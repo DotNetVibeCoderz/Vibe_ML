@@ -1,0 +1,79 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Data access">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.10" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageVersion Include="MySql.EntityFrameworkCore" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup Label="Storage">
+    <PackageVersion Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.101.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Machine learning">
+    <PackageVersion Include="Microsoft.ML" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.ML.AutoML" Version="0.23.0" />
+    <PackageVersion Include="Microsoft.ML.FastTree" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.ML.LightGbm" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.ML.Recommender" Version="0.23.0" />
+    <PackageVersion Include="Microsoft.ML.TimeSeries" Version="5.0.0" />
+    <PackageVersion Include="Microsoft.ML.Mkl.Components" Version="5.0.0" />
+  </ItemGroup>
+
+  <!-- Vision and NLP training. Kept out of the default build: between them these pull roughly
+       1.2 GB of native binaries (TensorFlow ~864 MB, libtorch ~319 MB per platform), which is
+       twenty times the rest of the solution's restore. Build with -p:EnableVisionNlp=true. -->
+  <ItemGroup Label="Vision and NLP (opt-in)">
+    <PackageVersion Include="Microsoft.ML.Vision" Version="5.0.0" />
+    <PackageVersion Include="SciSharp.TensorFlow.Redist" Version="2.16.0" />
+    <PackageVersion Include="Microsoft.ML.TorchSharp" Version="0.23.0" />
+    <PackageVersion Include="TorchSharp-cpu" Version="0.105.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Agents">
+    <PackageVersion Include="Microsoft.SemanticKernel" Version="1.78.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Google" Version="1.78.0-alpha" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Ollama" Version="1.78.0-alpha" />
+    <PackageVersion Include="Anthropic.SDK" Version="5.10.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Script modules">
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.14.0" />
+    <PackageVersion Include="Jint" Version="4.4.2" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.10" />
+    <PackageVersion Include="bunit" Version="1.40.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+
+    <!-- Browser automation for the canvas tests. A test-time dependency only — it adds nothing
+         to the shipped app — but the package bundles a driver for every platform (~730 MB) and
+         needs a browser downloaded on top. The tests skip themselves when it is absent. -->
+    <PackageVersion Include="Microsoft.Playwright" Version="1.56.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Web and utilities">
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="9.0.6" />
+    <PackageVersion Include="Markdig" Version="1.3.2" />
+    <PackageVersion Include="CsvHelper" Version="33.1.0" />
+    <PackageVersion Include="Parquet.Net" Version="5.0.2" />
+    <PackageVersion Include="MailKit" Version="4.17.0" />
+    <PackageVersion Include="HtmlAgilityPack" Version="1.12.4" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.10" />
+  </ItemGroup>
+
+</Project>

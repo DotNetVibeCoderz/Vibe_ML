@@ -1,0 +1,40 @@
+@page "/galat"
+@layout EmptyLayout
+@using Microsoft.AspNetCore.Diagnostics
+
+<PageTitle>Terjadi galat · Blazor ML Studio</PageTitle>
+
+<div class="auth">
+    <div class="auth-card card">
+        <div class="eyebrow">Galat</div>
+        <h1>Ada yang tidak beres</h1>
+
+        <p class="muted" style="margin:var(--space-3) 0">
+            Permintaan tadi tidak selesai. Coba muat ulang halamannya; kalau terus terjadi,
+            catat kode di bawah dan sertakan saat melapor.
+        </p>
+
+        @if (RequestId is not null)
+        {
+            <div class="card card--sunk card--tight">
+                <div class="eyebrow">Kode permintaan</div>
+                <code class="mono">@RequestId</code>
+            </div>
+        }
+
+        <div class="row" style="margin-top:var(--space-5)">
+            <a class="btn btn--primary" href="/">Kembali ke ringkasan</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    protected override void OnInitialized() =>
+        RequestId = HttpContext?.Features.Get<IExceptionHandlerPathFeature>() is not null
+            ? System.Diagnostics.Activity.Current?.Id ?? HttpContext?.TraceIdentifier
+            : null;
+}

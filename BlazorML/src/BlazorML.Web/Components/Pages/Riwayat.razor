@@ -1,0 +1,339 @@
+@page "/eksperimen/{ExperimentId}/riwayat"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Text.Json
+@using BlazorML.Infrastructure.Data
+@using Microsoft.EntityFrameworkCore
+@inject ExperimentService Experiments
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+
+<PageTitle>Riwayat · @(_experiment?.Name ?? "Eksperimen")</PageTitle>
+
+<TopBarTitle Title="@(_experiment?.Name ?? "Memuat…")" Eyebrow="Riwayat">
+    <Actions>
+        <a class="btn" href="/eksperimen/@ExperimentId">Kembali ke kanvas</a>
+    </Actions>
+</TopBarTitle>
+
+<div class="page">
+    <div class="tabs" style="margin-bottom:var(--space-5)">
+        <button class="tab @(_tab == "run" ? "active" : "")" @onclick='() => _tab = "run"'>
+            Run <span class="faint num">@_runs.Count</span>
+        </button>
+        <button class="tab @(_tab == "versi" ? "active" : "")" @onclick='() => _tab = "versi"'>
+            Versi <span class="faint num">@_versions.Count</span>
+        </button>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="notice notice--ok" style="margin-bottom:var(--space-4)"><div>@_message</div></div>
+    }
+
+    @if (_tab == "run")
+    {
+        @if (_runs.Count == 0)
+        {
+            <div class="empty">
+                <h3>Eksperimen ini belum pernah dijalankan</h3>
+                <p>Buka kanvasnya dan tekan Jalankan. Setiap run tersimpan di sini beserta metriknya,
+                   supaya kamu bisa membandingkan hasil antar percobaan.</p>
+                <a class="btn btn--primary" href="/eksperimen/@ExperimentId">Buka kanvas</a>
+            </div>
+        }
+        else
+        {
+            <div class="grid grid--2" style="align-items:start">
+                <section class="card">
+                    <div class="card-title">
+                        <h2>Perbandingan</h2>
+                    </div>
+
+                    @if (_metricNames.Count == 0)
+                    {
+                        <p class="muted">Belum ada run yang menghasilkan metrik.</p>
+                    }
+                    else
+                    {
+                        <div class="field">
+                            <label for="metrik">Metrik</label>
+                            <select id="metrik" value="@_metric" @onchange="OnMetricChanged">
+                                @foreach (var name in _metricNames)
+                                {
+                                    <option value="@name">@name</option>
+                                }
+                            </select>
+                            <div class="hint">
+                                Run terbaru di atas. @Direction(_metric) yang lebih baik.
+                            </div>
+                        </div>
+
+                        <figure class="chart">
+                            <figcaption>
+                                @_metric per run
+                                <span class="faint">— batang paling terang adalah yang terbaik sejauh ini</span>
+                            </figcaption>
+                            <div class="chart-plot" @ref="_chartRef"></div>
+                        </figure>
+                    }
+                </section>
+
+                <section class="card">
+                    <div class="card-title"><h2>Semua run</h2></div>
+
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Waktu</th>
+                                    <th>Status</th>
+                                    <th class="num">Durasi</th>
+                                    @foreach (var name in _metricNames.Take(3))
+                                    {
+                                        <th class="num">@name</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var run in _runs)
+                                {
+                                    <tr>
+                                        <td class="faint">@run.CreatedAt.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                                        <td><RunStatusTag Status="run.Status" /></td>
+                                        <td class="num">@run.DurationSeconds.ToString("N1")s</td>
+                                        @foreach (var name in _metricNames.Take(3))
+                                        {
+                                            <td class="num">@Format(Metric(run, name))</td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (_failed > 0)
+                    {
+                        <p class="hint" style="margin-top:var(--space-3)">
+                            @_failed run tidak selesai. Buka kanvas dan jalankan ulang untuk melihat
+                            log per langkahnya.
+                        </p>
+                    }
+                </section>
+            </div>
+        }
+    }
+    else
+    {
+        <section class="card" style="max-width:820px">
+            <div class="card-title">
+                <h2>Riwayat versi</h2>
+                <span class="faint">Setiap penyimpanan graph tersimpan utuh</span>
+            </div>
+
+            <p class="muted" style="margin-top:0">
+                Mengembalikan sebuah versi tidak menghapus apa pun — hasilnya menjadi versi baru
+                di puncak riwayat, jadi langkah itu sendiri bisa dibatalkan.
+            </p>
+
+            <div class="table-wrap" style="margin-top:var(--space-4)">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="num">Versi</th>
+                            <th>Catatan</th>
+                            <th class="num">Modul</th>
+                            <th>Waktu</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var version in _versions)
+                        {
+                            var current = version.Version == _experiment?.Version;
+
+                            <tr>
+                                <td class="num">
+                                    <strong>v@version.Version</strong>
+                                    @if (current)
+                                    {
+                                        <span class="tag tag--ok" style="margin-left:6px">sekarang</span>
+                                    }
+                                </td>
+                                <td>@(string.IsNullOrWhiteSpace(version.Note) ? "—" : version.Note)</td>
+                                <td class="num faint">@NodeCount(version)</td>
+                                <td class="faint">@version.CreatedAt.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                                <td>
+                                    @if (!current)
+                                    {
+                                        <button class="btn btn--sm" @onclick="() => RestoreAsync(version.Version)">
+                                            Kembalikan
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public string ExperimentId { get; set; } = string.Empty;
+
+    private Experiment? _experiment;
+    private List<ExperimentRun> _runs = [];
+    private List<ExperimentVersion> _versions = [];
+    private readonly Dictionary<string, Dictionary<string, double>> _metrics = [];
+    private List<string> _metricNames = [];
+
+    private string _tab = "run";
+    private string _metric = string.Empty;
+    private string? _message;
+    private int _failed;
+
+    private ElementReference _chartRef;
+    private bool _ready;
+    private string? _drawnFor;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _experiment = await Experiments.GetAsync(ExperimentId);
+
+        if (_experiment is null)
+        {
+            Nav.NavigateTo("/eksperimen");
+            return;
+        }
+
+        _runs = await Experiments.RunsAsync(ExperimentId, 50);
+        _versions = await Experiments.VersionsAsync(ExperimentId);
+        _failed = _runs.Count(r => r.Status == RunStatus.Failed);
+
+        _metrics.Clear();
+
+        foreach (var run in _runs.Where(r => !string.IsNullOrWhiteSpace(r.MetricsJson)))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, double>>(run.MetricsJson!);
+
+                if (parsed is { Count: > 0 })
+                {
+                    _metrics[run.Id] = parsed;
+                }
+            }
+            catch (JsonException)
+            {
+                // A run recorded by an older shape of this app should not break the page.
+            }
+        }
+
+        // Ordered by how often a metric appears, so the one most runs share is offered first.
+        _metricNames = _metrics.Values
+            .SelectMany(m => m.Keys)
+            .GroupBy(name => name)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (!_metricNames.Contains(_metric))
+        {
+            _metric = _metricNames.FirstOrDefault() ?? string.Empty;
+        }
+
+        _drawnFor = null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ready = true;
+        }
+
+        if (!_ready || _tab != "run" || string.IsNullOrEmpty(_metric))
+        {
+            return;
+        }
+
+        var signature = $"{_metric}:{_runs.Count}";
+
+        if (signature == _drawnFor)
+        {
+            return;
+        }
+
+        _drawnFor = signature;
+        await DrawAsync();
+    }
+
+    private async Task OnMetricChanged(ChangeEventArgs e)
+    {
+        _metric = e.Value?.ToString() ?? _metric;
+        _drawnFor = null;
+    }
+
+    private async Task DrawAsync()
+    {
+        // Oldest first so the chart reads left to right as the experiment progressed.
+        var points = _runs
+            .Where(r => _metrics.ContainsKey(r.Id) && _metrics[r.Id].ContainsKey(_metric))
+            .OrderBy(r => r.CreatedAt)
+            .Select(r => new
+            {
+                label = r.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm"),
+                value = _metrics[r.Id][_metric]
+            })
+            .ToList();
+
+        try
+        {
+            await Js.InvokeVoidAsync("blazormlCharts.runComparison", _chartRef, points, HigherIsBetter(_metric));
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or InvalidOperationException)
+        {
+            // The table beside it carries the same numbers, so a chart that fails to draw is not
+            // worth breaking the page over.
+        }
+    }
+
+    private async Task RestoreAsync(int version)
+    {
+        var ok = await Js.InvokeAsync<bool>("confirm",
+            $"Kembalikan kanvas ke versi {version}? Versi sekarang tetap tersimpan di riwayat.");
+
+        if (!ok)
+        {
+            return;
+        }
+
+        await Experiments.RestoreVersionAsync(ExperimentId, version);
+        await LoadAsync();
+
+        _message = $"Kanvas dikembalikan ke versi {version}, tersimpan sebagai versi {_experiment?.Version}.";
+    }
+
+    private double? Metric(ExperimentRun run, string name) =>
+        _metrics.TryGetValue(run.Id, out var values) && values.TryGetValue(name, out var value)
+            ? value : null;
+
+    private static string Format(double? value) =>
+        value is null ? "—" : double.IsNaN(value.Value) ? "—" : value.Value.ToString("N4");
+
+    /// <summary>Error measures improve downwards; scores improve upwards.</summary>
+    private static bool HigherIsBetter(string metric) =>
+        !metric.Contains("Error", StringComparison.OrdinalIgnoreCase)
+        && !metric.Contains("Loss", StringComparison.OrdinalIgnoreCase);
+
+    private static string Direction(string metric) => HigherIsBetter(metric) ? "Makin tinggi" : "Makin rendah";
+
+    private static int NodeCount(ExperimentVersion version) =>
+        ExperimentGraph.FromJson(version.GraphJson).Nodes.Count;
+}

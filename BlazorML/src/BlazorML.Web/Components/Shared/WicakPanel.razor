@@ -1,0 +1,402 @@
+@using System.Text.Json
+@using BlazorML.Agents.Chat
+@using BlazorML.Core.Configuration
+@using WicakOptions = BlazorML.Core.Configuration.ChatOptions
+@using Microsoft.AspNetCore.Components.Authorization
+@implements IDisposable
+@inject WicakChatService Chat
+@inject ISettingsService Settings
+@inject MarkdownRenderer Markdown
+@inject IStorageProviderFactory Storage
+@inject AuthenticationStateProvider Auth
+@inject IJSRuntime Js
+
+<aside class="wicak">
+    <header class="wicak-head">
+        <div class="wicak-mark">PW</div>
+        <div class="grow" style="min-width:0">
+            <div class="wicak-name">@_options.AssistantName</div>
+            <div class="wicak-model truncate">@_modelLabel</div>
+        </div>
+
+        <button class="btn btn--icon btn--ghost" @onclick="NewSessionAsync"
+                title="Sesi baru" aria-label="Sesi baru">@((MarkupString)Icons.Plus)</button>
+
+        @if (_session is not null)
+        {
+            <button class="btn btn--icon btn--ghost" @onclick="ResetAsync"
+                    title="Kosongkan sesi" aria-label="Kosongkan sesi">@((MarkupString)Icons.History)</button>
+            <button class="btn btn--icon btn--ghost" @onclick="DeleteSessionAsync"
+                    title="Hapus sesi" aria-label="Hapus sesi">@((MarkupString)Icons.Trash)</button>
+        }
+    </header>
+
+    @if (_sessions.Count > 1)
+    {
+        <div class="wicak-sessions">
+            @foreach (var session in _sessions)
+            {
+                <button class="wicak-session @(session.Id == _session?.Id ? "active" : "")"
+                        @onclick="() => SwitchAsync(session.Id)" title="@session.Title">
+                    @session.Title
+                </button>
+            }
+        </div>
+    }
+
+    <div class="wicak-thread" @ref="_threadRef">
+        @if (!_configured)
+        {
+            <div class="wicak-empty">
+                <h3>Profesor Wicak belum tersambung</h3>
+                <p class="muted">
+                    Tambahkan kunci API salah satu penyedia model di
+                    <a href="/pengaturan">Pengaturan → Profesor Wicak</a>, lalu buka lagi panel ini.
+                </p>
+            </div>
+        }
+        else if (_messages.Count == 0 && string.IsNullOrEmpty(_streaming))
+        {
+            <div class="wicak-empty">
+                <h3>Halo, saya Profesor Wicak</h3>
+                <p class="muted">
+                    Saya bisa memeriksa datamu, menyusun alur eksperimen di kanvas ini,
+                    dan menjelaskan hasilnya.
+                </p>
+
+                <div class="wicak-suggestions">
+                    @foreach (var suggestion in Suggestions)
+                    {
+                        <button class="wicak-suggestion" @onclick="() => SendAsync(suggestion)">@suggestion</button>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            @foreach (var message in _messages)
+            {
+                <div class="bubble bubble--@(message.Role == ChatRole.User ? "user" : "wicak")">
+                    <span class="bubble-who">@(message.Role == ChatRole.User ? "Kamu" : _options.AssistantName)</span>
+
+                    @if (Attachments(message) is { Count: > 0 } attachments)
+                    {
+                        <div class="bubble-attachments">
+                            @foreach (var attachment in attachments)
+                            {
+                                @if (attachment.Kind == AttachmentKind.Image)
+                                {
+                                    <img class="attachment-thumb" src="@attachment.Url" alt="@attachment.Name" />
+                                }
+                                else
+                                {
+                                    <a class="attachment-chip" href="@attachment.Url" target="_blank" rel="noopener">
+                                        @((MarkupString)Icons.Paperclip) @attachment.Name
+                                    </a>
+                                }
+                            }
+                        </div>
+                    }
+
+                    <div class="bubble-body md">
+                        @if (message.Role == ChatRole.User)
+                        {
+                            @message.Content
+                        }
+                        else
+                        {
+                            @Markdown.ToHtml(message.Content)
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_streaming))
+            {
+                <div class="bubble bubble--wicak">
+                    <span class="bubble-who">@_options.AssistantName</span>
+                    <div class="bubble-body md">@Markdown.ToHtml(_streaming)</div>
+                </div>
+            }
+            else if (_thinking)
+            {
+                <div class="bubble bubble--wicak">
+                    <span class="bubble-who">@_options.AssistantName</span>
+                    <div class="wicak-typing"><i></i><i></i><i></i></div>
+                </div>
+            }
+
+            @if (_error is not null)
+            {
+                <div class="bubble bubble--error">
+                    <span class="bubble-who">Galat</span>
+                    <div class="bubble-body">@_error</div>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="wicak-compose">
+        @if (_pending.Count > 0)
+        {
+            <div class="wicak-pending">
+                @foreach (var attachment in _pending)
+                {
+                    <span class="attachment-chip">
+                        @attachment.Name
+                        <button class="btn btn--ghost" style="padding:0;width:16px;height:16px"
+                                @onclick="() => _pending.Remove(attachment)" aria-label="Buang lampiran">×</button>
+                    </span>
+                }
+            </div>
+        }
+
+        <textarea @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDownAsync"
+                  placeholder="Tanya apa saja, atau minta dibuatkan alurnya…"
+                  disabled="@(!_configured || _thinking)" aria-label="Pesan"></textarea>
+
+        <div class="wicak-compose-actions">
+            <label class="btn btn--sm btn--ghost" style="cursor:pointer" title="Lampirkan berkas">
+                @((MarkupString)Icons.Paperclip)
+                <InputFile OnChange="AttachAsync" multiple style="display:none" />
+            </label>
+
+            <span class="faint" style="font-size:.72rem">Enter kirim · Shift+Enter baris baru</span>
+
+            <div class="grow"></div>
+
+            <button class="btn btn--sm btn--primary" @onclick="() => SendAsync(_draft)"
+                    disabled="@(!_configured || _thinking || string.IsNullOrWhiteSpace(_draft))">
+                @((MarkupString)Icons.Send) Kirim
+            </button>
+        </div>
+    </div>
+</aside>
+
+@code {
+    [Parameter] public string? ExperimentId { get; set; }
+
+    /// <summary>Raised after the assistant changes the graph, so the canvas can reload.</summary>
+    [Parameter] public EventCallback OnGraphChanged { get; set; }
+
+    private WicakOptions _options = new();
+    private List<ChatSession> _sessions = [];
+    private ChatSession? _session;
+    private List<ChatMessage> _messages = [];
+    private readonly List<ChatAttachment> _pending = [];
+
+    private string _draft = string.Empty;
+    private string _streaming = string.Empty;
+    private string? _error;
+    private string _modelLabel = string.Empty;
+    private bool _thinking;
+    private bool _configured;
+    private string? _userId;
+
+    private ElementReference _threadRef;
+
+    private static readonly string[] Suggestions =
+    [
+        "Dataset apa saja yang ada di workspace ini?",
+        "Periksa keseimbangan kelas pada dataset churn.",
+        "Susunkan alur klasifikasi churn lengkap dengan evaluasinya.",
+        "Jelaskan hasil run terakhir eksperimen ini."
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _options = await Settings.GetAsync<WicakOptions>(SettingsSections.Chat);
+        _configured = _options.Enabled &&
+                      Enum.GetValues<ChatProviderKind>().Any(_options.IsProviderConfigured);
+
+        var state = await Auth.GetAuthenticationStateAsync();
+        _userId = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (!_configured)
+        {
+            return;
+        }
+
+        _sessions = await Chat.SessionsAsync(_userId);
+        _session = _sessions.FirstOrDefault(s => s.ExperimentId == ExperimentId) ?? _sessions.FirstOrDefault();
+
+        if (_session is null)
+        {
+            _session = await Chat.CreateSessionAsync(_userId, ExperimentId);
+            _sessions = await Chat.SessionsAsync(_userId);
+        }
+
+        _messages = await Chat.MessagesAsync(_session.Id);
+        _modelLabel = $"{_session.Provider} · {_session.Model}";
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendAsync(_draft);
+        }
+    }
+
+    private async Task SendAsync(string prompt)
+    {
+        if (_session is null || _thinking || string.IsNullOrWhiteSpace(prompt))
+        {
+            return;
+        }
+
+        _draft = string.Empty;
+        _error = null;
+        _thinking = true;
+        _streaming = string.Empty;
+
+        var attachments = _pending.ToList();
+        _pending.Clear();
+
+        // Show the question immediately rather than waiting for the round trip.
+        _messages.Add(new ChatMessage
+        {
+            SessionId = _session.Id,
+            Role = ChatRole.User,
+            Content = prompt,
+            AttachmentsJson = attachments.Count > 0 ? JsonSerializer.Serialize(attachments) : null
+        });
+
+        StateHasChanged();
+        await ScrollAsync();
+
+        try
+        {
+            await foreach (var chunk in Chat.SendAsync(_session.Id, prompt, attachments, ExperimentId))
+            {
+                _streaming += chunk;
+                StateHasChanged();
+                await ScrollAsync();
+            }
+
+            _messages = await Chat.MessagesAsync(_session.Id);
+
+            // The assistant may have edited the graph through its designer functions; reloading
+            // is cheap and keeps the canvas honest about what is actually stored.
+            if (OnGraphChanged.HasDelegate)
+            {
+                await OnGraphChanged.InvokeAsync();
+            }
+        }
+        catch (Exception e)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _streaming = string.Empty;
+            _thinking = false;
+
+            _sessions = await Chat.SessionsAsync(_userId);
+            StateHasChanged();
+            await ScrollAsync();
+        }
+    }
+
+    private async Task AttachAsync(InputFileChangeEventArgs e)
+    {
+        foreach (var file in e.GetMultipleFiles(6))
+        {
+            try
+            {
+                var isImage = file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+                var key = $"chat/{_session?.Id ?? "tmp"}/{Guid.NewGuid():n}/{file.Name}";
+
+                await using var stream = file.OpenReadStream(32L * 1024 * 1024);
+                await Storage.Current.WriteAsync(key, stream, file.ContentType);
+
+                _pending.Add(new ChatAttachment
+                {
+                    Kind = isImage ? AttachmentKind.Image : AttachmentKind.Document,
+                    Name = file.Name,
+                    Url = await Storage.Current.GetUrlAsync(key, TimeSpan.FromHours(6)),
+                    ContentType = file.ContentType,
+                    SizeBytes = file.Size
+                });
+            }
+            catch (Exception ex)
+            {
+                _error = $"'{file.Name}' gagal diunggah: {ex.Message}";
+            }
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task NewSessionAsync()
+    {
+        _session = await Chat.CreateSessionAsync(_userId, ExperimentId);
+        _sessions = await Chat.SessionsAsync(_userId);
+        _messages = [];
+        _error = null;
+    }
+
+    private async Task SwitchAsync(string sessionId)
+    {
+        _session = _sessions.FirstOrDefault(s => s.Id == sessionId);
+        _messages = _session is null ? [] : await Chat.MessagesAsync(_session.Id);
+        _error = null;
+    }
+
+    private async Task ResetAsync()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        await Chat.ResetSessionAsync(_session.Id);
+        _messages = [];
+        _sessions = await Chat.SessionsAsync(_userId);
+    }
+
+    private async Task DeleteSessionAsync()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        await Chat.DeleteSessionAsync(_session.Id);
+        _sessions = await Chat.SessionsAsync(_userId);
+        _session = _sessions.FirstOrDefault();
+        _messages = _session is null ? [] : await Chat.MessagesAsync(_session.Id);
+    }
+
+    private List<ChatAttachment>? Attachments(ChatMessage message)
+    {
+        if (string.IsNullOrWhiteSpace(message.AttachmentsJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<ChatAttachment>>(message.AttachmentsJson);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task ScrollAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("blazorml.scrollToEnd", _threadRef);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or InvalidOperationException)
+        {
+            // Called before the panel reached the browser, or after the circuit closed. Scrolling
+            // is cosmetic, so failing to do it must never surface as an error.
+        }
+    }
+
+    public void Dispose() { }
+}

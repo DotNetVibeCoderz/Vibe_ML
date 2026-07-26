@@ -1,0 +1,15 @@
+@* A single measured number. Mono type and the category pen rail, same language as the canvas. *@
+
+<a class="card card--rail card--tight stat-card" href="@Href" style="--rail-pen: var(--pen-@Pen)">
+    <div class="stat">
+        <div class="stat-value">@Value.ToString("N0")</div>
+        <div class="stat-label">@Label</div>
+    </div>
+</a>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public int Value { get; set; }
+    [Parameter] public string Pen { get; set; } = "ink";
+    [Parameter] public string Href { get; set; } = "#";
+}

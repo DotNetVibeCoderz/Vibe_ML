@@ -1,0 +1,28 @@
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                @* Anonymous visitors are sent to sign in; a signed-in user without the right
+                   role is told so rather than bounced back to the login form. *@
+                @if (context.User.Identity?.IsAuthenticated ?? false)
+                {
+                    <div class="page">
+                        <div class="empty">
+                            <h3>Akun ini tidak punya akses ke halaman tersebut</h3>
+                            <p>Minta administrator workspace menambahkan peran yang diperlukan.</p>
+                            <a class="btn" href="/">Kembali ke ringkasan</a>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <RedirectToLogin />
+                }
+            </NotAuthorized>
+            <Authorizing>
+                <div class="page"><p class="muted">Memeriksa akses…</p></div>
+            </Authorizing>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

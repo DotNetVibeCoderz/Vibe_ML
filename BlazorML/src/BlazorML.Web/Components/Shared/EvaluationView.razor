@@ -1,0 +1,231 @@
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+@* Charts plus a table view of the same numbers. The table is not a fallback — it
+   is how the figures are read when colour is not available, and it is what makes
+   the charts safe to ship. *@
+
+<div class="eval">
+    <div class="spread" style="margin-bottom:var(--space-3)">
+        <h4 style="margin:0">@Title</h4>
+        <button class="btn btn--sm btn--ghost" type="button" @onclick="() => _asTable = !_asTable">
+            @(_asTable ? "Lihat grafik" : "Lihat tabel")
+        </button>
+    </div>
+
+    @if (Result is null)
+    {
+        <p class="muted" style="font-size:.85rem">Belum ada hasil evaluasi pada node ini.</p>
+    }
+    else if (_asTable)
+    {
+        @if (Result.RocCurve is { Count: > 1 })
+        {
+            <div class="table-wrap" style="margin-bottom:var(--space-4);max-height:220px;overflow-y:auto">
+                <table>
+                    <caption class="eval-caption">Titik kurva ROC</caption>
+                    <thead>
+                        <tr><th>Ambang</th><th class="num">FPR</th><th class="num">TPR</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var point in Result.RocCurve.Where((_, i) => i % 5 == 0))
+                        {
+                            <tr>
+                                <td class="num">@point.Threshold.ToString("F3")</td>
+                                <td class="num">@point.FalsePositiveRate.ToString("F3")</td>
+                                <td class="num">@point.TruePositiveRate.ToString("F3")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Result.ConfusionMatrix is { Count: > 0 } && Result.ClassLabels is { Count: > 0 })
+        {
+            <div class="table-wrap" style="margin-bottom:var(--space-4)">
+                <table>
+                    <caption class="eval-caption">Confusion matrix — baris sebenarnya, kolom prediksi</caption>
+                    <thead>
+                        <tr>
+                            <th></th>
+                            @foreach (var label in Result.ClassLabels)
+                            {
+                                <th class="num">@label</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var r = 0; r < Result.ConfusionMatrix.Count; r++)
+                        {
+                            var row = r;
+                            <tr>
+                                <th scope="row">@(row < Result.ClassLabels.Count ? Result.ClassLabels[row] : row.ToString())</th>
+                                @foreach (var value in Result.ConfusionMatrix[row])
+                                {
+                                    <td class="num">@value</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (Result.FeatureImportance is { Count: > 0 })
+        {
+            <div class="table-wrap">
+                <table>
+                    <caption class="eval-caption">Kepentingan fitur</caption>
+                    <thead><tr><th>Fitur</th><th class="num">Skor</th></tr></thead>
+                    <tbody>
+                        @foreach (var weight in Result.FeatureImportance)
+                        {
+                            <tr><td>@weight.Feature</td><td class="num">@weight.Weight.ToString("F4")</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+    else
+    {
+        @if (Result.RocCurve is { Count: > 1 })
+        {
+            <figure class="chart">
+                <figcaption>
+                    Kurva ROC
+                    <span class="faint">— makin dekat ke pojok kiri atas makin baik</span>
+                </figcaption>
+                <div class="chart-plot" @ref="_rocRef"></div>
+            </figure>
+        }
+
+        @if (Result.ConfusionMatrix is { Count: > 0 } && Result.ClassLabels is { Count: > 0 }
+             && Result.Task != MlTask.Clustering)
+        {
+            <figure class="chart">
+                <figcaption>
+                    Confusion matrix
+                    <span class="faint">— diagonal bertepi tebal adalah tebakan yang benar</span>
+                </figcaption>
+                <div class="chart-plot" @ref="_confusionRef"></div>
+            </figure>
+        }
+
+        @if (Result.Residuals is { Count: > 0 })
+        {
+            <figure class="chart">
+                <figcaption>
+                    Prediksi terhadap nilai sebenarnya
+                    <span class="faint">— sebaran yang melebar menjauhi garis berarti model kurang tepat</span>
+                </figcaption>
+                <div class="chart-plot" @ref="_residualRef"></div>
+            </figure>
+        }
+
+        @if (Result.FeatureImportance is { Count: > 0 })
+        {
+            <figure class="chart">
+                <figcaption>
+                    Kepentingan fitur
+                    <span class="faint">— skor negatif berarti model justru lebih baik tanpa kolom itu</span>
+                </figcaption>
+                <div class="chart-plot" @ref="_importanceRef"></div>
+            </figure>
+        }
+    }
+
+    @if (Result is { Metrics.Count: > 0 })
+    {
+        <div style="margin-top:var(--space-4)">
+            <MetricList Values="Result.Metrics" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public EvaluationResult? Result { get; set; }
+    [Parameter] public string Title { get; set; } = "Hasil evaluasi";
+
+    private ElementReference _rocRef, _confusionRef, _residualRef, _importanceRef;
+    private bool _asTable;
+    private bool _ready;
+    private string? _drawnFor;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ready = true;
+        }
+
+        if (!_ready || _asTable || Result is null)
+        {
+            return;
+        }
+
+        // Redraw only when the payload actually changed. Without this every keystroke
+        // elsewhere on the page would rebuild four SVGs.
+        var signature = Signature();
+        if (signature == _drawnFor)
+        {
+            return;
+        }
+
+        _drawnFor = signature;
+        await DrawAsync();
+    }
+
+    private string Signature() =>
+        $"{Result?.Task}:{Result?.RocCurve?.Count}:{Result?.ConfusionMatrix?.Count}:" +
+        $"{Result?.Residuals?.Count}:{Result?.FeatureImportance?.Count}:{Result?.Metrics.Count}";
+
+    private async Task DrawAsync()
+    {
+        if (Result is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (Result.RocCurve is { Count: > 1 })
+            {
+                var auc = Result.Metrics.TryGetValue("AUC", out var value) ? value : double.NaN;
+                await Js.InvokeVoidAsync("blazormlCharts.roc", _rocRef, Result.RocCurve, auc);
+            }
+
+            if (Result.ConfusionMatrix is { Count: > 0 } && Result.ClassLabels is { Count: > 0 }
+                && Result.Task != MlTask.Clustering)
+            {
+                await Js.InvokeVoidAsync("blazormlCharts.confusion", _confusionRef,
+                    Result.ClassLabels, Result.ConfusionMatrix);
+            }
+
+            if (Result.Residuals is { Count: > 0 })
+            {
+                await Js.InvokeVoidAsync("blazormlCharts.residuals", _residualRef, Result.Residuals);
+            }
+
+            if (Result.FeatureImportance is { Count: > 0 })
+            {
+                await Js.InvokeVoidAsync("blazormlCharts.importance", _importanceRef, Result.FeatureImportance);
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or InvalidOperationException)
+        {
+            // Charts are a read-only view of numbers already shown in the metric list and
+            // the table view, so failing to draw them must not break the page.
+        }
+    }
+
+    /// <summary>Forces a redraw — used when the theme flips and the tokens change.</summary>
+    public async Task RefreshAsync()
+    {
+        _drawnFor = null;
+        await DrawAsync();
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}

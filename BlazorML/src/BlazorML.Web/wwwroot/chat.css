@@ -1,0 +1,227 @@
+/* ============================================================================
+   Profesor Wicak chat panel.
+
+   Docked beside the designer rather than floating over it: the assistant edits
+   the same canvas the user is looking at, so it should not cover it. The
+   assistant's pen is violet — the same one the LLM module family uses on the
+   canvas, so "this came from a language model" reads consistently everywhere.
+   ========================================================================= */
+
+.wicak {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-left: var(--border-width) solid var(--rule);
+}
+
+.wicak-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--rule);
+}
+
+.wicak-mark {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #fff;
+  background: var(--pen-violet);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+
+.wicak-name { font-family: var(--font-display); font-weight: 800; font-size: 0.95rem; line-height: 1.1; }
+.wicak-model { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-faint); }
+
+.wicak-sessions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.wicak-session {
+  flex: none;
+  max-width: 150px;
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--surface-sunk);
+  border: var(--border-width) solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wicak-session:hover { color: var(--ink); }
+.wicak-session.active { color: var(--ink); background: var(--surface); border-color: var(--rule); }
+
+.wicak-thread {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  scroll-behavior: smooth;
+}
+
+.bubble { display: flex; flex-direction: column; gap: 5px; max-width: 100%; }
+
+.bubble-who {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.bubble-body {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.bubble--user { align-items: flex-end; }
+.bubble--user .bubble-body {
+  background: var(--pen-blue);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.bubble--user .bubble-body a { color: #fff; }
+
+.bubble--wicak .bubble-body {
+  background: var(--surface-sunk);
+  border-bottom-left-radius: 4px;
+  border-left: 6px solid var(--pen-violet);
+}
+
+.bubble--error .bubble-body { background: var(--surface); border-left: 6px solid var(--danger); }
+
+.bubble-attachments { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 0.73rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.attachment-thumb {
+  max-width: 180px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+
+/* Typing indicator: three plotted dots. */
+.wicak-typing { display: inline-flex; gap: 5px; padding: var(--space-3) var(--space-4); }
+.wicak-typing i {
+  width: 7px;
+  height: 7px;
+  background: var(--pen-violet);
+  border-radius: 2px;
+  animation: wicak-bounce 1.1s ease-in-out infinite;
+}
+.wicak-typing i:nth-child(2) { animation-delay: 0.15s; }
+.wicak-typing i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes wicak-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+.wicak-compose {
+  padding: var(--space-3);
+  border-top: var(--border-width) solid var(--rule);
+  background: var(--surface);
+}
+
+.wicak-compose textarea {
+  min-height: 62px;
+  max-height: 180px;
+  font-size: 0.87rem;
+  resize: none;
+}
+
+.wicak-compose-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.wicak-pending { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+
+.wicak-empty {
+  margin: auto;
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.wicak-empty h3 { color: var(--ink); margin-bottom: var(--space-2); }
+
+.wicak-suggestions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-4); }
+
+.wicak-suggestion {
+  padding: 9px 12px;
+  font-size: 0.82rem;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface-sunk);
+  border: var(--border-width) solid var(--rule-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.wicak-suggestion:hover { border-color: var(--rule); background: var(--surface); }
+
+/* Floating open button, shown when the panel is hidden. */
+.wicak-fab {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 11px 17px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--pen-violet);
+  border: var(--border-width) solid var(--rule);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.wicak-fab:active { transform: translate(2px, 2px); box-shadow: none; }
+
+@media (max-width: 1100px) {
+  .wicak {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    border-left: none;
+  }
+}

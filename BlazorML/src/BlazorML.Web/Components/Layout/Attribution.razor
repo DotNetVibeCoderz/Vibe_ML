@@ -1,0 +1,57 @@
+@* Who built this. Sits in the app shell so it is on every signed-in page, not only on the way in.
+
+   Reads WorkspaceOptions rather than hard-coding the names: they were already declared there and
+   nothing had ever read them, so the two spellings could drift apart without anyone noticing.
+
+   Deliberately not interactive, so it renders statically as part of the layout — see the render
+   mode note in CLAUDE.md. Nothing here needs a circuit. *@
+
+@using BlazorML.Core.Configuration
+@inject ISettingsService Settings
+
+<footer class="credit @Class">
+    <span>
+        Dibuat oleh <strong>@_builtBy</strong> · di-lead oleh <strong>@_ledBy</strong>
+    </span>
+
+    @if (Compact is false)
+    {
+        <span class="credit-sep" aria-hidden="true">·</span>
+        <a href="/api-docs" target="_blank" rel="noopener">Dokumentasi API</a>
+    }
+</footer>
+
+@code {
+    /// <summary>Drops the secondary links, for places with no room for them.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    /// <summary>Extra classes, for the auth card where the shell's rule and bar do not belong.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    private string _builtBy = "Gravicode Studios";
+    private string _ledBy = "Kang Fadhil";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The fallbacks above stand if settings cannot be read — a footer is never a reason to
+        // fail a page, but it should also never render blank.
+        try
+        {
+            var workspace = await Settings.GetAsync<WorkspaceOptions>(SettingsSections.Workspace);
+
+            if (!string.IsNullOrWhiteSpace(workspace.BuiltBy))
+            {
+                _builtBy = workspace.BuiltBy;
+            }
+
+            if (!string.IsNullOrWhiteSpace(workspace.LedBy))
+            {
+                _ledBy = workspace.LedBy;
+            }
+        }
+        catch (Exception)
+        {
+            // Keep the defaults.
+        }
+    }
+}

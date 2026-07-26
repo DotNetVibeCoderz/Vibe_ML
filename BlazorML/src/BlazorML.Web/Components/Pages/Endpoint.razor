@@ -1,0 +1,385 @@
+@page "/endpoint"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Authorization
+@using BlazorML.Web.Services
+@inject EndpointService Endpoints
+@inject EndpointTester Tester
+@inject AuthenticationStateProvider Auth
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+
+<PageTitle>Endpoint · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Endpoint" Eyebrow="@($"{_items.Count(e => e.Status == EndpointStatus.Live)} aktif")">
+    <Actions>
+        <a class="btn" href="/api-docs" target="_blank" rel="noopener">
+            @((MarkupString)Icons.Book) Dokumentasi API
+        </a>
+    </Actions>
+</TopBarTitle>
+
+<div class="page">
+    @if (_newKey is not null)
+    {
+        <div class="notice notice--ok" style="margin-bottom:var(--space-4)">
+            <div>
+                <strong>Kunci baru dibuat.</strong> Salin sekarang — tidak ditampilkan lagi.
+                Kunci ini sudah terisi di panel uji coba endpoint tersebut.
+                <code class="mono" style="display:block;padding:var(--space-2);margin-top:var(--space-2);word-break:break-all">@_newKey</code>
+                @* A quoted string inside a double-quoted Razor attribute ends the attribute, so
+                   the slot name is a constant rather than a literal here. *@
+                <button class="btn btn--sm" style="margin-top:var(--space-2)"
+                        @onclick="() => CopyAsync(_newKey!, KeySlot)">
+                    @CopyIcon(KeySlot) @CopyLabel(KeySlot)
+                </button>
+            </div>
+        </div>
+    }
+
+    @if (_items.Count == 0)
+    {
+        <div class="empty">
+            <h3>Belum ada endpoint</h3>
+            <p>Terbitkan model terlatih dari halaman Model untuk membuat endpoint REST berkunci API.</p>
+            <a class="btn" href="/model">Buka model</a>
+        </div>
+    }
+    else
+    {
+        <div class="stack">
+            @foreach (var endpoint in _items)
+            {
+                var fields = Fields(endpoint);
+                var open = _openConsole == endpoint.Id;
+
+                <article class="card card--rail" style="--rail-pen: var(--pen-@(endpoint.Status == EndpointStatus.Live ? "lime" : "ink"))">
+                    <div class="spread" style="align-items:flex-start">
+                        <div style="min-width:0">
+                            <div class="row">
+                                <h3>@endpoint.Name</h3>
+                                <span class="tag @(endpoint.Status == EndpointStatus.Live ? "tag--ok" : "tag--quiet")">
+                                    @(endpoint.Status == EndpointStatus.Live ? "aktif" : "berhenti")
+                                </span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(endpoint.Description))
+                            {
+                                <p class="muted" style="font-size:.86rem;margin:var(--space-2) 0 0">@endpoint.Description</p>
+                            }
+                        </div>
+
+                        <div class="row">
+                            <button class="btn btn--sm" @onclick="() => ToggleAsync(endpoint)">
+                                @(endpoint.Status == EndpointStatus.Live ? "Hentikan" : "Aktifkan")
+                            </button>
+                            <button class="btn btn--sm" @onclick="() => AddKeyAsync(endpoint)">Kunci baru</button>
+                        </div>
+                    </div>
+
+                    <div class="row-wrap" style="margin-top:var(--space-4);gap:var(--space-5)">
+                        <div class="stat">
+                            <span class="num" style="font-weight:600">@endpoint.CallCount.ToString("N0")</span>
+                            <span class="stat-label">panggilan</span>
+                        </div>
+                        <div class="stat">
+                            <span class="num" style="font-weight:600">@(endpoint.Model?.Name ?? "—")</span>
+                            <span class="stat-label">model v@(endpoint.Model?.Version ?? 0)</span>
+                        </div>
+                        <div class="stat">
+                            <span class="num" style="font-weight:600">
+                                @(endpoint.LastCalledAt?.ToLocalTime().ToString("dd MMM HH:mm") ?? "belum pernah")
+                            </span>
+                            <span class="stat-label">terakhir dipanggil</span>
+                        </div>
+                    </div>
+
+                    @* ------------------------------------------------------- code samples *@
+
+                    <div class="card card--sunk card--tight" style="margin-top:var(--space-4)">
+                        <div class="spread" style="margin-bottom:var(--space-3)">
+                            <div class="eyebrow">Contoh kode</div>
+                            <span class="muted" style="font-size:.76rem">@ColumnNote(fields)</span>
+                        </div>
+
+                        <div class="tabs" style="margin-bottom:var(--space-3)">
+                            @foreach (var language in Languages)
+                            {
+                                <button class="tab @(Chosen(endpoint) == language ? "active" : "")"
+                                        @onclick="() => _language[endpoint.Id] = language">
+                                    @EndpointSnippets.Label(language)
+                                </button>
+                            }
+                        </div>
+
+                        <div class="codeblock">
+                            <pre class="mono">@Snippet(endpoint)</pre>
+                            <button class="btn btn--sm codeblock-copy"
+                                    @onclick="() => CopyAsync(Snippet(endpoint), CodeSlot(endpoint))">
+                                @CopyIcon(CodeSlot(endpoint)) @CopyLabel(CodeSlot(endpoint))
+                            </button>
+                        </div>
+
+                        <p class="muted" style="font-size:.76rem;margin:var(--space-3) 0 0">
+                            Ganti <code class="mono">@EndpointSnippets.KeyPlaceholder</code> dengan kunci
+                            asli — kunci hanya tampil sekali, saat dibuat.
+                        </p>
+                    </div>
+
+                    @* ---------------------------------------------------------- playground *@
+
+                    <div class="card card--sunk card--tight" style="margin-top:var(--space-3)">
+                        <div class="spread">
+                            <div class="eyebrow">Uji coba</div>
+                            <button class="btn btn--sm" @onclick="() => ToggleConsole(endpoint)"
+                                    aria-expanded="@(open ? "true" : "false")">
+                                @(open ? "Tutup" : "Buka panel")
+                            </button>
+                        </div>
+
+                        @if (open)
+                        {
+                            <div style="margin-top:var(--space-4)">
+                                @if (endpoint.Status != EndpointStatus.Live)
+                                {
+                                    <div class="notice notice--warn" style="margin-bottom:var(--space-4)">
+                                        <div>
+                                            Endpoint ini berhenti, jadi permintaan apa pun dijawab 401.
+                                            Aktifkan dulu untuk mengujinya.
+                                        </div>
+                                    </div>
+                                }
+
+                                <div class="field">
+                                    <label for="key-@endpoint.Id">Kunci API</label>
+                                    <input id="key-@endpoint.Id" type="password" class="code"
+                                           placeholder="bml_…" autocomplete="off"
+                                           value="@Key(endpoint)"
+                                           @oninput="e => _key[endpoint.Id] = e.Value?.ToString() ?? string.Empty" />
+                                </div>
+
+                                <div class="field">
+                                    <div class="spread" style="margin-bottom:var(--space-2)">
+                                        <label for="body-@endpoint.Id" style="margin:0">Permintaan</label>
+                                        <button class="btn btn--sm" @onclick="() => ResetPayload(endpoint)">
+                                            Kembalikan contoh
+                                        </button>
+                                    </div>
+                                    @* The payload goes in the value attribute, not between the
+                                       tags. Once a browser's textarea has been typed in, changing
+                                       its child text node no longer changes what is displayed —
+                                       so "Kembalikan contoh" would appear to do nothing. Blazor
+                                       assigns value as a DOM property, which does take. *@
+                                    <textarea id="body-@endpoint.Id" class="code" rows="9"
+                                              value="@Payload(endpoint)"
+                                              @oninput="e => _payload[endpoint.Id] = e.Value?.ToString() ?? string.Empty"></textarea>
+                                </div>
+
+                                <button class="btn btn--go" @onclick="() => SendAsync(endpoint)"
+                                        disabled="@(_sending == endpoint.Id)">
+                                    @if (_sending == endpoint.Id)
+                                    {
+                                        <text>Mengirim…</text>
+                                    }
+                                    else
+                                    {
+                                        @((MarkupString)Icons.Send)
+                                        <text>Kirim permintaan</text>
+                                    }
+                                </button>
+
+                                @if (_attempt.TryGetValue(endpoint.Id, out var attempt))
+                                {
+                                    <div style="margin-top:var(--space-4)">
+                                        @if (attempt.Failure is not null)
+                                        {
+                                            <div class="notice notice--danger">
+                                                <div>@attempt.Failure</div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="spread" style="margin-bottom:var(--space-2)">
+                                                <div class="row">
+                                                    <span class="eyebrow" style="margin:0">Respons</span>
+                                                    <span class="tag @(attempt.Ok ? "tag--ok" : "tag--danger")">
+                                                        @attempt.Status @Reason(attempt.Status)
+                                                    </span>
+                                                </div>
+                                                <span class="num muted" style="font-size:.78rem">@attempt.ElapsedMs ms</span>
+                                            </div>
+
+                                            <div class="codeblock">
+                                                <pre class="mono">@attempt.Body</pre>
+                                                <button class="btn btn--sm codeblock-copy"
+                                                        @onclick="() => CopyAsync(attempt.Body, RespSlot(endpoint))">
+                                                    @CopyIcon(RespSlot(endpoint)) @CopyLabel(RespSlot(endpoint))
+                                                </button>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly SnippetLanguage[] Languages =
+        [SnippetLanguage.Curl, SnippetLanguage.CSharp, SnippetLanguage.Python, SnippetLanguage.Node];
+
+    private List<ServiceEndpoint> _items = [];
+    private string? _newKey;
+
+    // Per-endpoint console state, keyed rather than held on the entity: none of it belongs in the
+    // database, and the API key must not outlive the page.
+    private readonly Dictionary<string, SnippetLanguage> _language = [];
+    private readonly Dictionary<string, string> _key = [];
+    private readonly Dictionary<string, string> _payload = [];
+    private readonly Dictionary<string, ScoreAttempt> _attempt = [];
+
+    private string? _openConsole;
+    private string? _sending;
+    private string? _copied;
+
+    protected override async Task OnInitializedAsync() => _items = await Endpoints.ListAsync();
+
+    // ------------------------------------------------------------------ snippets
+
+    private static IReadOnlyList<ModelInputField> Fields(ServiceEndpoint endpoint) =>
+        ModelInputSchema.Parse(endpoint.Model?.InputSchemaJson);
+
+    private static string ColumnNote(IReadOnlyList<ModelInputField> fields) => fields.Count == 0
+        ? "Model ini tidak mencatat kolomnya — sesuaikan payload-nya sendiri."
+        : $"{fields.Count} kolom, nilai contoh dari data latih";
+
+    private SnippetLanguage Chosen(ServiceEndpoint endpoint) =>
+        _language.TryGetValue(endpoint.Id, out var language) ? language : SnippetLanguage.Curl;
+
+    private string Snippet(ServiceEndpoint endpoint) =>
+        EndpointSnippets.For(Chosen(endpoint), Nav.BaseUri, endpoint.Slug, Fields(endpoint));
+
+    private string Payload(ServiceEndpoint endpoint) =>
+        _payload.TryGetValue(endpoint.Id, out var body)
+            ? body
+            : EndpointSnippets.SamplePayload(Fields(endpoint));
+
+    private string Key(ServiceEndpoint endpoint) =>
+        _key.TryGetValue(endpoint.Id, out var key) ? key : string.Empty;
+
+    private const string KeySlot = "kunci";
+    private static string CodeSlot(ServiceEndpoint endpoint) => $"kode-{endpoint.Id}";
+    private static string RespSlot(ServiceEndpoint endpoint) => $"resp-{endpoint.Id}";
+
+    private void ResetPayload(ServiceEndpoint endpoint)
+    {
+        _payload.Remove(endpoint.Id);
+        _attempt.Remove(endpoint.Id);
+    }
+
+    // ------------------------------------------------------------------- console
+
+    private void ToggleConsole(ServiceEndpoint endpoint) =>
+        _openConsole = _openConsole == endpoint.Id ? null : endpoint.Id;
+
+    private async Task SendAsync(ServiceEndpoint endpoint)
+    {
+        var key = Key(endpoint);
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            _attempt[endpoint.Id] = ScoreAttempt.Failed(
+                "Masukkan kunci API dulu. Kalau tidak ada, buat lewat tombol \"Kunci baru\".", 0);
+            return;
+        }
+
+        _sending = endpoint.Id;
+        _attempt.Remove(endpoint.Id);
+
+        try
+        {
+            _attempt[endpoint.Id] = await Tester.ScoreAsync(
+                Nav.BaseUri, endpoint.Slug, key, Payload(endpoint));
+        }
+        finally
+        {
+            _sending = null;
+        }
+
+        // A successful score moves the call counter and the last-called stamp, so the card's own
+        // figures would otherwise contradict the response sitting right underneath them.
+        if (_attempt[endpoint.Id].Ok)
+        {
+            _items = await Endpoints.ListAsync();
+        }
+    }
+
+    private static string Reason(int status) => status switch
+    {
+        200 => "OK",
+        400 => "permintaan tidak lengkap",
+        401 => "kunci tidak berlaku",
+        404 => "tidak ditemukan",
+        422 => "gagal diskor",
+        _ => string.Empty
+    };
+
+    // ---------------------------------------------------------------------- keys
+
+    private async Task ToggleAsync(ServiceEndpoint endpoint)
+    {
+        var next = endpoint.Status == EndpointStatus.Live ? EndpointStatus.Stopped : EndpointStatus.Live;
+        await Endpoints.SetStatusAsync(endpoint.Id, next);
+        _items = await Endpoints.ListAsync();
+    }
+
+    private async Task AddKeyAsync(ServiceEndpoint endpoint)
+    {
+        var state = await Auth.GetAuthenticationStateAsync();
+        var userId = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        var (_, plain) = await Endpoints.AddKeyAsync(endpoint.Id, $"Kunci {DateTime.Now:dd MMM}", userId);
+
+        _newKey = plain;
+
+        // The one moment the plain key exists. Putting it straight into that endpoint's console
+        // saves the copy-paste the notice would otherwise be asking for.
+        _key[endpoint.Id] = plain;
+        _openConsole = endpoint.Id;
+    }
+
+    // ------------------------------------------------------------------- copying
+
+    private MarkupString CopyIcon(string slot) =>
+        (MarkupString)(_copied == slot ? Icons.Check : Icons.Copy);
+
+    private string CopyLabel(string slot) => _copied == slot ? "Tersalin" : "Salin";
+
+    private async Task CopyAsync(string text, string slot)
+    {
+        var copied = await Js.InvokeAsync<bool>("blazorml.copyText", text);
+
+        if (!copied)
+        {
+            await Js.InvokeVoidAsync("alert",
+                "Browser menolak akses clipboard. Pilih teksnya dan salin manual.");
+            return;
+        }
+
+        // Confirm on the button itself: "did that work" is the only question a copy button raises,
+        // and answering it with a toast somewhere else answers it in the wrong place.
+        _copied = slot;
+        StateHasChanged();
+
+        await Task.Delay(1600);
+
+        if (_copied == slot)
+        {
+            _copied = null;
+            StateHasChanged();
+        }
+    }
+}

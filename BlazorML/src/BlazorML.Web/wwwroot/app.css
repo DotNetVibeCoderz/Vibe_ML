@@ -1,0 +1,1044 @@
+/* ============================================================================
+   Blazor ML Studio — design system
+   ----------------------------------------------------------------------------
+   Direction: "neo brutalism soft", grounded in the vernacular of a pen plotter.
+   An ML studio is an instrument, so the interface borrows from one: plotting
+   paper, a set of coloured pens, hard ink shadows, monospace for anything the
+   machine measured.
+
+   The load-bearing idea is that COLOUR ENCODES CATEGORY. Each module family
+   owns one plotter pen, and that pen appears on its palette chip, its node
+   header, its ports and its edges. Colour is never decoration here — if two
+   things share a colour they are the same kind of thing.
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+/* ---------------------------------------------------------------- tokens */
+/* Every theme-varying value is written once, as light-dark(light, dark). The
+   active branch follows `color-scheme`, which the data-theme rules below flip.
+   The earlier shape of this file declared each token three times — once for
+   light, once for [data-theme=dark], once inside a prefers-color-scheme query —
+   and three copies of the same palette is three chances for them to drift apart. */
+
+:root {
+  color-scheme: light dark;
+
+  /* The pen set. Six inks, deliberately a touch off the stock palettes so the
+     product does not read as someone else's default theme.
+
+     These carry category identity, not magnitude, so they are a categorical
+     palette and were run through a CVD/contrast validator rather than picked by
+     eye. Both branches pass the lightness band, chroma floor, adjacent-pair
+     separation under deuteranopia and tritanopia, and 3:1 contrast against their
+     own surface. The dark branch is re-stepped, not lightened: naively brightening
+     these put five of six above the lightness band. Changing any value here means
+     re-running the validator, not eyeballing it. */
+  --pen-blue:   light-dark(#1b5ce0, #5b8cff);
+  --pen-teal:   light-dark(#04938c, #1fa89f);
+  --pen-violet: light-dark(#6d4ad6, #8f6ff0);
+  --pen-amber:  light-dark(#c47400, #c07f10);
+  --pen-rose:   light-dark(#d6336c, #e04f7c);
+  --pen-lime:   light-dark(#5c9a1b, #5f9a22);
+  --pen-ink:    light-dark(#2a2f3a, #c3c9d6);
+
+  /* Chart-only roles, kept separate from the category pens so a chart never
+     implies a category it does not mean. The seq ramp is one hue, light to dark,
+     for magnitude in a heatmap. */
+  --chart-axis:      light-dark(#8b93a1, #6f7787);
+  --chart-grid:      light-dark(#e2e2dd, #2b2f38);
+  --chart-reference: light-dark(#b4b8b0, #4a505d);
+  --seq-0: light-dark(#eef3fd, #16203a);
+  --seq-1: light-dark(#cfe0fa, #1d3160);
+  --seq-2: light-dark(#9dc0f2, #26468f);
+  --seq-3: light-dark(#5f96e6, #305fc0);
+  --seq-4: light-dark(#2f6dd4, #4a80e4);
+  --seq-5: light-dark(#14449b, #7ba6f5);
+
+  /* Surfaces. Light is a cool paper stock, not the warm cream every AI mock
+     reaches for. */
+  --paper:        light-dark(#edede8, #14161a);
+  --surface:      light-dark(#ffffff, #1c1f26);
+  --surface-sunk: light-dark(#f5f5f1, #23262f);
+  --ink:          light-dark(#14161a, #edede8);
+  --ink-soft:     light-dark(#5b6270, #a4abb8);
+  --ink-faint:    light-dark(#8b93a1, #6f7787);
+  --rule:         light-dark(#14161a, #05060a);
+  --rule-soft:    light-dark(#cfd0c9, #363a45);
+
+  /* Status colours are reserved: never reused as a category or a series. */
+  --ok:     light-dark(#2f7d32, #6fcf74);
+  --warn:   light-dark(#b26a00, #ffc061);
+  --danger: light-dark(#c62828, #ff7a7a);
+
+  /* Neo-brutalism, softened: real borders and a hard offset shadow with no
+     blur, but generous corner radii so it reads as friendly rather than harsh. */
+  --border-width: 2px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --shadow: 4px 4px 0 var(--rule);
+  --shadow-sm: 2px 2px 0 var(--rule);
+  --shadow-lg: 7px 7px 0 var(--rule);
+
+  --font-display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --rail: 68px;
+  --header: 60px;
+  --credit: 34px;
+}
+
+/* The toggle stamps data-theme on the root; these pin color-scheme so the
+   light-dark() branch above follows the user's choice rather than the OS. */
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark']  { color-scheme: dark; }
+
+/* ------------------------------------------------------------------ base */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The plotting-paper ground. A faint grid, drawn once on the body so every
+   surface that sits on it reads as a card laid on paper. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--ink) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--ink) 6%, transparent) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+h1 { font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.3rem); }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1.1rem; }
+h4 { font-size: 0.95rem; }
+
+a { color: var(--pen-blue); text-decoration-thickness: 2px; text-underline-offset: 2px; }
+a:hover { color: var(--ink); }
+
+code, kbd, pre, .mono { font-family: var(--font-mono); }
+
+:focus-visible {
+  outline: 3px solid var(--pen-amber);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection { background: var(--pen-amber); color: #14161a; }
+
+/* --------------------------------------------------------------- helpers */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.muted { color: var(--ink-soft); }
+.faint { color: var(--ink-faint); }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.stack { display: flex; flex-direction: column; gap: var(--space-4); }
+.row { display: flex; align-items: center; gap: var(--space-3); }
+.row-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.spread { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.grow { flex: 1 1 auto; min-width: 0; }
+
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ----------------------------------------------------------------- cards */
+
+.card {
+  position: relative;
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-5);
+}
+
+.card--flat { box-shadow: none; }
+.card--sunk { background: var(--surface-sunk); box-shadow: none; }
+.card--tight { padding: var(--space-4); }
+
+/* The pen rail: a colour bar down the left edge naming what kind of thing
+   this card is. Same language as the ports on a node. */
+.card--rail { padding-left: calc(var(--space-5) + 6px); }
+.card--rail::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  background: var(--rail-pen, var(--pen-ink));
+  border-right: var(--border-width) solid var(--rule);
+  border-radius: calc(var(--radius) - var(--border-width)) 0 0 calc(var(--radius) - var(--border-width));
+}
+
+.card-title { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); }
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 9px 16px;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 90ms ease, box-shadow 90ms ease, background-color 120ms ease;
+}
+
+.btn:hover { background: var(--surface-sunk); color: var(--ink); }
+
+/* Pressing pushes the card into its own shadow — the whole reason the shadow
+   is a hard offset rather than a blur. */
+.btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--rule); }
+
+.btn:disabled, .btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn--primary { background: var(--pen-blue); color: #fff; }
+.btn--primary:hover { background: color-mix(in srgb, var(--pen-blue) 85%, var(--ink)); color: #fff; }
+
+.btn--go { background: var(--pen-lime); color: #14161a; }
+.btn--go:hover { background: color-mix(in srgb, var(--pen-lime) 85%, var(--ink)); color: #14161a; }
+
+.btn--danger { background: var(--danger); color: #fff; }
+.btn--danger:hover { background: color-mix(in srgb, var(--danger) 85%, #000); color: #fff; }
+
+.btn--ghost { background: transparent; box-shadow: none; border-color: transparent; }
+.btn--ghost:hover { background: var(--surface-sunk); border-color: var(--rule-soft); }
+
+.btn--sm { padding: 5px 10px; font-size: 0.8rem; }
+.btn--icon { padding: 8px; width: 38px; height: 38px; }
+.btn--block { width: 100%; }
+
+/* ------------------------------------------------------------------ tags */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: var(--border-width) solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+/* Category identity is carried by the swatch, not by tinting the text. Coloured
+   text on a coloured chip is where contrast goes to die, and the pens are chosen
+   for separation from each other rather than from white. */
+.tag--pen { background: var(--surface); color: var(--ink); border-color: var(--rule); }
+.tag--pen::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--tag-pen, var(--pen-ink));
+}
+
+.tag--ok { background: var(--ok); color: #fff; }
+.tag--warn { background: var(--warn); color: #fff; }
+.tag--danger { background: var(--danger); color: #fff; }
+.tag--quiet { background: var(--surface-sunk); color: var(--ink-soft); border-color: var(--rule-soft); }
+
+/* Status dot used on run badges: a filled square, matching the plotted look. */
+.dot { width: 9px; height: 9px; border: 1.5px solid var(--rule); display: inline-block; }
+.dot--running { background: var(--pen-amber); animation: pulse 1.1s ease-in-out infinite; }
+.dot--ok { background: var(--ok); }
+.dot--fail { background: var(--danger); }
+.dot--idle { background: var(--rule-soft); }
+
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+/* ---------------------------------------------------------------- inputs */
+
+label, .label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--ink);
+}
+
+.hint { font-size: 0.78rem; color: var(--ink-soft); margin-top: 4px; line-height: 1.4; }
+
+/* Named by what an input is NOT, rather than by listing the types that take typed text.
+
+   `input[type='text']` is an attribute selector: it needs the attribute to be literally there.
+   `<input @bind="x" />` — the ordinary way to write a text field in Razor — emits `<input>` with
+   no type at all, so it matched none of the listed types and fell through to the browser's own
+   box: square corners, wrong font, wrong size. Twenty-five fields across Settings, Profile, the
+   S3 form and the module inspector were rendering that way.
+
+   Inverting also means the types nobody has reached for yet — tel, time, datetime-local — are
+   styled when someone does, instead of failing the same silent way. */
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'],
+          [type='submit'], [type='button'], [type='reset'], [type='image'], [type='hidden']),
+select, textarea {
+  width: 100%;
+  padding: 9px 11px;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  transition: box-shadow 100ms ease;
+}
+
+/* Same set: the hard offset shadow reads as focus on a bordered box, but on a checkbox or a
+   slider it does not, and dropping the outline there would leave keyboard users with no focus
+   indicator at all. Those keep the amber :focus-visible ring. */
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'],
+          [type='submit'], [type='button'], [type='reset'], [type='image'], [type='hidden']):focus,
+select:focus, textarea:focus {
+  outline: none;
+  box-shadow: var(--shadow-sm);
+}
+
+textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+textarea.code, input.code { font-family: var(--font-mono); font-size: 0.83rem; }
+
+input[type='range'] { width: 100%; accent-color: var(--pen-blue); }
+input[type='checkbox'] { width: 17px; height: 17px; accent-color: var(--pen-blue); }
+
+.field { margin-bottom: var(--space-4); }
+.field--inline { display: flex; align-items: center; gap: var(--space-3); }
+.field--inline label { margin-bottom: 0; }
+
+.validation-message, .error-text { color: var(--danger); font-size: 0.8rem; margin-top: 4px; }
+
+/* ---------------------------------------------------------------- tables */
+
+.table-wrap {
+  overflow-x: auto;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* Caps the height so the sticky header has something to stick to and the dialog around it does
+   not grow past the viewport. Without it a 500-row preview scrolls the whole dialog and the
+   column names are the first thing to leave. */
+.table-wrap--tall { max-height: 56vh; overflow-y: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  background: var(--surface-sunk);
+  border-bottom: var(--border-width) solid var(--rule);
+  white-space: nowrap;
+}
+
+td { padding: 9px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--surface-sunk); }
+
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------ app shell */
+
+.shell {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  min-height: 100vh;
+}
+
+.rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  background: var(--surface);
+  border-right: var(--border-width) solid var(--rule);
+  z-index: 20;
+}
+
+.rail-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-3);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1rem;
+  color: #fff;
+  background: var(--pen-blue);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+
+.rail-link {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.rail-link:hover { background: var(--surface-sunk); color: var(--ink); }
+
+.rail-link.active {
+  color: var(--ink);
+  background: var(--surface-sunk);
+  border-color: var(--rule);
+  box-shadow: var(--shadow-sm);
+}
+
+.rail-link svg { width: 20px; height: 20px; }
+
+/* Tooltip on the rail, since the icons carry no visible label. */
+.rail-link::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 9px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--surface);
+  background: var(--ink);
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.rail-link:hover::after, .rail-link:focus-visible::after { opacity: 1; }
+
+.rail-spacer { flex: 1 1 auto; }
+
+.main { display: flex; flex-direction: column; min-width: 0; }
+
+/* Pushes the credit to the bottom on pages too short to fill the viewport, instead of leaving it
+   floating directly under the content. */
+.main > main { flex: 1 1 auto; min-height: 0; }
+
+/* ------------------------------------------------------------ attribution
+
+   Recessive by design: present on every page, but never competing with the work. Its height is
+   declared as a token because the designer sizes its canvas against the viewport and has to
+   subtract it — see designer.css. */
+
+.credit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--credit);
+  padding: 0 var(--space-5);
+  border-top: var(--border-width) solid var(--rule);
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.credit strong { font-weight: 600; color: var(--ink); }
+.credit a { color: var(--ink-soft); }
+.credit a:hover { color: var(--ink); }
+.credit-sep { color: var(--rule); }
+
+/* Inside the auth card there is no shell to separate it from, so it drops the bar and the rule. */
+.credit--bare {
+  justify-content: center;
+  height: auto;
+  padding: var(--space-3) 0 0;
+  border-top: none;
+  background: none;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--header);
+  padding: 0 var(--space-5);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: var(--border-width) solid var(--rule);
+}
+
+.topbar h1 { font-size: 1.15rem; }
+
+.page { padding: var(--space-5); max-width: 1500px; width: 100%; }
+.page--wide { max-width: none; }
+.page--flush { padding: 0; }
+
+.page-head { margin-bottom: var(--space-5); }
+.page-head p { margin: var(--space-2) 0 0; color: var(--ink-soft); max-width: 62ch; }
+
+/* ------------------------------------------------------------------ grid */
+
+.grid { display: grid; gap: var(--space-4); }
+.grid--2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grid--3 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.grid--4 { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+
+/* ------------------------------------------------------------- stat tile */
+
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat-value { font-family: var(--font-mono); font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; }
+.stat-label { font-size: 0.8rem; color: var(--ink-soft); }
+
+.stat-card { display: block; text-decoration: none; color: inherit; transition: transform 110ms ease; }
+.stat-card:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); color: inherit; }
+.stat-card:active { transform: translate(2px, 2px); box-shadow: var(--shadow-sm); }
+
+/* ------------------------------------------------------------- metric list */
+
+.metrics { margin: 0; display: flex; flex-direction: column; gap: 1px; }
+
+.metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.metric:last-child { border-bottom: none; }
+.metric dt { font-size: 0.83rem; color: var(--ink-soft); }
+.metric dd { margin: 0; font-weight: 600; font-size: 0.92rem; }
+
+/* ----------------------------------------------------------------- steps */
+
+/* Numbered because these genuinely are a sequence: you cannot publish a model you have not
+   trained, and you cannot train one without data. */
+.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+
+.steps li {
+  position: relative;
+  padding: 0 0 var(--space-4) var(--space-6);
+  counter-increment: step;
+  font-size: 0.89rem;
+  color: var(--ink-soft);
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface-sunk);
+  border: var(--border-width) solid var(--rule);
+  border-radius: 6px;
+}
+
+/* The connecting rule between steps, stopping before the last one. */
+.steps li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 28px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--rule-soft);
+}
+
+.steps li strong { display: block; color: var(--ink); margin-bottom: 2px; }
+.steps li a { display: inline-block; margin-top: 5px; font-size: 0.83rem; }
+
+/* --------------------------------------------------------------- empties */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-5);
+  text-align: center;
+  border: var(--border-width) dashed var(--rule-soft);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+}
+
+.empty h3 { color: var(--ink); }
+.empty p { margin: 0; max-width: 46ch; }
+
+/* --------------------------------------------------------------- notices */
+
+.notice {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 0.87rem;
+}
+
+.notice--info { border-left: 10px solid var(--pen-blue); }
+.notice--ok { border-left: 10px solid var(--ok); }
+.notice--warn { border-left: 10px solid var(--warn); }
+.notice--danger { border-left: 10px solid var(--danger); }
+
+/* ----------------------------------------------------------------- tabs */
+
+.tabs { display: flex; gap: var(--space-1); border-bottom: var(--border-width) solid var(--rule); }
+
+.tab {
+  padding: 8px 15px;
+  font-size: 0.87rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: transparent;
+  border: var(--border-width) solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer;
+  margin-bottom: calc(var(--border-width) * -1);
+}
+
+.tab:hover { color: var(--ink); background: var(--surface-sunk); }
+
+.tab.active {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--rule);
+  border-bottom: var(--border-width) solid var(--surface);
+}
+
+/* ----------------------------------------------------------- code block
+
+   A snippet the reader is meant to take away, with the copy button inside the block rather than
+   under it — the button belongs to this code, and on a page listing several endpoints a row of
+   detached buttons stops saying which.
+
+   Deliberately not syntax highlighted. Colour in this design system means category, and six
+   colours competing inside a six-line snippet would say nothing while contradicting every other
+   surface. */
+
+.codeblock {
+  position: relative;
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+
+.codeblock pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  /* Room for the button, so a long line never runs underneath it. */
+  padding-right: 104px;
+  font-size: 0.78rem;
+  line-height: 1.65;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.codeblock-copy {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  background: var(--surface-sunk);
+}
+
+/* Sticky within the scroll container would drift; keeping it fixed to the block means scrolling a
+   wide line moves the code under a button that stays put. */
+.codeblock-copy:hover { background: var(--surface); }
+
+@media (max-width: 560px) {
+  .codeblock pre { padding-right: var(--space-4); padding-top: 44px; }
+  .codeblock-copy { top: var(--space-2); right: var(--space-2); }
+}
+
+/* ---------------------------------------------------------------- dialog */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.dialog {
+  width: min(560px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+}
+
+.dialog--wide { width: min(880px, 100%); }
+
+/* -------------------------------------------------------------- markdown */
+
+.md { font-size: 0.92rem; line-height: 1.6; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3 { margin: var(--space-4) 0 var(--space-2); }
+.md h1 { font-size: 1.25rem; }
+.md h2 { font-size: 1.1rem; }
+.md h3 { font-size: 0.98rem; }
+.md p { margin: 0 0 var(--space-3); }
+.md ul, .md ol { margin: 0 0 var(--space-3); padding-left: 1.35rem; }
+.md li { margin-bottom: 4px; }
+.md blockquote {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-left: 5px solid var(--pen-violet);
+  background: var(--surface-sunk);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.md code {
+  padding: 1px 5px;
+  font-size: 0.86em;
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule-soft);
+  border-radius: 5px;
+}
+
+.md pre {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  overflow-x: auto;
+  background: var(--surface-sunk);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+
+.md pre code { padding: 0; background: none; border: none; font-size: 0.82rem; line-height: 1.5; }
+
+.md table { margin: 0 0 var(--space-3); border: var(--border-width) solid var(--rule); border-radius: var(--radius-sm); }
+.md img, .md video { max-width: 100%; height: auto; border: var(--border-width) solid var(--rule); border-radius: var(--radius-sm); }
+.md audio { width: 100%; }
+
+/* --------------------------------------------------------------- scrollbar */
+
+* { scrollbar-width: thin; scrollbar-color: var(--rule-soft) transparent; }
+*::-webkit-scrollbar { width: 11px; height: 11px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--rule-soft); border: 3px solid var(--paper); border-radius: 999px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); }
+
+/* ------------------------------------------------------------- usermenu */
+
+.usermenu { position: relative; }
+
+.usermenu-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 200px;
+  padding: 5px 11px 5px 5px;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+
+.usermenu-trigger:active { transform: translate(2px, 2px); box-shadow: none; }
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--pen-violet);
+  border-radius: 50%;
+}
+
+.usermenu-name { display: none; }
+
+@media (min-width: 640px) { .usermenu-name { display: block; } }
+
+.usermenu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 50;
+  width: 210px;
+  padding: var(--space-2);
+}
+
+.usermenu-panel hr { margin: var(--space-2) 0; border: none; border-top: 1px solid var(--rule-soft); }
+
+.usermenu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  font-family: var(--font-body);
+  font-size: 0.87rem;
+  font-weight: 500;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.usermenu-item:hover { background: var(--surface-sunk); color: var(--ink); }
+.usermenu-item--danger { color: var(--danger); }
+
+/* ------------------------------------------------------------- auth page */
+
+.auth {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+}
+
+.auth-card { width: min(430px, 100%); }
+
+.auth-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-4);
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: #fff;
+  background: var(--pen-blue);
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.auth-foot { margin-top: var(--space-5); font-size: 0.85rem; color: var(--ink-soft); text-align: center; }
+
+/* ------------------------------------------------------------ blazor ui */
+
+#blazor-error-ui {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: none;
+  padding: var(--space-3) var(--space-5);
+  background: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+#blazor-error-ui .dismiss { cursor: pointer; float: right; font-size: 1.2rem; }
+
+.blazor-error-boundary {
+  padding: var(--space-4);
+  background: var(--danger);
+  color: #fff;
+  border-radius: var(--radius);
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+
+  .rail {
+    position: fixed;
+    bottom: 0;
+    top: auto;
+    left: 0;
+    right: 0;
+    height: auto;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: var(--space-2);
+    border-right: none;
+    border-top: var(--border-width) solid var(--rule);
+    overflow-x: auto;
+  }
+
+  .rail-mark, .rail-spacer { display: none; }
+  .rail-link::after { display: none; }
+
+  .main { padding-bottom: 68px; }
+  .page { padding: var(--space-4); }
+  .topbar { padding: 0 var(--space-4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================================
+   Charts
+   ----------------------------------------------------------------------------
+   Recessive frame, thin marks, and a caption that says what the reader should
+   take from the figure rather than repeating its title. Every chart here is
+   paired with a table view of the same numbers, which is what makes it safe to
+   rely on colour at all.
+   ========================================================================= */
+
+.eval { position: relative; }
+
+.chart {
+  margin: 0 0 var(--space-5);
+  padding: 0;
+}
+
+.chart figcaption {
+  margin-bottom: var(--space-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.chart figcaption .faint { font-weight: 400; }
+
+/* The plot sits on the sunk surface so the recessive grid still reads, and
+   scrolls inside itself rather than pushing the panel sideways. */
+.chart-plot {
+  position: relative;
+  overflow-x: auto;
+  padding: var(--space-2);
+  background: var(--surface-sunk);
+  border: var(--border-width) solid var(--rule-soft);
+  border-radius: var(--radius-sm);
+}
+
+.chart-plot svg { display: block; max-width: 100%; height: auto; }
+
+.c-grid line { shape-rendering: crispEdges; }
+
+.c-tip {
+  position: absolute;
+  z-index: 5;
+  max-width: 200px;
+  padding: 6px 9px;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--surface);
+  background: var(--ink);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.c-tip b { font-family: var(--font-mono); font-weight: 600; }
+
+.eval-caption {
+  padding: 8px 12px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: left;
+  color: var(--ink-soft);
+  background: var(--surface-sunk);
+  border-bottom: var(--border-width) solid var(--rule);
+}

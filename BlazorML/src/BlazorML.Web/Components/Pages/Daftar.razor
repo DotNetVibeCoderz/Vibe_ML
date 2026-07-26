@@ -1,0 +1,74 @@
+@page "/daftar"
+@layout EmptyLayout
+@using BlazorML.Core.Configuration
+@inject ISettingsService Settings
+
+<PageTitle>Daftar · Blazor ML Studio</PageTitle>
+
+<div class="auth">
+    <div class="auth-card card">
+        <div class="auth-mark">ML</div>
+
+        <div class="eyebrow">Blazor ML Studio</div>
+        <h1>Buat akun baru</h1>
+        <p class="muted" style="margin:var(--space-2) 0 var(--space-5)">
+            Satu akun untuk dataset, eksperimen, dan model yang kamu terbitkan.
+        </p>
+
+        @if (!_allowRegistration)
+        {
+            <div class="notice notice--warn">
+                <div>
+                    Pendaftaran mandiri sedang ditutup untuk workspace ini.
+                    Hubungi administrator untuk dibuatkan akun.
+                </div>
+            </div>
+
+            <p class="auth-foot"><a href="/masuk">Kembali ke halaman masuk</a></p>
+        }
+        else
+        {
+            @if (Pesan is not null)
+            {
+                <div class="notice notice--danger" style="margin-bottom:var(--space-4)">
+                    <div>@Pesan</div>
+                </div>
+            }
+
+            <form method="post" action="/akun/daftar">
+                <div class="field">
+                    <label for="nama">Nama lengkap</label>
+                    <input id="nama" name="nama" type="text" autocomplete="name" placeholder="Nama kamu" />
+                </div>
+
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" autocomplete="username" required />
+                </div>
+
+                <div class="field">
+                    <label for="password">Kata sandi</label>
+                    <input id="password" name="password" type="password" autocomplete="new-password"
+                           minlength="8" required />
+                    <div class="hint">Minimal 8 karakter.</div>
+                </div>
+
+                <button class="btn btn--primary btn--block" type="submit">Buat akun</button>
+            </form>
+
+            <p class="auth-foot">Sudah punya akun? <a href="/masuk">Masuk</a></p>
+        }
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "pesan")] public string? Pesan { get; set; }
+
+    private bool _allowRegistration = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var workspace = await Settings.GetAsync<WorkspaceOptions>(SettingsSections.Workspace);
+        _allowRegistration = workspace.AllowRegistration;
+    }
+}

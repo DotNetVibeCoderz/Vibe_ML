@@ -1,0 +1,54 @@
+@page "/lupa-sandi"
+@layout EmptyLayout
+
+<PageTitle>Lupa kata sandi · Blazor ML Studio</PageTitle>
+
+<div class="auth">
+    <div class="auth-card card">
+        <div class="auth-mark">ML</div>
+
+        <div class="eyebrow">Blazor ML Studio</div>
+        <h1>Lupa kata sandi</h1>
+
+        @if (Terkirim is not null)
+        {
+            @* Deliberately the same message whether or not the address exists. Confirming which
+               email addresses have accounts would turn this page into a way to enumerate them. *@
+            <div class="notice notice--ok" style="margin:var(--space-4) 0">
+                <div>
+                    Kalau alamat itu terdaftar, tautan untuk mengatur ulang kata sandi sudah dikirim.
+                    Tautannya berlaku beberapa jam.
+                </div>
+            </div>
+
+            <p class="muted" style="font-size:.85rem">
+                Tidak menerima apa pun? Periksa folder spam. Kalau workspace ini belum diatur
+                mengirim email, administrator bisa menemukan tautannya di log aplikasi.
+            </p>
+
+            <p class="auth-foot"><a href="/masuk">Kembali ke halaman masuk</a></p>
+        }
+        else
+        {
+            <p class="muted" style="margin:var(--space-2) 0 var(--space-5)">
+                Masukkan email akunmu. Kami kirimkan tautan untuk memilih kata sandi baru.
+            </p>
+
+            <form method="post" action="/akun/lupa-sandi">
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" autocomplete="username" required
+                           placeholder="nama@perusahaan.com" />
+                </div>
+
+                <button class="btn btn--primary btn--block" type="submit">Kirim tautan</button>
+            </form>
+
+            <p class="auth-foot"><a href="/masuk">Kembali ke halaman masuk</a></p>
+        }
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "terkirim")] public string? Terkirim { get; set; }
+}

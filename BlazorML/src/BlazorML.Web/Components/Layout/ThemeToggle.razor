@@ -1,0 +1,49 @@
+@* An interactive island of its own. The layout renders statically — a page's render mode does
+   not flow up into its layout — so without this the click handler below is never wired and the
+   theme toggle simply does nothing. *@
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IJSRuntime Js
+@inject ThemeState State
+
+<button class="btn btn--icon" type="button" @onclick="ToggleAsync"
+        title="@(_dark ? "Ganti ke tema terang" : "Ganti ke tema gelap")"
+        aria-label="@(_dark ? "Ganti ke tema terang" : "Ganti ke tema gelap")">
+    @((MarkupString)(_dark ? Icons.Sun : Icons.Moon))
+</button>
+
+@code {
+    private bool _dark;
+
+    protected override void OnInitialized() => State.Changed += OnChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // The theme was applied before first paint by the inline script in App.razor; this
+        // reads back what it settled on so the icon matches what the user is looking at.
+        _dark = await Js.InvokeAsync<bool>("blazorml.isDarkTheme");
+        StateHasChanged();
+    }
+
+    private async Task ToggleAsync()
+    {
+        _dark = !_dark;
+        var theme = _dark ? "dark" : "light";
+
+        await Js.InvokeVoidAsync("blazorml.setTheme", theme);
+        State.Theme = theme;
+    }
+
+    private void OnChanged(string theme)
+    {
+        _dark = theme == "dark";
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => State.Changed -= OnChanged;
+}

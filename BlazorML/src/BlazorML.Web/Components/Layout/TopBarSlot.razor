@@ -1,0 +1,10 @@
+@* Holds whatever the current page puts in the top bar.
+
+   Carries its own render mode for the same reason ThemeToggle and UserMenu do: a layout does not
+   inherit a page's. It matters more here than there, though — the pages that fill this slot put
+   *buttons* in it (Run, Save, the assistant), and a section outlet only receives content from the
+   renderer it lives in. Rendered statically, this slot shows the buttons and none of them work. *@
+
+@rendermode InteractiveServer
+
+<SectionOutlet SectionName="topbar" />

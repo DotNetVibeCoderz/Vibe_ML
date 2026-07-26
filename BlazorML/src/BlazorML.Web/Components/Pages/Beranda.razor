@@ -1,0 +1,152 @@
+@page "/"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using BlazorML.Infrastructure.Data
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject NavigationManager Nav
+
+<PageTitle>Ringkasan · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Ringkasan" Eyebrow="Workspace">
+    <Actions>
+        <a class="btn btn--primary" href="/eksperimen">
+            @((MarkupString)Icons.Plus) Eksperimen baru
+        </a>
+    </Actions>
+</TopBarTitle>
+
+<div class="page">
+    @if (_loading)
+    {
+        <p class="muted">Memuat…</p>
+    }
+    else
+    {
+        <div class="grid grid--4" style="margin-bottom:var(--space-5)">
+            <StatCard Label="Dataset" Value="@_datasets" Pen="blue" Href="/dataset" />
+            <StatCard Label="Eksperimen" Value="@_experiments" Pen="teal" Href="/eksperimen" />
+            <StatCard Label="Model terlatih" Value="@_models" Pen="amber" Href="/model" />
+            <StatCard Label="Endpoint aktif" Value="@_liveEndpoints" Pen="lime" Href="/endpoint" />
+        </div>
+
+        <div class="grid grid--2">
+            <section class="card">
+                <div class="card-title">
+                    <h2>Run terakhir</h2>
+                    <span class="faint num">@_runs.Count</span>
+                </div>
+
+                @if (_runs.Count == 0)
+                {
+                    <div class="empty" style="border:none;padding:var(--space-5) 0">
+                        <h3>Belum ada yang dijalankan</h3>
+                        <p>Buka salah satu contoh di galeri, lalu tekan Jalankan untuk melihat hasilnya.</p>
+                        <a class="btn" href="/galeri">Lihat galeri</a>
+                    </div>
+                }
+                else
+                {
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Eksperimen</th>
+                                    <th>Status</th>
+                                    <th class="num">Durasi</th>
+                                    <th>Waktu</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var run in _runs)
+                                {
+                                    <tr style="cursor:pointer" @onclick="() => Open(run.ExperimentId)">
+                                        <td class="truncate" style="max-width:200px">
+                                            @(_names.GetValueOrDefault(run.ExperimentId) ?? "(dihapus)")
+                                        </td>
+                                        <td><RunStatusTag Status="run.Status" /></td>
+                                        <td class="num">@run.DurationSeconds.ToString("N1")s</td>
+                                        <td class="faint">@Ago(run.CreatedAt)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+
+            <section class="card">
+                <div class="card-title">
+                    <h2>Mulai dari sini</h2>
+                </div>
+
+                <p class="muted" style="margin-top:0">
+                    Tiga langkah yang biasanya dilalui sebuah eksperimen, dari data mentah sampai
+                    endpoint yang bisa dipanggil aplikasi lain.
+                </p>
+
+                <ol class="steps">
+                    <li>
+                        <strong>Bawa datanya masuk.</strong>
+                        Unggah CSV, tarik dari SQL, atau pakai salah satu dataset contoh.
+                        <a href="/dataset">Buka dataset</a>
+                    </li>
+                    <li>
+                        <strong>Susun alurnya.</strong>
+                        Seret modul ke kanvas, sambungkan, lalu jalankan. Kalau bingung, tanya
+                        Profesor Wicak — dia bisa menyusunkan alurnya untuk kamu.
+                        <a href="/eksperimen">Buka eksperimen</a>
+                    </li>
+                    <li>
+                        <strong>Terbitkan modelnya.</strong>
+                        Model yang sudah dilatih bisa jadi REST endpoint berkunci API dalam satu klik.
+                        <a href="/endpoint">Buka endpoint</a>
+                    </li>
+                </ol>
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private int _datasets, _experiments, _models, _liveEndpoints;
+    private List<ExperimentRun> _runs = [];
+    private Dictionary<string, string> _names = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _datasets = await Db.Datasets.CountAsync();
+        _experiments = await Db.Experiments.CountAsync();
+        _models = await Db.TrainedModels.CountAsync();
+        _liveEndpoints = await Db.Endpoints.CountAsync(e => e.Status == EndpointStatus.Live);
+
+        _runs = await Db.ExperimentRuns.AsNoTracking()
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(8)
+            .ToListAsync();
+
+        var ids = _runs.Select(r => r.ExperimentId).Distinct().ToList();
+
+        _names = await Db.Experiments.AsNoTracking()
+            .Where(e => ids.Contains(e.Id))
+            .ToDictionaryAsync(e => e.Id, e => e.Name);
+
+        _loading = false;
+    }
+
+    private void Open(string experimentId) => Nav.NavigateTo($"/eksperimen/{experimentId}");
+
+    private static string Ago(DateTimeOffset when)
+    {
+        var span = DateTimeOffset.UtcNow - when;
+
+        return span switch
+        {
+            { TotalMinutes: < 1 } => "baru saja",
+            { TotalMinutes: < 60 } => $"{(int)span.TotalMinutes} menit lalu",
+            { TotalHours: < 24 } => $"{(int)span.TotalHours} jam lalu",
+            _ => $"{(int)span.TotalDays} hari lalu"
+        };
+    }
+}

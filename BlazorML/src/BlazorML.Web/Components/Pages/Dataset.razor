@@ -1,0 +1,441 @@
+@page "/dataset"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Text.Json
+@using BlazorML.Infrastructure.Data
+@using BlazorML.Infrastructure.Datasets
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject IDatasetService Datasets
+@inject AuthenticationStateProvider Auth
+@inject IJSRuntime Js
+
+<PageTitle>Dataset · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Dataset" Eyebrow="@($"{_items.Count} tersimpan")">
+    <Actions>
+        <label class="btn btn--primary" style="cursor:pointer">
+            @((MarkupString)Icons.Upload) Impor berkas
+            <InputFile OnChange="UploadAsync" accept=".csv,.tsv,.json" style="display:none" />
+        </label>
+    </Actions>
+</TopBarTitle>
+
+<div class="page">
+    @if (_message is not null)
+    {
+        <div class="notice @(_failed ? "notice--danger" : "notice--ok")" style="margin-bottom:var(--space-4)">
+            <div>@_message</div>
+        </div>
+    }
+
+    @if (_uploading)
+    {
+        <div class="notice notice--info" style="margin-bottom:var(--space-4)">
+            <div>Membaca berkas dan menghitung profil kolom…</div>
+        </div>
+    }
+
+    @if (_items.Count == 0)
+    {
+        <div class="empty">
+            <h3>Belum ada dataset</h3>
+            <p>Impor berkas CSV, TSV, atau JSON. Kolomnya akan diperiksa otomatis dan
+               statistiknya dihitung saat impor.</p>
+        </div>
+    }
+    else
+    {
+        <div class="grid grid--3">
+            @foreach (var item in _items)
+            {
+                <article class="card card--rail card--tight" style="--rail-pen: var(--pen-blue)">
+                    <div class="spread" style="align-items:flex-start">
+                        <div style="min-width:0">
+                            <h3 class="truncate">@item.Name</h3>
+                            <div class="eyebrow">@item.Format.ToString().ToUpperInvariant() · @Size(item.SizeBytes)</div>
+                        </div>
+                        @if (item.IsSample)
+                        {
+                            <span class="tag tag--quiet">contoh</span>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(item.Description))
+                    {
+                        <p class="muted" style="font-size:.85rem;margin:var(--space-3) 0 0">@item.Description</p>
+                    }
+
+                    <div class="row" style="margin-top:var(--space-3);gap:var(--space-5)">
+                        <div class="stat">
+                            <span class="num" style="font-weight:600">@item.RowCount.ToString("N0")</span>
+                            <span class="stat-label">baris</span>
+                        </div>
+                        <div class="stat">
+                            <span class="num" style="font-weight:600">@item.ColumnCount</span>
+                            <span class="stat-label">kolom</span>
+                        </div>
+                    </div>
+
+                    <div class="row" style="margin-top:var(--space-4)">
+                        <button class="btn btn--sm" @onclick="() => OpenAsync(item, DataTab)">Lihat data</button>
+                        <button class="btn btn--sm" @onclick="() => OpenAsync(item, ColumnTab)">Lihat kolom</button>
+                        <button class="btn btn--sm btn--ghost" @onclick="() => DeleteAsync(item)">Hapus</button>
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@if (_inspecting is not null)
+{
+    <div class="overlay" @onclick="Close">
+        <div class="dialog dialog--wide" @onclick:stopPropagation="true">
+            <div class="spread" style="margin-bottom:var(--space-4)">
+                <div style="min-width:0">
+                    <div class="eyebrow">@_inspecting.RowCount.ToString("N0") baris · @_inspecting.ColumnCount kolom</div>
+                    <h2 class="truncate">@_inspecting.Name</h2>
+                </div>
+                <button class="btn btn--icon btn--ghost" @onclick="Close" aria-label="Tutup">
+                    @((MarkupString)Icons.Close)
+                </button>
+            </div>
+
+            @* Two views of the same dataset. Reading the rows raises the question of what the
+               columns are, and the other way round, so they belong behind one pair of tabs
+               rather than in two dialogs that cannot be flipped between. *@
+            <div class="tabs" style="margin-bottom:var(--space-4)">
+                <button class="tab @(_tab == DataTab ? "active" : "")"
+                        @onclick="() => ShowDataAsync()">@DataTab</button>
+                <button class="tab @(_tab == ColumnTab ? "active" : "")"
+                        @onclick="() => _tab = ColumnTab">@ColumnTab</button>
+            </div>
+
+            @if (_tab == DataTab)
+            {
+                <div class="spread" style="margin-bottom:var(--space-3)">
+                    <span class="muted" style="font-size:.8rem">@PreviewNote()</span>
+
+                    <div class="row">
+                        <label for="baris" class="muted" style="font-size:.8rem;margin:0">Baris</label>
+                        <select id="baris" style="width:auto" value="@_previewRows"
+                                @onchange="OnRowCountChangedAsync">
+                            @foreach (var option in RowOptions)
+                            {
+                                <option value="@option">@option</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                @if (_loadingPreview)
+                {
+                    <p class="muted">Membaca berkas…</p>
+                }
+                else if (_previewError is not null)
+                {
+                    <div class="notice notice--danger">
+                        <div>@_previewError</div>
+                    </div>
+                }
+                else if (_preview is null || _preview.RowCount == 0)
+                {
+                    <p class="muted">Berkasnya terbaca, tapi tidak ada satu baris pun di dalamnya.</p>
+                }
+                else
+                {
+                    <div class="table-wrap table-wrap--tall">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="num" style="width:1%">#</th>
+                                    @foreach (var column in _preview.Columns)
+                                    {
+                                        <th class="@(IsNumeric(column.Name) ? "num" : "")">@column.Name</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (var row = 0; row < _preview.RowCount; row++)
+                                {
+                                    var index = row;
+                                    <tr>
+                                        <td class="num faint">@(index + 1)</td>
+                                        @foreach (var column in _preview.Columns)
+                                        {
+                                            var value = _preview.Value(index, column.Name);
+
+                                            @if (TabularData.IsBlank(value))
+                                            {
+                                                @* Named, not left blank: an empty cell reads as a
+                                                   rendering fault, and a gap is a fact about the
+                                                   data that every transform downstream cares about. *@
+                                                <td class="faint" title="Tidak ada nilai">—</td>
+                                            }
+                                            else
+                                            {
+                                                <td class="@(IsNumeric(column.Name) ? "num" : "")">@Cell(value)</td>
+                                            }
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+            else if (_profile is null)
+            {
+                <p class="muted">Profil untuk dataset ini belum tersimpan.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Kolom</th>
+                                <th>Tipe</th>
+                                <th class="num">Kosong</th>
+                                <th class="num">Unik</th>
+                                <th class="num">Min</th>
+                                <th class="num">Rata-rata</th>
+                                <th class="num">Maks</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var column in _profile.Columns)
+                            {
+                                <tr>
+                                    <td><strong>@column.Name</strong></td>
+                                    <td><span class="tag tag--quiet">@TypeLabel(column.DataType)</span></td>
+                                    <td class="num @(column.MissingCount > 0 ? "" : "faint")">@column.MissingCount</td>
+                                    <td class="num">@column.DistinctCount</td>
+                                    <td class="num faint">@Fmt(column.Min)</td>
+                                    <td class="num faint">@Fmt(column.Mean)</td>
+                                    <td class="num faint">@Fmt(column.Max)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private const string DataTab = "Data";
+    private const string ColumnTab = "Kolom";
+    private static readonly int[] RowOptions = [25, 100, 500];
+
+    private List<Core.Domain.Dataset> _items = [];
+    private Core.Domain.Dataset? _inspecting;
+    private DatasetProfile? _profile;
+    private string? _message;
+    private bool _failed;
+    private bool _uploading;
+
+    private string _tab = DataTab;
+    private TabularData? _preview;
+    private int _previewRows = RowOptions[0];
+    private bool _loadingPreview;
+    private string? _previewError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() =>
+        _items = await Db.Datasets.AsNoTracking().OrderByDescending(d => d.CreatedAt).ToListAsync();
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        _uploading = true;
+        _message = null;
+
+        try
+        {
+            var state = await Auth.GetAuthenticationStateAsync();
+            var userId = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            var format = TabularSerializer.GuessFormat(file.Name);
+
+            // 512 MB matches the form limit configured in Program.cs.
+            await using var stream = file.OpenReadStream(512L * 1024 * 1024);
+
+            var name = Path.GetFileNameWithoutExtension(file.Name);
+            var dataset = await Datasets.ImportAsync(name, stream, format, DatasetSourceKind.Upload, userId);
+
+            _failed = false;
+            _message = $"'{dataset.Name}' diimpor: {dataset.RowCount:N0} baris, {dataset.ColumnCount} kolom.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _failed = true;
+            _message = $"Impor gagal: {ex.Message}";
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    // -------------------------------------------------------------- inspecting
+
+    private async Task OpenAsync(Core.Domain.Dataset dataset, string tab)
+    {
+        _inspecting = dataset;
+        _tab = tab;
+        _preview = null;
+        _previewError = null;
+        _previewRows = RowOptions[0];
+
+        _profile = string.IsNullOrWhiteSpace(dataset.ProfileJson)
+            ? null
+            : JsonSerializer.Deserialize<DatasetProfile>(dataset.ProfileJson);
+
+        if (tab == DataTab)
+        {
+            await LoadPreviewAsync();
+        }
+    }
+
+    private void Close()
+    {
+        _inspecting = null;
+
+        // Dropped rather than kept for next time: a 500-row table is real memory, and it is held
+        // by a circuit that lives as long as the browser tab does.
+        _preview = null;
+        _previewError = null;
+    }
+
+    private async Task ShowDataAsync()
+    {
+        _tab = DataTab;
+
+        if (_preview is null && _previewError is null)
+        {
+            await LoadPreviewAsync();
+        }
+    }
+
+    private async Task OnRowCountChangedAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var rows))
+        {
+            _previewRows = rows;
+            await LoadPreviewAsync();
+        }
+    }
+
+    /// <summary>
+    /// Reads only the rows being shown. <c>PreviewAsync</c> stops the reader once it has them, so
+    /// opening this on a large file costs the first few kilobytes rather than the whole thing.
+    /// </summary>
+    private async Task LoadPreviewAsync()
+    {
+        if (_inspecting is null)
+        {
+            return;
+        }
+
+        var dataset = _inspecting;
+
+        _loadingPreview = true;
+        _previewError = null;
+        StateHasChanged();
+
+        try
+        {
+            var rows = await Datasets.PreviewAsync(dataset.Id, _previewRows);
+
+            // The dialog may have been closed, or another dataset opened, while this was reading.
+            if (_inspecting?.Id == dataset.Id)
+            {
+                _preview = rows;
+            }
+        }
+        catch (Exception ex)
+        {
+            _previewError = $"Tidak bisa membaca berkasnya: {ex.Message}";
+        }
+        finally
+        {
+            _loadingPreview = false;
+        }
+    }
+
+    private string PreviewNote()
+    {
+        if (_preview is null || _inspecting is null)
+        {
+            return string.Empty;
+        }
+
+        return _preview.RowCount >= _inspecting.RowCount
+            ? $"Seluruh {_inspecting.RowCount:N0} baris."
+            : $"{_preview.RowCount:N0} baris pertama dari {_inspecting.RowCount:N0}.";
+    }
+
+    /// <summary>
+    /// Numbers line up on the right so their magnitudes can be compared down a column. Taken from
+    /// the stored profile, which is the same judgement the rest of the app trains on.
+    /// </summary>
+    private bool IsNumeric(string column) =>
+        _profile?.Column(column)?.DataType == ColumnDataType.Numeric;
+
+    private static string Cell(object? value) => value switch
+    {
+        double d => d.ToString("G6"),
+        float f => f.ToString("G6"),
+        DateTime date => date.ToString("yyyy-MM-dd HH:mm"),
+        DateTimeOffset stamp => stamp.ToString("yyyy-MM-dd HH:mm"),
+        bool flag => flag ? "true" : "false",
+        _ => value?.ToString() ?? string.Empty
+    };
+
+    private async Task DeleteAsync(Core.Domain.Dataset dataset)
+    {
+        var ok = await Js.InvokeAsync<bool>("confirm",
+            $"Hapus '{dataset.Name}'? Eksperimen yang memakainya akan gagal saat dijalankan.");
+
+        if (!ok)
+        {
+            return;
+        }
+
+        var tracked = await Db.Datasets.FirstOrDefaultAsync(d => d.Id == dataset.Id);
+        if (tracked is not null)
+        {
+            Db.Datasets.Remove(tracked);
+            await Db.SaveChangesAsync();
+        }
+
+        _failed = false;
+        _message = $"'{dataset.Name}' dihapus.";
+        await LoadAsync();
+    }
+
+    private static string TypeLabel(ColumnDataType type) => type switch
+    {
+        ColumnDataType.Numeric => "angka",
+        ColumnDataType.Categorical => "kategori",
+        ColumnDataType.Text => "teks",
+        ColumnDataType.Boolean => "boolean",
+        ColumnDataType.DateTime => "tanggal",
+        _ => "?"
+    };
+
+    private static string Fmt(double? value) => value is null ? "—" : value.Value.ToString("G6");
+
+    private static string Size(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:N1} KB",
+        _ => $"{bytes / (1024.0 * 1024):N1} MB"
+    };
+}

@@ -1,0 +1,133 @@
+@* Renders one module parameter from its spec. Every module's inspector is built from this, so a
+   new module needs no UI code at all — only a declaration in ModuleCatalog. *@
+
+<div class="field">
+    <label for="@_id">@Spec.Label</label>
+
+    @switch (Spec.Kind)
+    {
+        case ParameterKind.Boolean:
+            <div class="field--inline">
+                <input id="@_id" type="checkbox" checked="@(Value == "true")"
+                       @onchange="EmitBool" />
+                <span class="hint" style="margin:0">@(Value == "true" ? "Aktif" : "Nonaktif")</span>
+            </div>
+            break;
+
+        case ParameterKind.Choice:
+            <select id="@_id" value="@Value" @onchange="e => Emit(e.Value?.ToString())">
+                @foreach (var choice in Spec.Choices)
+                {
+                    <option value="@choice.Value">@choice.Label</option>
+                }
+            </select>
+            break;
+
+        case ParameterKind.DatasetRef:
+            <select id="@_id" value="@Value" @onchange="e => Emit(e.Value?.ToString())">
+                <option value="">— pilih dataset —</option>
+                @foreach (var option in Datasets)
+                {
+                    <option value="@option.Value">@option.Label</option>
+                }
+            </select>
+            @if (Datasets.Count == 0)
+            {
+                <div class="hint">
+                    Belum ada dataset di workspace. <a href="/dataset">Impor satu dulu</a>.
+                </div>
+            }
+            break;
+
+        case ParameterKind.ColumnName:
+            @* A datalist rather than a select: the column list is a hint, and a graph built
+               before the dataset was chosen may name a column that is not in the list yet. *@
+            <input id="@_id" list="@(_id)-cols" value="@Value"
+                   @onchange="e => Emit(e.Value?.ToString())" placeholder="nama kolom" />
+            <datalist id="@(_id)-cols">
+                @foreach (var column in Columns)
+                {
+                    <option value="@column"></option>
+                }
+            </datalist>
+            break;
+
+        case ParameterKind.ColumnList:
+            <input id="@_id" value="@Value" @onchange="e => Emit(e.Value?.ToString())"
+                   placeholder="pisahkan dengan koma" />
+            @if (Columns.Count > 0)
+            {
+                <div class="row-wrap" style="margin-top:6px;gap:5px">
+                    @foreach (var column in Columns.Take(12))
+                    {
+                        <button type="button" class="tag tag--quiet" style="cursor:pointer"
+                                @onclick="() => Append(column)">+ @column</button>
+                    }
+                </div>
+            }
+            break;
+
+        case ParameterKind.Integer:
+        case ParameterKind.Number:
+            <input id="@_id" type="number" value="@Value"
+                   min="@Spec.Min" max="@Spec.Max" step="@(Spec.Step ?? (Spec.Kind == ParameterKind.Integer ? 1 : 0.01))"
+                   @onchange="e => Emit(e.Value?.ToString())" />
+            break;
+
+        case ParameterKind.MultilineText:
+            <textarea id="@_id" rows="4" @onchange="e => Emit(e.Value?.ToString())">@Value</textarea>
+            break;
+
+        case ParameterKind.Code:
+            <textarea id="@_id" class="code" rows="10" spellcheck="false"
+                      @onchange="e => Emit(e.Value?.ToString())">@Value</textarea>
+            break;
+
+        case ParameterKind.Secret:
+            <input id="@_id" type="password" value="@Value" autocomplete="off"
+                   @onchange="e => Emit(e.Value?.ToString())" />
+            break;
+
+        default:
+            <input id="@_id" value="@Value" @onchange="e => Emit(e.Value?.ToString())" />
+            break;
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Spec.Help))
+    {
+        <div class="hint">@Spec.Help</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ParameterSpec Spec { get; set; } = default!;
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public List<string> Columns { get; set; } = [];
+    [Parameter] public List<ChoiceOption> Datasets { get; set; } = [];
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    private readonly string _id = $"p{Guid.NewGuid():n}"[..9];
+
+    private Task Emit(string? value) => ValueChanged.InvokeAsync(value);
+
+    /// <summary>Checkbox values arrive as a boxed bool rather than a string.</summary>
+    private Task EmitBool(ChangeEventArgs e) => Emit(Equals(e.Value, true) ? "true" : "false");
+
+    private Task Append(string column)
+    {
+        var current = (Value ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        if (current.Contains(column, StringComparer.OrdinalIgnoreCase))
+        {
+            current.RemoveAll(c => string.Equals(c, column, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            current.Add(column);
+        }
+
+        return Emit(string.Join(", ", current));
+    }
+}

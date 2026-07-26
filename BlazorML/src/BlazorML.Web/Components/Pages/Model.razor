@@ -1,0 +1,197 @@
+@page "/model"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using System.Text.Json
+@using BlazorML.Infrastructure.Data
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject EndpointService Endpoints
+@inject AuthenticationStateProvider Auth
+
+<PageTitle>Model · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Model terlatih" Eyebrow="@($"{_models.Count} tersimpan")" />
+
+<div class="page">
+    @if (_published is not null)
+    {
+        <div class="notice notice--ok" style="margin-bottom:var(--space-4)">
+            <div>
+                <strong>@_published.Value.Name diterbitkan.</strong>
+                <p style="margin:var(--space-2) 0">
+                    Simpan kunci berikut sekarang — kunci ini tidak akan ditampilkan lagi.
+                </p>
+                <code class="mono" style="display:block;padding:var(--space-2);word-break:break-all">
+                    @_published.Value.Key
+                </code>
+                <p class="hint" style="margin-top:var(--space-2)">
+                    Panggil dengan <code>POST /api/v1/score/@_published.Value.Slug</code>
+                    dan header <code>X-Api-Key</code>.
+                </p>
+            </div>
+        </div>
+    }
+
+    @if (_models.Count == 0)
+    {
+        <div class="empty">
+            <h3>Belum ada model terlatih</h3>
+            <p>Tambahkan modul <strong>Register Model</strong> di ujung alur eksperimen,
+               lalu jalankan. Modelnya akan muncul di sini beserta metriknya.</p>
+            <a class="btn" href="/eksperimen">Buka eksperimen</a>
+        </div>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Task</th>
+                        <th>Algoritma</th>
+                        <th class="num">Versi</th>
+                        <th>Metrik utama</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var model in _models)
+                    {
+                        <tr>
+                            <td>
+                                <strong>@model.Name</strong>
+                                @if (!string.IsNullOrWhiteSpace(model.Description))
+                                {
+                                    <div class="faint" style="font-size:.78rem">@model.Description</div>
+                                }
+                            </td>
+                            <td><span class="tag tag--quiet">@model.Task</span></td>
+                            <td class="faint">@model.Algorithm</td>
+                            <td class="num">v@model.Version</td>
+                            <td class="num">@Headline(model)</td>
+                            <td>
+                                <button class="btn btn--sm" @onclick="() => _publishing = model">Terbitkan</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (_publishing is not null)
+{
+    <div class="overlay" @onclick="() => _publishing = null">
+        <div class="dialog" @onclick:stopPropagation="true">
+            <div class="eyebrow">Terbitkan sebagai web service</div>
+            <h2 style="margin-bottom:var(--space-4)">@_publishing.Name</h2>
+
+            <div class="field">
+                <label for="ep-nama">Nama endpoint</label>
+                <input id="ep-nama" @bind="_endpointName" @bind:event="oninput" />
+                <div class="hint">Dipakai untuk membuat alamat URL-nya.</div>
+            </div>
+
+            <div class="field">
+                <label for="ep-desc">Deskripsi</label>
+                <textarea id="ep-desc" rows="2" @bind="_endpointDescription"></textarea>
+            </div>
+
+            <div class="notice notice--info" style="margin-bottom:var(--space-4);font-size:.83rem">
+                <div>Sebuah kunci API akan dibuat dan ditampilkan satu kali. Simpan baik-baik.</div>
+            </div>
+
+            <div class="row" style="justify-content:flex-end">
+                <button class="btn btn--ghost" @onclick="() => _publishing = null">Batal</button>
+                <button class="btn btn--primary" @onclick="PublishAsync"
+                        disabled="@string.IsNullOrWhiteSpace(_endpointName)">Terbitkan</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<TrainedModel> _models = [];
+    private TrainedModel? _publishing;
+    private string _endpointName = string.Empty;
+    private string? _endpointDescription;
+    private (string Name, string Slug, string Key)? _published;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() =>
+        _models = await Db.TrainedModels.AsNoTracking()
+            .OrderByDescending(m => m.CreatedAt)
+            .ToListAsync();
+
+    protected override void OnParametersSet()
+    {
+        if (_publishing is not null && string.IsNullOrWhiteSpace(_endpointName))
+        {
+            _endpointName = _publishing.Name;
+        }
+    }
+
+    private async Task PublishAsync()
+    {
+        if (_publishing is null)
+        {
+            return;
+        }
+
+        var state = await Auth.GetAuthenticationStateAsync();
+        var userId = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        var (endpoint, key) = await Endpoints.PublishAsync(
+            _publishing.Id, _endpointName.Trim(), _endpointDescription, userId);
+
+        _published = (endpoint.Name, endpoint.Slug, key);
+        _publishing = null;
+        _endpointName = string.Empty;
+        _endpointDescription = null;
+    }
+
+    /// <summary>The one metric worth showing in a list, chosen by task.</summary>
+    private static string Headline(TrainedModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.MetricsJson))
+        {
+            return "—";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(model.MetricsJson);
+
+            if (!document.RootElement.TryGetProperty("Metrics", out var metrics))
+            {
+                return "—";
+            }
+
+            var wanted = model.Task switch
+            {
+                MlTask.BinaryClassification => "AUC",
+                MlTask.MulticlassClassification => "MacroAccuracy",
+                MlTask.Regression or MlTask.Recommendation => "RSquared",
+                _ => null
+            };
+
+            if (wanted is not null && metrics.TryGetProperty(wanted, out var value))
+            {
+                return $"{wanted} {value.GetDouble():N4}";
+            }
+
+            var first = metrics.EnumerateObject().FirstOrDefault();
+            return first.Value.ValueKind == JsonValueKind.Number
+                ? $"{first.Name} {first.Value.GetDouble():N4}"
+                : "—";
+        }
+        catch (JsonException)
+        {
+            return "—";
+        }
+    }
+}

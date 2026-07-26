@@ -1,0 +1,25 @@
+@using System.Net.Http
+@using System.Globalization
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Routing
+@* Without this, Razor silently treats SectionOutlet and SectionContent as unknown HTML elements
+   rather than components — no warning, and every page title renders in the body instead of the
+   top bar. See TopBarTitle. *@
+@using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using BlazorML.Core.Abstractions
+@using BlazorML.Core.Analysis
+@using BlazorML.Core.Configuration
+@using BlazorML.Core.Data
+@using BlazorML.Core.Designer
+@using BlazorML.Core.Domain
+@using BlazorML.Core.Modules
+@using BlazorML.Web
+@using BlazorML.Web.Components
+@using BlazorML.Web.Components.Layout
+@using BlazorML.Web.Components.Shared
+@using BlazorML.Web.Services
+@using static Microsoft.AspNetCore.Components.Web.RenderMode

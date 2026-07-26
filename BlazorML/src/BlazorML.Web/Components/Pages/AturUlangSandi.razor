@@ -1,0 +1,71 @@
+@page "/atur-ulang-sandi"
+@layout EmptyLayout
+
+<PageTitle>Atur ulang kata sandi · Blazor ML Studio</PageTitle>
+
+<div class="auth">
+    <div class="auth-card card">
+        <div class="auth-mark">ML</div>
+
+        <div class="eyebrow">Blazor ML Studio</div>
+        <h1>Pilih kata sandi baru</h1>
+
+        @if (string.IsNullOrWhiteSpace(Token) || string.IsNullOrWhiteSpace(Email))
+        {
+            <div class="notice notice--danger" style="margin:var(--space-4) 0">
+                <div>
+                    Tautan ini tidak lengkap. Buka tautan dari emailmu persis seperti yang dikirim,
+                    atau minta yang baru.
+                </div>
+            </div>
+
+            <a class="btn btn--block" href="/lupa-sandi">Minta tautan baru</a>
+        }
+        else
+        {
+            @if (Galat is not null)
+            {
+                <div class="notice notice--danger" style="margin:var(--space-4) 0">
+                    <div>@Pesan(Galat)</div>
+                </div>
+            }
+
+            <p class="muted" style="margin:var(--space-2) 0 var(--space-5)">
+                Untuk akun <strong>@Email</strong>.
+            </p>
+
+            <form method="post" action="/akun/atur-ulang">
+                <input type="hidden" name="email" value="@Email" />
+                <input type="hidden" name="token" value="@Token" />
+
+                <div class="field">
+                    <label for="password">Kata sandi baru</label>
+                    <input id="password" name="password" type="password" autocomplete="new-password"
+                           minlength="8" required />
+                    <div class="hint">Minimal 8 karakter.</div>
+                </div>
+
+                <div class="field">
+                    <label for="ulangi">Ulangi kata sandi baru</label>
+                    <input id="ulangi" name="ulangi" type="password" autocomplete="new-password"
+                           minlength="8" required />
+                </div>
+
+                <button class="btn btn--primary btn--block" type="submit">Simpan dan masuk</button>
+            </form>
+        }
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "email")] public string? Email { get; set; }
+    [SupplyParameterFromQuery(Name = "token")] public string? Token { get; set; }
+    [SupplyParameterFromQuery(Name = "galat")] public string? Galat { get; set; }
+
+    private static string Pesan(string code) => code switch
+    {
+        "beda" => "Kedua kata sandi tidak sama.",
+        "kedaluwarsa" => "Tautan ini sudah kedaluwarsa atau pernah dipakai. Minta yang baru.",
+        _ => "Kata sandi itu ditolak. Coba yang lebih panjang atau lebih bervariasi."
+    };
+}

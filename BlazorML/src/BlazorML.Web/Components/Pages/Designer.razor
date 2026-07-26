@@ -1,0 +1,715 @@
+@page "/eksperimen/{ExperimentId}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject ExperimentService Experiments
+@inject IExperimentRunner Runner
+@inject IServiceScopeFactory Scopes
+@inject AuthenticationStateProvider Auth
+@inject IJSRuntime Js
+@inject NavigationManager Nav
+
+<PageTitle>@(_experiment?.Name ?? "Kanvas") · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="@(_experiment?.Name ?? "Memuat…")" Eyebrow="@($"Eksperimen · v{_experiment?.Version ?? 0}")">
+    <Actions>
+        @if (_running)
+        {
+            <span class="tag tag--warn"><i class="dot dot--running"></i> Berjalan</span>
+        }
+        else
+        {
+            <button class="btn btn--go" @onclick="RunAsync" disabled="@(_graph.Nodes.Count == 0)">
+                @((MarkupString)Icons.Play) Jalankan
+            </button>
+        }
+
+        <button class="btn" @onclick="SaveAsync" disabled="@(!_dirty)">
+            @((MarkupString)Icons.Save) @(_dirty ? "Simpan" : "Tersimpan")
+        </button>
+
+        <a class="btn btn--icon" href="/eksperimen/@ExperimentId/riwayat"
+           title="Riwayat run dan versi" aria-label="Riwayat run dan versi">
+            @((MarkupString)Icons.History)
+        </a>
+
+        <button class="btn btn--icon @(_chatOpen ? "btn--primary" : "")" @onclick="() => _chatOpen = !_chatOpen"
+                title="Profesor Wicak" aria-label="Profesor Wicak">
+            @((MarkupString)Icons.Chat)
+        </button>
+    </Actions>
+</TopBarTitle>
+
+<div class="designer @(_chatOpen ? "is-chat-open" : "")">
+
+    @* ------------------------------------------------------------- palette *@
+    <aside class="palette">
+        <div class="palette-search">
+            <input type="search" placeholder="Cari modul…" @bind="_search" @bind:event="oninput"
+                   aria-label="Cari modul" />
+        </div>
+
+        <div class="palette-list">
+            @foreach (var group in FilteredModules())
+            {
+                <details class="palette-group" open style="--group-pen: var(--pen-@ModuleCatalog.CategoryPen(group.Key))">
+                    <summary>@ModuleCatalog.CategoryLabel(group.Key)</summary>
+
+                    @foreach (var module in group)
+                    {
+                        @* The drag payload is set in plain JS: the browser only exposes a usable
+                           dataTransfer during the native dragstart, which a Blazor handler
+                           receives too late to write to. *@
+                        <button class="palette-item" draggable="true"
+                                ondragstart="event.dataTransfer.setData('text/blazorml-module', this.dataset.module)"
+                                data-module="@module.Id"
+                                @onclick="() => AddNodeAsync(module.Id, NextX(), NextY())"
+                                title="@module.Description">
+                            @module.Name
+                            <small>@module.Description</small>
+                        </button>
+                    }
+                </details>
+            }
+        </div>
+    </aside>
+
+    @* -------------------------------------------------------------- canvas *@
+    <div class="dz" @ref="_canvasRef">
+        <div class="dz-viewport">
+            <svg class="dz-edges" aria-hidden="true">
+                <defs>
+                    <marker id="dz-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                        <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
+                    </marker>
+                </defs>
+
+                @* Pan and zoom are applied to this group, never to the <svg> itself: a transform
+                   on an outermost <svg> is not the same operation as one on a group, and the edge
+                   layer drifted away from the nodes as soon as the canvas was scaled. *@
+                <g class="dz-edge-layer"></g>
+            </svg>
+            <div class="dz-world">
+                <div class="dz-nodes"></div>
+            </div>
+        </div>
+
+        @if (_graph.Nodes.Count == 0)
+        {
+            <div class="dz-hint">Seret modul dari kiri ke kanvas, atau klik modulnya untuk menambahkan.</div>
+        }
+        else
+        {
+            <div class="dz-hint">Tarik dari port bawah ke port atas untuk menyambung · klik garis untuk memutus</div>
+        }
+
+        <div class="dz-controls">
+            <button class="btn btn--icon" @onclick="() => ZoomAsync(1.25)"
+                    title="Perbesar" aria-label="Perbesar">+</button>
+            <button class="btn btn--icon" @onclick="() => ZoomAsync(0.8)"
+                    title="Perkecil" aria-label="Perkecil">−</button>
+            <button class="btn btn--icon" @onclick="FitAsync"
+                    title="Paskan tampilan" aria-label="Paskan tampilan">⤢</button>
+        </div>
+
+        @if (_logs.Count > 0)
+        {
+            <div class="run-console" style="position:absolute;left:0;right:0;bottom:0">
+                <div class="run-console-head">
+                    <strong style="font-size:.85rem">Log run</strong>
+                    <span class="faint num">@_logs.Count baris</span>
+                    <div class="grow"></div>
+                    <button class="btn btn--sm btn--ghost" @onclick="() => _logs.Clear()">Bersihkan</button>
+                </div>
+                <div class="run-log">
+                    @foreach (var line in _logs)
+                    {
+                        <div class="run-log-line run-log-line--@line.Level.ToString().ToLowerInvariant()">
+                            <span class="node">@line.Node</span>
+                            <span>@line.Message</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ----------------------------------------------------------- inspector *@
+    <aside class="inspector">
+        @if (_selected is null)
+        {
+            <div class="inspector-head">
+                <div class="eyebrow">Inspector</div>
+                <h3>Tidak ada yang dipilih</h3>
+            </div>
+            <div class="inspector-body">
+                <p class="muted" style="font-size:.87rem">
+                    Klik salah satu modul di kanvas untuk mengatur parameternya.
+                </p>
+
+                @if (_issues.Count > 0)
+                {
+                    <h4 style="margin:var(--space-5) 0 var(--space-2)">Yang perlu dibereskan</h4>
+                    @foreach (var issue in _issues)
+                    {
+                        <div class="notice @(issue.Severity == GraphIssueSeverity.Error ? "notice--danger" : "notice--warn")"
+                             style="margin-bottom:var(--space-2);font-size:.82rem">
+                            <div>@issue.Message</div>
+                        </div>
+                    }
+                }
+            </div>
+        }
+        else
+        {
+            var module = ModuleCatalog.Find(_selected.ModuleId);
+
+            <div class="inspector-head">
+                <div class="eyebrow">@(module is null ? "Modul" : ModuleCatalog.CategoryLabel(module.Category))</div>
+                <div class="spread">
+                    <h3>@_selected.Label</h3>
+                    <button class="btn btn--icon btn--ghost" @onclick="RemoveSelectedAsync"
+                            title="Hapus modul" aria-label="Hapus modul">
+                        @((MarkupString)Icons.Trash)
+                    </button>
+                </div>
+                @if (module is not null)
+                {
+                    <p class="muted" style="font-size:.82rem;margin:var(--space-2) 0 0">@module.Description</p>
+                }
+            </div>
+
+            <div class="inspector-body">
+                <div class="field">
+                    <label>Nama di kanvas</label>
+                    <input value="@_selected.Label"
+                           @onchange="e => UpdateLabel(e.Value?.ToString())" />
+                </div>
+
+                @if (module is not null)
+                {
+                    @foreach (var parameter in module.Parameters.Where(IsVisible))
+                    {
+                        <ParameterField Spec="parameter"
+                                        Value="@_selected.Parameters.GetValueOrDefault(parameter.Name)"
+                                        Columns="_columnHints"
+                                        Datasets="_datasetChoices"
+                                        ValueChanged="v => UpdateParameter(parameter.Name, v)" />
+                    }
+                }
+
+                @if (_results.TryGetValue(_selected.Id, out var result) && result.Preview is { Count: > 1 })
+                {
+                    <h4 style="margin:var(--space-5) 0 var(--space-2)">
+                        Pratinjau keluaran
+                        <span class="faint num" style="font-weight:400">
+                            @result.RowsOut?.ToString("N0") baris
+                        </span>
+                    </h4>
+
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    @foreach (var header in result.Preview[0])
+                                    {
+                                        <th>@header</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in result.Preview.Skip(1))
+                                {
+                                    <tr>
+                                        @foreach (var cell in row)
+                                        {
+                                            <td class="truncate" style="max-width:120px">@cell</td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                @if (_results.TryGetValue(_selected.Id, out var outcome))
+                {
+                    @if (outcome.Evaluation is not null)
+                    {
+                        <div style="margin-top:var(--space-5)">
+                            <EvaluationView Result="outcome.Evaluation" Title="Hasil evaluasi" />
+                        </div>
+                    }
+                    else if (outcome.Metrics is { Count: > 0 })
+                    {
+                        <h4 style="margin:var(--space-5) 0 var(--space-2)">Metrik</h4>
+                        <MetricList Values="outcome.Metrics" />
+                    }
+                }
+            </div>
+        }
+    </aside>
+
+    @if (_chatOpen)
+    {
+        <WicakPanel ExperimentId="ExperimentId" OnGraphChanged="ReloadAsync" />
+    }
+</div>
+
+@code {
+    [Parameter] public string ExperimentId { get; set; } = string.Empty;
+
+    private Experiment? _experiment;
+    private ExperimentGraph _graph = new();
+    private GraphNode? _selected;
+    private ElementReference _canvasRef;
+    private DotNetObjectReference<Designer>? _self;
+
+    private readonly Dictionary<string, NodeRunResult> _results = [];
+    private readonly Dictionary<string, string> _states = [];
+    private readonly List<LogLine> _logs = [];
+    private List<GraphIssue> _issues = [];
+
+    private List<string> _columnHints = [];
+    private List<ChoiceOption> _datasetChoices = [];
+
+    private string _search = string.Empty;
+    private bool _dirty;
+    private bool _running;
+    private bool _chatOpen;
+    private bool _canvasReady;
+
+    private record LogLine(string Node, string Message, Core.Domain.LogLevel Level);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+
+        // The dataset list feeds the "Import Dataset" module's picker, so the user chooses a
+        // real dataset rather than typing an id.
+        using var scope = Scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<global::BlazorML.Infrastructure.Data.AppDbContext>();
+
+        _datasetChoices = (await db.Datasets.AsNoTracking().OrderBy(d => d.Name).ToListAsync())
+            .Select(d => new ChoiceOption(d.Id, $"{d.Name} ({d.RowCount:N0} baris)"))
+            .ToList();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await Js.InvokeVoidAsync("designer.init", _canvasRef, _self);
+            await Js.InvokeVoidAsync("designer.setView", _canvasRef, _graph.View);
+
+            // Only from here on is the browser reachable. Anything earlier runs during
+            // prerender, where a JS call throws rather than queueing.
+            _canvasReady = true;
+        }
+
+        await PushGraphAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _experiment = await Experiments.GetAsync(ExperimentId);
+
+        if (_experiment is null)
+        {
+            Nav.NavigateTo("/eksperimen");
+            return;
+        }
+
+        _graph = ExperimentGraph.FromJson(_experiment.GraphJson);
+        _selected = _graph.Node(_selected?.Id ?? string.Empty);
+        _issues = (await Runner.ValidateAsync(_graph)).ToList();
+
+        await PushGraphAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>Hands the graph to the canvas in the shape designer.js renders from.</summary>
+    private async Task PushGraphAsync()
+    {
+        if (!_canvasReady)
+        {
+            return;
+        }
+
+        var payload = new
+        {
+            nodes = _graph.Nodes.Select(n =>
+            {
+                var module = ModuleCatalog.Find(n.ModuleId);
+                return new
+                {
+                    id = n.Id,
+                    label = n.Label,
+                    x = n.X,
+                    y = n.Y,
+                    category = (module?.Category ?? ModuleCategory.DataTransform).ToString(),
+                    inputs = module?.Inputs.Select(p => p.Name).ToArray() ?? [],
+                    outputs = module?.Outputs.Select(p => p.Name).ToArray() ?? [],
+                    badge = Badge(n.Id)
+                };
+            }),
+            edges = _graph.Edges,
+            view = _graph.View
+        };
+
+        await Js.InvokeVoidAsync("designer.render", _canvasRef, payload, _states);
+    }
+
+    private async Task ZoomAsync(double factor) =>
+        await Js.InvokeVoidAsync("designer.zoomBy", _canvasRef, factor);
+
+    private async Task FitAsync() => await Js.InvokeVoidAsync("designer.fit", _canvasRef);
+
+    private string? Badge(string nodeId) =>
+        _results.TryGetValue(nodeId, out var result) && result.RowsOut is { } rows
+            ? $"{rows:N0} × {result.ColumnsOut}"
+            : null;
+
+    // ------------------------------------------------------ canvas callbacks
+
+    [JSInvokable]
+    public async Task OnNodeMoved(string nodeId, double x, double y)
+    {
+        var node = _graph.Node(nodeId);
+        if (node is null)
+        {
+            return;
+        }
+
+        node.X = x;
+        node.Y = y;
+        MarkDirty();
+        await Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnNodeSelected(string nodeId)
+    {
+        _selected = _graph.Node(nodeId);
+        RefreshColumnHints();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task OnModuleDropped(string moduleId, double x, double y) =>
+        await AddNodeAsync(moduleId, x, y);
+
+    [JSInvokable]
+    public async Task OnEdgeCreated(string sourceId, int sourcePort, string targetId, int targetPort)
+    {
+        if (sourceId == targetId)
+        {
+            return;
+        }
+
+        var source = ModuleCatalog.Find(_graph.Node(sourceId)?.ModuleId);
+        var target = ModuleCatalog.Find(_graph.Node(targetId)?.ModuleId);
+
+        if (source is null || target is null ||
+            sourcePort >= source.Outputs.Count || targetPort >= target.Inputs.Count)
+        {
+            return;
+        }
+
+        var outType = source.Outputs[sourcePort].Type;
+        var inType = target.Inputs[targetPort].Type;
+
+        if (outType != inType && outType != PortType.Any && inType != PortType.Any)
+        {
+            _logs.Add(new LogLine("kanvas",
+                $"'{source.Outputs[sourcePort].Name}' membawa {outType}, sedangkan " +
+                $"'{target.Inputs[targetPort].Name}' menerima {inType}.", Core.Domain.LogLevel.Warning));
+
+            StateHasChanged();
+            return;
+        }
+
+        // One value per input port; a new connection replaces whatever was there.
+        _graph.Edges.RemoveAll(e => e.TargetNodeId == targetId && e.TargetPort == targetPort);
+
+        _graph.Edges.Add(new GraphEdge
+        {
+            SourceNodeId = sourceId,
+            SourcePort = sourcePort,
+            TargetNodeId = targetId,
+            TargetPort = targetPort
+        });
+
+        if (!_graph.TryTopologicalSort(out _, out var cycle))
+        {
+            _graph.Edges.RemoveAt(_graph.Edges.Count - 1);
+            _logs.Add(new LogLine("kanvas", cycle ?? "Sambungan itu membuat lingkaran.",
+                Core.Domain.LogLevel.Warning));
+        }
+        else
+        {
+            MarkDirty();
+        }
+
+        await PushGraphAsync();
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnEdgeDeleted(string edgeId)
+    {
+        _graph.Edges.RemoveAll(e => e.Id == edgeId);
+        MarkDirty();
+        await PushGraphAsync();
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------- editing
+
+    // Clicking a palette module used to drop every node at the same coordinates, so a second
+    // click hid the first one exactly underneath it and the canvas looked like nothing happened.
+    // Cascading keeps each new node visible and separately grabbable.
+    private double NextX() => 120 + _graph.Nodes.Count % 6 * 40;
+
+    private double NextY() => 120 + _graph.Nodes.Count % 6 * 60;
+
+    private async Task AddNodeAsync(string moduleId, double x, double y)
+    {
+        var module = ModuleCatalog.Find(moduleId);
+        if (module is null)
+        {
+            return;
+        }
+
+        var node = new GraphNode
+        {
+            ModuleId = moduleId,
+            Label = module.Name,
+            X = x,
+            Y = y,
+            Parameters = module.BuildDefaultParameters()
+        };
+
+        _graph.Nodes.Add(node);
+        _selected = node;
+
+
+        MarkDirty();
+        RefreshColumnHints();
+        await PushGraphAsync();
+    }
+
+    private async Task RemoveSelectedAsync()
+    {
+        if (_selected is null)
+        {
+            return;
+        }
+
+        _graph.Edges.RemoveAll(e => e.SourceNodeId == _selected.Id || e.TargetNodeId == _selected.Id);
+        _graph.Nodes.Remove(_selected);
+        _selected = null;
+
+        MarkDirty();
+        await PushGraphAsync();
+    }
+
+    private void UpdateLabel(string? label)
+    {
+        if (_selected is null || string.IsNullOrWhiteSpace(label))
+        {
+            return;
+        }
+
+        _selected.Label = label.Trim();
+        MarkDirty();
+        _ = PushGraphAsync();
+    }
+
+    private void UpdateParameter(string name, string? value)
+    {
+        if (_selected is null)
+        {
+            return;
+        }
+
+        _selected.Parameters[name] = value;
+        MarkDirty();
+
+        // Changing the dataset changes which columns the other pickers should offer.
+        if (name == "datasetId")
+        {
+            RefreshColumnHints();
+        }
+    }
+
+    private void MarkDirty()
+    {
+        _dirty = true;
+        _issues = [];
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_experiment is null)
+        {
+            return;
+        }
+
+        await Experiments.SaveGraphAsync(ExperimentId, _graph, "Disunting di kanvas");
+        _dirty = false;
+
+        _experiment = await Experiments.GetAsync(ExperimentId);
+        _issues = (await Runner.ValidateAsync(_graph)).ToList();
+    }
+
+    /// <summary>
+    /// Column names offered by the parameter pickers. Read from the profile of whichever dataset
+    /// the graph imports, so the user picks from real columns instead of typing them.
+    /// </summary>
+    private void RefreshColumnHints()
+    {
+        var datasetId = _graph.Nodes
+            .Where(n => n.ModuleId == "data.dataset")
+            .Select(n => n.Parameters.GetValueOrDefault("datasetId"))
+            .FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+
+        if (datasetId is null)
+        {
+            _columnHints = [];
+            return;
+        }
+
+        using var scope = Scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<global::BlazorML.Infrastructure.Data.AppDbContext>();
+        var dataset = db.Datasets.AsNoTracking().FirstOrDefault(d => d.Id == datasetId);
+
+        if (dataset?.ProfileJson is null)
+        {
+            _columnHints = [];
+            return;
+        }
+
+        try
+        {
+            var profile = JsonSerializer.Deserialize<DatasetProfile>(dataset.ProfileJson);
+            _columnHints = profile?.Columns.Select(c => c.Name).ToList() ?? [];
+        }
+        catch (JsonException)
+        {
+            _columnHints = [];
+        }
+    }
+
+    private bool IsVisible(ParameterSpec spec)
+    {
+        if (spec.VisibleWhen is null || _selected is null)
+        {
+            return true;
+        }
+
+        return _selected.Parameters.GetValueOrDefault(spec.VisibleWhen) == spec.VisibleWhenValue;
+    }
+
+    private IEnumerable<IGrouping<ModuleCategory, ModuleDescriptor>> FilteredModules() =>
+        ModuleCatalog.Search(_search).GroupBy(m => m.Category).OrderBy(g => g.Key);
+
+    // ------------------------------------------------------------------- run
+
+    private async Task RunAsync()
+    {
+        if (_experiment is null || _running)
+        {
+            return;
+        }
+
+        if (_dirty)
+        {
+            await SaveAsync();
+        }
+
+        _running = true;
+        _results.Clear();
+        _states.Clear();
+        _logs.Clear();
+
+        var state = await Auth.GetAuthenticationStateAsync();
+        var userId = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        var progress = new Progress<RunProgress>(async report =>
+        {
+            _states[report.NodeId] = report.State.ToString();
+
+            if (report.Result is not null)
+            {
+                _results[report.NodeId] = report.Result;
+            }
+
+            if (report.Message is not null)
+            {
+                var label = _graph.Node(report.NodeId)?.Label ?? report.NodeId;
+                _logs.Add(new LogLine(label, report.Message,
+                    report.State == NodeRunState.Failed ? Core.Domain.LogLevel.Error : Core.Domain.LogLevel.Info));
+            }
+
+            await InvokeAsync(async () =>
+            {
+                await Js.InvokeVoidAsync("designer.setStates", _canvasRef, _states);
+                StateHasChanged();
+            });
+        });
+
+        try
+        {
+            // A run holds a scope of its own: it outlives any single render and must not use the
+            // component's DbContext, which the circuit may dispose underneath it.
+            using var scope = Scopes.CreateScope();
+            var runner = scope.ServiceProvider.GetRequiredService<IExperimentRunner>();
+
+            var run = await runner.RunAsync(ExperimentId, userId, progress);
+
+            _logs.Add(new LogLine("run",
+                run.Status == RunStatus.Succeeded
+                    ? $"Selesai dalam {run.DurationSeconds:N1} detik."
+                    : run.Error ?? "Run berakhir dengan galat.",
+                run.Status == RunStatus.Succeeded ? Core.Domain.LogLevel.Info : Core.Domain.LogLevel.Error));
+
+            _experiment = await Experiments.GetAsync(ExperimentId);
+        }
+        catch (Exception e)
+        {
+            _logs.Add(new LogLine("run", e.Message, Core.Domain.LogLevel.Error));
+        }
+        finally
+        {
+            _running = false;
+            await PushGraphAsync();
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        // A prerendered-only instance never reached the browser, so there is nothing there to
+        // tear down and the interop call would throw.
+        if (_canvasReady)
+        {
+            try
+            {
+                await Js.InvokeVoidAsync("designer.destroy", _canvasRef);
+            }
+            catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException)
+            {
+                // The circuit is already gone; the browser side went with it.
+            }
+        }
+
+        _self?.Dispose();
+    }
+}

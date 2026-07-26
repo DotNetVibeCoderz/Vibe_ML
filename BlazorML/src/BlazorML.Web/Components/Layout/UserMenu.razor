@@ -1,0 +1,55 @@
+@* Interactive for the same reason as ThemeToggle: the dropdown is opened by an event handler,
+   and a statically rendered layout never attaches one. *@
+@rendermode InteractiveServer
+@using BlazorML.Infrastructure.Identity
+@inject NavigationManager Nav
+
+<AuthorizeView>
+    <Authorized>
+        <div class="usermenu">
+            <button class="usermenu-trigger" type="button" @onclick="() => _open = !_open"
+                    aria-haspopup="menu" aria-expanded="@_open">
+                <span class="avatar">@Initials(context.User.Identity?.Name)</span>
+                <span class="usermenu-name truncate">@(context.User.Identity?.Name ?? "Pengguna")</span>
+            </button>
+
+            @if (_open)
+            {
+                <div class="usermenu-panel card card--tight" role="menu">
+                    <a class="usermenu-item" href="/profil" role="menuitem" @onclick="Close">Profil saya</a>
+                    <a class="usermenu-item" href="/pengaturan" role="menuitem" @onclick="Close">Pengaturan</a>
+                    <hr />
+                    <form action="/akun/keluar" method="post">
+                        <AntiforgeryToken />
+                        <button class="usermenu-item usermenu-item--danger" type="submit" role="menuitem">
+                            Keluar
+                        </button>
+                    </form>
+                </div>
+            }
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <a class="btn btn--sm" href="/masuk">Masuk</a>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private bool _open;
+
+    private void Close() => _open = false;
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "?";
+        }
+
+        var parts = name.Split([' ', '@', '.'], StringSplitOptions.RemoveEmptyEntries);
+
+        return parts.Length >= 2
+            ? string.Concat(parts[0][0], parts[1][0]).ToUpperInvariant()
+            : name[..Math.Min(2, name.Length)].ToUpperInvariant();
+    }
+}

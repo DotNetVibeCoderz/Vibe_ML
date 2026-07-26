@@ -1,0 +1,119 @@
+@page "/galeri"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using BlazorML.Infrastructure.Data
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject ExperimentService Experiments
+@inject AuthenticationStateProvider Auth
+@inject NavigationManager Nav
+
+<PageTitle>Galeri · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Galeri contoh" Eyebrow="Template siap pakai" />
+
+<div class="page">
+    <div class="page-head">
+        <p>
+            Setiap contoh datang lengkap dengan datasetnya. Menyalin sebuah contoh membuat
+            eksperimen baru milikmu — yang aslinya tidak ikut berubah.
+        </p>
+    </div>
+
+    @if (_categories.Count > 1)
+    {
+        <div class="tabs" style="margin-bottom:var(--space-5)">
+            <button class="tab @(_filter is null ? "active" : "")" @onclick="() => _filter = null">Semua</button>
+            @foreach (var category in _categories)
+            {
+                <button class="tab @(_filter == category ? "active" : "")"
+                        @onclick="() => _filter = category">@category</button>
+            }
+        </div>
+    }
+
+    @if (Visible().Count == 0)
+    {
+        <div class="empty">
+            <h3>Galeri masih kosong</h3>
+            <p>Contoh bawaan akan muncul di sini setelah workspace di-seed.</p>
+        </div>
+    }
+    else
+    {
+        <div class="grid grid--3">
+            @foreach (var item in Visible())
+            {
+                <article class="card card--rail" style="--rail-pen: var(--pen-@Pen(item.Task))">
+                    <div class="row" style="margin-bottom:var(--space-3)">
+                        <span style="font-size:1.6rem;line-height:1">@item.Glyph</span>
+                        <div style="min-width:0">
+                            <h3 class="truncate">@item.Name</h3>
+                            <div class="eyebrow">@item.Category</div>
+                        </div>
+                    </div>
+
+                    <p class="muted" style="font-size:.86rem;min-height:4em">@item.Summary</p>
+
+                    <div class="row" style="margin-top:var(--space-4)">
+                        <button class="btn btn--sm btn--primary" @onclick="() => UseAsync(item)">
+                            Pakai contoh ini
+                        </button>
+                        @if (item.ExperimentId is not null)
+                        {
+                            <a class="btn btn--sm btn--ghost" href="/eksperimen/@item.ExperimentId">Intip alurnya</a>
+                        }
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<MarketplaceItem> _items = [];
+    private List<string> _categories = [];
+    private string? _filter;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await Db.MarketplaceItems.AsNoTracking().OrderBy(m => m.Category).ThenBy(m => m.Name).ToListAsync();
+        _categories = _items.Select(i => i.Category).Distinct().OrderBy(c => c).ToList();
+    }
+
+    private List<MarketplaceItem> Visible() =>
+        _filter is null ? _items : _items.Where(i => i.Category == _filter).ToList();
+
+    private async Task UseAsync(MarketplaceItem item)
+    {
+        if (item.ExperimentId is null)
+        {
+            return;
+        }
+
+        var state = await Auth.GetAuthenticationStateAsync();
+        var userId = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        var copy = await Experiments.CloneAsync(item.ExperimentId, userId, item.Name);
+
+        var tracked = await Db.MarketplaceItems.FirstOrDefaultAsync(m => m.Id == item.Id);
+        if (tracked is not null)
+        {
+            tracked.Installs++;
+            await Db.SaveChangesAsync();
+        }
+
+        Nav.NavigateTo($"/eksperimen/{copy.Id}");
+    }
+
+    private static string Pen(MlTask task) => task switch
+    {
+        MlTask.BinaryClassification or MlTask.MulticlassClassification => "amber",
+        MlTask.Regression => "teal",
+        MlTask.Recommendation => "rose",
+        MlTask.TextClassification => "violet",
+        MlTask.Clustering => "lime",
+        _ => "blue"
+    };
+}

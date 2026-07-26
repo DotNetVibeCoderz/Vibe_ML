@@ -1,0 +1,60 @@
+nama:
+Blazor ML Studio (BlazorML)
+
+deskripsi:
+Platform drag‑and‑drop berbasis web untuk membuat, melatih, dan menerapkan model ML tanpa banyak coding (seperti Azure ML Studio Classic). Fitur utamanya berfokus pada kemudahan eksperimen, integrasi data, dan deployment cepat. Fiturnya:
+
+- Drag‑and‑Drop Interface  
+  Membuat alur kerja ML dengan modul visual tanpa perlu menulis kode. Terdapat actions yang memanfaatkan LLM juga seperti (formatting, cleansing, sentiment detection, custom prompt)
+
+- Data Import & Transformation 
+  Mendukung input dari Azure Blob, S3, MinIO, SQL Database, CSV, dan web services. Termasuk modul untuk cleaning, normalization, dan feature selection.
+
+- Prebuilt Algorithms  
+  Library algoritma ML klasik: regression, classification, clustering, anomaly detection, recommendation. Untuk masing-masing task terdapat pilihan algoritma yang berbeda.
+
+- Experimentation Environment  
+  Menyusun eksperimen, menjalankan training, dan membandingkan hasil model secara visual.
+
+- Evaluation & Scoring  
+  Modul untuk ROC curve, confusion matrix, dan evaluasi performa model.
+
+- Web Service Deployment  
+  Model dapat langsung dipublikasikan sebagai REST API endpoint dengan MinAPI dan swagger. Secure by ApiKey
+
+- Reproducibility & Versioning  
+  Menyimpan eksperimen dan versi model untuk audit dan pengulangan.
+
+- Integration with R, Python, JS dan C# script  
+  Mendukung script custom untuk memperluas fungsionalitas.
+
+- Marketplace & Sample Experiments  
+  Template eksperimen beserta dataset siap pakai untuk rekomendasi film, prediksi harga, sentiment analysis, dll.
+
+- Automated ML  
+  AutoML untuk classification, regression, vision, NLP tanpa coding mendalam.
+
+Chat Bot Data Scientist
+  - Nama 'Profesor Wicak'
+  - Chat ini tersedia di halaman ML Designer, Chat bot membantu user dalam membuat experiment ML.
+  - Chat Panel dengan tampilan yang keren, multi session (create/delete), reset session, bisa attach gambar (diupload lalu url-nya di jadikan image content) dan dokumen (di upload dan disertakan linknya ke text message). Bisa di hide/show.
+  - System Prompt (persona), temperature, model dan setting lainnya di simpan di appsetting
+  - Menggunakan Semantic Kernel Library dengan dukungan model: Open AI, Anthropic, Gemini, Ollama (bisa pilih)
+  - Tambahkan beberapa common functions (kernel functions) yang diperlukan termasuk query ke tavily (search internet), scrap page url, baca file dari url, cek tanggal, Waktu, math calculation, dan beberapa function yang diperlukan lainnya
+  - Tambahkan functions untuk query data ke dataset untuk mengetahui berbagai informasi dan fungsi-fungsi untuk membuat ML flow dan design (jadi bot mampu mendesain/mengedit ML design dan flow berdasarkan prompt user)
+  - Bisa render chat thread dengan mark down dengan baik ke html (baik table, media (image, video, audio), code, dan lainnya dengan baik)
+
+---
+
+Notes:
+- Dibuat dengan blazor server, .NET 10, D3JS, dengan desain modern, responsive, easy to use dengan style neo brutalism soft dengan dukungan dark theme/light
+- Semua konfigurasi disimpan di appsetting dan bisa diubah dari aplikasi
+- Tambahkan readme.md (English dan Bahasa Indonesia)
+- Database support SQLite, SQLServer, MySQL, Postgre
+- Storage Support: FileSystem, AzureBlob, S3, MinIO
+- Tambahkan dokumentasi lengkap di folder docs
+- Buatkan banyak contoh experiment, dataset dan user
+- optimasi kode agar aplikasi cepat dan ringan
+- Auth: Login, Logout, Register, User Profile, Reset Password
+- Untuk ML Library di dukung: ML.Net, berbagai library dari Scisharp, python melalui python.net, dan library lainnya yang direkomendasikan.
+- Tambahkan info di dokumentasi dan aplikasi: Dibuat oleh Gravicode Studios, di lead oleh Kang Fadhil

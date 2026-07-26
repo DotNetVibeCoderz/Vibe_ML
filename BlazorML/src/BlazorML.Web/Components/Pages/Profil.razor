@@ -1,0 +1,143 @@
+@page "/profil"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using BlazorML.Infrastructure.Identity
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@inject UserManager<ApplicationUser> Users
+@inject AuthenticationStateProvider Auth
+
+<PageTitle>Profil · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Profil saya" Eyebrow="Akun" />
+
+<div class="page">
+    @if (_user is null)
+    {
+        <p class="muted">Memuat…</p>
+    }
+    else
+    {
+        @if (_message is not null)
+        {
+            <div class="notice @(_failed ? "notice--danger" : "notice--ok")" style="margin-bottom:var(--space-4)">
+                <div>@_message</div>
+            </div>
+        }
+
+        <div class="grid grid--2">
+            <section class="card">
+                <div class="card-title"><h2>Identitas</h2></div>
+
+                <div class="field">
+                    <label for="nama">Nama tampilan</label>
+                    <input id="nama" @bind="_displayName" />
+                </div>
+
+                <div class="field">
+                    <label for="org">Organisasi</label>
+                    <input id="org" @bind="_organisation" />
+                </div>
+
+                <div class="field">
+                    <label for="email">Email</label>
+                    <input id="email" value="@_user.Email" disabled />
+                    <div class="hint">Email dipakai untuk masuk dan tidak bisa diubah sendiri.</div>
+                </div>
+
+                <button class="btn btn--primary" @onclick="SaveProfileAsync">Simpan perubahan</button>
+            </section>
+
+            <section class="card">
+                <div class="card-title"><h2>Kata sandi</h2></div>
+
+                <div class="field">
+                    <label for="lama">Kata sandi sekarang</label>
+                    <input id="lama" type="password" @bind="_currentPassword" autocomplete="current-password" />
+                </div>
+
+                <div class="field">
+                    <label for="baru">Kata sandi baru</label>
+                    <input id="baru" type="password" @bind="_newPassword" autocomplete="new-password" />
+                    <div class="hint">Minimal 8 karakter.</div>
+                </div>
+
+                <div class="field">
+                    <label for="ulang">Ulangi kata sandi baru</label>
+                    <input id="ulang" type="password" @bind="_confirmPassword" autocomplete="new-password" />
+                </div>
+
+                <button class="btn" @onclick="ChangePasswordAsync">Ganti kata sandi</button>
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private ApplicationUser? _user;
+    private string? _displayName, _organisation;
+    private string? _currentPassword, _newPassword, _confirmPassword;
+    private string? _message;
+    private bool _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await Auth.GetAuthenticationStateAsync();
+        _user = await Users.GetUserAsync(state.User);
+
+        _displayName = _user?.DisplayName;
+        _organisation = _user?.Organisation;
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        if (_user is null)
+        {
+            return;
+        }
+
+        _user.DisplayName = _displayName;
+        _user.Organisation = _organisation;
+
+        var result = await Users.UpdateAsync(_user);
+
+        _failed = !result.Succeeded;
+        _message = result.Succeeded
+            ? "Profil tersimpan."
+            : string.Join(" ", result.Errors.Select(e => e.Description));
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        if (_user is null)
+        {
+            return;
+        }
+
+        if (_newPassword != _confirmPassword)
+        {
+            _failed = true;
+            _message = "Kata sandi baru dan ulangannya tidak sama.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_currentPassword) || string.IsNullOrWhiteSpace(_newPassword))
+        {
+            _failed = true;
+            _message = "Isi kata sandi sekarang dan kata sandi barunya.";
+            return;
+        }
+
+        var result = await Users.ChangePasswordAsync(_user, _currentPassword, _newPassword);
+
+        _failed = !result.Succeeded;
+        _message = result.Succeeded
+            ? "Kata sandi diganti."
+            : string.Join(" ", result.Errors.Select(e => e.Description));
+
+        if (result.Succeeded)
+        {
+            _currentPassword = _newPassword = _confirmPassword = null;
+        }
+    }
+}

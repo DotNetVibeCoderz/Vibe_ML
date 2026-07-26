@@ -1,0 +1,75 @@
+@page "/masuk"
+@layout EmptyLayout
+@using BlazorML.Core.Configuration
+@inject ISettingsService Settings
+
+<PageTitle>Masuk · Blazor ML Studio</PageTitle>
+
+<div class="auth">
+    <div class="auth-card card">
+        <div class="auth-mark">ML</div>
+
+        <div class="eyebrow">Blazor ML Studio</div>
+        <h1>Masuk ke workspace</h1>
+        <p class="muted" style="margin:var(--space-2) 0 var(--space-5)">
+            Rancang, latih, dan terbitkan model tanpa menulis kode.
+        </p>
+
+        @if (Galat is not null)
+        {
+            <div class="notice notice--danger" style="margin-bottom:var(--space-4)">
+                <div>@ErrorMessage(Galat)</div>
+            </div>
+        }
+
+        <form method="post" action="/akun/masuk">
+            <input type="hidden" name="kembali" value="@Kembali" />
+
+            <div class="field">
+                <label for="email">Email</label>
+                <input id="email" name="email" type="email" autocomplete="username" required
+                       placeholder="nama@perusahaan.com" />
+            </div>
+
+            <div class="field">
+                <label for="password">Kata sandi</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required />
+            </div>
+
+            <div class="field field--inline">
+                <input id="ingat" name="ingat" type="checkbox" value="true" />
+                <label for="ingat">Ingat saya di perangkat ini</label>
+            </div>
+
+            <button class="btn btn--primary btn--block" type="submit">Masuk</button>
+        </form>
+
+        @if (_allowRegistration)
+        {
+            <p class="auth-foot">Belum punya akun? <a href="/daftar">Daftar di sini</a></p>
+        }
+
+        <p class="auth-foot"><a href="/lupa-sandi">Lupa kata sandi?</a></p>
+
+        <Attribution Compact="true" Class="credit--bare" />
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "galat")] public string? Galat { get; set; }
+    [SupplyParameterFromQuery(Name = "kembali")] public string? Kembali { get; set; }
+
+    private bool _allowRegistration = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var workspace = await Settings.GetAsync<WorkspaceOptions>(SettingsSections.Workspace);
+        _allowRegistration = workspace.AllowRegistration;
+    }
+
+    private static string ErrorMessage(string code) => code switch
+    {
+        "2" => "Akun terkunci sementara karena terlalu banyak percobaan. Coba lagi beberapa menit lagi.",
+        _ => "Email atau kata sandi tidak cocok."
+    };
+}

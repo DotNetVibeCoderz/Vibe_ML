@@ -1,0 +1,387 @@
+@page "/pengaturan"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using BlazorML.Core.Configuration
+@using WicakOptions = BlazorML.Core.Configuration.ChatOptions
+@inject ISettingsService Settings
+@inject DatabaseOptions Database
+
+<PageTitle>Pengaturan · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Pengaturan" Eyebrow="Workspace" />
+
+<div class="page">
+    @if (_saved is not null)
+    {
+        <div class="notice notice--ok" style="margin-bottom:var(--space-4)">
+            <div>@_saved</div>
+        </div>
+    }
+
+    <div class="tabs" style="margin-bottom:var(--space-5)">
+        @foreach (var tab in Tabs)
+        {
+            <button class="tab @(_tab == tab ? "active" : "")" @onclick="() => _tab = tab">@tab</button>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <p class="muted">Memuat…</p>
+    }
+    else
+    {
+        @switch (_tab)
+        {
+            case "Workspace":
+                <section class="card" style="max-width:640px">
+                    <div class="field">
+                        <label>Nama workspace</label>
+                        <input @bind="_workspace.Name" />
+                    </div>
+                    <div class="field">
+                        <label>Tagline</label>
+                        <input @bind="_workspace.Tagline" />
+                    </div>
+                    <div class="field">
+                        <label>Tema bawaan</label>
+                        <select @bind="_workspace.DefaultTheme">
+                            <option value="system">Ikuti sistem</option>
+                            <option value="light">Terang</option>
+                            <option value="dark">Gelap</option>
+                        </select>
+                    </div>
+                    <div class="field field--inline">
+                        <input type="checkbox" @bind="_workspace.AllowRegistration" id="reg" />
+                        <label for="reg">Izinkan orang mendaftar sendiri</label>
+                    </div>
+                    <button class="btn btn--primary" @onclick="SaveWorkspaceAsync">Simpan</button>
+                </section>
+                break;
+
+            case "Profesor Wicak":
+                <section class="card" style="max-width:720px">
+                    <div class="field field--inline">
+                        <input type="checkbox" @bind="_chat.Enabled" id="chat-on" />
+                        <label for="chat-on">Tampilkan panel chat di halaman designer</label>
+                    </div>
+
+                    <div class="field">
+                        <label>Penyedia model aktif</label>
+                        <select @bind="_chat.Provider">
+                            @foreach (var kind in Enum.GetValues<ChatProviderKind>())
+                            {
+                                <option value="@kind">@kind @(_chat.IsProviderConfigured(kind) ? "" : "(belum diisi)")</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label>Persona / system prompt</label>
+                        <textarea rows="8" @bind="_chat.SystemPrompt"></textarea>
+                        <div class="hint">Ini yang membentuk cara Wicak menjawab dan seberapa berani dia bertindak.</div>
+                    </div>
+
+                    <div class="grid grid--3">
+                        <div class="field">
+                            <label>Temperature</label>
+                            <input type="number" step="0.05" min="0" max="2" @bind="_chat.Temperature" />
+                            <div class="hint">Rendah = jawaban stabil.</div>
+                        </div>
+                        <div class="field">
+                            <label>Token maksimum</label>
+                            <input type="number" min="256" max="32000" @bind="_chat.MaxTokens" />
+                        </div>
+                        <div class="field">
+                            <label>Giliran riwayat</label>
+                            <input type="number" min="2" max="50" @bind="_chat.HistoryTurns" />
+                            <div class="hint">Berapa giliran lampau yang dikirim ulang.</div>
+                        </div>
+                    </div>
+
+                    <div class="field field--inline">
+                        <input type="checkbox" @bind="_chat.EnableFunctionCalling" id="fn" />
+                        <label for="fn">Izinkan Wicak memanggil fungsi (query data, menyusun alur)</label>
+                    </div>
+
+                    <hr style="margin:var(--space-5) 0;border:none;border-top:2px solid var(--rule-soft)" />
+
+                    <h3 style="margin-bottom:var(--space-3)">Kredensial penyedia</h3>
+
+                    <div class="grid grid--2">
+                        <div>
+                            <div class="eyebrow">OpenAI</div>
+                            <div class="field">
+                                <label>API key</label>
+                                <input type="password" @bind="_chat.OpenAI.ApiKey" autocomplete="off" />
+                            </div>
+                            <div class="field">
+                                <label>Model</label>
+                                <input @bind="_chat.OpenAI.Model" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="eyebrow">Anthropic</div>
+                            <div class="field">
+                                <label>API key</label>
+                                <input type="password" @bind="_chat.Anthropic.ApiKey" autocomplete="off" />
+                            </div>
+                            <div class="field">
+                                <label>Model</label>
+                                <input @bind="_chat.Anthropic.Model" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="eyebrow">Google Gemini</div>
+                            <div class="field">
+                                <label>API key</label>
+                                <input type="password" @bind="_chat.Gemini.ApiKey" autocomplete="off" />
+                            </div>
+                            <div class="field">
+                                <label>Model</label>
+                                <input @bind="_chat.Gemini.Model" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="eyebrow">Ollama</div>
+                            <div class="field field--inline">
+                                <input type="checkbox" @bind="_chat.Ollama.Enabled" id="ollama-on" />
+                                <label for="ollama-on">Saya menjalankan Ollama</label>
+                            </div>
+                            <div class="field">
+                                <label>Endpoint</label>
+                                <input @bind="_chat.Ollama.Endpoint" />
+                                <div class="hint">Alamatnya sudah terisi bawaan, jadi centang di atas
+                                    yang menentukan apakah Ollama dianggap tersedia.</div>
+                            </div>
+                            <div class="field">
+                                <label>Model</label>
+                                <input @bind="_chat.Ollama.Model" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn btn--primary" @onclick="SaveChatAsync">Simpan</button>
+                </section>
+                break;
+
+            case "Penyimpanan":
+                <section class="card" style="max-width:640px">
+                    <div class="field">
+                        <label>Provider aktif</label>
+                        <select @bind="_storage.Provider">
+                            @foreach (var kind in Enum.GetValues<StorageProviderKind>())
+                            {
+                                <option value="@kind">@kind</option>
+                            }
+                        </select>
+                    </div>
+
+                    @switch (_storage.Provider)
+                    {
+                        case StorageProviderKind.FileSystem:
+                            <div class="field">
+                                <label>Folder</label>
+                                <input @bind="_storage.FileSystem.RootPath" />
+                                <div class="hint">Path relatif dihitung dari folder aplikasi.</div>
+                            </div>
+                            break;
+
+                        case StorageProviderKind.AzureBlob:
+                            <div class="field">
+                                <label>Connection string</label>
+                                <input type="password" @bind="_storage.AzureBlob.ConnectionString" />
+                            </div>
+                            <div class="field">
+                                <label>Container</label>
+                                <input @bind="_storage.AzureBlob.Container" />
+                            </div>
+                            break;
+
+                        case StorageProviderKind.S3:
+                            <S3Fields Options="_storage.S3" ShowServiceUrl="false" />
+                            break;
+
+                        case StorageProviderKind.MinIO:
+                            <S3Fields Options="_storage.MinIO" ShowServiceUrl="true" />
+                            break;
+                    }
+
+                    <button class="btn btn--primary" @onclick="SaveStorageAsync">Simpan</button>
+                </section>
+                break;
+
+            case "Email":
+                <section class="card" style="max-width:640px">
+                    <div class="notice notice--info" style="margin-bottom:var(--space-4);font-size:.83rem">
+                        <div>
+                            Email hanya dipakai untuk tautan atur ulang kata sandi. Tanpa server email,
+                            alur itu tetap berjalan — tautannya ditulis ke log aplikasi supaya
+                            administrator bisa meneruskannya.
+                        </div>
+                    </div>
+
+                    <div class="field field--inline">
+                        <input type="checkbox" @bind="_email.Enabled" id="email-on" />
+                        <label for="email-on">Kirim email lewat server SMTP</label>
+                    </div>
+
+                    <div class="grid grid--2">
+                        <div class="field">
+                            <label>Host</label>
+                            <input @bind="_email.Host" placeholder="smtp.contoh.com" />
+                        </div>
+                        <div class="field">
+                            <label>Port</label>
+                            <input type="number" min="1" max="65535" @bind="_email.Port" />
+                        </div>
+                    </div>
+
+                    <div class="field field--inline">
+                        <input type="checkbox" @bind="_email.UseStartTls" id="email-tls" />
+                        <label for="email-tls">Pakai STARTTLS</label>
+                    </div>
+
+                    <div class="grid grid--2">
+                        <div class="field">
+                            <label>Username</label>
+                            <input @bind="_email.Username" autocomplete="off" />
+                        </div>
+                        <div class="field">
+                            <label>Password</label>
+                            <input type="password" @bind="_email.Password" autocomplete="off" />
+                        </div>
+                        <div class="field">
+                            <label>Alamat pengirim</label>
+                            <input @bind="_email.FromAddress" placeholder="noreply@contoh.com" />
+                        </div>
+                        <div class="field">
+                            <label>Nama pengirim</label>
+                            <input @bind="_email.FromName" />
+                        </div>
+                    </div>
+
+                    <button class="btn btn--primary" @onclick="SaveEmailAsync">Simpan</button>
+                </section>
+                break;
+
+            case "Tools":
+                <section class="card" style="max-width:640px">
+                    <div class="field">
+                        <label>Tavily API key</label>
+                        <input type="password" @bind="_tools.TavilyApiKey" autocomplete="off" />
+                        <div class="hint">Dipakai fungsi pencarian web Profesor Wicak.</div>
+                    </div>
+                    <div class="field field--inline">
+                        <input type="checkbox" @bind="_tools.EnableWebSearch" id="ws" />
+                        <label for="ws">Izinkan pencarian web</label>
+                    </div>
+                    <div class="field field--inline">
+                        <input type="checkbox" @bind="_tools.EnableUrlScraping" id="scr" />
+                        <label for="scr">Izinkan membaca isi halaman web</label>
+                    </div>
+                    <button class="btn btn--primary" @onclick="SaveToolsAsync">Simpan</button>
+                </section>
+                break;
+
+            case "Training":
+                <section class="card" style="max-width:640px">
+                    <div class="field">
+                        <label>Run bersamaan maksimum</label>
+                        <input type="number" min="1" max="16" @bind="_training.MaxConcurrentRuns" />
+                    </div>
+                    <div class="field">
+                        <label>Batas waktu satu run (menit)</label>
+                        <input type="number" min="1" max="480" @bind="_training.RunTimeoutMinutes" />
+                    </div>
+                    <div class="field">
+                        <label>Baris pratinjau per node</label>
+                        <input type="number" min="1" max="100" @bind="_training.PreviewRows" />
+                    </div>
+                    <div class="field">
+                        <label>Batas baris di memori</label>
+                        <input type="number" min="1000" max="20000000" @bind="_training.MaxRowsInMemory" />
+                        <div class="hint">Pengaman supaya satu berkas besar tidak menghabiskan memori server.</div>
+                    </div>
+                    <button class="btn btn--primary" @onclick="SaveTrainingAsync">Simpan</button>
+                </section>
+                break;
+
+            case "Database":
+                <section class="card" style="max-width:640px">
+                    <div class="notice notice--warn" style="margin-bottom:var(--space-4)">
+                        <div>
+                            Provider database dibaca dari <code>appsettings.json</code> saat aplikasi
+                            menyala, karena pengaturannya tidak bisa disimpan di dalam database yang
+                            sedang dikonfigurasi. Ubah berkasnya lalu jalankan ulang aplikasi.
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Provider aktif</label>
+                        <input value="@Database.Provider" disabled />
+                    </div>
+                    <div class="field">
+                        <label>Connection string aktif</label>
+                        <input value="@Mask(Database.Current)" disabled />
+                    </div>
+                </section>
+                break;
+        }
+    }
+</div>
+
+@code {
+    private static readonly string[] Tabs =
+        ["Workspace", "Profesor Wicak", "Penyimpanan", "Email", "Tools", "Training", "Database"];
+
+    private string _tab = "Workspace";
+    private bool _loading = true;
+    private string? _saved;
+
+    private WorkspaceOptions _workspace = new();
+    private WicakOptions _chat = new();
+    private StorageOptions _storage = new();
+    private ToolOptions _tools = new();
+    private TrainingOptions _training = new();
+    private EmailOptions _email = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _workspace = await Settings.GetAsync<WorkspaceOptions>(SettingsSections.Workspace);
+        _chat = await Settings.GetAsync<WicakOptions>(SettingsSections.Chat);
+        _storage = await Settings.GetAsync<StorageOptions>(SettingsSections.Storage);
+        _tools = await Settings.GetAsync<ToolOptions>(SettingsSections.Tools);
+        _training = await Settings.GetAsync<TrainingOptions>(SettingsSections.Training);
+        _email = await Settings.GetAsync<EmailOptions>(SettingsSections.Email);
+        _loading = false;
+    }
+
+    private async Task SaveWorkspaceAsync() => await SaveAsync(SettingsSections.Workspace, _workspace);
+    private async Task SaveChatAsync() => await SaveAsync(SettingsSections.Chat, _chat);
+    private async Task SaveStorageAsync() => await SaveAsync(SettingsSections.Storage, _storage);
+    private async Task SaveToolsAsync() => await SaveAsync(SettingsSections.Tools, _tools);
+    private async Task SaveTrainingAsync() => await SaveAsync(SettingsSections.Training, _training);
+    private async Task SaveEmailAsync() => await SaveAsync(SettingsSections.Email, _email);
+
+    private async Task SaveAsync<T>(string section, T value) where T : class
+    {
+        await Settings.SaveAsync(section, value);
+        _saved = $"Pengaturan {section} tersimpan dan langsung berlaku.";
+    }
+
+    /// <summary>Shows enough of a connection string to identify it without exposing the password.</summary>
+    private static string Mask(string connectionString)
+    {
+        var parts = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries);
+
+        return string.Join(';', parts.Select(part =>
+            part.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+            part.Contains("pwd", StringComparison.OrdinalIgnoreCase)
+                ? part[..(part.IndexOf('=') + 1)] + "••••••"
+                : part));
+    }
+}

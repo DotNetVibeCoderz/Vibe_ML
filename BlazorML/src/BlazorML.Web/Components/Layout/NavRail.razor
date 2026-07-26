@@ -1,0 +1,39 @@
+@* Icon rail. Labels appear on hover as tooltips, and every link carries an aria-label so the
+   navigation is usable without seeing them. *@
+
+<nav class="rail" aria-label="Navigasi utama">
+    <a class="rail-mark" href="/" aria-label="Blazor ML Studio">ML</a>
+
+    @foreach (var item in Items)
+    {
+        <NavLink class="rail-link" href="@item.Href" data-label="@item.Label" aria-label="@item.Label"
+                 Match="@(item.Href == "/" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+            @((MarkupString)item.Icon)
+        </NavLink>
+    }
+
+    <div class="rail-spacer"></div>
+
+    <a class="rail-link" href="/api-docs" target="_blank" rel="noopener"
+       data-label="Dokumentasi API" aria-label="Dokumentasi API">
+        @((MarkupString)Icons.Book)
+    </a>
+
+    <NavLink class="rail-link" href="/pengaturan" data-label="Pengaturan" aria-label="Pengaturan">
+        @((MarkupString)Icons.Settings)
+    </NavLink>
+</nav>
+
+@code {
+    private record NavItem(string Href, string Label, string Icon);
+
+    private static readonly NavItem[] Items =
+    [
+        new("/", "Ringkasan", Icons.Grid),
+        new("/dataset", "Dataset", Icons.Table),
+        new("/eksperimen", "Eksperimen", Icons.Flow),
+        new("/model", "Model", Icons.Box),
+        new("/endpoint", "Endpoint", Icons.Plug),
+        new("/galeri", "Galeri", Icons.Sparkle)
+    ];
+}

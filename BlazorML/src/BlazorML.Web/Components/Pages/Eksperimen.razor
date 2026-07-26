@@ -1,0 +1,132 @@
+@page "/eksperimen"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ExperimentService Experiments
+@inject AuthenticationStateProvider Auth
+@inject NavigationManager Nav
+
+<PageTitle>Eksperimen · Blazor ML Studio</PageTitle>
+
+<TopBarTitle Title="Eksperimen" Eyebrow="@($"{_items.Count} tersimpan")">
+    <Actions>
+        <button class="btn btn--primary" @onclick="() => _creating = true">
+            @((MarkupString)Icons.Plus) Eksperimen baru
+        </button>
+    </Actions>
+</TopBarTitle>
+
+<div class="page">
+    @if (_items.Count == 0)
+    {
+        <div class="empty">
+            <h3>Belum ada eksperimen</h3>
+            <p>Mulai dari kanvas kosong, atau salin salah satu contoh siap pakai dari galeri.</p>
+            <div class="row">
+                <button class="btn btn--primary" @onclick="() => _creating = true">Kanvas kosong</button>
+                <a class="btn" href="/galeri">Lihat galeri</a>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="grid grid--3">
+            @foreach (var item in _items)
+            {
+                <article class="card card--rail card--tight" style="--rail-pen: var(--pen-teal)">
+                    <div class="spread" style="align-items:flex-start">
+                        <h3 class="truncate">@item.Name</h3>
+                        <RunStatusTag Status="item.LastStatus" />
+                    </div>
+
+                    <p class="muted" style="font-size:.85rem;margin:var(--space-2) 0 0;min-height:2.4em">
+                        @(string.IsNullOrWhiteSpace(item.Description) ? "Belum ada deskripsi." : item.Description)
+                    </p>
+
+                    <div class="row-wrap" style="margin-top:var(--space-3)">
+                        @if (item.Task != MlTask.None)
+                        {
+                            <span class="tag tag--quiet">@TaskLabel(item.Task)</span>
+                        }
+                        <span class="tag tag--quiet">v@item.Version</span>
+                    </div>
+
+                    <div class="row" style="margin-top:var(--space-4)">
+                        <a class="btn btn--sm btn--primary" href="/eksperimen/@item.Id">Buka kanvas</a>
+                        <a class="btn btn--sm btn--ghost" href="/eksperimen/@item.Id/riwayat">Riwayat</a>
+                        <button class="btn btn--sm btn--ghost" @onclick="() => DuplicateAsync(item.Id)">Duplikat</button>
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@if (_creating)
+{
+    <div class="overlay" @onclick="() => _creating = false">
+        <div class="dialog" @onclick:stopPropagation="true">
+            <h2 style="margin-bottom:var(--space-4)">Eksperimen baru</h2>
+
+            <div class="field">
+                <label for="nama">Nama</label>
+                <input id="nama" @bind="_newName" @bind:event="oninput"
+                       placeholder="Prediksi churn pelanggan" />
+                <div class="hint">Bisa diubah kapan saja.</div>
+            </div>
+
+            <div class="row" style="justify-content:flex-end">
+                <button class="btn btn--ghost" @onclick="() => _creating = false">Batal</button>
+                <button class="btn btn--primary" @onclick="CreateAsync"
+                        disabled="@string.IsNullOrWhiteSpace(_newName)">
+                    Buat dan buka
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Experiment> _items = [];
+    private bool _creating;
+    private string _newName = string.Empty;
+
+    protected override async Task OnInitializedAsync() => _items = await Experiments.ListAsync();
+
+    private async Task<string?> UserIdAsync()
+    {
+        var state = await Auth.GetAuthenticationStateAsync();
+        return state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newName))
+        {
+            return;
+        }
+
+        var experiment = await Experiments.CreateAsync(_newName.Trim(), await UserIdAsync());
+        Nav.NavigateTo($"/eksperimen/{experiment.Id}");
+    }
+
+    private async Task DuplicateAsync(string id)
+    {
+        var copy = await Experiments.CloneAsync(id, await UserIdAsync());
+        Nav.NavigateTo($"/eksperimen/{copy.Id}");
+    }
+
+    private static string TaskLabel(MlTask task) => task switch
+    {
+        MlTask.BinaryClassification => "klasifikasi biner",
+        MlTask.MulticlassClassification => "klasifikasi multikelas",
+        MlTask.Regression => "regresi",
+        MlTask.Clustering => "clustering",
+        MlTask.AnomalyDetection => "deteksi anomali",
+        MlTask.Recommendation => "rekomendasi",
+        MlTask.Forecasting => "peramalan",
+        MlTask.TextClassification => "klasifikasi teks",
+        MlTask.ImageClassification => "klasifikasi gambar",
+        _ => task.ToString()
+    };
+}

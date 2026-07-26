@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorML.Core\BlazorML.Core.csproj" />
+    <ProjectReference Include="..\BlazorML.Infrastructure\BlazorML.Infrastructure.csproj" />
+    <ProjectReference Include="..\BlazorML.ML\BlazorML.ML.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SemanticKernel" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.Google" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.Ollama" />
+    <PackageReference Include="Anthropic.SDK" />
+    <PackageReference Include="HtmlAgilityPack" />
+  </ItemGroup>
+
+</Project>

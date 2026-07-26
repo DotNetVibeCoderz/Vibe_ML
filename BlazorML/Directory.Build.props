@@ -1,0 +1,23 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Semantic Kernel ships its Google/Ollama connectors as prerelease and marks a number of
+         AI-facing APIs experimental. Both are deliberate choices here, so silence the noise. -->
+    <NoWarn>$(NoWarn);NU5104;SKEXP0001;SKEXP0010;SKEXP0070;SKEXP0110;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Product">
+    <Product>Blazor ML Studio</Product>
+    <Company>Gravicode Studios</Company>
+    <Authors>Gravicode Studios</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+</Project>

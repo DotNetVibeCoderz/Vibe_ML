@@ -1,0 +1,26 @@
+@* Puts a title and optional actions into the layout's top bar from any page. *@
+
+<SectionContent SectionName="topbar">
+    <div class="spread">
+        <div class="row grow" style="min-width:0">
+            <div style="min-width:0">
+                @if (!string.IsNullOrWhiteSpace(Eyebrow))
+                {
+                    <div class="eyebrow">@Eyebrow</div>
+                }
+                <h1 class="truncate">@Title</h1>
+            </div>
+        </div>
+
+        @if (Actions is not null)
+        {
+            <div class="row-wrap">@Actions</div>
+        }
+    </div>
+</SectionContent>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Eyebrow { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

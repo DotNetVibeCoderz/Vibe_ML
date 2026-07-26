@@ -1,0 +1,37 @@
+@using BlazorML.Core.Configuration
+
+@if (ShowServiceUrl)
+{
+    <div class="field">
+        <label>Alamat server</label>
+        <input @bind="Options.ServiceUrl" placeholder="http://localhost:9000" />
+        <div class="hint">Alamat MinIO atau server lain yang kompatibel S3.</div>
+    </div>
+}
+
+<div class="field">
+    <label>Access key</label>
+    <input @bind="Options.AccessKey" autocomplete="off" />
+</div>
+
+<div class="field">
+    <label>Secret key</label>
+    <input type="password" @bind="Options.SecretKey" autocomplete="off" />
+</div>
+
+<div class="field">
+    <label>Bucket</label>
+    <input @bind="Options.Bucket" />
+</div>
+
+<div class="field">
+    <label>Region</label>
+    <input @bind="Options.Region" />
+</div>
+
+@code {
+    [Parameter, EditorRequired] public S3StorageOptions Options { get; set; } = default!;
+
+    /// <summary>MinIO needs an explicit endpoint; real AWS S3 derives it from the region.</summary>
+    [Parameter] public bool ShowServiceUrl { get; set; }
+}

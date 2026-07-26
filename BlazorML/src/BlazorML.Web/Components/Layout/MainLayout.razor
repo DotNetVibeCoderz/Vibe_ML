@@ -1,0 +1,22 @@
+@inherits LayoutComponentBase
+
+<div class="shell">
+    <NavRail />
+
+    <div class="main">
+        <header class="topbar">
+            <div class="grow">
+                <TopBarSlot />
+            </div>
+
+            <ThemeToggle />
+            <UserMenu />
+        </header>
+
+        <main>
+            @Body
+        </main>
+
+        <Attribution />
+    </div>
+</div>

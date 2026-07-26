@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BlazorML.Agents/BlazorML.Agents.csproj" />
+    <Project Path="src/BlazorML.Core/BlazorML.Core.csproj" />
+    <Project Path="src/BlazorML.Infrastructure/BlazorML.Infrastructure.csproj" />
+    <Project Path="src/BlazorML.ML/BlazorML.ML.csproj" />
+    <Project Path="src/BlazorML.Web/BlazorML.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BlazorML.Agents.Tests/BlazorML.Agents.Tests.csproj" />
+    <Project Path="tests/BlazorML.Canvas.Tests/BlazorML.Canvas.Tests.csproj" />
+    <Project Path="tests/BlazorML.Tests/BlazorML.Tests.csproj" />
+    <Project Path="tests/BlazorML.Web.Tests/BlazorML.Web.Tests.csproj" />
+  </Folder>
+</Solution>

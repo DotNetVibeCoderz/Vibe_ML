@@ -1,0 +1,10 @@
+@inject NavigationManager Nav
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Carry where they were heading so signing in lands them there rather than the dashboard.
+        var target = Uri.EscapeDataString(Nav.ToBaseRelativePath(Nav.Uri));
+        Nav.NavigateTo($"/masuk?kembali={target}", forceLoad: true);
+    }
+}

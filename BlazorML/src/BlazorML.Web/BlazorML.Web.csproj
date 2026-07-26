@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>blazorml-studio-gravicode</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorML.Core\BlazorML.Core.csproj" />
+    <ProjectReference Include="..\BlazorML.Infrastructure\BlazorML.Infrastructure.csproj" />
+    <ProjectReference Include="..\BlazorML.ML\BlazorML.ML.csproj" />
+    <ProjectReference Include="..\BlazorML.Agents\BlazorML.Agents.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" />
+    <PackageReference Include="Markdig" />
+  </ItemGroup>
+
+</Project>

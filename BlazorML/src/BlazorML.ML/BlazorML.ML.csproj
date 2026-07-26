@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorML.Core\BlazorML.Core.csproj" />
+    <ProjectReference Include="..\BlazorML.Infrastructure\BlazorML.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML" />
+    <PackageReference Include="Microsoft.ML.AutoML" />
+    <PackageReference Include="Microsoft.ML.FastTree" />
+    <PackageReference Include="Microsoft.ML.LightGbm" />
+    <PackageReference Include="Microsoft.ML.Recommender" />
+    <PackageReference Include="Microsoft.ML.TimeSeries" />
+    <PackageReference Include="Microsoft.ML.Mkl.Components" />
+    <PackageReference Include="CsvHelper" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+  </ItemGroup>
+
+  <!-- Image and text classification, off by default. See Directory.Packages.props for why.
+       Turn on with:  dotnet build -p:EnableVisionNlp=true                                   -->
+  <PropertyGroup Condition="'$(EnableVisionNlp)' == 'true'">
+    <DefineConstants>$(DefineConstants);VISION_NLP</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(EnableVisionNlp)' == 'true'" Label="Vision and NLP (opt-in)">
+    <PackageReference Include="Microsoft.ML.Vision" />
+    <PackageReference Include="SciSharp.TensorFlow.Redist" />
+    <PackageReference Include="Microsoft.ML.TorchSharp" />
+    <PackageReference Include="TorchSharp-cpu" />
+  </ItemGroup>
+
+  <ItemGroup Label="Script module runtimes">
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
+    <PackageReference Include="Jint" />
+  </ItemGroup>
+
+</Project>

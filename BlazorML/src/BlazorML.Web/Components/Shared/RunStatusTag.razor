@@ -1,0 +1,35 @@
+<span class="tag @CssClass">
+    <i class="dot @DotClass"></i>
+    @Label
+</span>
+
+@code {
+    [Parameter, EditorRequired] public RunStatus Status { get; set; }
+
+    private string Label => Status switch
+    {
+        RunStatus.Draft => "Draf",
+        RunStatus.Queued => "Antre",
+        RunStatus.Running => "Berjalan",
+        RunStatus.Succeeded => "Selesai",
+        RunStatus.Failed => "Gagal",
+        RunStatus.Cancelled => "Dibatalkan",
+        _ => Status.ToString()
+    };
+
+    private string CssClass => Status switch
+    {
+        RunStatus.Succeeded => "tag--ok",
+        RunStatus.Failed => "tag--danger",
+        RunStatus.Running => "tag--warn",
+        _ => "tag--quiet"
+    };
+
+    private string DotClass => Status switch
+    {
+        RunStatus.Succeeded => "dot--ok",
+        RunStatus.Failed => "dot--fail",
+        RunStatus.Running => "dot--running",
+        _ => "dot--idle"
+    };
+}
