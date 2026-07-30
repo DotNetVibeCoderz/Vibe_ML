@@ -5,39 +5,90 @@
 @inject ApplicationDbContext Db
 @inject IStorageService Storage
 @inject ISceneUpdateNotifier Notifier
+@inject IJSRuntime JS
 @implements IAsyncDisposable
 
-<PageTitle>SplatStudio &mdash; Gallery</PageTitle>
+<PageTitle>SplatStudio &mdash; one photo in, a point cloud out</PageTitle>
 
+@* The hero is the product's actual output, running live. A still image or an
+   illustration would be making a claim; an orbiting point cloud demonstrates it.
+   It auto-orbits until the visitor touches it, then hands over control. *@
 <section class="hero">
-    <h1>Turn one photo into a world you can orbit</h1>
-    <p class="hero-sub">
-        Upload an image, SplatStudio bakes it into a 3D Gaussian-splat point cloud,
-        and you fly around it right in the browser &mdash; no GPU, no plugins.
-    </p>
-    <div class="hero-actions">
-        <a class="btn btn-primary" href="upload">Upload an image</a>
-        <a class="btn btn-ghost" href="#gallery">Browse the gallery &darr;</a>
+    <div class="hero-copy">
+        <p class="eyebrow">Single image reconstruction</p>
+        <h1>One photo in.<br />A cloud you can <em>walk around</em>.</h1>
+        <p class="hero-sub">
+            SplatStudio reads depth out of a single image and bakes it into a Gaussian
+            splat cloud you can orbit in the browser. No rig, no camera poses, no upload
+            queue measured in hours.
+        </p>
+        <div class="hero-actions">
+            <a class="btn btn-primary" href="upload">Upload a photo</a>
+            <a class="btn btn-ghost" href="about">How this works</a>
+        </div>
+
+        <div class="depth-legend">
+            <div class="depth-ramp" aria-hidden="true"></div>
+            <div class="depth-legend-labels">
+                <span>Near</span>
+                <span>Depth</span>
+                <span>Far</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="hero-stage">
+        @if (_heroScene is not null && _heroSplatUrl is not null)
+        {
+            <div @ref="_heroContainer" class="hero-viewer" role="img"
+                 aria-label="@($"Rotating 3D point cloud of {_heroScene.Title}")"></div>
+            <span class="hero-caption">@_heroScene.Title</span>
+
+            <div class="telemetry">
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Splats</span>
+                    <span class="telemetry-value is-near">@_heroScene.PointCount.ToString("N0")</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Baked in</span>
+                    <span class="telemetry-value">@(_heroScene.ConversionMilliseconds > 0 ? $"{_heroScene.ConversionMilliseconds} ms" : "—")</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Engine</span>
+                    <span class="telemetry-value">@EngineLabel(_heroScene.Engine)</span>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="hero-stage-empty">
+                <p>The first finished scene shows up here, live and orbitable.</p>
+            </div>
+        }
     </div>
 </section>
 
 <section id="gallery" class="gallery-section">
-    <div class="gallery-header">
-        <h2>Constellation gallery</h2>
-        @if (_loading)
-        {
-            <span class="muted">loading&hellip;</span>
-        }
-        else
-        {
-            <span class="muted">@_scenes.Count scenes</span>
-        }
+    <div class="section-head">
+        <h2>Everything baked so far</h2>
+        <span class="mono small muted">
+            @if (_loading)
+            {
+                <text>loading…</text>
+            }
+            else
+            {
+                <text>@_scenes.Count scene@(_scenes.Count == 1 ? "" : "s")</text>
+            }
+        </span>
     </div>
 
     @if (!_loading && _scenes.Count == 0)
     {
         <div class="glass-panel empty-state">
-            <p>No public scenes yet. Be the first to <a href="upload">upload one</a>.</p>
+            <h3>Nothing here yet</h3>
+            <p class="muted">Upload a photo and it will appear here once it finishes baking.</p>
+            <p><a class="btn btn-primary" href="upload">Upload a photo</a></p>
         </div>
     }
     else
@@ -53,8 +104,13 @@
 
 @code {
     private List<SplatScene> _scenes = new();
-    private Dictionary<Guid, string> _thumbUrls = new();
+    private readonly Dictionary<Guid, string> _thumbUrls = new();
     private bool _loading = true;
+
+    private SplatScene? _heroScene;
+    private string? _heroSplatUrl;
+    private ElementReference _heroContainer;
+    private bool _heroInitialized;
 
     protected override async Task OnInitializedAsync()
     {
@@ -83,8 +139,48 @@
                 _thumbUrls[scene.Id] = await Storage.GetPublicUrlAsync(key);
         }
 
+        // Feature whatever the community rated highest, not a hand-picked favourite.
+        // AverageRating is computed rather than mapped, so this ordering happens in
+        // memory over the page of scenes already loaded above.
+        var hero = _scenes
+            .Where(s => !string.IsNullOrEmpty(s.SplatStorageKey))
+            .OrderByDescending(s => s.AverageRating)
+            .ThenByDescending(s => s.Ratings.Count)
+            .ThenByDescending(s => s.PointCount)
+            .FirstOrDefault();
+
+        if (hero is not null && hero.Id != _heroScene?.Id)
+        {
+            _heroScene = hero;
+            _heroSplatUrl = await Storage.GetPublicUrlAsync(hero.SplatStorageKey!);
+            _heroInitialized = false;
+        }
+
         _loading = false;
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_heroInitialized || _heroScene is null || _heroSplatUrl is null) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("splatViewer.init", _heroContainer, _heroSplatUrl,
+                new { autoOrbit = true });
+            _heroInitialized = true;
+        }
+        catch (JSException)
+        {
+            // The container only exists once the branch above has rendered; retry next pass.
+        }
+    }
+
+    private static string EngineLabel(SplatEngineType engine) => engine switch
+    {
+        SplatEngineType.Gpu => "GPU",
+        SplatEngineType.ExternalApi => "External",
+        _ => "CPU"
+    };
 
     private async Task OnSceneUpdatedAsync(Guid sceneId)
     {
@@ -95,9 +191,13 @@
         });
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Notifier.SceneUpdated -= OnSceneUpdatedAsync;
-        return ValueTask.CompletedTask;
+        if (_heroInitialized)
+        {
+            try { await JS.InvokeVoidAsync("splatViewer.dispose", _heroContainer); }
+            catch { /* circuit may already be tearing down */ }
+        }
     }
 }

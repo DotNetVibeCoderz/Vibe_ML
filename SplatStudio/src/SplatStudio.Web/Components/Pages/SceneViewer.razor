@@ -30,8 +30,9 @@ else
             @if (_scene.Status == SplatStatus.Completed)
             {
                 <div class="viewer-canvas-wrap">
-                    <div @ref="_viewerContainer" class="viewer-canvas"></div>
-                    <p class="viewer-hint">Drag to orbit &middot; scroll to zoom &middot; @_scene.PointCount.ToString("N0") splats</p>
+                    <div @ref="_viewerContainer" class="viewer-canvas" role="img"
+                         aria-label="@($"3D point cloud of {_scene.Title}. Drag to orbit.")"></div>
+                    <p class="viewer-hint">Drag to orbit &middot; scroll to zoom</p>
                 </div>
             }
             else if (_scene.Status == SplatStatus.Failed)
@@ -52,11 +53,40 @@ else
         </div>
 
         <div class="scene-info-panel">
-            <h1>@_scene.Title</h1>
-            @if (!string.IsNullOrWhiteSpace(_scene.Description))
-            {
-                <p class="scene-description">@_scene.Description</p>
-            }
+            <div>
+                <h1>@_scene.Title</h1>
+                <div class="scene-byline">
+                    @if (_ownerAvatarUrl is not null)
+                    {
+                        <img class="scene-byline-avatar" src="@_ownerAvatarUrl" alt="" />
+                    }
+                    <span>@(_ownerName ?? "Someone") &middot; @_scene.CreatedAtUtc.ToString("d MMM yyyy")</span>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_scene.Description))
+                {
+                    <p class="scene-description">@_scene.Description</p>
+                }
+            </div>
+
+            @* Same readout as the hero, so density and cost read consistently everywhere. *@
+            <div class="glass-panel scene-telemetry">
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Splats</span>
+                    <span class="telemetry-value is-near">@_scene.PointCount.ToString("N0")</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Baked in</span>
+                    <span class="telemetry-value">@(_scene.ConversionMilliseconds > 0 ? $"{_scene.ConversionMilliseconds} ms" : "—")</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Engine</span>
+                    <span class="telemetry-value">@EngineLabel(_scene.Engine)</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Views</span>
+                    <span class="telemetry-value">@_scene.ViewCount.ToString("N0")</span>
+                </div>
+            </div>
 
             <div class="glass-panel rating-panel">
                 <h3>Rate this scene</h3>
@@ -89,6 +119,15 @@ else
     private ElementReference _viewerContainer;
     private bool _viewerInitialized;
     private string? _splatUrl;
+    private string? _ownerName;
+    private string? _ownerAvatarUrl;
+
+    private static string EngineLabel(SplatEngineType engine) => engine switch
+    {
+        SplatEngineType.Gpu => "GPU",
+        SplatEngineType.ExternalApi => "External",
+        _ => "CPU"
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -131,6 +170,16 @@ else
             {
                 _splatUrl = await Storage.GetPublicUrlAsync(_scene.SplatStorageKey);
             }
+
+            var owner = await Db.Users
+                .Where(u => u.Id == _scene.UserId)
+                .Select(u => new { u.DisplayName, u.AvatarStorageKey })
+                .FirstOrDefaultAsync();
+
+            _ownerName = owner?.DisplayName;
+            _ownerAvatarUrl = string.IsNullOrEmpty(owner?.AvatarStorageKey)
+                ? null
+                : await Storage.GetPublicUrlAsync(owner.AvatarStorageKey);
         }
 
         _loading = false;

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using SplatStudio.Infrastructure;
@@ -70,10 +71,16 @@ var storageRoot = Path.IsPathRooted(storageOptions.FileSystem.RootPath)
     ? storageOptions.FileSystem.RootPath
     : Path.Combine(app.Environment.ContentRootPath, storageOptions.FileSystem.RootPath);
 Directory.CreateDirectory(storageRoot);
+// The static-file middleware refuses to serve extensions it has no content type for,
+// so ".splat" — the app's primary artifact — 404s unless it is mapped explicitly.
+var mediaContentTypes = new FileExtensionContentTypeProvider();
+mediaContentTypes.Mappings[".splat"] = "application/octet-stream";
+
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(storageRoot),
     RequestPath = storageOptions.FileSystem.PublicBasePath,
+    ContentTypeProvider = mediaContentTypes,
     OnPrepareResponse = ctx =>
     {
         ctx.Context.Response.Headers.CacheControl = "public,max-age=2592000,immutable";
@@ -83,6 +90,11 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Razor Components endpoints carry anti-forgery metadata, so this middleware is
+// mandatory — without it every component route fails with a 500. Must sit after
+// UseAuthentication/UseAuthorization and before the endpoint mappings.
+app.UseAntiforgery();
 
 app.MapRazorPages();
 app.MapRazorComponents<App>()

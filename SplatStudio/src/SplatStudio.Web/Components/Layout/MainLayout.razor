@@ -1,12 +1,10 @@
 @inherits LayoutComponentBase
 
 <div class="app-shell">
-    <div class="aurora-backdrop" aria-hidden="true">
-        <span class="blob blob-purple"></span>
-        <span class="blob blob-cyan"></span>
-        <span class="blob blob-coral"></span>
-        <span class="starfield"></span>
-    </div>
+    @* A single fixed wash in the depth-ramp colours. It replaced three animated blobs and
+       a starfield: with a live point cloud in the hero, moving decoration behind it was
+       competing with the actual subject. *@
+    <div class="depth-wash" aria-hidden="true"></div>
 
     <NavMenu />
 
@@ -15,6 +13,9 @@
     </main>
 
     <footer class="app-footer">
-        <p>SplatStudio &mdash; built with .NET 8 Blazor Server. Every splat is generated offline, no GPU required.</p>
+        <p>
+            SplatStudio bakes one photo into a point cloud using a depth heuristic, not
+            multi-view reconstruction. <a href="/about">What that means</a>.
+        </p>
     </footer>
 </div>

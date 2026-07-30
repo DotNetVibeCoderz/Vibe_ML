@@ -1,0 +1,107 @@
+@page "/about"
+@using SplatStudio.Infrastructure.Splatting
+@inject GpuSplatEngine Gpu
+@inject SplattingOptions Splatting
+
+<PageTitle>How SplatStudio works</PageTitle>
+
+@* The README is blunt about what this technique can and cannot do. That caveat
+   belongs in the product too — someone deciding whether to trust a result should
+   not have to find it on GitHub. *@
+<section class="page-section prose">
+    <p class="eyebrow">How it works</p>
+    <h1>What you are actually looking at</h1>
+
+    <p>
+        Real 3D Gaussian splatting is trained from many photos of the same subject shot
+        from different angles. A pipeline like COLMAP recovers where each camera was,
+        and then millions of Gaussians are fitted against all those views over hours of
+        GPU time. A single flat photo does not contain that information, and no amount
+        of clever code puts it back.
+    </p>
+
+    <div class="callout">
+        SplatStudio does something smaller and honest about it: it estimates depth from
+        one image and builds a real, orbitable point cloud out of that estimate. Not
+        photogrammetry — closer to turning a photo into a snow globe.
+    </div>
+
+    <h2>The estimate, step by step</h2>
+    <ul>
+        <li>The image is downscaled to fit the splat budget (currently
+            <span class="mono">@ActiveBudget.ToString("N0")</span> points).</li>
+        <li>Each pixel gets a pseudo-depth: bright pixels and central pixels are pulled
+            toward the camera, dark and peripheral ones pushed away.</li>
+        <li>That depth field is blurred slightly so the surface reads as continuous
+            rather than per-pixel noise.</li>
+        <li>Every surviving pixel becomes one Gaussian splat, positioned in that depth
+            field and coloured from the source image.</li>
+        <li>The result is written as a 32-bytes-per-point binary file and rendered in
+            your browser with WebGL.</li>
+    </ul>
+
+    <h2>What it does well, and where it breaks</h2>
+    <p>
+        One clear subject against a plain background — a portrait, an object on a
+        backdrop — looks convincing, because for that composition "bright and central"
+        genuinely correlates with "near". Orbit maybe thirty degrees off-axis and the
+        illusion holds.
+    </p>
+    <p>
+        It fails in ways worth seeing. A ring gets its hole filled in, because the
+        centre-weighted prior insists the middle is close. Flat scenes stay flat. Nothing
+        recovers geometry hidden behind the subject, because that geometry was never
+        photographed. The gallery deliberately keeps those cases in.
+    </p>
+
+    <h2>Where it runs</h2>
+    <p>
+        The depth field and the splat emission are the parallel part of the job, so they
+        run as GPU compute kernels when a device is available and fall back to the CPU
+        when one isn't.
+    </p>
+
+    <div class="glass-panel scene-telemetry">
+        <div class="telemetry-item">
+            <span class="telemetry-label">Configured engine</span>
+            <span class="telemetry-value">@EngineLabel</span>
+        </div>
+        <div class="telemetry-item">
+            <span class="telemetry-label">Compute device</span>
+            <span class="telemetry-value @(Gpu.IsAvailable ? "is-near" : "")">
+                @(Gpu.IsAvailable ? Gpu.DeviceName : "CPU only")
+            </span>
+        </div>
+        <div class="telemetry-item">
+            <span class="telemetry-label">Splat budget</span>
+            <span class="telemetry-value">@ActiveBudget.ToString("N0")</span>
+        </div>
+        <div class="telemetry-item">
+            <span class="telemetry-label">File size</span>
+            <span class="telemetry-value">@((ActiveBudget * 32 / (1024.0 * 1024.0)).ToString("0.0")) MB</span>
+        </div>
+    </div>
+
+    <h2>Swapping in the real thing</h2>
+    <p>
+        The engine sits behind a single interface, so a genuine multi-view backend —
+        nerfstudio, gsplat, a hosted service — can replace it without touching the
+        gallery, the viewer, or the storage layer. That was the point of keeping the
+        approximation behind a port rather than wiring it through the app.
+    </p>
+</section>
+
+@code {
+    private bool UsingGpu =>
+        Gpu.IsAvailable && string.Equals(Splatting.Engine, "Gpu", StringComparison.OrdinalIgnoreCase);
+
+    private int ActiveBudget => UsingGpu ? Splatting.GpuMaxPoints : Splatting.MaxPoints;
+
+    /// <summary>Reads back the configuration value the way a person would say it.</summary>
+    private string EngineLabel => Splatting.Engine?.ToLowerInvariant() switch
+    {
+        "gpu" => Gpu.IsAvailable ? "GPU heuristic" : "GPU heuristic (no device — using CPU)",
+        "externalapi" => "External API",
+        _ => "CPU heuristic"
+    };
+}
