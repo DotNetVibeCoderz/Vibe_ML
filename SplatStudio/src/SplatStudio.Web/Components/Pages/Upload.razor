@@ -1,0 +1,165 @@
+@page "/upload"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@using SplatStudio.Infrastructure.Data
+@inject ApplicationDbContext Db
+@inject IStorageService Storage
+@inject IImageProcessingService ImageProcessor
+@inject IConversionQueue Queue
+@inject NavigationManager Nav
+@inject ILogger<Upload> Logger
+
+<PageTitle>SplatStudio &mdash; Upload</PageTitle>
+
+<section class="page-section">
+    <div class="glass-panel form-panel">
+        <h1>Upload an image</h1>
+        <p class="muted">JPEG or PNG, up to 15&nbsp;MB. Photos with one clear subject (a portrait, an object on a plain background) splat best with the local heuristic engine.</p>
+
+        <EditForm Model="_form" OnValidSubmit="SubmitAsync" FormName="upload-form">
+            <DataAnnotationsValidator />
+
+            <label class="field-label" for="title">Title</label>
+            <InputText id="title" class="text-input" @bind-Value="_form.Title" maxlength="120" placeholder="e.g. My desk plant" />
+
+            <label class="field-label" for="description">Description (optional)</label>
+            <InputTextArea id="description" class="text-input" @bind-Value="_form.Description" rows="3" maxlength="500" />
+
+            <label class="field-label">Visibility</label>
+            <div class="visibility-toggle">
+                <label><InputCheckbox @bind-Value="_form.IsPublic" /> Public &mdash; visible in the gallery</label>
+            </div>
+
+            <label class="field-label" for="file">Image</label>
+            <InputFile id="file" OnChange="OnFileSelected" accept=".jpg,.jpeg,.png,.webp" />
+
+            @if (!string.IsNullOrEmpty(_fileError))
+            {
+                <p class="form-error">@_fileError</p>
+            }
+            @if (_previewDataUrl is not null)
+            {
+                <img class="upload-preview" src="@_previewDataUrl" alt="Preview" />
+            }
+
+            <button class="btn btn-primary" type="submit" disabled="@(_uploading || _selectedFile is null)">
+                @(_uploading ? "Uploading\u2026" : "Create splat scene")
+            </button>
+        </EditForm>
+    </div>
+</section>
+
+@code {
+    private const long MaxFileBytes = 15 * 1024 * 1024;
+
+    private readonly UploadFormModel _form = new();
+    private IBrowserFile? _selectedFile;
+    private string? _previewDataUrl;
+    private string? _fileError;
+    private bool _uploading;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _fileError = null;
+        _previewDataUrl = null;
+        var file = e.File;
+
+        if (file.Size > MaxFileBytes)
+        {
+            _fileError = "File is too large (max 15 MB).";
+            _selectedFile = null;
+            return;
+        }
+
+        _selectedFile = file;
+        if (string.IsNullOrWhiteSpace(_form.Title))
+            _form.Title = Path.GetFileNameWithoutExtension(file.Name);
+
+        using var ms = new MemoryStream();
+        await using var stream = file.OpenReadStream(MaxFileBytes);
+        await stream.CopyToAsync(ms);
+        _previewDataUrl = $"data:{file.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_selectedFile is null || AuthStateTask is null) return;
+
+        _uploading = true;
+        try
+        {
+            var authState = await AuthStateTask;
+            var userId = authState.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId)) return;
+
+            using var uploadMs = new MemoryStream();
+            await using (var readStream = _selectedFile.OpenReadStream(MaxFileBytes))
+            {
+                await readStream.CopyToAsync(uploadMs);
+            }
+            uploadMs.Position = 0;
+
+            var processed = await ImageProcessor.ProcessUploadAsync(uploadMs, thumbnailMaxDimension: 480);
+
+            var imageAsset = new ImageAsset
+            {
+                UserId = userId,
+                OriginalFileName = _selectedFile.Name,
+                ContentType = _selectedFile.ContentType is { Length: > 0 } ct ? ct : "image/jpeg",
+                SizeBytes = _selectedFile.Size,
+                Width = processed.Width,
+                Height = processed.Height
+            };
+            imageAsset.StorageKey = $"images/{userId}/{imageAsset.Id}{Path.GetExtension(_selectedFile.Name)}";
+            imageAsset.ThumbnailStorageKey = $"thumbnails/{userId}/{imageAsset.Id}.jpg";
+
+            uploadMs.Position = 0;
+            await Storage.SaveAsync(imageAsset.StorageKey, uploadMs, imageAsset.ContentType);
+            using (var thumbStream = new MemoryStream(processed.ThumbnailBytes))
+            {
+                await Storage.SaveAsync(imageAsset.ThumbnailStorageKey, thumbStream, processed.ThumbnailContentType);
+            }
+
+            var scene = new SplatScene
+            {
+                ImageAssetId = imageAsset.Id,
+                UserId = userId,
+                Title = string.IsNullOrWhiteSpace(_form.Title) ? _selectedFile.Name : _form.Title,
+                Description = _form.Description,
+                IsPublic = _form.IsPublic,
+                Status = SplatStatus.Queued
+            };
+
+            Db.ImageAssets.Add(imageAsset);
+            Db.SplatScenes.Add(scene);
+            await Db.SaveChangesAsync();
+
+            Queue.QueueSceneConversion(scene.Id);
+
+            Nav.NavigateTo($"scenes/{scene.Id}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _fileError = "Something went wrong while uploading. Please try again.";
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private class UploadFormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(120)]
+        public string Title { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.StringLength(500)]
+        public string? Description { get; set; }
+
+        public bool IsPublic { get; set; } = true;
+    }
+}

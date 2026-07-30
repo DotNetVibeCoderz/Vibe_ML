@@ -1,0 +1,209 @@
+@page "/scenes/{SceneId:guid}"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using SplatStudio.Infrastructure.Data
+@inject ApplicationDbContext Db
+@inject IStorageService Storage
+@inject ISceneUpdateNotifier Notifier
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>@(_scene?.Title ?? "Scene") &mdash; SplatStudio</PageTitle>
+
+@if (_loading)
+{
+    <p class="muted">Loading scene&hellip;</p>
+}
+else if (_scene is null)
+{
+    <div class="glass-panel not-found-block">
+        <h2>Scene not found</h2>
+        <p>It may have been removed, or the link is incorrect.</p>
+        <a class="btn btn-primary" href="/">Back to gallery</a>
+    </div>
+}
+else
+{
+    <section class="scene-viewer-layout">
+        <div class="glass-panel viewer-panel">
+            @if (_scene.Status == SplatStatus.Completed)
+            {
+                <div class="viewer-canvas-wrap">
+                    <div @ref="_viewerContainer" class="viewer-canvas"></div>
+                    <p class="viewer-hint">Drag to orbit &middot; scroll to zoom &middot; @_scene.PointCount.ToString("N0") splats</p>
+                </div>
+            }
+            else if (_scene.Status == SplatStatus.Failed)
+            {
+                <div class="processing-state processing-failed">
+                    <h2>Conversion failed</h2>
+                    <p class="muted">@(_scene.ErrorMessage ?? "An unknown error occurred.")</p>
+                </div>
+            }
+            else
+            {
+                <div class="processing-state">
+                    <div class="spinner" aria-hidden="true"></div>
+                    <h2>@(_scene.Status == SplatStatus.Processing ? "Baking your splats\u2026" : "Queued for processing\u2026")</h2>
+                    <p class="muted">This usually takes a few seconds &mdash; the page updates automatically.</p>
+                </div>
+            }
+        </div>
+
+        <div class="scene-info-panel">
+            <h1>@_scene.Title</h1>
+            @if (!string.IsNullOrWhiteSpace(_scene.Description))
+            {
+                <p class="scene-description">@_scene.Description</p>
+            }
+
+            <div class="glass-panel rating-panel">
+                <h3>Rate this scene</h3>
+                <StarRating Interactive="@_canRate" CurrentUserRating="@_myRating" OnRate="HandleRateAsync"
+                            Value="@_scene.AverageRating" Count="@_scene.Ratings.Count" />
+                @if (!_canRate)
+                {
+                    <p class="muted small"><a href="Account/Login">Sign in</a> to rate this scene.</p>
+                }
+            </div>
+
+            <div class="glass-panel">
+                <CommentList Comments="_scene.Comments" CanComment="@_canComment" OnAddComment="HandleAddCommentAsync" />
+            </div>
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public Guid SceneId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private SplatScene? _scene;
+    private bool _loading = true;
+    private bool _canRate;
+    private bool _canComment;
+    private int? _myRating;
+    private string? _userId;
+    private string? _displayName;
+    private ElementReference _viewerContainer;
+    private bool _viewerInitialized;
+    private string? _splatUrl;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthStateTask is not null)
+        {
+            var authState = await AuthStateTask;
+            _userId = authState.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            _canRate = !string.IsNullOrEmpty(_userId);
+            _canComment = !string.IsNullOrEmpty(_userId);
+            if (_userId is not null)
+            {
+                _displayName = await Db.Users.Where(u => u.Id == _userId).Select(u => u.DisplayName).FirstOrDefaultAsync();
+            }
+        }
+
+        await LoadAsync(incrementView: true);
+        Notifier.SceneUpdated += OnSceneUpdatedAsync;
+    }
+
+    private async Task LoadAsync(bool incrementView)
+    {
+        _loading = true;
+        _scene = await Db.SplatScenes
+            .Include(s => s.ImageAsset)
+            .Include(s => s.Comments)
+            .Include(s => s.Ratings)
+            .FirstOrDefaultAsync(s => s.Id == SceneId);
+
+        if (_scene is not null)
+        {
+            _myRating = _userId is null ? null : _scene.Ratings.FirstOrDefault(r => r.UserId == _userId)?.Stars;
+
+            if (incrementView)
+            {
+                _scene.ViewCount++;
+                await Db.SaveChangesAsync();
+            }
+
+            if (_scene.Status == SplatStatus.Completed && !string.IsNullOrEmpty(_scene.SplatStorageKey))
+            {
+                _splatUrl = await Storage.GetPublicUrlAsync(_scene.SplatStorageKey);
+            }
+        }
+
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_viewerInitialized && _scene?.Status == SplatStatus.Completed && _splatUrl is not null)
+        {
+            // The container only exists once the Completed branch above has
+            // rendered, so this check runs on every render until it succeeds.
+            try
+            {
+                await JS.InvokeVoidAsync("splatViewer.init", _viewerContainer, _splatUrl);
+                _viewerInitialized = true;
+            }
+            catch (JSException)
+            {
+                // Container not ready yet (e.g. still transitioning from the
+                // processing state) — will retry on the next render.
+            }
+        }
+    }
+
+    private async Task OnSceneUpdatedAsync(Guid sceneId)
+    {
+        if (sceneId != SceneId) return;
+        await InvokeAsync(async () =>
+        {
+            await LoadAsync(incrementView: false);
+            StateHasChanged();
+        });
+    }
+
+    private async Task HandleRateAsync(int stars)
+    {
+        if (_userId is null || _scene is null) return;
+
+        var existing = await Db.Ratings.FirstOrDefaultAsync(r => r.SplatSceneId == SceneId && r.UserId == _userId);
+        if (existing is null)
+        {
+            Db.Ratings.Add(new Rating { SplatSceneId = SceneId, UserId = _userId, Stars = stars });
+        }
+        else
+        {
+            existing.Stars = stars;
+        }
+        await Db.SaveChangesAsync();
+        await LoadAsync(incrementView: false);
+    }
+
+    private async Task HandleAddCommentAsync(string content)
+    {
+        if (_userId is null || _scene is null) return;
+
+        Db.Comments.Add(new Comment
+        {
+            SplatSceneId = SceneId,
+            UserId = _userId,
+            AuthorDisplayName = string.IsNullOrWhiteSpace(_displayName) ? "Anonymous" : _displayName,
+            Content = content
+        });
+        await Db.SaveChangesAsync();
+        await LoadAsync(incrementView: false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Notifier.SceneUpdated -= OnSceneUpdatedAsync;
+        if (_viewerInitialized)
+        {
+            try { await JS.InvokeVoidAsync("splatViewer.dispose", _viewerContainer); }
+            catch { /* circuit may already be tearing down */ }
+        }
+    }
+}

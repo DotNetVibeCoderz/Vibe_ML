@@ -1,0 +1,11 @@
+@page
+@model SplatStudio.Web.Pages.ErrorModel
+@{ ViewData["Title"] = "Error"; }
+
+<h1>Something went wrong</h1>
+<p class="muted">An unexpected error occurred. Please try again.</p>
+@if (Model.ShowRequestId)
+{
+    <p class="muted small">Request ID: <code>@Model.RequestId</code></p>
+}
+<a class="btn btn-primary" href="~/">Back to gallery</a>

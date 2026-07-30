@@ -1,0 +1,25 @@
+<Router AppAssembly="@typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+            <NotAuthorized>
+                <LayoutView Layout="@typeof(MainLayout)">
+                    <div class="glass-panel auth-block">
+                        <h2>Sign in required</h2>
+                        <p>You need to be signed in to view this page.</p>
+                        <a class="btn btn-primary" href="Account/Login">Sign in</a>
+                    </div>
+                </LayoutView>
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <div class="glass-panel not-found-block">
+                <h2>404 &mdash; Lost in the void</h2>
+                <p>This nebula doesn't exist. Let's get you back to the gallery.</p>
+                <a class="btn btn-primary" href="/">Back home</a>
+            </div>
+        </LayoutView>
+    </NotFound>
+</Router>

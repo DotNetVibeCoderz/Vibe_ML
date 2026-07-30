@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SplatStudio.Web</RootNamespace>
+    <UserSecretsId>splatstudio-web-secrets</UserSecretsId>
+    <!-- Smaller, faster startup; trims dev-only diagnostics from the published output. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SplatStudio.Application\SplatStudio.Application.csproj" />
+    <ProjectReference Include="..\SplatStudio.Domain\SplatStudio.Domain.csproj" />
+    <ProjectReference Include="..\SplatStudio.Infrastructure\SplatStudio.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.ResponseCompression" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Generated/sample data shipped alongside the app; not all of these
+         binaries need to be tracked under wwwroot's default static-file glob. -->
+    <Content Update="wwwroot\sample-data\**" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

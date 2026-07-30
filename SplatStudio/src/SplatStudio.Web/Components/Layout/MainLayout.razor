@@ -1,0 +1,20 @@
+@inherits LayoutComponentBase
+
+<div class="app-shell">
+    <div class="aurora-backdrop" aria-hidden="true">
+        <span class="blob blob-purple"></span>
+        <span class="blob blob-cyan"></span>
+        <span class="blob blob-coral"></span>
+        <span class="starfield"></span>
+    </div>
+
+    <NavMenu />
+
+    <main class="app-main">
+        @Body
+    </main>
+
+    <footer class="app-footer">
+        <p>SplatStudio &mdash; built with .NET 8 Blazor Server. Every splat is generated offline, no GPU required.</p>
+    </footer>
+</div>

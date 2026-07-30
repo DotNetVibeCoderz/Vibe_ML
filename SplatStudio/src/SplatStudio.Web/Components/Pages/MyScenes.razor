@@ -1,0 +1,140 @@
+@page "/my-scenes"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using SplatStudio.Infrastructure.Data
+@inject ApplicationDbContext Db
+@inject IStorageService Storage
+@inject ISceneUpdateNotifier Notifier
+@implements IAsyncDisposable
+
+<PageTitle>My Scenes &mdash; SplatStudio</PageTitle>
+
+<section class="page-section">
+    <div class="gallery-header">
+        <h1>My scenes</h1>
+        <a class="btn btn-primary btn-sm" href="upload">+ New upload</a>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading&hellip;</p>
+    }
+    else if (_scenes.Count == 0)
+    {
+        <div class="glass-panel empty-state">
+            <p>You haven't uploaded anything yet. <a href="upload">Create your first splat scene</a>.</p>
+        </div>
+    }
+    else
+    {
+        <div class="my-scenes-list">
+            @foreach (var scene in _scenes)
+            {
+                <div class="glass-panel my-scene-row">
+                    <a class="my-scene-thumb" href="@($"scenes/{scene.Id}")">
+                        @if (_thumbUrls.TryGetValue(scene.Id, out var url))
+                        {
+                            <img src="@url" alt="@scene.Title" />
+                        }
+                    </a>
+                    <div class="my-scene-details">
+                        <a class="my-scene-title" href="@($"scenes/{scene.Id}")">@scene.Title</a>
+                        <span class="scene-card-status status-@scene.Status.ToString().ToLowerInvariant()">@scene.Status</span>
+                        <span class="muted">@scene.PointCount.ToString("N0") pts &middot; @scene.ViewCount views &middot; @scene.Comments.Count comments</span>
+                    </div>
+                    <div class="my-scene-actions">
+                        <label class="visibility-toggle">
+                            <input type="checkbox" checked="@scene.IsPublic" @onchange="@(e => ToggleVisibilityAsync(scene, (bool)e.Value!))" />
+                            Public
+                        </label>
+                        <button class="btn btn-ghost btn-sm" type="button" @onclick="() => DeleteAsync(scene)">Delete</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private List<SplatScene> _scenes = new();
+    private Dictionary<Guid, string> _thumbUrls = new();
+    private bool _loading = true;
+    private string? _userId;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthStateTask is not null)
+        {
+            var authState = await AuthStateTask;
+            _userId = authState.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        }
+
+        await LoadAsync();
+        Notifier.SceneUpdated += OnSceneUpdatedAsync;
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_userId is null) { _loading = false; return; }
+
+        _loading = true;
+        _scenes = await Db.SplatScenes
+            .Include(s => s.ImageAsset)
+            .Include(s => s.Comments)
+            .Where(s => s.UserId == _userId)
+            .OrderByDescending(s => s.CreatedAtUtc)
+            .ToListAsync();
+
+        _thumbUrls.Clear();
+        foreach (var scene in _scenes)
+        {
+            var key = scene.ImageAsset?.ThumbnailStorageKey;
+            if (!string.IsNullOrEmpty(key))
+                _thumbUrls[scene.Id] = await Storage.GetPublicUrlAsync(key);
+        }
+
+        _loading = false;
+    }
+
+    private async Task OnSceneUpdatedAsync(Guid sceneId)
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task ToggleVisibilityAsync(SplatScene scene, bool isPublic)
+    {
+        scene.IsPublic = isPublic;
+        await Db.SaveChangesAsync();
+    }
+
+    private async Task DeleteAsync(SplatScene scene)
+    {
+        if (scene.ImageAsset is not null)
+        {
+            await Storage.DeleteAsync(scene.ImageAsset.StorageKey);
+            if (!string.IsNullOrEmpty(scene.ImageAsset.ThumbnailStorageKey))
+                await Storage.DeleteAsync(scene.ImageAsset.ThumbnailStorageKey);
+            Db.ImageAssets.Remove(scene.ImageAsset);
+        }
+        if (!string.IsNullOrEmpty(scene.SplatStorageKey))
+            await Storage.DeleteAsync(scene.SplatStorageKey);
+
+        Db.SplatScenes.Remove(scene);
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Notifier.SceneUpdated -= OnSceneUpdatedAsync;
+        return ValueTask.CompletedTask;
+    }
+}

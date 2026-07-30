@@ -1,0 +1,27 @@
+@using Microsoft.AspNetCore.Components.Web
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <base href="/" />
+    <title>SplatStudio &mdash; Image to 3D Gaussian Splats</title>
+    <meta name="description" content="Turn a single photo into an orbitable 3D Gaussian-splat point cloud, right in your browser." />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B0E1A'/%3E%3Ccircle cx='12' cy='13' r='6' fill='%236E56CF' fill-opacity='0.85'/%3E%3Ccircle cx='20' cy='19' r='5' fill='%234FD1C5' fill-opacity='0.85'/%3E%3C/svg%3E" />
+
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+<body>
+    <Routes @rendermode="InteractiveServer" />
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/128.0.0/three.min.js"></script>
+    <script src="js/splat-viewer.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

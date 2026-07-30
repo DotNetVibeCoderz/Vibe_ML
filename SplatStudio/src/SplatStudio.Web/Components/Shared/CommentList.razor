@@ -1,0 +1,54 @@
+@* Displays a scene's comments, newest first, with an optional add-comment
+   form for authenticated users. The parent owns persistence — this
+   component only raises OnAddComment and clears its own input on success. *@
+
+<div class="comment-list">
+    <h3 class="comment-list-heading">Comments (@Comments.Count)</h3>
+
+    @if (CanComment)
+    {
+        <div class="comment-form">
+            <textarea @bind="_draft" @bind:event="oninput" maxlength="1000" rows="2"
+                      placeholder="Share your thoughts about this scene&hellip;"></textarea>
+            <button class="btn btn-secondary btn-sm" type="button" disabled="@string.IsNullOrWhiteSpace(_draft)" @onclick="Submit">
+                Post comment
+            </button>
+        </div>
+    }
+
+    @if (Comments.Count == 0)
+    {
+        <p class="comment-empty">No comments yet &mdash; be the first to say something.</p>
+    }
+    else
+    {
+        <ul class="comment-items">
+            @foreach (var comment in Comments.OrderByDescending(c => c.CreatedAtUtc))
+            {
+                <li class="comment-item">
+                    <div class="comment-item-header">
+                        <span class="comment-author">@comment.AuthorDisplayName</span>
+                        <span class="comment-date">@comment.CreatedAtUtc.ToLocalTime().ToString("d MMM yyyy, HH:mm")</span>
+                    </div>
+                    <p class="comment-content">@comment.Content</p>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<Comment> Comments { get; set; } = new();
+    [Parameter] public bool CanComment { get; set; }
+    [Parameter] public EventCallback<string> OnAddComment { get; set; }
+
+    private string _draft = string.Empty;
+
+    private async Task Submit()
+    {
+        var text = _draft.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        await OnAddComment.InvokeAsync(text);
+        _draft = string.Empty;
+    }
+}

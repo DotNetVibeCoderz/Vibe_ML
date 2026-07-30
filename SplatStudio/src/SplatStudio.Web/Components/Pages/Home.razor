@@ -1,0 +1,103 @@
+@page "/"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using SplatStudio.Infrastructure.Data
+@inject ApplicationDbContext Db
+@inject IStorageService Storage
+@inject ISceneUpdateNotifier Notifier
+@implements IAsyncDisposable
+
+<PageTitle>SplatStudio &mdash; Gallery</PageTitle>
+
+<section class="hero">
+    <h1>Turn one photo into a world you can orbit</h1>
+    <p class="hero-sub">
+        Upload an image, SplatStudio bakes it into a 3D Gaussian-splat point cloud,
+        and you fly around it right in the browser &mdash; no GPU, no plugins.
+    </p>
+    <div class="hero-actions">
+        <a class="btn btn-primary" href="upload">Upload an image</a>
+        <a class="btn btn-ghost" href="#gallery">Browse the gallery &darr;</a>
+    </div>
+</section>
+
+<section id="gallery" class="gallery-section">
+    <div class="gallery-header">
+        <h2>Constellation gallery</h2>
+        @if (_loading)
+        {
+            <span class="muted">loading&hellip;</span>
+        }
+        else
+        {
+            <span class="muted">@_scenes.Count scenes</span>
+        }
+    </div>
+
+    @if (!_loading && _scenes.Count == 0)
+    {
+        <div class="glass-panel empty-state">
+            <p>No public scenes yet. Be the first to <a href="upload">upload one</a>.</p>
+        </div>
+    }
+    else
+    {
+        <div class="gallery-grid">
+            @foreach (var scene in _scenes)
+            {
+                <SceneCard Scene="scene" ThumbnailUrl="@_thumbUrls.GetValueOrDefault(scene.Id)" />
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private List<SplatScene> _scenes = new();
+    private Dictionary<Guid, string> _thumbUrls = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        Notifier.SceneUpdated += OnSceneUpdatedAsync;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _scenes = await Db.SplatScenes
+            .AsNoTracking()
+            .Include(s => s.ImageAsset)
+            .Include(s => s.Ratings)
+            .Include(s => s.Comments)
+            .Where(s => s.IsPublic && s.Status == SplatStatus.Completed)
+            .OrderByDescending(s => s.CreatedAtUtc)
+            .Take(60)
+            .ToListAsync();
+
+        _thumbUrls.Clear();
+        foreach (var scene in _scenes)
+        {
+            var key = scene.ImageAsset?.ThumbnailStorageKey;
+            if (!string.IsNullOrEmpty(key))
+                _thumbUrls[scene.Id] = await Storage.GetPublicUrlAsync(key);
+        }
+
+        _loading = false;
+    }
+
+    private async Task OnSceneUpdatedAsync(Guid sceneId)
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Notifier.SceneUpdated -= OnSceneUpdatedAsync;
+        return ValueTask.CompletedTask;
+    }
+}

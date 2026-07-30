@@ -1,0 +1,209 @@
+@page "/profile"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using SplatStudio.Infrastructure.Data
+@inject ApplicationDbContext Db
+@inject IStorageService Storage
+@inject IImageProcessingService ImageProcessor
+@inject UserManager<ApplicationUser> UserManager
+@inject ILogger<Profile> Logger
+
+<PageTitle>Profile &mdash; SplatStudio</PageTitle>
+
+<section class="page-section profile-section">
+    <div class="glass-panel form-panel">
+        <h1>Your profile</h1>
+
+        @if (_user is null)
+        {
+            <p class="muted">Loading&hellip;</p>
+        }
+        else
+        {
+            <div class="profile-avatar-row">
+                @if (_avatarUrl is not null)
+                {
+                    <img class="profile-avatar" src="@_avatarUrl" alt="@_user.DisplayName" />
+                }
+                else
+                {
+                    <div class="profile-avatar profile-avatar-placeholder" aria-hidden="true">@(_user.DisplayName?.FirstOrDefault().ToString().ToUpperInvariant())</div>
+                }
+                <div>
+                    <InputFile OnChange="OnAvatarSelectedAsync" accept=".jpg,.jpeg,.png,.webp" />
+                    @if (_avatarError is not null)
+                    {
+                        <p class="form-error">@_avatarError</p>
+                    }
+                </div>
+            </div>
+
+            <EditForm Model="_profileForm" OnValidSubmit="SaveProfileAsync" FormName="profile-form">
+                <DataAnnotationsValidator />
+                <label class="field-label" for="displayName">Display name</label>
+                <InputText id="displayName" class="text-input" @bind-Value="_profileForm.DisplayName" maxlength="80" />
+
+                <label class="field-label" for="bio">Bio</label>
+                <InputTextArea id="bio" class="text-input" @bind-Value="_profileForm.Bio" rows="3" maxlength="300" />
+
+                <button class="btn btn-primary" type="submit">Save profile</button>
+                @if (_profileSaved)
+                {
+                    <span class="form-success">Saved.</span>
+                }
+            </EditForm>
+        }
+    </div>
+
+    <div class="glass-panel form-panel">
+        <h2>Change password</h2>
+        <EditForm Model="_passwordForm" OnValidSubmit="ChangePasswordAsync" FormName="password-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <label class="field-label" for="currentPassword">Current password</label>
+            <InputText id="currentPassword" type="password" class="text-input" @bind-Value="_passwordForm.CurrentPassword" />
+
+            <label class="field-label" for="newPassword">New password</label>
+            <InputText id="newPassword" type="password" class="text-input" @bind-Value="_passwordForm.NewPassword" />
+
+            <label class="field-label" for="confirmPassword">Confirm new password</label>
+            <InputText id="confirmPassword" type="password" class="text-input" @bind-Value="_passwordForm.ConfirmPassword" />
+
+            @if (_passwordError is not null)
+            {
+                <p class="form-error">@_passwordError</p>
+            }
+            @if (_passwordChanged)
+            {
+                <p class="form-success">Password changed.</p>
+            }
+
+            <button class="btn btn-secondary" type="submit">Change password</button>
+        </EditForm>
+    </div>
+</section>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private ApplicationUser? _user;
+    private string? _avatarUrl;
+    private string? _avatarError;
+    private bool _profileSaved;
+    private string? _passwordError;
+    private bool _passwordChanged;
+
+    private readonly ProfileFormModel _profileForm = new();
+    private readonly PasswordFormModel _passwordForm = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthStateTask is null) return;
+        var authState = await AuthStateTask;
+        var userId = authState.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is null) return;
+
+        _user = await Db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (_user is null) return;
+
+        _profileForm.DisplayName = _user.DisplayName;
+        _profileForm.Bio = _user.Bio;
+
+        if (!string.IsNullOrEmpty(_user.AvatarStorageKey))
+            _avatarUrl = await Storage.GetPublicUrlAsync(_user.AvatarStorageKey);
+    }
+
+    private async Task OnAvatarSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _avatarError = null;
+        if (_user is null) return;
+
+        var file = e.File;
+        const long maxBytes = 5 * 1024 * 1024;
+        if (file.Size > maxBytes)
+        {
+            _avatarError = "Image is too large (max 5 MB).";
+            return;
+        }
+
+        try
+        {
+            using var ms = new MemoryStream();
+            await using (var stream = file.OpenReadStream(maxBytes))
+            {
+                await stream.CopyToAsync(ms);
+            }
+            ms.Position = 0;
+            var processed = await ImageProcessor.ProcessUploadAsync(ms, thumbnailMaxDimension: 256);
+
+            var key = $"avatars/{_user.Id}/{Guid.NewGuid()}.jpg";
+            using var thumbStream = new MemoryStream(processed.ThumbnailBytes);
+            await Storage.SaveAsync(key, thumbStream, processed.ThumbnailContentType);
+
+            if (!string.IsNullOrEmpty(_user.AvatarStorageKey))
+                await Storage.DeleteAsync(_user.AvatarStorageKey);
+
+            _user.AvatarStorageKey = key;
+            await Db.SaveChangesAsync();
+            _avatarUrl = await Storage.GetPublicUrlAsync(key);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Avatar upload failed");
+            _avatarError = "Could not process that image.";
+        }
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        if (_user is null) return;
+        _user.DisplayName = _profileForm.DisplayName;
+        _user.Bio = _profileForm.Bio;
+        await Db.SaveChangesAsync();
+        _profileSaved = true;
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        _passwordError = null;
+        _passwordChanged = false;
+        if (_user is null) return;
+
+        if (_passwordForm.NewPassword != _passwordForm.ConfirmPassword)
+        {
+            _passwordError = "New password and confirmation do not match.";
+            return;
+        }
+
+        var result = await UserManager.ChangePasswordAsync(_user, _passwordForm.CurrentPassword, _passwordForm.NewPassword);
+        if (result.Succeeded)
+        {
+            _passwordChanged = true;
+            _passwordForm.CurrentPassword = _passwordForm.NewPassword = _passwordForm.ConfirmPassword = string.Empty;
+        }
+        else
+        {
+            _passwordError = string.Join(" ", result.Errors.Select(e => e.Description));
+        }
+    }
+
+    private class ProfileFormModel
+    {
+        [StringLength(80)]
+        public string DisplayName { get; set; } = string.Empty;
+        [StringLength(300)]
+        public string? Bio { get; set; }
+    }
+
+    private class PasswordFormModel
+    {
+        [Required] public string CurrentPassword { get; set; } = string.Empty;
+        [Required, StringLength(100, MinimumLength = 8)] public string NewPassword { get; set; } = string.Empty;
+        [Required] public string ConfirmPassword { get; set; } = string.Empty;
+    }
+}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>@ViewData["Title"] &mdash; SplatStudio</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="~/css/app.css" />
+</head>
+<body>
+    <div class="app-shell">
+        <div class="aurora-backdrop" aria-hidden="true">
+            <span class="blob blob-purple"></span>
+            <span class="blob blob-cyan"></span>
+            <span class="blob blob-coral"></span>
+            <span class="starfield"></span>
+        </div>
+
+        <nav class="navbar glass-panel">
+            <a class="brand" href="~/">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-text">SplatStudio</span>
+            </a>
+        </nav>
+
+        <main class="app-main account-main">
+            <div class="glass-panel form-panel account-panel">
+                @RenderBody()
+            </div>
+        </main>
+
+        <footer class="app-footer">
+            <p>SplatStudio &mdash; built with .NET 8 Blazor Server.</p>
+        </footer>
+    </div>
+</body>
+</html>

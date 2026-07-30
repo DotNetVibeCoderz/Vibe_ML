@@ -1,0 +1,29 @@
+@page
+@model SplatStudio.Web.Pages.Account.RegisterModel
+@{ ViewData["Title"] = "Create account"; }
+
+<h1>Create your account</h1>
+<p class="muted">Already have one? <a href="Login">Sign in</a>.</p>
+
+<form method="post">
+    @Html.AntiForgeryToken()
+    <div asp-validation-summary="All" class="form-error"></div>
+
+    <label class="field-label" asp-for="Input.DisplayName">Display name</label>
+    <input asp-for="Input.DisplayName" class="text-input" autocomplete="nickname" />
+    <span asp-validation-for="Input.DisplayName" class="form-error"></span>
+
+    <label class="field-label" asp-for="Input.Email">Email</label>
+    <input asp-for="Input.Email" class="text-input" autocomplete="username" />
+    <span asp-validation-for="Input.Email" class="form-error"></span>
+
+    <label class="field-label" asp-for="Input.Password">Password</label>
+    <input asp-for="Input.Password" class="text-input" autocomplete="new-password" />
+    <span asp-validation-for="Input.Password" class="form-error"></span>
+
+    <label class="field-label" asp-for="Input.ConfirmPassword">Confirm password</label>
+    <input asp-for="Input.ConfirmPassword" class="text-input" autocomplete="new-password" />
+    <span asp-validation-for="Input.ConfirmPassword" class="form-error"></span>
+
+    <button class="btn btn-primary" type="submit">Create account</button>
+</form>

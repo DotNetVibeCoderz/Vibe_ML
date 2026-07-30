@@ -1,0 +1,72 @@
+@* Renders a 1-5 star indicator. In display mode it shows a (possibly
+   fractional) average; in interactive mode it lets the current user submit
+   their own 1-5 rating via OnRate. *@
+
+<div class="star-rating @(Interactive ? "star-rating-interactive" : "")" role="@(Interactive ? "radiogroup" : "img")" aria-label="@AriaLabel">
+    @for (var i = 1; i <= 5; i++)
+    {
+        var star = i;
+        var filled = star <= Math.Round(DisplayValue);
+        @if (Interactive)
+        {
+            <button type="button"
+                    class="star-btn @(filled ? "star-filled" : "")"
+                    aria-label="Rate @star out of 5"
+                    @onmouseenter="() => _hover = star"
+                    @onmouseleave="() => _hover = 0"
+                    @onclick="() => Rate(star)">
+                ★
+            </button>
+        }
+        else
+        {
+            <span class="star-static @(filled ? "star-filled" : "")">★</span>
+        }
+    }
+
+    @if (!Interactive)
+    {
+        <span class="star-rating-meta">
+            @Value.ToString("0.0") @if (Count > 0)
+            {
+                <text>(@Count)</text>
+            }
+            else
+            {
+                <text>&middot; no ratings yet</text>
+            }
+        </span>
+    }
+    else if (CurrentUserRating is > 0)
+    {
+        <span class="star-rating-meta">you rated @CurrentUserRating</span>
+    }
+</div>
+
+@code {
+    /// <summary>Average rating to show in display (non-interactive) mode.</summary>
+    [Parameter] public double Value { get; set; }
+    /// <summary>Number of ratings backing the average, shown next to it.</summary>
+    [Parameter] public int Count { get; set; }
+    /// <summary>If true, renders clickable stars and raises OnRate instead of a static display.</summary>
+    [Parameter] public bool Interactive { get; set; }
+    /// <summary>The signed-in user's existing rating for this scene, if any.</summary>
+    [Parameter] public int? CurrentUserRating { get; set; }
+    [Parameter] public EventCallback<int> OnRate { get; set; }
+
+    private int _hover;
+
+    private double DisplayValue => Interactive
+        ? (_hover > 0 ? _hover : CurrentUserRating ?? 0)
+        : Value;
+
+    private string AriaLabel => Interactive
+        ? "Rate this scene from 1 to 5 stars"
+        : $"Rated {Value:0.0} out of 5 stars";
+
+    private async Task Rate(int star)
+    {
+        if (!Interactive) return;
+        await OnRate.InvokeAsync(star);
+    }
+}

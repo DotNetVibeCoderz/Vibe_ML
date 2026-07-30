@@ -1,0 +1,50 @@
+@rendermode InteractiveServer
+@inject NavigationManager Nav
+
+<nav class="navbar glass-panel">
+    <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">SplatStudio</span>
+    </a>
+
+    <button class="nav-toggle" type="button" @onclick="ToggleMenu" aria-label="Toggle navigation">
+        <span></span><span></span><span></span>
+    </button>
+
+    <div class="nav-links @(_open ? "nav-links-open" : "")">
+        <NavLink href="/" Match="NavLinkMatch.All">Gallery</NavLink>
+        <AuthorizeView>
+            <Authorized>
+                <NavLink href="upload">Upload</NavLink>
+                <NavLink href="my-scenes">My Scenes</NavLink>
+                <NavLink href="profile">Profile</NavLink>
+                <form method="post" action="Account/Logout" class="nav-logout-form">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="ReturnUrl" value="@_currentUrl" />
+                    <button type="submit" class="nav-link-button">Sign out</button>
+                </form>
+                <span class="nav-user" title="@context.User.Identity?.Name">
+                    @(context.User.Identity?.Name)
+                </span>
+            </Authorized>
+            <NotAuthorized>
+                <NavLink href="Account/Login">Sign in</NavLink>
+                <a href="Account/Register" class="btn btn-primary btn-sm">Get started</a>
+            </NotAuthorized>
+        </AuthorizeView>
+    </div>
+</nav>
+
+@code {
+    private bool _open;
+    private string _currentUrl = "/";
+
+    protected override void OnInitialized()
+    {
+        _currentUrl = Nav.ToBaseRelativePath(Nav.Uri);
+        if (string.IsNullOrEmpty(_currentUrl)) _currentUrl = "/";
+        else _currentUrl = "/" + _currentUrl;
+    }
+
+    private void ToggleMenu() => _open = !_open;
+}
