@@ -95,6 +95,12 @@
         if (_userId is null) { _loading = false; return; }
 
         _loading = true;
+
+        // Same reason as SceneViewer: this page tracks scenes (it toggles IsPublic), so a
+        // re-query would return the stale tracked instances and conversion progress would
+        // never appear.
+        Db.ChangeTracker.Clear();
+
         _scenes = await Db.SplatScenes
             .Include(s => s.ImageAsset)
             .Include(s => s.Comments)
@@ -137,8 +143,13 @@
                 await Storage.DeleteAsync(scene.ImageAsset.ThumbnailStorageKey);
             Db.ImageAssets.Remove(scene.ImageAsset);
         }
+        // Both keys are cleared, not just the one matching ArtifactKind: a scene that was
+        // retried in a different mode can have written under either prefix, and EF cascade
+        // only cleans the database.
         if (!string.IsNullOrEmpty(scene.SplatStorageKey))
             await Storage.DeleteAsync(scene.SplatStorageKey);
+        if (!string.IsNullOrEmpty(scene.MeshStorageKey))
+            await Storage.DeleteAsync(scene.MeshStorageKey);
 
         Db.SplatScenes.Remove(scene);
         await Db.SaveChangesAsync();

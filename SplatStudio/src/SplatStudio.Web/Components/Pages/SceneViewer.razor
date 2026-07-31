@@ -31,7 +31,7 @@ else
             {
                 <div class="viewer-canvas-wrap">
                     <div @ref="_viewerContainer" class="viewer-canvas" role="img"
-                         aria-label="@($"3D point cloud of {_scene.Title}. Drag to orbit.")"></div>
+                         aria-label="@($"{(IsMesh ? "3D model" : "3D point cloud")} of {_scene.Title}. Drag to orbit.")"></div>
                     <p class="viewer-hint">Drag to orbit &middot; scroll to zoom</p>
                 </div>
             }
@@ -71,8 +71,14 @@ else
             @* Same readout as the hero, so density and cost read consistently everywhere. *@
             <div class="glass-panel scene-telemetry">
                 <div class="telemetry-item">
-                    <span class="telemetry-label">Splats</span>
-                    <span class="telemetry-value is-near">@_scene.PointCount.ToString("N0")</span>
+                    <span class="telemetry-label">Mode</span>
+                    <span class="telemetry-value">@ModeLabel(_scene.Mode)</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">@(IsMesh ? "Model" : "Splats")</span>
+                    <span class="telemetry-value is-near">
+                        @(IsMesh ? "mesh (glTF)" : _scene.PointCount.ToString("N0"))
+                    </span>
                 </div>
                 <div class="telemetry-item">
                     <span class="telemetry-label">Baked in</span>
@@ -86,6 +92,18 @@ else
                     <span class="telemetry-label">Views</span>
                     <span class="telemetry-value">@_scene.ViewCount.ToString("N0")</span>
                 </div>
+
+                @* Mesh scenes are ordinary glTF geometry, so the file is worth having on its
+                   own — the point of picking this mode over a point cloud is being able to
+                   take the result into Blender or a game engine. *@
+                @if (IsMesh && _artifactUrl is not null)
+                {
+                    <div class="telemetry-download">
+                        <a class="btn btn-secondary btn-sm" href="@_artifactUrl"
+                           download="@DownloadFileName">Download .glb</a>
+                        <span class="muted small">glTF binary &mdash; opens in Blender and most 3D tools.</span>
+                    </div>
+                }
             </div>
 
             <div class="glass-panel rating-panel">
@@ -118,15 +136,51 @@ else
     private string? _displayName;
     private ElementReference _viewerContainer;
     private bool _viewerInitialized;
-    private string? _splatUrl;
+    private string? _artifactUrl;
     private string? _ownerName;
     private string? _ownerAvatarUrl;
+
+    private bool IsMesh => _scene?.ArtifactKind == ConversionArtifactKind.Mesh;
+
+    /// <summary>The JS module that can render this scene's artifact kind.</summary>
+    private string ViewerNamespace => IsMesh ? "meshViewer" : "splatViewer";
+
+    /// <summary>
+    /// What the downloaded file lands as. Derived from the title so a folder of downloads
+    /// stays readable, with anything a filesystem would object to stripped out.
+    /// </summary>
+    private string DownloadFileName
+    {
+        get
+        {
+            var title = _scene?.Title ?? "scene";
+            var safe = new string(title
+                .Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' or ' ' ? c : '-')
+                .ToArray())
+                .Trim();
+
+            // Collapse the runs of dashes/spaces the substitution above can leave behind.
+            safe = System.Text.RegularExpressions.Regex.Replace(safe, @"[\s-]+", "-").Trim('-');
+
+            return string.IsNullOrEmpty(safe) ? "scene.glb" : $"{safe}.glb";
+        }
+    }
 
     private static string EngineLabel(SplatEngineType engine) => engine switch
     {
         SplatEngineType.Gpu => "GPU",
         SplatEngineType.ExternalApi => "External",
+        SplatEngineType.HostedPhotoreal => "Hosted 3DGS",
+        SplatEngineType.HostedMesh => "Hosted mesh",
+        SplatEngineType.SampleData => "Sample data",
         _ => "CPU"
+    };
+
+    private static string ModeLabel(ConversionMode mode) => mode switch
+    {
+        ConversionMode.PhotorealSplat => "Photoreal",
+        ConversionMode.Mesh => "3D object",
+        _ => "Depth splat"
     };
 
     protected override async Task OnInitializedAsync()
@@ -150,6 +204,13 @@ else
     private async Task LoadAsync(bool incrementView)
     {
         _loading = true;
+
+        // This component's DbContext tracks the scene (it increments ViewCount), and EF's
+        // identity resolution hands back that tracked instance on re-query instead of the
+        // current row. Without clearing it, the background worker's transition to Completed
+        // never becomes visible and the page sits on "Queued" forever.
+        Db.ChangeTracker.Clear();
+
         _scene = await Db.SplatScenes
             .Include(s => s.ImageAsset)
             .Include(s => s.Comments)
@@ -166,9 +227,10 @@ else
                 await Db.SaveChangesAsync();
             }
 
-            if (_scene.Status == SplatStatus.Completed && !string.IsNullOrEmpty(_scene.SplatStorageKey))
+            // OutputStorageKey resolves to whichever of the two keys this scene actually used.
+            if (_scene.Status == SplatStatus.Completed && !string.IsNullOrEmpty(_scene.OutputStorageKey))
             {
-                _splatUrl = await Storage.GetPublicUrlAsync(_scene.SplatStorageKey);
+                _artifactUrl = await Storage.GetPublicUrlAsync(_scene.OutputStorageKey);
             }
 
             var owner = await Db.Users
@@ -187,13 +249,13 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_viewerInitialized && _scene?.Status == SplatStatus.Completed && _splatUrl is not null)
+        if (!_viewerInitialized && _scene?.Status == SplatStatus.Completed && _artifactUrl is not null)
         {
             // The container only exists once the Completed branch above has
             // rendered, so this check runs on every render until it succeeds.
             try
             {
-                await JS.InvokeVoidAsync("splatViewer.init", _viewerContainer, _splatUrl);
+                await JS.InvokeVoidAsync($"{ViewerNamespace}.init", _viewerContainer, _artifactUrl, null);
                 _viewerInitialized = true;
             }
             catch (JSException)
@@ -251,7 +313,7 @@ else
         Notifier.SceneUpdated -= OnSceneUpdatedAsync;
         if (_viewerInitialized)
         {
-            try { await JS.InvokeVoidAsync("splatViewer.dispose", _viewerContainer); }
+            try { await JS.InvokeVoidAsync($"{ViewerNamespace}.dispose", _viewerContainer); }
             catch { /* circuit may already be tearing down */ }
         }
     }

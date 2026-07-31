@@ -142,8 +142,13 @@
         // Feature whatever the community rated highest, not a hand-picked favourite.
         // AverageRating is computed rather than mapped, so this ordering happens in
         // memory over the page of scenes already loaded above.
+        //
+        // Restricted to point clouds: the hero's headline is about splats, and the mesh
+        // viewer would be a second renderer loaded on the busiest page for an artifact the
+        // copy beside it does not describe.
         var hero = _scenes
-            .Where(s => !string.IsNullOrEmpty(s.SplatStorageKey))
+            .Where(s => s.ArtifactKind == ConversionArtifactKind.Splat
+                        && !string.IsNullOrEmpty(s.SplatStorageKey))
             .OrderByDescending(s => s.AverageRating)
             .ThenByDescending(s => s.Ratings.Count)
             .ThenByDescending(s => s.PointCount)

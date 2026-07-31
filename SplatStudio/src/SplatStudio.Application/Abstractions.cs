@@ -57,6 +57,67 @@ public interface IGaussianSplatEngine
 }
 
 /// <summary>
+/// One conversion's output, whatever kind of artifact it is. Carries the bytes plus
+/// enough metadata for the pipeline to store them without knowing which engine ran.
+/// </summary>
+/// <param name="PointCount">
+/// Splat count for point clouds. Meshes report 0 — a triangle count would be a different
+/// measure and the UI labels it accordingly.
+/// </param>
+public record ConversionOutput(
+    bool Success,
+    byte[]? Content,
+    ConversionArtifactKind Kind,
+    string FileExtension,
+    string ContentType,
+    int PointCount,
+    SplatEngineType Engine,
+    string? ErrorMessage)
+{
+    public static ConversionOutput Failed(string error, SplatEngineType engine) =>
+        new(false, null, ConversionArtifactKind.Splat, ".splat", "application/octet-stream", 0, engine, error);
+}
+
+/// <summary>
+/// One selectable conversion mode, as the upload page sees it. Each implementation owns
+/// exactly one <see cref="ConversionMode"/>.
+///
+/// Availability is part of the port on purpose: the hosted modes need credentials that a
+/// given deployment may not have, and the upload page shows those modes disabled with the
+/// reason rather than accepting an upload it cannot fulfil.
+/// </summary>
+public interface IConversionEngine
+{
+    ConversionMode Mode { get; }
+
+    /// <summary>Short label for the upload page, e.g. "Photorealistic splat".</summary>
+    string DisplayName { get; }
+
+    /// <summary>One sentence on what this mode actually does, including its cost/quality trade-off.</summary>
+    string Description { get; }
+
+    /// <summary>False when this deployment cannot run this mode (usually missing configuration).</summary>
+    bool IsAvailable { get; }
+
+    /// <summary>Why it is unavailable, phrased for whoever has to fix it. Null when available.</summary>
+    string? UnavailableReason { get; }
+
+    Task<ConversionOutput> ConvertAsync(Stream imageStream, CancellationToken ct = default);
+}
+
+/// <summary>
+/// The set of conversion modes this deployment knows about. The upload page enumerates it to
+/// build its picker; the background worker resolves one entry by the mode the scene recorded.
+/// </summary>
+public interface IConversionEngineCatalog
+{
+    IReadOnlyList<IConversionEngine> Engines { get; }
+
+    /// <summary>Null when the mode has no registered engine at all.</summary>
+    IConversionEngine? Resolve(ConversionMode mode);
+}
+
+/// <summary>
 /// Lightweight in-process work queue that decouples the (fast) HTTP upload
 /// request from the (slower) splat generation step. Backed by a bounded
 /// <see cref="System.Threading.Channels.Channel{T}"/> in Infrastructure and

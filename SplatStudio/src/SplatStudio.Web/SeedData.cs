@@ -105,6 +105,37 @@ public static class SeedData
         [
             (4, "Rolling surface, no subject. Reads like terrain."),
             (2, "Turn the point budget up on this one, it rewards density.")
+        ],
+
+        // Mesh scenes. The comments stay honest about these being demo geometry rather than
+        // pretending a model produced them from a photo.
+        ["torus-knot"] =
+        [
+            (2, "Good stress test for the viewer — there is no angle where this reads as flat."),
+            (5, "Worth noting these mesh samples are drawn parametrically, not generated. They exist to show the glTF path works.")
+        ],
+        ["vase"] =
+        [
+            (1, "This is the silhouette I'd expect back from a real image-to-3D run on a studio shot."),
+            (3, "The lathe profile does a lot of work. Nice one.")
+        ],
+        ["gem"] =
+        [
+            (3, "Per-face normals, so the facets stay crisp instead of smoothing into a ball."),
+            (0, "Zoom in — the flat shading survives right down to the individual triangles.")
+        ],
+        ["shell"] =
+        [
+            (4, "The self-occlusion near the centre is the bit worth orbiting around."),
+            (2, "Depth sorting is free here because it's a mesh, not splats.")
+        ],
+        ["terrain"] =
+        [
+            (4, "Closest thing in the gallery to what a real scan of landscape looks like.")
+        ],
+        ["mobius"] =
+        [
+            (2, "Rendered double-sided, which is the whole point — cull the back faces and half of it disappears.")
         ]
     };
 
@@ -230,15 +261,116 @@ public static class SeedData
 
         await db.SaveChangesAsync();
 
+        // Splat scenes go through the real pipeline; mesh scenes cannot, so they are written
+        // straight to storage. See SeedMeshScenesAsync for why.
+        var meshScenes = await SeedMeshScenesAsync(db, storage, created, logger);
+        foreach (var (key, scene) in meshScenes) scenesByKey[key] = scene;
+
         SeedDiscussion(db, created, scenesByKey);
         await db.SaveChangesAsync();
 
-        foreach (var scene in scenesByKey.Values)
+        // Only the splat scenes need converting — the mesh ones are already Completed.
+        var queued = 0;
+        foreach (var scene in scenesByKey.Values.Where(s => s.Status == SplatStatus.Queued))
+        {
             queue.QueueSceneConversion(scene.Id);
+            queued++;
+        }
 
         logger.LogInformation(
-            "Seed: created {Users} users and queued {Scenes} sample scenes for conversion.",
-            created.Count, scenesByKey.Count);
+            "Seed: created {Users} users, {Meshes} sample meshes, and queued {Queued} scenes for conversion.",
+            created.Count, meshScenes.Count, queued);
+    }
+
+    /// <summary>
+    /// Adds the sample mesh scenes.
+    ///
+    /// Unlike the splat scenes these do not go through the conversion queue: mode 3 has no
+    /// local engine, so with no hosted provider configured every one of them would fail and
+    /// the gallery would show nothing but errors on a fresh install. Writing the geometry
+    /// directly is the only way to demonstrate the mesh viewer out of the box.
+    ///
+    /// The trade-off is that they are not a smoke test of the hosted path, so they are
+    /// labelled <see cref="SplatEngineType.SampleData"/> rather than being passed off as
+    /// generated output.
+    /// </summary>
+    private static async Task<Dictionary<string, SplatScene>> SeedMeshScenesAsync(
+        ApplicationDbContext db,
+        IStorageService storage,
+        List<ApplicationUser> users,
+        ILogger logger)
+    {
+        var created = new Dictionary<string, SplatScene>();
+        var catalogue = SampleMeshFactory.Catalogue;
+
+        for (int i = 0; i < catalogue.Length; i++)
+        {
+            var recipe = catalogue[i];
+            // Offset the owner so mesh scenes don't all land on the same accounts the splat
+            // scenes did.
+            var owner = users[(i + 2) % users.Count];
+
+            byte[] glb, thumbnail;
+            try
+            {
+                var mesh = SampleMeshFactory.Build(recipe.Key);
+                glb = SampleMeshFactory.WriteGlb(mesh);
+                thumbnail = SampleMeshFactory.RenderThumbnail(mesh);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Seed: could not build sample mesh {Key}.", recipe.Key);
+                continue;
+            }
+
+            // SplatScene requires an ImageAsset, and in the real flow that is the photo the
+            // model was generated from. There is no source photo here, so the record carries
+            // the rendered thumbnail — which is what the gallery actually needs from it.
+            var imageAsset = new ImageAsset
+            {
+                UserId = owner.Id,
+                OriginalFileName = $"{recipe.Key}-preview.jpg",
+                ContentType = "image/jpeg",
+                SizeBytes = thumbnail.Length,
+                Width = 640,
+                Height = 640,
+                UploadedAtUtc = DateTime.UtcNow.AddDays(-catalogue.Length + i).AddHours(-i * 5)
+            };
+            imageAsset.StorageKey = $"images/{owner.Id}/{imageAsset.Id}.jpg";
+            imageAsset.ThumbnailStorageKey = $"thumbnails/{owner.Id}/{imageAsset.Id}.jpg";
+
+            using (var stream = new MemoryStream(thumbnail))
+                await storage.SaveAsync(imageAsset.StorageKey, stream, "image/jpeg");
+            using (var stream = new MemoryStream(thumbnail))
+                await storage.SaveAsync(imageAsset.ThumbnailStorageKey, stream, "image/jpeg");
+
+            var scene = new SplatScene
+            {
+                ImageAssetId = imageAsset.Id,
+                UserId = owner.Id,
+                Title = recipe.Title,
+                Description = recipe.Description,
+                IsPublic = true,
+                Mode = ConversionMode.Mesh,
+                ArtifactKind = ConversionArtifactKind.Mesh,
+                Engine = SplatEngineType.SampleData,
+                Status = SplatStatus.Completed,
+                CreatedAtUtc = imageAsset.UploadedAtUtc,
+                CompletedAtUtc = imageAsset.UploadedAtUtc,
+                ViewCount = 23 + (i * 71) % 300
+            };
+            scene.MeshStorageKey = $"meshes/{owner.Id}/{scene.Id}.glb";
+
+            using (var stream = new MemoryStream(glb))
+                await storage.SaveAsync(scene.MeshStorageKey, stream, "model/gltf-binary");
+
+            db.ImageAssets.Add(imageAsset);
+            db.SplatScenes.Add(scene);
+            created[recipe.Key] = scene;
+        }
+
+        await db.SaveChangesAsync();
+        return created;
     }
 
     /// <summary>

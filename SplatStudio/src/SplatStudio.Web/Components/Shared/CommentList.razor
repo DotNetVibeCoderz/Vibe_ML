@@ -8,8 +8,10 @@
     @if (CanComment)
     {
         <div class="comment-form">
+            @* A literal character, not "&hellip;" — Razor escapes entities inside attribute
+               values, so the named form would render to the user verbatim. *@
             <textarea @bind="_draft" @bind:event="oninput" maxlength="1000" rows="2"
-                      placeholder="Share your thoughts about this scene&hellip;"></textarea>
+                      placeholder="Share your thoughts about this scene…"></textarea>
             <button class="btn btn-secondary btn-sm" type="button" disabled="@string.IsNullOrWhiteSpace(_draft)" @onclick="Submit">
                 Post comment
             </button>

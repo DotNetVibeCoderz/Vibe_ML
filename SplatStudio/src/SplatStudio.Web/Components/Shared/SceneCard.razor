@@ -29,8 +29,10 @@
            scene comes from the same engine, so on a grid it would be a column of
            identical chips carrying no information. *@
         <span class="scene-card-points">
-            @Scene.PointCount.ToString("N0") splats@(Scene.ConversionMilliseconds > 0
-                ? $" · {Scene.ConversionMilliseconds} ms" : "")
+            @(Scene.ArtifactKind == ConversionArtifactKind.Mesh
+                ? "3D mesh"
+                : $"{Scene.PointCount:N0} splats")@(Scene.ConversionMilliseconds > 0
+                ? $" · {FormatDuration(Scene.ConversionMilliseconds)}" : "")
         </span>
 
         <div class="scene-card-footer">
@@ -43,4 +45,15 @@
 @code {
     [Parameter, EditorRequired] public SplatScene Scene { get; set; } = null!;
     [Parameter] public string? ThumbnailUrl { get; set; }
+
+    /// <summary>
+    /// Hosted conversions run for minutes, so raw milliseconds stop being readable. Local
+    /// ones finish in tens of milliseconds, where seconds would lose the interesting part.
+    /// </summary>
+    private static string FormatDuration(int milliseconds) => milliseconds switch
+    {
+        < 1000 => $"{milliseconds} ms",
+        < 60_000 => $"{milliseconds / 1000.0:0.#} s",
+        _ => $"{milliseconds / 60_000} min {milliseconds % 60_000 / 1000} s"
+    };
 }

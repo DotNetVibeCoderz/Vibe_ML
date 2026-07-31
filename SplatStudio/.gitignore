@@ -1,0 +1,4 @@
+# Runtime state, created on first run: the SQLite database, uploaded/generated media
+# and the file-based email outbox. Never source-controlled — deleting this directory is
+# the documented way to re-seed.
+src/SplatStudio.Web/App_Data/

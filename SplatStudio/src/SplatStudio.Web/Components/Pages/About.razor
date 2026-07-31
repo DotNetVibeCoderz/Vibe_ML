@@ -2,6 +2,7 @@
 @using SplatStudio.Infrastructure.Splatting
 @inject GpuSplatEngine Gpu
 @inject SplattingOptions Splatting
+@inject IConversionEngineCatalog Engines
 
 <PageTitle>How SplatStudio works</PageTitle>
 
@@ -21,12 +22,43 @@
     </p>
 
     <div class="callout">
-        SplatStudio does something smaller and honest about it: it estimates depth from
-        one image and builds a real, orbitable point cloud out of that estimate. Not
-        photogrammetry — closer to turning a photo into a snow globe.
+        SplatStudio's built-in mode does something smaller and honest about it: it estimates
+        depth from one image and builds a real, orbitable point cloud out of that estimate.
+        Not photogrammetry — closer to turning a photo into a snow globe.
     </div>
 
-    <h2>The estimate, step by step</h2>
+    <h2>Three ways to convert</h2>
+    <p>
+        The built-in mode is the only one that runs on this machine. The other two hand the
+        image to a hosted service running an actual generative 3D model, which costs money and
+        minutes but is not an approximation.
+    </p>
+
+    <div class="mode-summary">
+        @foreach (var engine in Engines.Engines)
+        {
+            <div class="mode-summary-row">
+                <div class="mode-summary-head">
+                    <span class="mode-summary-name">@engine.DisplayName</span>
+                    <span class="chip @(engine.IsAvailable ? "chip-gpu" : "")">
+                        @(engine.IsAvailable ? "available" : "not configured")
+                    </span>
+                </div>
+                <p class="muted small">@engine.Description</p>
+                @if (!engine.IsAvailable)
+                {
+                    <p class="mode-option-reason">@engine.UnavailableReason</p>
+                }
+            </div>
+        }
+    </div>
+
+    <p>
+        The third mode produces a textured mesh rather than a point cloud, so those scenes open
+        in a glTF viewer instead, and the file is ordinary geometry you can download and edit.
+    </p>
+
+    <h2>How the built-in estimate works, step by step</h2>
     <ul>
         <li>The image is downscaled to fit the splat budget (currently
             <span class="mono">@ActiveBudget.ToString("N0")</span> points).</li>
@@ -54,7 +86,7 @@
         photographed. The gallery deliberately keeps those cases in.
     </p>
 
-    <h2>Where it runs</h2>
+    <h2>Where the built-in mode runs</h2>
     <p>
         The depth field and the splat emission are the parallel part of the job, so they
         run as GPU compute kernels when a device is available and fall back to the CPU

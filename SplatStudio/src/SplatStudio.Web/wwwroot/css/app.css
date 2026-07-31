@@ -241,7 +241,8 @@ summary:focus-visible,
 }
 .nav-toggle span { width: 20px; height: 2px; background: var(--ink); border-radius: 2px; }
 
-.nav-links { display: flex; align-items: center; gap: 1.35rem; }
+/* Signed-in visitors see six items plus their address, so the row is tight by design. */
+.nav-links { display: flex; align-items: center; gap: 1.1rem; white-space: nowrap; }
 .nav-links a,
 .nav-link-button {
   color: var(--ink-2);
@@ -256,7 +257,11 @@ summary:focus-visible,
 .nav-links a:hover,
 .nav-link-button:hover { color: var(--ink); text-decoration: none; }
 .nav-links a.active { color: var(--ink); }
-.nav-logout-form { margin: 0; display: inline; }
+
+/* Sign-out has to be a real POST (see the auth notes), so the button is wrapped in a form.
+   inline-flex keeps that wrapper on the same line box as the plain links beside it. */
+.nav-logout-form { margin: 0; display: inline-flex; align-items: center; }
+.nav-link-button { line-height: inherit; }
 
 .nav-user {
   font-family: var(--font-mono);
@@ -655,6 +660,59 @@ input[type="file"]::file-selector-button {
   cursor: pointer;
 }
 
+/* ---- Conversion mode picker --------------------------------------------------- */
+
+.mode-picker {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.mode-picker legend { padding: 0; }
+
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.mode-option:hover { border-color: var(--edge-strong); }
+
+/* :has lets the selected card highlight without a second class on the server. Browsers
+   without it simply show the radio itself, which is still perfectly usable. */
+.mode-option:has(input:checked) {
+  border-color: var(--near);
+  background: rgba(255, 179, 92, 0.07);
+}
+.mode-option:has(input:focus-visible) { outline: 2px solid var(--near); outline-offset: 2px; }
+
+.mode-option input { margin-top: 0.3rem; accent-color: var(--near); flex-shrink: 0; }
+
+.mode-option-body { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.mode-option-head { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; }
+.mode-option-name { font-weight: 600; }
+.mode-option-desc { font-size: 0.85rem; color: var(--ink-2); }
+
+.mode-option-reason {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--near);
+}
+
+/* Disabled modes stay readable — they are documentation of what enabling them needs,
+   not dead weight. Only the interaction is removed. */
+.mode-option-disabled { cursor: not-allowed; opacity: 0.62; }
+.mode-option-disabled:hover { border-color: var(--edge); }
+
+.mode-timing-note { margin-top: 0.75rem; }
+
 .visibility-toggle {
   display: flex;
   align-items: center;
@@ -678,7 +736,10 @@ input[type="file"]::file-selector-button {
   display: block;
 }
 
-form button[type="submit"] { margin-top: 1.5rem; }
+/* Scoped to the panelled forms this spacing is meant for. As a bare `form button[type=submit]`
+   it also matched the navbar's sign-out button — which is a submit button in a form too — and
+   pushed it out of line with the rest of the nav row. */
+.form-panel button[type="submit"] { margin-top: 1.5rem; }
 
 .validation-message, .validation-errors { color: var(--bad); font-size: 0.85rem; }
 .validation-errors ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
@@ -765,6 +826,18 @@ form button[type="submit"] { margin-top: 1.5rem; }
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.9rem 1rem;
+}
+
+/* Spans both telemetry columns and is separated by a rule: it is an action, not a reading. */
+.telemetry-download {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.2rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--edge);
 }
 
 /* ---- Comments ----------------------------------------------------------------- */
@@ -866,6 +939,26 @@ form button[type="submit"] { margin-top: 1.5rem; }
 .prose h2 { margin-top: 2.5rem; }
 .prose ul { color: var(--ink-2); padding-left: 1.2rem; }
 .prose li { margin-bottom: 0.5rem; }
+
+.mode-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin: 1.5rem 0 2rem;
+}
+.mode-summary-row {
+  border-left: 2px solid var(--edge-strong);
+  padding-left: 1.1rem;
+}
+.mode-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.3rem;
+}
+.mode-summary-name { font-weight: 600; }
+.mode-summary-row p { margin-bottom: 0.25rem; }
 
 .callout {
   border-left: 2px solid var(--near);
