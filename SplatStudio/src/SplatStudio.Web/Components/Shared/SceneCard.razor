@@ -1,13 +1,12 @@
-@* A single floating glass card in the gallery's "constellation grid". Purely
-   presentational — the parent page resolves the thumbnail URL via
-   IStorageService and passes it in, so this component has no infrastructure
-   dependencies. *@
+@* One scene in the gallery grid. Purely presentational — the parent page resolves
+   the thumbnail URL via IStorageService and passes it in, so this component has no
+   infrastructure dependencies. *@
 
 <a class="scene-card glass-panel" href="@($"scenes/{Scene.Id}")">
     <div class="scene-card-thumb">
         @if (!string.IsNullOrEmpty(ThumbnailUrl))
         {
-            <img src="@ThumbnailUrl" alt="@Scene.Title" loading="lazy" />
+            <img src="@ThumbnailUrl" alt="" loading="lazy" />
         }
         else
         {
@@ -20,13 +19,25 @@
 
     <div class="scene-card-body">
         <h3 class="scene-card-title">@Scene.Title</h3>
+
         <div class="scene-card-meta">
             <StarRating Value="@Scene.AverageRating" Count="@Scene.Ratings.Count" />
-            <span class="scene-card-points" title="Gaussian splat count">@Scene.PointCount.ToString("N0") pts</span>
         </div>
+
+        @* Density and cost, because that is what this audience compares scenes on. The
+           engine badge lives on the detail page instead: in a normal deployment every
+           scene comes from the same engine, so on a grid it would be a column of
+           identical chips carrying no information. *@
+        <span class="scene-card-points">
+            @(Scene.ArtifactKind == ConversionArtifactKind.Mesh
+                ? "3D mesh"
+                : $"{Scene.PointCount:N0} splats")@(Scene.ConversionMilliseconds > 0
+                ? $" · {FormatDuration(Scene.ConversionMilliseconds)}" : "")
+        </span>
+
         <div class="scene-card-footer">
-            <span>@Scene.ViewCount views</span>
-            <span>@Scene.Comments.Count comments</span>
+            <span>@Scene.ViewCount.ToString("N0") @(Scene.ViewCount == 1 ? "view" : "views")</span>
+            <span>@Scene.Comments.Count @(Scene.Comments.Count == 1 ? "comment" : "comments")</span>
         </div>
     </div>
 </a>
@@ -34,4 +45,15 @@
 @code {
     [Parameter, EditorRequired] public SplatScene Scene { get; set; } = null!;
     [Parameter] public string? ThumbnailUrl { get; set; }
+
+    /// <summary>
+    /// Hosted conversions run for minutes, so raw milliseconds stop being readable. Local
+    /// ones finish in tens of milliseconds, where seconds would lose the interesting part.
+    /// </summary>
+    private static string FormatDuration(int milliseconds) => milliseconds switch
+    {
+        < 1000 => $"{milliseconds} ms",
+        < 60_000 => $"{milliseconds / 1000.0:0.#} s",
+        _ => $"{milliseconds / 60_000} min {milliseconds % 60_000 / 1000} s"
+    };
 }

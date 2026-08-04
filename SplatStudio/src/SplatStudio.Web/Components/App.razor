@@ -10,18 +10,28 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    @* Bricolage Grotesque carries the display voice; Inter reads body copy; IBM Plex Mono
+       is reserved for measured values (splat counts, timings, depth) so numbers always
+       look like instrument output rather than prose. *@
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
     <link rel="stylesheet" href="css/app.css" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B0E1A'/%3E%3Ccircle cx='12' cy='13' r='6' fill='%236E56CF' fill-opacity='0.85'/%3E%3Ccircle cx='20' cy='19' r='5' fill='%234FD1C5' fill-opacity='0.85'/%3E%3C/svg%3E" />
+    @* Three splats at three depths — the favicon is the depth ramp in miniature. *@
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090B11'/%3E%3Cellipse cx='11' cy='12' rx='7' ry='6' fill='%23FFB35C' fill-opacity='0.9'/%3E%3Cellipse cx='20' cy='16' rx='6' ry='7' fill='%23E4566E' fill-opacity='0.8'/%3E%3Cellipse cx='15' cy='23' rx='7' ry='5' fill='%235566D8' fill-opacity='0.8'/%3E%3C/svg%3E" />
 
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 <body>
     <Routes @rendermode="InteractiveServer" />
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/128.0.0/three.min.js"></script>
+    @* Three.js is vendored rather than pulled from a CDN. The viewer is the whole
+       product, and a third-party outage — or a wrong CDN path, which is exactly how
+       this shipped — turns every scene page into a blank rectangle. r128 is pinned
+       because the viewer's shaders are written against it. *@
+    <script src="js/vendor/three.min.js"></script>
     <script src="js/splat-viewer.js"></script>
+    @* GLTFLoader itself is fetched on demand by this file — see mesh-viewer.js. *@
+    <script src="js/mesh-viewer.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>

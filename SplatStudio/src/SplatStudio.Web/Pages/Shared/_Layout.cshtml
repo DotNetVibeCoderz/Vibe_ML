@@ -7,23 +7,25 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    @* Kept in step with Components/App.razor — the auth pages are plain Razor Pages
+       but must not look like a different product. *@
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="~/css/app.css" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090B11'/%3E%3Cellipse cx='11' cy='12' rx='7' ry='6' fill='%23FFB35C' fill-opacity='0.9'/%3E%3Cellipse cx='20' cy='16' rx='6' ry='7' fill='%23E4566E' fill-opacity='0.8'/%3E%3Cellipse cx='15' cy='23' rx='7' ry='5' fill='%235566D8' fill-opacity='0.8'/%3E%3C/svg%3E" />
 </head>
 <body>
     <div class="app-shell">
-        <div class="aurora-backdrop" aria-hidden="true">
-            <span class="blob blob-purple"></span>
-            <span class="blob blob-cyan"></span>
-            <span class="blob blob-coral"></span>
-            <span class="starfield"></span>
-        </div>
+        <div class="depth-wash" aria-hidden="true"></div>
 
-        <nav class="navbar glass-panel">
+        <nav class="navbar">
             <a class="brand" href="~/">
-                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-mark" aria-hidden="true"><span></span></span>
                 <span class="brand-text">SplatStudio</span>
             </a>
+            <div class="nav-links">
+                <a href="~/">Gallery</a>
+                <a href="~/about">How it works</a>
+            </div>
         </nav>
 
         <main class="app-main account-main">
@@ -33,7 +35,7 @@
         </main>
 
         <footer class="app-footer">
-            <p>SplatStudio &mdash; built with .NET 8 Blazor Server.</p>
+            <p>SplatStudio bakes one photo into a point cloud using a depth heuristic, not multi-view reconstruction.</p>
         </footer>
     </div>
 </body>

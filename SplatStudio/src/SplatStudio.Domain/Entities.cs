@@ -48,10 +48,32 @@ public class SplatScene
     public SplatEngineType Engine { get; set; } = SplatEngineType.LocalHeuristic;
     public string? ErrorMessage { get; set; }
 
-    /// <summary>Storage key of the generated binary .splat file.</summary>
+    /// <summary>What the uploader asked for. Chosen at upload time and never changed after.</summary>
+    public ConversionMode Mode { get; set; } = ConversionMode.HeuristicSplat;
+
+    /// <summary>
+    /// Whether this scene's output is a point cloud or a mesh. Derived from the mode when the
+    /// conversion completes, and stored so the viewer doesn't have to re-derive it.
+    /// </summary>
+    public ConversionArtifactKind ArtifactKind { get; set; } = ConversionArtifactKind.Splat;
+
+    /// <summary>Storage key of the generated binary .splat file. Null for mesh scenes.</summary>
     public string? SplatStorageKey { get; set; }
+
+    /// <summary>Storage key of the generated mesh (.glb). Null for splat scenes.</summary>
+    public string? MeshStorageKey { get; set; }
+
+    /// <summary>
+    /// The storage key holding this scene's renderable output, whichever kind it is. The
+    /// viewer and the delete path both want "the artifact" without caring which column.
+    /// </summary>
+    public string? OutputStorageKey =>
+        ArtifactKind == ConversionArtifactKind.Mesh ? MeshStorageKey : SplatStorageKey;
     /// <summary>Number of Gaussian splats baked into the file — shown in the UI as a quality indicator.</summary>
     public int PointCount { get; set; }
+
+    /// <summary>Wall-clock time the conversion took, in milliseconds. 0 until it completes.</summary>
+    public int ConversionMilliseconds { get; set; }
 
     public bool IsPublic { get; set; } = true;
     public int ViewCount { get; set; }

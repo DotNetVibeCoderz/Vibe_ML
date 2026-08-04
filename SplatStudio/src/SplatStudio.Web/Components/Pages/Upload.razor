@@ -7,6 +7,7 @@
 @inject IStorageService Storage
 @inject IImageProcessingService ImageProcessor
 @inject IConversionQueue Queue
+@inject IConversionEngineCatalog Engines
 @inject NavigationManager Nav
 @inject ILogger<Upload> Logger
 
@@ -15,7 +16,7 @@
 <section class="page-section">
     <div class="glass-panel form-panel">
         <h1>Upload an image</h1>
-        <p class="muted">JPEG or PNG, up to 15&nbsp;MB. Photos with one clear subject (a portrait, an object on a plain background) splat best with the local heuristic engine.</p>
+        <p class="muted">JPEG or PNG, up to 15&nbsp;MB. Photos with one clear subject &mdash; a portrait, an object on a plain background &mdash; work best in every mode.</p>
 
         <EditForm Model="_form" OnValidSubmit="SubmitAsync" FormName="upload-form">
             <DataAnnotationsValidator />
@@ -25,6 +26,42 @@
 
             <label class="field-label" for="description">Description (optional)</label>
             <InputTextArea id="description" class="text-input" @bind-Value="_form.Description" rows="3" maxlength="500" />
+
+            @* Modes differ in what they produce, what they cost and how long they take, so
+               each option states all three rather than just naming itself. Unconfigured
+               modes stay visible but disabled — hiding them would leave no clue the
+               capability exists or what enabling it takes. *@
+            <fieldset class="mode-picker">
+                <legend class="field-label">Convert to</legend>
+
+                @foreach (var engine in Engines.Engines)
+                {
+                    var id = $"mode-{engine.Mode}";
+                    var unavailable = !engine.IsAvailable;
+
+                    <label class="mode-option @(unavailable ? "mode-option-disabled" : "")"
+                           for="@id"
+                           title="@engine.UnavailableReason">
+                        <input type="radio"
+                               id="@id"
+                               name="conversion-mode"
+                               disabled="@unavailable"
+                               checked="@(_form.Mode == engine.Mode)"
+                               @onchange="@(() => _form.Mode = engine.Mode)" />
+                        <span class="mode-option-body">
+                            <span class="mode-option-head">
+                                <span class="mode-option-name">@engine.DisplayName</span>
+                                <span class="chip">@ModeBadge(engine.Mode)</span>
+                            </span>
+                            <span class="mode-option-desc">@engine.Description</span>
+                            @if (unavailable)
+                            {
+                                <span class="mode-option-reason">@engine.UnavailableReason</span>
+                            }
+                        </span>
+                    </label>
+                }
+            </fieldset>
 
             <label class="field-label">Visibility</label>
             <div class="visibility-toggle">
@@ -44,8 +81,15 @@
             }
 
             <button class="btn btn-primary" type="submit" disabled="@(_uploading || _selectedFile is null)">
-                @(_uploading ? "Uploading\u2026" : "Create splat scene")
+                @(_uploading ? "Uploading\u2026" : "Start conversion")
             </button>
+            @if (SelectedEngine is { Mode: not ConversionMode.HeuristicSplat })
+            {
+                <p class="muted small mode-timing-note">
+                    Hosted conversions run for a few minutes. You can leave this page &mdash; the
+                    scene updates itself when it finishes.
+                </p>
+            }
         </EditForm>
     </div>
 </section>
@@ -60,6 +104,24 @@
     private bool _uploading;
 
     [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private IConversionEngine? SelectedEngine => Engines.Resolve(_form.Mode);
+
+    protected override void OnInitialized()
+    {
+        // Default to the first mode this deployment can actually run, so the form never
+        // starts on an option the visitor cannot submit.
+        var firstAvailable = Engines.Engines.FirstOrDefault(e => e.IsAvailable);
+        if (firstAvailable is not null) _form.Mode = firstAvailable.Mode;
+    }
+
+    private static string ModeBadge(ConversionMode mode) => mode switch
+    {
+        ConversionMode.HeuristicSplat => "instant · free",
+        ConversionMode.PhotorealSplat => "minutes · hosted",
+        ConversionMode.Mesh => "minutes · hosted",
+        _ => ""
+    };
 
     private async Task OnFileSelected(InputFileChangeEventArgs e)
     {
@@ -87,6 +149,15 @@
     private async Task SubmitAsync()
     {
         if (_selectedFile is null || AuthStateTask is null) return;
+
+        // Re-check rather than trusting the disabled attribute: the picker is client-side and
+        // configuration could have changed since the page rendered.
+        var engine = SelectedEngine;
+        if (engine is null || !engine.IsAvailable)
+        {
+            _fileError = engine?.UnavailableReason ?? "That conversion mode is not available.";
+            return;
+        }
 
         _uploading = true;
         try
@@ -130,7 +201,12 @@
                 Title = string.IsNullOrWhiteSpace(_form.Title) ? _selectedFile.Name : _form.Title,
                 Description = _form.Description,
                 IsPublic = _form.IsPublic,
-                Status = SplatStatus.Queued
+                Status = SplatStatus.Queued,
+                Mode = _form.Mode,
+                // Provisional: the worker sets the real value from what the engine returns.
+                ArtifactKind = _form.Mode == ConversionMode.Mesh
+                    ? ConversionArtifactKind.Mesh
+                    : ConversionArtifactKind.Splat
             };
 
             Db.ImageAssets.Add(imageAsset);
@@ -161,5 +237,7 @@
         public string? Description { get; set; }
 
         public bool IsPublic { get; set; } = true;
+
+        public ConversionMode Mode { get; set; } = ConversionMode.HeuristicSplat;
     }
 }

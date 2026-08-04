@@ -12,9 +12,9 @@
 <PageTitle>My Scenes &mdash; SplatStudio</PageTitle>
 
 <section class="page-section">
-    <div class="gallery-header">
+    <div class="section-head">
         <h1>My scenes</h1>
-        <a class="btn btn-primary btn-sm" href="upload">+ New upload</a>
+        <a class="btn btn-primary btn-sm" href="upload">Upload a photo</a>
     </div>
 
     @if (_loading)
@@ -24,7 +24,9 @@
     else if (_scenes.Count == 0)
     {
         <div class="glass-panel empty-state">
-            <p>You haven't uploaded anything yet. <a href="upload">Create your first splat scene</a>.</p>
+            <h3>No scenes yet</h3>
+            <p class="muted">Upload a photo with one clear subject and it will show up here.</p>
+            <p><a class="btn btn-primary" href="upload">Upload a photo</a></p>
         </div>
     }
     else
@@ -36,13 +38,24 @@
                     <a class="my-scene-thumb" href="@($"scenes/{scene.Id}")">
                         @if (_thumbUrls.TryGetValue(scene.Id, out var url))
                         {
-                            <img src="@url" alt="@scene.Title" />
+                            <img src="@url" alt="" />
                         }
                     </a>
                     <div class="my-scene-details">
                         <a class="my-scene-title" href="@($"scenes/{scene.Id}")">@scene.Title</a>
-                        <span class="scene-card-status status-@scene.Status.ToString().ToLowerInvariant()">@scene.Status</span>
-                        <span class="muted">@scene.PointCount.ToString("N0") pts &middot; @scene.ViewCount views &middot; @scene.Comments.Count comments</span>
+                        <div class="my-scene-meta">
+                            @if (scene.Status != SplatStatus.Completed)
+                            {
+                                <span class="chip status-@scene.Status.ToString().ToLowerInvariant()">@scene.Status</span>
+                            }
+                            @if (!scene.IsPublic)
+                            {
+                                <span class="chip chip-private">Private</span>
+                            }
+                            <span>@scene.PointCount.ToString("N0") splats</span>
+                            <span>@scene.ViewCount.ToString("N0") views</span>
+                            <span>@scene.Comments.Count comments</span>
+                        </div>
                     </div>
                     <div class="my-scene-actions">
                         <label class="visibility-toggle">
@@ -82,6 +95,12 @@
         if (_userId is null) { _loading = false; return; }
 
         _loading = true;
+
+        // Same reason as SceneViewer: this page tracks scenes (it toggles IsPublic), so a
+        // re-query would return the stale tracked instances and conversion progress would
+        // never appear.
+        Db.ChangeTracker.Clear();
+
         _scenes = await Db.SplatScenes
             .Include(s => s.ImageAsset)
             .Include(s => s.Comments)
@@ -124,8 +143,13 @@
                 await Storage.DeleteAsync(scene.ImageAsset.ThumbnailStorageKey);
             Db.ImageAssets.Remove(scene.ImageAsset);
         }
+        // Both keys are cleared, not just the one matching ArtifactKind: a scene that was
+        // retried in a different mode can have written under either prefix, and EF cascade
+        // only cleans the database.
         if (!string.IsNullOrEmpty(scene.SplatStorageKey))
             await Storage.DeleteAsync(scene.SplatStorageKey);
+        if (!string.IsNullOrEmpty(scene.MeshStorageKey))
+            await Storage.DeleteAsync(scene.MeshStorageKey);
 
         Db.SplatScenes.Remove(scene);
         await Db.SaveChangesAsync();

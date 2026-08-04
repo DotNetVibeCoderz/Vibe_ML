@@ -13,7 +13,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The GPU kernels and their 32-byte record struct are internal, but the test suite
+         drives them directly to pinpoint which initialisation stage fails on a new machine. -->
+    <InternalsVisibleTo Include="SplatStudio.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Identity's AddIdentity/ConfigureApplicationCookie extension methods live in
+         the ASP.NET Core shared framework, which a plain classlib doesn't get by
+         default. This also supplies IHttpClientFactory and the options/DI plumbing. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- EF Core + the three supported relational providers -->
+    <PackageReference Include="ILGPU" Version="1.5.3" />
+    <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.10" />
@@ -26,8 +41,13 @@
     <PackageReference Include="Azure.Storage.Blobs" Version="12.22.2" />
     <PackageReference Include="AWSSDK.S3" Version="3.7.412.4" />
 
-    <!-- Image decoding/resizing for thumbnails and the splat heuristic -->
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
+    <!-- Image decoding/resizing for thumbnails and the splat heuristic.
+         3.1.5 carries two published advisories (GHSA-2cmq-823j-5qj8, GHSA-rxmq-m78w-7wmc);
+         3.1.12 is the patched release on the same major line. -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+
+    <!-- Binds configuration sections to POCOs via IConfigurationSection.Get<T>() -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
 
     <!-- Hosted background worker base class (classlib, so not implicit) -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />

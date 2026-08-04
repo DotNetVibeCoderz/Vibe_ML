@@ -3,7 +3,8 @@
 
 <nav class="navbar glass-panel">
     <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true"></span>
+        @* Three splats at three depths — the mark is the depth ramp in miniature. *@
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
         <span class="brand-text">SplatStudio</span>
     </a>
 
@@ -13,6 +14,7 @@
 
     <div class="nav-links @(_open ? "nav-links-open" : "")">
         <NavLink href="/" Match="NavLinkMatch.All">Gallery</NavLink>
+        <NavLink href="about">How it works</NavLink>
         <AuthorizeView>
             <Authorized>
                 <NavLink href="upload">Upload</NavLink>

@@ -33,6 +33,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Title).HasMaxLength(160);
             e.Property(x => x.Description).HasMaxLength(2000);
             e.Property(x => x.SplatStorageKey).HasMaxLength(512);
+            e.Property(x => x.MeshStorageKey).HasMaxLength(512);
+            // Computed from the two keys above; nothing to persist.
+            e.Ignore(x => x.OutputStorageKey);
 
             e.HasOne(x => x.ImageAsset)
                 .WithOne(i => i.SplatScene)

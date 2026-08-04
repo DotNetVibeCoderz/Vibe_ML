@@ -53,14 +53,28 @@
     return { count, positions, colors, sizes };
   }
 
+  /* uProjScale converts a world-space radius into pixels at a given view depth:
+   *   pixelsPerWorldUnit(z) = viewportHeight / (2 * tan(fovY/2) * z)
+   * The original shader hard-coded 480.0 in place of that whole term, which only
+   * happened to be right for one canvas height and one point density. At the splat
+   * counts the GPU engine produces, per-point spacing is small enough that the error
+   * pushed gl_PointSize below one pixel and the cloud rendered as nothing at all.
+   *
+   * uMinSize keeps sparse-but-distant points from vanishing entirely; without it a
+   * zoomed-out cloud dissolves rather than getting denser. */
   const VERTEX_SHADER = [
     'attribute float pointSize;',
     'attribute vec4 pointColor;',
+    'uniform float uProjScale;',
+    'uniform float uMinSize;',
     'varying vec4 vColor;',
     'void main() {',
     '  vColor = pointColor;',
     '  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);',
-    '  gl_PointSize = pointSize * (480.0 / max(-mvPosition.z, 0.001));',
+    '  float depth = max(-mvPosition.z, 0.001);',
+    // pointSize is a radius; a sprite is measured by its diameter.
+    '  float px = 2.0 * pointSize * uProjScale / depth;',
+    '  gl_PointSize = clamp(px, uMinSize, 64.0);',
     '  gl_Position = projectionMatrix * mvPosition;',
     '}'
   ].join('\n');
@@ -76,9 +90,36 @@
     '}'
   ].join('\n');
 
+  const prefersReducedMotion = () =>
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function isWebGLAvailable() {
+    try {
+      const canvas = document.createElement('canvas');
+      return !!(window.WebGLRenderingContext &&
+        (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+    } catch (e) {
+      return false;
+    }
+  }
+
   class Viewer {
-    constructor(container) {
+    constructor(container, options) {
+      const opts = options || {};
       this.container = container;
+      // Auto-orbit is the hero's one piece of motion: it shows the cloud is genuinely 3D
+      // before the visitor touches anything. It yields permanently on first interaction,
+      // and never starts at all when the visitor asks for reduced motion.
+      //
+      // It sways within a bounded arc rather than spinning. A full rotation swings a
+      // single-image cloud through edge-on, where a 2.5D reconstruction reads as the flat
+      // sheet it is. A shallow sway shows the parallax that proves it has depth without
+      // parking on the angle that undermines it.
+      this.autoOrbit = !!opts.autoOrbit && !prefersReducedMotion();
+      this.autoOrbitSpeed = typeof opts.autoOrbitSpeed === 'number' ? opts.autoOrbitSpeed : 0.35;
+      this.autoOrbitArc = typeof opts.autoOrbitArc === 'number' ? opts.autoOrbitArc : 0.38; // ~22 degrees
+      this._elapsed = 0;
+      this._lastFrame = 0;
       this.scene = new THREE.Scene();
       this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -90,7 +131,9 @@
       this.target = new THREE.Vector3(0, 0, 0);
       this.radius = 2.2;
       this.theta = Math.PI / 2.3;
-      this.phi = -Math.PI / 4;
+      // Slightly off head-on: enough angle to read as 3D, not enough to flatten out.
+      this.phi = -Math.PI / 2 + 0.30;
+      this._basePhi = this.phi;
       this._updateCamera();
 
       this._disposed = false;
@@ -118,6 +161,10 @@
       geometry.setAttribute('pointSize', new THREE.BufferAttribute(sizes, 1));
 
       const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uProjScale: { value: 1.0 },
+          uMinSize: { value: 1.0 }
+        },
         vertexShader: VERTEX_SHADER,
         fragmentShader: FRAGMENT_SHADER,
         transparent: true,
@@ -133,9 +180,22 @@
       const bs = geometry.boundingSphere;
       if (bs && bs.radius > 0) {
         this.target.copy(bs.center);
-        this.radius = Math.max(bs.radius * 2.6, 0.6);
+        this.radius = Math.max(bs.radius * 2.2, 0.6);
         this._updateCamera();
       }
+
+      this._updateProjScale();
+    }
+
+    /* Recomputed whenever the canvas or the camera's field of view changes, so a
+     * resized viewport keeps the same apparent point size. */
+    _updateProjScale() {
+      if (!this.points) return;
+      const h = this.renderer.domElement.height; // device pixels, matches gl_PointSize
+      const fovRad = (this.camera.fov * Math.PI) / 180;
+      this.points.material.uniforms.uProjScale.value = h / (2 * Math.tan(fovRad / 2));
+      this.points.material.uniforms.uMinSize.value =
+        Math.min(this.renderer.getPixelRatio(), 2);
     }
 
     _clearPoints() {
@@ -152,7 +212,7 @@
       let lastX = 0;
       let lastY = 0;
 
-      const down = (x, y) => { dragging = true; lastX = x; lastY = y; };
+      const down = (x, y) => { dragging = true; lastX = x; lastY = y; this.autoOrbit = false; };
       const move = (x, y) => {
         if (!dragging) return;
         const dx = x - lastX;
@@ -170,6 +230,7 @@
       this._onMouseUp = up;
       this._onWheel = (e) => {
         e.preventDefault();
+        this.autoOrbit = false;
         this.radius = Math.min(Math.max(this.radius * (1 + e.deltaY * 0.001), 0.2), 15);
         this._updateCamera();
       };
@@ -215,10 +276,22 @@
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
+      this._updateProjScale();
     }
 
-    _animate() {
+    _animate(now) {
       if (this._disposed) return;
+
+      if (this.autoOrbit) {
+        // Advance by wall-clock delta rather than per-frame so the sway runs at the same
+        // rate on a 60 Hz and a 144 Hz display.
+        const delta = this._lastFrame ? Math.min((now - this._lastFrame) / 1000, 0.1) : 0;
+        this._elapsed += delta;
+        this.phi = this._basePhi + Math.sin(this._elapsed * this.autoOrbitSpeed) * this.autoOrbitArc;
+        this._updateCamera();
+      }
+      this._lastFrame = now;
+
       this.renderer.render(this.scene, this.camera);
       this._raf = requestAnimationFrame(this._animate);
     }
@@ -237,16 +310,38 @@
 
   const instances = new WeakMap();
 
+  /* A blank rectangle is the worst possible failure mode here — it looks like the
+   * scene itself is empty rather than like something broke. Say what happened. */
+  function showFailure(container, message) {
+    if (!container) return;
+    container.innerHTML =
+      '<div class="viewer-failure"><p><strong>This scene could not be rendered.</strong></p>' +
+      '<p class="muted small">' + message + '</p></div>';
+  }
+
   window.splatViewer = {
-    init(container, url) {
-      if (!container || typeof THREE === 'undefined') return;
+    init(container, url, options) {
+      if (!container) return;
+
+      if (typeof THREE === 'undefined') {
+        showFailure(container, 'The 3D library did not load. Try reloading the page.');
+        return;
+      }
+      if (!isWebGLAvailable()) {
+        showFailure(container, 'This browser has WebGL turned off or unavailable.');
+        return;
+      }
+
       const existing = instances.get(container);
       if (existing) existing.dispose();
 
-      const viewer = new Viewer(container);
+      const viewer = new Viewer(container, options);
       instances.set(container, viewer);
       viewer.load(url).catch((err) => {
         console.error('SplatStudio viewer: failed to load splat file', err);
+        viewer.dispose();
+        instances.delete(container);
+        showFailure(container, 'The point cloud file could not be downloaded.');
       });
     },
     dispose(container) {
