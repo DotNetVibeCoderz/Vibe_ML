@@ -7,7 +7,7 @@ Status of the current release is in [Progress.md](Progress.md). This file is abo
 ## Where the project is
 
 **v0.1.0 — feature complete against the original specification.** All six libraries, their
-samples, notebooks, benchmarks and tests exist and run. 400 tests pass. Documentation is
+samples, notebooks, benchmarks and tests exist and run. 962 tests pass. Documentation is
 published in English and Bahasa Indonesia.
 
 Every algorithm listed in `requirements.md` is implemented rather than stubbed. Three things are
@@ -225,7 +225,7 @@ anything is written.
 **Still open**: the reader remains a weight reader, not a runtime — it cannot execute an arbitrary
 ONNX graph. The `IDataView` adapters for ML.NET are untouched.
 
-### Arrow
+### Arrow — deferred to v0.5
 Zero-copy interchange with pandas, Polars and Spark via the Arrow memory format. `DataFrame` is
 already columnar, so this is mostly a matter of matching buffer layouts.
 
@@ -233,7 +233,7 @@ already columnar, so this is mostly a matter of matching buffer layouts.
 
 ## v0.3 — Scale
 
-### Out-of-core dataframes
+### Out-of-core dataframes — deferred to v0.5
 `MemoryMappedArray` handles arrays larger than RAM; `DataFrame` does not yet. The plan is chunked
 columns with a streaming group-by and sort, so a frame can exceed memory the way the array already
 can.
@@ -329,47 +329,219 @@ produce pretrained weights — see *Non-goals*. A model trained here learns from
 given, and for a small labelled set TF-IDF plus a linear model remains the better baseline. What
 changed is that the architecture is trainable at all.
 
-### Distributed training
+### Distributed training — deferred to v0.5
 Data-parallel training across processes for the tree ensembles and GNNs, which are the two places
 where a single machine runs out first.
 
 ---
 
-## v0.4 — Breadth
+## v0.4 — Breadth — ✅ complete
 
-### GraviNum
-Einstein summation, more `Slice` ergonomics, complex number support.
+Every item below is implemented, tested and documented in both languages. The suite went from 589
+to **962 tests**.
 
-**FFT — ✅ done.** `Signal.Fft` transforms **any length**: radix-2 Cooley-Tukey for powers of two,
-Bluestein's algorithm for everything else, so a prime length is still `O(n log n)`. That second
-path is the part worth having — padding to a power of two changes the spectrum, smearing each peak
-across neighbouring bins, so a library that padded silently would answer a question nobody asked.
+### GraviNum — ✅ done
 
-Also `ForwardReal` (the `n/2+1` distinct bins of a real signal), `FrequencyBins`, and an
-FFT-based `Convolve` that pads to `n + m - 1` so the result is linear rather than circular.
+**Einstein summation.** `Einsum.Evaluate` covers matrix products, transposes, traces, diagonals,
+axis reductions, outer products, Frobenius products and batched contractions in one notation, with
+NumPy's implicit-output rule. A nested-loop evaluator rather than an optimising one — for two
+operands, which is nearly every real use, there is no ordering choice to make.
 
-Verified against **NumPy's `rfft`** — pocketfft, a separate implementation — to 5e-14 relative at
-lengths 64, 100, 101, 360 and 1531. At 4096 it beats the direct `O(n²)` DFT by 3,536×.
+**Complex arrays.** `ComplexNdArray` over a flat interleaved `Complex` buffer, so the layout matches
+FFTW and NumPy and goes to `Fft` without a repack. `ConjugateTranspose` and the Hermitian `Inner`
+are provided alongside their plain counterparts precisely because the two are easy to confuse and
+the wrong one produces plausible-looking nonsense. Separable 2-D transforms. Unlike `NdArray`,
+reshape and transpose copy: complex arithmetic does six flops per element, so the copy no longer
+dominates.
 
-### GraviFrame
-Window functions with partitioning, `asof` joins for time series alignment, categorical column type
-with dictionary encoding, SQL and Excel readers.
+**Slice ergonomics.** `SliceOps` adds ellipsis slicing, `TakeAlong` on an arbitrary axis, `AxisAt`
+and `AxisRange` views, three-argument `Select`, masked writes, `IndicesWhere`, `FilterRows` and
+`Clip`, plus named shorthands. `NdArray.Assign` already handled broadcast assignment through a view
+and was left alone.
 
-### GraviLearn
-Calibration curves, permutation importance, SHAP-style explanations, isotonic regression,
-one-class SVM, HDBSCAN, imbalanced-data resampling.
+**FFT — done earlier.** `Signal.Fft` transforms **any length**: radix-2 Cooley-Tukey for powers of
+two, Bluestein's algorithm for everything else. Verified against NumPy's `rfft` — pocketfft, a
+separate implementation — to 5e-14 relative. At 4096 it beats the direct DFT by 3,536×.
 
-### GraviText
-BPE and SentencePiece tokenizers, a decoder stack for generation, sequence labelling with a CRF
-head, a real trained NER model to replace the rule-based one.
+### GraviFrame — ✅ done
 
-### GraviGraph
-Heterogeneous graphs, temporal graphs, edge features, graph-level pooling and classification,
-neighbourhood sampling so GraphSAGE can train on graphs that do not fit in memory.
+**Window functions.** `Rank`, `CumulativeSum`, `RollingMean`, `Lag` and `Lead`, all partitioned. The
+tests check partition boundaries specifically, because that is where the leak lives: without
+partitioning, `Lag` makes each group's first row reach into the previous group's last, which quietly
+inflates a model's score and is invisible in the output. `RollingMean` leaves incomplete windows
+missing rather than averaging over what is there.
 
-### GraviProb
-Dirichlet and multivariate distributions, Gaussian processes, state-space models, model comparison
-via WAIC and LOO.
+**As-of join.** Backward-only by design — matching the *nearest* row in either direction is
+look-ahead, and is how a backtest ends up predicting the past. Sorts the right frame itself rather
+than demanding sorted input, and supports a staleness tolerance.
+
+**Categorical columns.** `CategoricalSeries` with dictionary encoding, ordered categories,
+one-hot with an optional dropped baseline, and category reordering that remaps codes rather than
+relabelling them. The categories are part of the column's *type*: `Take` keeps every category, and
+writing an unlisted value throws rather than widening the dictionary.
+
+**SQL.** `SqlReader`/`SqlWriter` against `System.Data.Common`, so any ADO.NET provider works with no
+package dependency. Parameterised throughout; table and column names are checked as plain
+identifiers since they cannot be parameterised. Tested end to end against SQLite, and `FromReader`
+additionally against a `DataTable` — a second, independent `IDataReader`.
+
+**Excel.** `ExcelReader`/`ExcelWriter` for `.xlsx` with no spreadsheet library, since the format is
+a zip of XML the BCL already reads. Handles the three things that bite a first-time reader: absent
+cells are gaps not blanks, dates are numbers marked only by a style, and the 1900 leap-year bug.
+Tested against workbooks assembled by hand from the spec, not only round trips.
+
+### GraviLearn — ✅ done
+
+**Permutation importance** with per-feature standard deviations, and a documented warning that
+correlated features share the blame.
+
+**Shapley values**, exact by subset enumeration below twenty features and Monte Carlo above. Pinned
+against the closed form for linear models — `wᵢ(xᵢ − E[xᵢ])` — and against the three axioms:
+efficiency, symmetry, and the dummy property.
+
+**Calibration.** Reliability curves, expected calibration error and the Brier score, plus
+`IsotonicRegression` by pool-adjacent-violators. The backward-cascading merge is the whole algorithm
+and is tested against a brute-force search over monotone fits.
+
+**Imbalanced data.** Over- and under-sampling, SMOTE, and class weights. Tests verify that synthetic
+points stay inside the minority region and that features and targets survive the shuffle aligned.
+
+**One-class SVM** by SMO on the nu-formulation, checked directly against Schölkopf's nu-property at
+four values. Found and documented two real behaviours: the default tolerance had to drop to 1e-6 for
+the property to hold, and an isolated *training* point lands on the boundary because it appears in
+its own decision function.
+
+**HDBSCAN.** Core distances, mutual reachability, MST, condensed tree, stability selection. The
+central test runs DBSCAN across a sweep of `eps` and asserts that **none** of them recovers a
+varying-density dataset that HDBSCAN gets right — so the comparison is demonstrated rather than
+asserted.
+
+### GraviText — ✅ done
+
+**BPE**, trained from a corpus, with the classic `low`/`lower`/`newest`/`widest` example as the
+reference for the first merges. Merges are applied by rank rather than position, and saved rather
+than the vocabulary, because the order *is* the model.
+
+**Unigram (SentencePiece)** — a genuinely different algorithm: EM with iterative pruning, Viterbi
+segmentation, and sampling for subword regularisation. Whitespace is encoded rather than split on,
+which makes it exactly reversible and lets it handle text with no spaces at all.
+
+**Linear-chain CRF.** Viterbi decoding, exact forward partition, forward-backward marginals, and
+gradient training on observed-minus-expected counts. The partition function and the marginals are
+checked against **brute-force enumeration** of every labelling on short sequences. BIO constraints
+are enforced structurally, including the entity-type match that a prefix-only check misses.
+
+**Trained NER.** Feature-based tagger — word shape, affixes, capitalisation, neighbours — feeding a
+CRF. **97.9% entity F1 on a held-out split** of the new `ner_conll.txt` corpus. Tested for the claim
+that matters: names appearing nowhere in the corpus are still recognised, from shape and context.
+
+**Decoder stack.** Causal self-attention, a language-model head, and greedy/top-k/nucleus sampling
+with a repetition penalty. The central test changes a later token and asserts no earlier hidden
+state moved — the one property that cannot be seen by looking at generated text.
+
+### GraviGraph — ✅ done
+
+**Heterogeneous graphs** with per-type features, per-relation edge lists, edge feature matrices, and
+`RelationalConvolution` (R-GCN). Normalisation is per relation, so three `bought` edges are not
+drowned out by a thousand `viewed` ones.
+
+**Temporal graphs** with time-respecting reachability, snapshots, windows, time-decayed features and
+a `TemporalEfficiency` measure of how much a static view overstates. The reachability test is the
+argument for the whole type: statically 0 reaches 3, temporally it cannot.
+
+**Graph-level pooling and classification.** Mean, sum, max, mean-max and attention pooling, all
+permutation-invariant — tested by shuffling the node order. `GraphClassifier` separates cycles from
+complete graphs and generalises to sizes it never saw.
+
+**Neighbourhood sampling.** GraphSAGE-style bounded fan-out per hop, with the block built outward
+and reversed. Tested on a hub with two thousand neighbours: the block stays under six nodes.
+
+### GraviProb — ✅ done
+
+**Multivariate normal** through a single Cholesky factor for density, determinant and sampling, with
+closed-form conditioning. **Dirichlet** with conjugate updating and Beta marginals, and
+**Multinomial** sampled as a chain of binomials so the counts sum exactly. Each is pinned against
+the scalar distribution it reduces to.
+
+**Gaussian processes** with RBF, Matérn (ν = 1/2, 3/2, 5/2), periodic and sum kernels; posterior
+sampling, credible intervals, log marginal likelihood and grid-search hyperparameter selection. The
+posterior is checked against the closed-form Gaussian conditional computed independently through
+`MultivariateNormal`.
+
+**Kalman filter and RTS smoother**, with local-level and local-linear-trend constructors, forecasting
+and simulation. The scalar steady-state gain is pinned against the closed-form root of the Riccati
+equation. Uses the Joseph form, because the short update drifts into an asymmetric covariance over a
+long series and then diverges with no warning.
+
+**WAIC and PSIS-LOO** with Pareto-k diagnostics and paired-difference standard errors. Both are
+pinned on the degenerate case where they must reduce exactly to the log likelihood, and on
+hand-computed values — the `lppd` is a log-of-mean, and writing it as a mean-of-logs gives a number
+in the right range that is not WAIC.
+
+---
+
+## v0.5 — Consolidation
+
+v0.4 finished the breadth work, and three items from earlier milestones are still open. They are
+carried here rather than left orphaned in a version that is otherwise complete, because each one is
+a real piece of work and none of them was dropped for a reason.
+
+### Migrating the six libraries onto `NdArray<T>`
+
+The generic core is built and measured: genericising the `double` path costs **0.91–1.04×**, which
+is inside noise. That was the gamble, and it did not cost anything, so migrating is now a scheduling
+decision rather than a risk.
+
+What it buys is a single-precision path for the whole stack rather than for two hand-written
+kernels. What it costs is a public API change across six libraries, which is why it waits for a
+minor version and gets release notes.
+
+`Single.SingleKernels` stays regardless — it is the hand-written baseline the generic version was
+measured against, and deleting the comparand would make the next measurement meaningless.
+
+### Arrow interchange — carried from v0.2
+
+Zero-copy exchange with pandas, Polars and Spark. `DataFrame` is already columnar and
+`CategoricalSeries` now matches Arrow's dictionary-encoded layout, so the remaining work is buffer
+layout and the schema metadata rather than a restructure.
+
+The honest reason this has not happened yet is that it is only worth doing properly. A converter
+that copies every buffer is not interchange, it is an import path with extra steps, and the whole
+argument for Arrow is that the copy does not happen.
+
+### Out-of-core dataframes — carried from v0.3
+
+`MemoryMappedArray` handles arrays larger than RAM; `DataFrame` does not. The plan is chunked
+columns with a streaming group-by and sort.
+
+The v0.4 window functions and as-of join are both single-pass over sorted input and are natural
+candidates to stream. The categorical column type helps here too: a chunked frame wants its
+dictionary held once for the whole column rather than per chunk.
+
+### Distributed training — carried from v0.3
+
+Data-parallel training across processes for the tree ensembles and the GNNs, which are the two
+places a single machine runs out first. The v0.4 neighbourhood sampler is the piece that makes
+distributed GNN training coherent — it already produces bounded, independent per-batch computation
+graphs, which is exactly the unit a worker process needs.
+
+### Pretrained weights
+
+The oldest un-met promise in the project, and stated as a non-claim since v0.1: `TransformerModel`
+runs a correct forward pass over randomly initialised weights, so its output is structurally right
+and semantically meaningless. `Io.OnnxReader` can now import weights, so the remaining work is a
+loader that maps a published checkpoint's tensor names onto the model's parameters, plus the
+matching tokenizer vocabulary.
+
+`BpeTokenizer.Load` and `UnigramTokenizer.Load` were built with this in mind — they read the
+formats a published tokenizer actually ships in.
+
+### Sparse and quantised paths
+
+`SparseMatrix` exists in CSR with SpMV and SpMM but nothing above `GraviNum` uses it. A GCN on a
+large graph spends most of its time in a dense product against an adjacency matrix that is almost
+entirely zero, which is the clearest place to start. Quantisation is speculative until there is a
+pretrained model to quantise.
 
 ---
 
@@ -377,7 +549,7 @@ via WAIC and LOO.
 
 These are not versioned; they run alongside everything above.
 
-- **Test coverage.** 589 tests today. Every bug found gets a regression test — that is how the
+- **Test coverage.** 962 tests today. Every bug found gets a regression test — that is how the
   memory-mapped CSV page-padding bug and the directed-graph connectivity bug are now covered.
   Where a fast path replaces a simple one, the simple one stays as the reference it is checked
   against, as `SvdJacobi` and `SymmetricEigenJacobi` now do.

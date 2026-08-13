@@ -8,6 +8,9 @@ using Gravicode.Science.GraviText.Tasks;
 using Gravicode.Science.GraviText.Tokenization;
 using Gravicode.Science.GraviText.Transformers;
 using Gravicode.Science.GraviText.Vectorization;
+using Gravicode.Science.GraviLearn;
+using Gravicode.Science.GraviText.Sequence;
+using Gravicode.Science.GraviText.Generation;
 
 Console.WriteLine(GraviInfo.Banner("GraviText"));
 
@@ -235,6 +238,176 @@ plot.Title($"GraviText - {vocabulary.Length} word vectors projected with t-SNE")
 plot.SavePng(Path.Combine(screenshots, "gravitext_embeddings.png"), 1100, 850);
 Console.WriteLine($"  saved {Path.Combine(screenshots, "gravitext_embeddings.png")}");
 Console.WriteLine($"  final KL divergence: {tsne.FinalDivergence:F4}");
+
+// ---------------------------------------------------------------- v0.4: BPE
+Section("10. Byte-pair encoding");
+
+// The corpus every BPE explanation uses, with the frequencies that make the merges predictable.
+var bpeCorpus = new List<string>();
+foreach (var (word, count) in new[] { ("low", 5), ("lower", 2), ("newest", 6), ("widest", 3) })
+    for (var i = 0; i < count; i++) bpeCorpus.Add(word);
+
+var bpe = BpeTokenizer.Train(bpeCorpus, vocabularySize: 60, minFrequency: 1);
+
+Console.WriteLine($"  learned {bpe.Merges.Count} merges from a four-word corpus");
+Console.WriteLine("  the first few, in the order they were learned:");
+foreach (var (left, right) in bpe.Merges.Take(4))
+    Console.WriteLine($"    {left} + {right} -> {left + right}");
+Console.WriteLine("    'es' merges first because it occurs 9 times, in newest and widest together");
+
+Console.WriteLine($"  'newest'  -> [{string.Join(", ", bpe.Encode("newest"))}]  (one token, it was frequent)");
+Console.WriteLine($"  'lowest'  -> [{string.Join(", ", bpe.Encode("lowest"))}]  (never seen, but decomposes)");
+Console.WriteLine($"  round trip: '{bpe.Decode(bpe.Encode("lowest"))}'");
+Console.WriteLine("  The merge ORDER is the model - a token set alone cannot tokenize, which is why");
+Console.WriteLine("  Save writes ranked merges rather than a vocabulary.");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: unigram
+Section("11. Unigram (SentencePiece)");
+
+string[] unigramCorpus =
+[
+    "the cat sat on the mat", "the dog sat on the log", "the cat and the dog",
+    "a cat on a mat", "the mat and the log",
+];
+
+var unigram = UnigramTokenizer.Train(unigramCorpus, vocabularySize: 80, seedSize: 400);
+
+Console.WriteLine($"  pruned a seed vocabulary down to {unigram.PieceCount} pieces by EM");
+Console.WriteLine($"  'the cat sat' -> [{string.Join(", ", unigram.Encode("the cat sat"))}]");
+Console.WriteLine($"  round trip is exact: '{unigram.Decode(unigram.Encode("the cat sat"))}'");
+Console.WriteLine("    whitespace is ENCODED, not split on, so decoding is plain concatenation");
+
+Console.WriteLine("  Segmentation is Viterbi over the piece lattice, so it is globally optimal.");
+Console.WriteLine("  Because every piece carries a probability, alternatives can be sampled:");
+
+var samplingRng = new GraviRandom(7);
+var seen = new HashSet<string>(StringComparer.Ordinal);
+for (var i = 0; i < 60; i++)
+    seen.Add(string.Join(" | ", unigram.SampleEncoding("the cat sat", samplingRng, alpha: 0.2)));
+
+foreach (var segmentation in seen.Take(4))
+    Console.WriteLine($"    {segmentation}");
+Console.WriteLine($"    {seen.Count} distinct segmentations of one sentence - this is subword");
+Console.WriteLine("    regularisation, and BPE cannot do it, having no probabilities to sample from");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: CRF
+Section("12. CRF sequence labelling");
+
+var crfLabels = new[] { "O", "B-PER", "I-PER" };
+var crf = new LinearChainCrf(crfLabels.Length);
+crf.ApplyBioConstraints(crfLabels);
+
+// Emissions that want an impossible sequence: O followed by I-PER.
+var wanted = NdArray.Full(-10.0, 2, crfLabels.Length);
+wanted[0, 0] = 10;      // O
+wanted[1, 2] = 10;      // I-PER
+
+Console.WriteLine("  Per-token emissions strongly want 'O' then 'I-PER', which the BIO scheme forbids:");
+Console.WriteLine($"    independent argmax would give: O, I-PER");
+Console.WriteLine($"    the CRF decodes:               {string.Join(", ", crf.Decode(wanted).Select(i => crfLabels[i]))}");
+Console.WriteLine("  A learned penalty could be outvoted by a confident emission. Forbid gives the");
+Console.WriteLine("  transition a score no path can recover from, so the output cannot be invalid.");
+
+// Transitions the model learns, from featureless emissions - so anything it gets right
+// came from the transition structure alone.
+var alternating = Enumerable.Range(0, 40).Select(_ => NdArray.Zeros(6, 2)).ToList();
+var alternatingTags = Enumerable.Range(0, 40).Select(_ => new[] { 0, 1, 0, 1, 0, 1 }).ToList();
+
+var learnedCrf = new LinearChainCrf(2).Fit(alternating, alternatingTags, epochs: 150, learningRate: 0.5);
+Console.WriteLine($"  Trained on alternating labels with ZERO emission signal:");
+Console.WriteLine($"    0->1 scores {learnedCrf.Transition(0, 1):F3}, 0->0 scores {learnedCrf.Transition(0, 0):F3}");
+Console.WriteLine($"    decoding featureless input gives: [{string.Join(", ", learnedCrf.Decode(NdArray.Zeros(6, 2)))}]");
+Console.WriteLine("    everything it got right came from the transitions, not the observations");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: trained NER
+Section("13. Trained NER");
+
+var nerPath = Path.Combine(Datasets.FindDatasetDirectory() ?? "datasets", "ner_conll.txt");
+if (File.Exists(nerPath))
+{
+    var annotated = TaggedSentence.LoadConll(nerPath);
+    var cut = (int)(annotated.Count * 0.75);
+    var nerTrain = annotated.Take(cut).ToList();
+    var nerTest = annotated.Skip(cut).ToList();
+
+    var ner = new TrainedNer().Fit(nerTrain);
+
+    Console.WriteLine($"  trained on {nerTrain.Count} sentences, {ner.FeatureCount} features, " +
+                      $"{ner.Labels.Count} tags");
+    Console.WriteLine($"  held-out entity score: {ner.Evaluate(nerTest)}");
+    Console.WriteLine($"  token accuracy:        {ner.TokenAccuracy(nerTest):P2}  " +
+                      "<- dominated by 'O', which is why entity F1 is the number to read");
+
+    Console.WriteLine("  Names that appear NOWHERE in the corpus, recognised from shape and context:");
+    foreach (var sentence in new[]
+    {
+        "Kartika Wijaya bekerja di Gravicode .",
+        "Zulkarnain tinggal di Surabaya .",
+        "Tim dari Bandung mengunjungi Tokopedia .",
+    })
+    {
+        Console.WriteLine($"    \"{sentence}\"");
+        foreach (var entity in ner.Recognize(sentence))
+            Console.WriteLine($"        {entity.Type,-4} {entity.Text}");
+    }
+
+    Console.WriteLine("  The corpus is generated, so 98% F1 says the model learned the templates -");
+    Console.WriteLine("  NOT that it would score 98% on newswire. Treat it as a working demonstration.");
+}
+else
+{
+    Console.WriteLine($"  datasets/ner_conll.txt not found; skipping.");
+}
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: decoder
+Section("14. Decoder stack");
+
+var decoderVocab = new Vocabulary();
+foreach (var word in "the cat sat on a mat dog log and ran".Split(' ')) decoderVocab.Add(word);
+
+var decoderConfig = new TransformerConfig(
+    VocabularySize: decoderVocab.Count, HiddenSize: 32, Layers: 2, Heads: 4,
+    IntermediateSize: 64, MaxPositions: 32);
+
+var decoder = new TransformerDecoder(decoderConfig, decoderVocab, new GraviRandom(5));
+
+// Causality is the one property you cannot see by reading generated text.
+int[] first = [5, 6, 7, 8];
+int[] second = [5, 6, 7, 12];
+
+var stateA = decoder.Forward(first);
+var stateB = decoder.Forward(second);
+
+var maxDrift = 0.0;
+for (var t = 0; t < 3; t++)
+    for (var d = 0; d < stateA.Shape[1]; d++)
+        maxDrift = Math.Max(maxDrift, Math.Abs(stateA[t, d] - stateB[t, d]));
+
+Console.WriteLine("  Changing the LAST token and measuring how far the earlier states moved:");
+Console.WriteLine($"    max drift across positions 0-2 = {maxDrift:E2}");
+Console.WriteLine("    zero, because the attention is causally masked. Without the mask a decoder");
+Console.WriteLine("    trains beautifully and generates nothing, having learned to read the future.");
+
+// Untrained perplexity should be at or above the vocabulary size. A value well BELOW
+// it would mean the model is already predicting, which for random weights means
+// something is leaking - so the number being unimpressive is the point.
+Console.WriteLine($"  perplexity on a short sequence: {decoder.Perplexity([5, 6, 7, 8, 9]):F2}");
+Console.WriteLine($"    a uniform guess over {decoderVocab.Count} tokens would score {decoderVocab.Count}; " +
+                  "random weights do no better, and");
+Console.WriteLine("    that is what you want to see before training - anything lower would be a leak");
+
+var generationRng = new GraviRandom(11);
+Console.WriteLine("  Sampling strategies, from the same prompt and the same weights:");
+Console.WriteLine($"    greedy      -> [{string.Join(", ", decoder.Generate([5, 6], 6, SamplingOptions.Greedy))}]");
+Console.WriteLine($"    nucleus     -> [{string.Join(", ", decoder.Generate([5, 6], 6, SamplingOptions.Nucleus, generationRng))}]");
+Console.WriteLine($"    temp 1.5    -> [{string.Join(", ", decoder.Generate([5, 6], 6, new SamplingOptions(Temperature: 1.5), generationRng))}]");
+Console.WriteLine("  The weights are random, so the tokens are meaningless - what is being shown is");
+Console.WriteLine("  that the sampling machinery works, not that the model has anything to say.");
+Console.WriteLine();
 
 Console.WriteLine();
 Console.WriteLine(GraviInfo.Attribution);

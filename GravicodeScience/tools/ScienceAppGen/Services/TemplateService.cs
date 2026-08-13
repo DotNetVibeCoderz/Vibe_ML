@@ -571,6 +571,429 @@ public static class TemplateService
                     """,
             }),
 
+        // ------------------------------------------------------ model explanation
+        new ProjectTemplate(
+            "explainability",
+            "Model explanation",
+            "Machine learning",
+            "Permutation importance, Shapley values and calibration for a fitted model.",
+            ["GraviNum", "GraviLearn"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "GraviLearn"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviLearn;
+                    using Gravicode.Science.GraviLearn.Explain;
+                    using Gravicode.Science.GraviLearn.ModelSelection;
+                    using Gravicode.Science.GraviLearn.Trees;
+                    using Gravicode.Science.GraviNum;
+
+                    var data = Datasets.LoadIris();
+                    var split = Selection.Split(data.Features, data.Target, testSize: 0.3, seed: 42, stratify: true);
+
+                    var model = new RandomForestClassifier(nTrees: 100, seed: 42);
+                    model.Fit(split.TrainX, split.TrainY);
+                    Console.WriteLine($"accuracy: {Metrics.Accuracy(split.TestY, model.Predict(split.TestX)):P2}\n");
+
+                    // Which features does the model rely on? Measured on HELD-OUT data - on the
+                    // training set this measures memorisation rather than what generalises.
+                    Console.WriteLine("permutation importance:");
+                    foreach (var importance in PermutationImportance.Ranked(model, split.TestX, split.TestY, repeats: 10))
+                        Console.WriteLine($"  {data.FeatureNames[importance.Feature],-16} " +
+                                          $"{importance.Mean,7:F4} +/- {importance.StandardDeviation:F4}");
+
+                    // Why THIS row? Explaining the probability rather than the hard label - a class
+                    // index is a step function, and attributing a step says far less than
+                    // attributing the confidence behind it.
+                    var instance = split.TestX.Row(0);
+
+                    NdArray AsRow(NdArray vector)
+                    {
+                        var matrix = NdArray.Zeros(1, vector.Size);
+                        for (var i = 0; i < vector.Size; i++) matrix[0, i] = vector.At(i);
+                        return matrix;
+                    }
+
+                    var predicted = (int)model.Predict(AsRow(instance)).At(0);
+
+                    NdArray ClassProbability(NdArray batch)
+                    {
+                        var probabilities = model.PredictProbabilities(batch);
+                        var column = NdArray.Zeros(batch.Shape[0]);
+                        for (var i = 0; i < batch.Shape[0]; i++) column.SetAt(i, probabilities[i, predicted]);
+                        return column;
+                    }
+
+                    var attribution = ShapleyValues.Sample(ClassProbability, instance, split.TrainX, samples: 200);
+
+                    Console.WriteLine($"\nexplaining P({data.LabelNames[predicted]}) for one sample");
+                    Console.WriteLine($"  base value {attribution.BaseValue:F4} (average over the background)");
+                    foreach (var (feature, contribution) in attribution.Ranked)
+                        Console.WriteLine($"  {data.FeatureNames[feature],-16} {contribution,+8:F4}");
+                    Console.WriteLine($"  they sum to the prediction: {attribution.Prediction:F4}");
+
+                    // A model can rank perfectly and still be badly calibrated. Accuracy and AUC
+                    // cannot see it, because neither depends on the numbers themselves.
+                    var probabilities = model.PredictProbabilities(split.TestX);
+                    var positive = NdArray.Zeros(split.TestY.Size);
+                    var binary = NdArray.Zeros(split.TestY.Size);
+                    for (var i = 0; i < split.TestY.Size; i++)
+                    {
+                        positive.SetAt(i, probabilities[i, 0]);
+                        binary.SetAt(i, split.TestY.At(i) == 0 ? 1 : 0);
+                    }
+
+                    Console.WriteLine($"\nexpected calibration error: {Calibration.ExpectedError(positive, binary):F4}");
+                    Console.WriteLine($"Brier score               : {Calibration.BrierScore(positive, binary):F4}");
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Explaining a fitted model three ways.
+
+                    - **Permutation importance** — which features the model relies on overall.
+                      Run it on held-out data; on the training set it measures memorisation.
+                    - **Shapley values** — why the model said *that*, for *this* row. Explains
+                      the probability rather than the label, and the contributions sum to the
+                      prediction exactly.
+                    - **Calibration** — whether the probabilities mean what they say. A model
+                      can rank perfectly and still be badly calibrated, and accuracy cannot see it.
+
+                    ```bash
+                    dotnet run
+                    ```
+                    """,
+            }),
+
+        // ------------------------------------------------------- anomaly detection
+        new ProjectTemplate(
+            "anomaly",
+            "Anomaly detection",
+            "Machine learning",
+            "One-class SVM and HDBSCAN for novelty detection and density clustering.",
+            ["GraviNum", "GraviLearn"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "GraviLearn"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviLearn.Anomaly;
+                    using Gravicode.Science.GraviLearn.Clustering;
+                    using Gravicode.Science.GraviNum;
+
+                    var rng = new GraviRandom(42);
+
+                    // Normal operating data: one cloud, no labels. Novelty detection is not
+                    // classification with a class missing - there are no negatives to learn a
+                    // boundary between, so the task is to wrap the normal data tightly.
+                    var normal = NdArray.Zeros(400, 2);
+                    for (var i = 0; i < 400; i++)
+                    {
+                        normal[i, 0] = rng.Normal();
+                        normal[i, 1] = rng.Normal();
+                    }
+
+                    // nu says "about this fraction of the training data is contamination worth
+                    // excluding". It bounds the outlier fraction above and the support-vector
+                    // fraction below - it is not a tolerance to tune until the answer looks right.
+                    var detector = new OneClassSvm(nu: 0.05).Fit(normal);
+                    Console.WriteLine($"support vectors: {detector.SupportVectorCount} of 400, gamma {detector.Gamma:F4}");
+
+                    var probes = NdArray.FromArray(new double[,] { { 0, 0 }, { 1, 1 }, { 5, 5 }, { -7, 2 } });
+                    var scores = detector.DecisionFunction(probes);
+
+                    Console.WriteLine("\nsigned distance from the boundary - use it to RANK alerts:");
+                    for (var i = 0; i < probes.Shape[0]; i++)
+                        Console.WriteLine($"  ({probes[i, 0],5:F1}, {probes[i, 1],5:F1})  {scores.At(i),9:F4}  " +
+                                          $"{(scores.At(i) >= 0 ? "normal" : "ANOMALY")}");
+
+                    // HDBSCAN finds structure without being told a density threshold. DBSCAN needs
+                    // one eps for the whole dataset, which fails as soon as clusters differ in
+                    // density - there is then no value that works.
+                    var mixed = NdArray.Zeros(150, 2);
+                    for (var i = 0; i < 50; i++)   { mixed[i, 0] = rng.Normal() * 0.3;      mixed[i, 1] = rng.Normal() * 0.3; }
+                    for (var i = 50; i < 100; i++) { mixed[i, 0] = 3 + rng.Normal() * 0.3;  mixed[i, 1] = rng.Normal() * 0.3; }
+                    for (var i = 100; i < 150; i++){ mixed[i, 0] = 25 + rng.Normal() * 3.0; mixed[i, 1] = 25 + rng.Normal() * 3.0; }
+
+                    var clusters = new Hdbscan(minClusterSize: 10).Fit(mixed);
+                    Console.WriteLine($"\nHDBSCAN found {clusters.ClusterCount} clusters");
+
+                    var noise = 0;
+                    for (var i = 0; i < clusters.Labels.Size; i++) if (clusters.Labels.At(i) < 0) noise++;
+                    Console.WriteLine($"  {noise} points classed as noise");
+                    Console.WriteLine("  membership strength is often more useful than the flat label:");
+                    Console.WriteLine("  a point at 0.05 is nominally clustered and practically noise");
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Two unsupervised approaches to finding what does not belong.
+
+                    - **One-class SVM** — learns the shape of "normal" from unlabelled data.
+                      `nu` is the dial that matters: it bounds the training-set outlier fraction
+                      above and the support-vector fraction below. Scale your features first.
+                    - **HDBSCAN** — density clustering with no single density threshold, which is
+                      what lets it handle clusters that differ in density. `minClusterSize` is a
+                      question about the problem, not about the data's scale.
+
+                    Evaluate the detector on data it has not seen: a support vector appears in its
+                    own decision function, so training points score higher than they should.
+
+                    ```bash
+                    dotnet run
+                    ```
+                    """,
+            }),
+
+        // --------------------------------------------------------------- tokenizer
+        new ProjectTemplate(
+            "tokenizer",
+            "Sub-word tokenizer",
+            "Natural language",
+            "Train a BPE or SentencePiece-style tokenizer on your own corpus.",
+            ["GraviNum", "GraviText"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "GraviLearn", "GraviText"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviNum;
+                    using Gravicode.Science.GraviText.Tokenization;
+
+                    // Replace this with your own text. A real vocabulary wants far more than this.
+                    string[] corpus =
+                    [
+                        "the cat sat on the mat", "the dog sat on the log",
+                        "a cat and a dog", "the mat and the log",
+                        "lowest newest widest slowest", "low lower lowest",
+                    ];
+
+                    // ---------------------------------------------------------------- BPE
+                    // Merge the most frequent adjacent pair, over and over. The merge ORDER is the
+                    // model: the same token set applied in a different order segments differently,
+                    // which is why Save writes ranked merges rather than a vocabulary.
+                    var bpe = BpeTokenizer.Train(corpus, vocabularySize: 200, minFrequency: 1);
+
+                    Console.WriteLine($"BPE: {bpe.Merges.Count} merges, {bpe.Vocabulary.Count} tokens");
+                    foreach (var word in new[] { "lowest", "sat", "unseen" })
+                        Console.WriteLine($"  {word,-8} -> [{string.Join(", ", bpe.Encode(word))}]");
+
+                    Console.WriteLine($"  round trip: '{bpe.Decode(bpe.Tokenize("the cat sat"))}'");
+
+                    // ------------------------------------------------------------ unigram
+                    // A different algorithm, not a variant: start from a large candidate set and
+                    // prune downwards by EM. Segmentation is Viterbi, so it is globally optimal
+                    // rather than a greedy artefact of the order rules were learned in.
+                    var unigram = UnigramTokenizer.Train(corpus, vocabularySize: 120, seedSize: 500);
+
+                    Console.WriteLine($"\nUnigram: {unigram.PieceCount} pieces");
+                    Console.WriteLine($"  'the cat sat' -> [{string.Join(", ", unigram.Encode("the cat sat"))}]");
+                    Console.WriteLine($"  round trip is exact: '{unigram.Decode(unigram.Encode("the cat sat"))}'");
+
+                    // Because every piece carries a probability, alternatives can be SAMPLED. That
+                    // is subword regularisation - training on several segmentations of the same
+                    // sentence makes a model robust to the tokenizer's arbitrary choices.
+                    var rng = new GraviRandom(7);
+                    var seen = new HashSet<string>(StringComparer.Ordinal);
+                    for (var i = 0; i < 50; i++)
+                        seen.Add(string.Join(" ", unigram.SampleEncoding("the cat sat", rng, alpha: 0.2)));
+
+                    Console.WriteLine($"  {seen.Count} distinct segmentations sampled from one sentence");
+
+                    // Persist. BPE saves merges; unigram saves pieces with their log probabilities.
+                    bpe.Save("merges.txt");
+                    unigram.Save("unigram.model");
+                    Console.WriteLine("\nsaved merges.txt and unigram.model");
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Two trainable sub-word tokenizers, by genuinely different routes.
+
+                    - **BPE** merges the most frequent adjacent pair repeatedly. Simple, fast to
+                      train, and what GPT uses. The merge *order* is the model — a vocabulary
+                      alone cannot tokenize.
+                    - **Unigram (SentencePiece)** prunes a large candidate vocabulary by EM and
+                      segments by Viterbi, so the result is globally optimal. It can also *sample*
+                      alternative segmentations, which BPE cannot.
+
+                    Unigram encodes whitespace rather than splitting on it, so decoding is exactly
+                    reversible and it works on languages that do not space their words.
+
+                    ```bash
+                    dotnet run
+                    ```
+                    """,
+            }),
+
+        // ------------------------------------------------------------ named entities
+        new ProjectTemplate(
+            "ner",
+            "Named entity recognition",
+            "Natural language",
+            "Train a CRF-backed entity tagger on annotated text in CoNLL format.",
+            ["GraviNum", "GraviText"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "GraviLearn", "GraviText"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviText.Tasks;
+
+                    // CoNLL column format: one token and its BIO tag per line, blank lines between
+                    // sentences. Point this at your own annotated data.
+                    var path = args.Length > 0 ? args[0] : "../../datasets/ner_conll.txt";
+
+                    if (!File.Exists(path))
+                    {
+                        Console.WriteLine($"No corpus at '{path}'. Pass one as the first argument.");
+                        return;
+                    }
+
+                    var sentences = TaggedSentence.LoadConll(path);
+                    var cut = (int)(sentences.Count * 0.75);
+                    var train = sentences.Take(cut).ToList();
+                    var test = sentences.Skip(cut).ToList();
+
+                    Console.WriteLine($"{sentences.Count} sentences, {train.Count} for training\n");
+
+                    var ner = new TrainedNer().Fit(train);
+                    Console.WriteLine($"features: {ner.FeatureCount}, tags: {string.Join(", ", ner.Labels)}\n");
+
+                    // Score whole ENTITIES, not tokens. Token accuracy is dominated by the O tag -
+                    // a model predicting O everywhere scores above 85% on most corpora.
+                    Console.WriteLine($"held out : {ner.Evaluate(test)}");
+                    Console.WriteLine($"tokens   : {ner.TokenAccuracy(test):P2}  <- not the number to judge by\n");
+
+                    foreach (var sentence in new[]
+                    {
+                        "Kartika Wijaya bekerja di Gravicode .",
+                        "Tim dari Bandung mengunjungi Tokopedia .",
+                    })
+                    {
+                        Console.WriteLine($"\"{sentence}\"");
+                        foreach (var entity in ner.Recognize(sentence))
+                            Console.WriteLine($"    {entity.Type,-4} {entity.Text}");
+                    }
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    A trained entity tagger: shape-based features scored per token, decoded as a
+                    sequence by a linear-chain CRF.
+
+                    Pass a CoNLL-format corpus as the first argument — one token and its BIO tag
+                    per line, blank lines between sentences.
+
+                    ```bash
+                    dotnet run -- path/to/corpus.txt
+                    ```
+
+                    Two things worth knowing:
+
+                    - **Features are shape-based, not identity-based.** Mapping capitals to `X` and
+                      lower-case to `x` turns "Jakarta" and "Bandung" into the same pattern, so
+                      evidence about one transfers to the other. That is what separates a trained
+                      tagger from a gazetteer.
+                    - **The CRF enforces the BIO scheme structurally.** An `I-PER` cannot follow an
+                      `O`, because the transition is forbidden rather than merely penalised — a
+                      learned penalty can always be outvoted by a confident emission.
+
+                    Judge it on entity F1, never token accuracy.
+                    """,
+            }),
+
+        // ------------------------------------------------------------ forecasting
+        new ProjectTemplate(
+            "forecasting",
+            "State-space forecasting",
+            "Statistics",
+            "Kalman filtering, smoothing and forecasting with honest uncertainty.",
+            ["GraviNum", "GraviProb"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviProb"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviNum;
+                    using Gravicode.Science.GraviProb;
+
+                    // A local level model is an exponentially weighted moving average whose
+                    // smoothing constant is DERIVED from the noise ratio rather than guessed -
+                    // and it reports its own uncertainty, which an EWMA does not.
+                    var filter = KalmanFilter.LocalLevel(processVariance: 0.05, observationVariance: 1.0);
+
+                    // Simulate so there is a truth to check against. Replace this with your series.
+                    var (truth, observations) = filter.Simulate(200, new GraviRandom(42));
+
+                    var filtered = filter.Filter(observations);
+                    var smoothed = filter.Smooth(observations);
+
+                    double Rmse(IReadOnlyList<double> estimate)
+                    {
+                        var total = 0.0;
+                        for (var t = 0; t < estimate.Count; t++)
+                        {
+                            var error = estimate[t] - truth[t, 0];
+                            total += error * error;
+                        }
+                        return Math.Sqrt(total / estimate.Count);
+                    }
+
+                    var raw = 0.0;
+                    for (var t = 0; t < 200; t++)
+                    {
+                        var error = observations[t, 0] - truth[t, 0];
+                        raw += error * error;
+                    }
+
+                    Console.WriteLine($"raw observations : {Math.Sqrt(raw / 200):F4}");
+                    Console.WriteLine($"filtered         : {Rmse(filtered.Filtered.Select(s => s.Mean.At(0)).ToList()):F4}");
+                    Console.WriteLine($"smoothed         : {Rmse(smoothed.Select(s => s.Mean.At(0)).ToList()):F4}");
+                    Console.WriteLine("\nFiltering uses only the past, which is what a live system can do.");
+                    Console.WriteLine("Smoothing uses the whole series - using smoothed states to test a");
+                    Console.WriteLine("forecasting rule is a look-ahead error, and a common one.\n");
+
+                    // Only the RATIO of Q to R matters, which is why the log likelihood can be used
+                    // to fit it: the series decomposes into independent one-step prediction errors.
+                    Console.WriteLine("choosing the process variance by likelihood:");
+                    foreach (var q in new[] { 0.001, 0.01, 0.05, 0.2, 1.0 })
+                    {
+                        var candidate = KalmanFilter.LocalLevel(q, 1.0).Filter(observations);
+                        Console.WriteLine($"  Q = {q,-6} log likelihood {candidate.LogLikelihood,10:F2}");
+                    }
+
+                    var forecast = filter.Forecast(observations, horizon: 20);
+                    Console.WriteLine($"\n20-step forecast, with uncertainty that grows as it must:");
+                    foreach (var step in new[] { 0, 4, 9, 19 })
+                        Console.WriteLine($"  t+{step + 1,-3} {forecast[step].Mean.At(0),8:F4} " +
+                                          $"+/- {forecast[step].StandardDeviation.At(0):F4}");
+
+                    // A local linear trend adds a slope, which is never observed - it is inferred
+                    // entirely from how the level moves, so it extrapolates rather than flattening.
+                    Console.WriteLine("\nKalmanFilter.LocalLinearTrend adds an unobserved slope,");
+                    Console.WriteLine("which is what lets a forecast continue a trend rather than flatten.");
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Linear-Gaussian state-space modelling. Within its assumptions the Kalman filter
+                    is not a good method, it is *the* method: the exact posterior over the hidden
+                    state, and the minimum-variance estimator among all estimators.
+
+                    ```bash
+                    dotnet run
+                    ```
+
+                    - **`Filter`** estimates each state from the past only — what a real-time
+                      system can do.
+                    - **`Smooth`** uses the whole series. Strictly better, and only available
+                      after the fact.
+                    - **`Forecast`** runs the predict step alone, so uncertainty grows with the
+                      horizon. A forecast whose uncertainty does not grow is not a forecast.
+
+                    Only the *ratio* of process to observation variance matters, so the model can
+                    be tuned with one number — and `LogLikelihood` gives you a principled way to
+                    choose it rather than guessing.
+                    """,
+            }),
+
         // ------------------------------------------------------------ notebook
         new ProjectTemplate(
             "notebook",

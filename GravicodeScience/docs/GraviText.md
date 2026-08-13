@@ -271,6 +271,184 @@ a graph of content-word overlap. It cannot hallucinate.
 | Indonesian stop words are not removed | Pass `StopWords.Indonesian` or `Bilingual` explicitly |
 | Word2Vec vocabulary is empty | `minCount` is above the corpus frequencies |
 
+## Trainable sub-word tokenizers
+
+`WordPieceTokenizer` applies a vocabulary it is given. Two tokenizers learn one from a corpus, by
+genuinely different routes.
+
+### Byte-pair encoding
+
+`BpeTokenizer` starts from characters and repeatedly merges the most frequent adjacent pair,
+recording each merge in order. Applying it later means replaying those merges.
+
+```csharp
+var tokenizer = BpeTokenizer.Train(corpus, vocabularySize: 8000, minFrequency: 2);
+
+tokenizer.Encode("lowest");        // ["low", "est</w>"] — unseen, but decomposes
+tokenizer.Tokenize(document);
+tokenizer.Decode(pieces);
+tokenizer.Save("merges.txt");
+```
+
+The difference from WordPiece is which pair merges: BPE takes the most *frequent*, WordPiece the one
+that most increases corpus likelihood. In practice the vocabularies look similar and BPE is simpler
+to train.
+
+**The merge order is the model.** The vocabulary alone cannot tokenize — the same token set applied
+in a different order produces a different segmentation — which is why `Save` writes ranked merges
+rather than a token list. For the same reason merges are applied by *rank*, not left to right: an
+early low-rank merge can consume a symbol a higher-rank merge needed.
+
+Words carry an end-of-word marker, so `"est"` ending a word is a different token from `"est"` inside
+one. Without it the tokenizer learns merges that span word boundaries and produces segmentations that
+do not survive re-spacing the text. Training breaks ties deterministically, so two runs over the same
+corpus cannot diverge — irreproducibility here is invisible until a model trained on one tokenizer is
+served with another.
+
+### Unigram (SentencePiece)
+
+`UnigramTokenizer` is a different idea, not a variant. It starts from a large candidate vocabulary,
+assigns every piece a probability, and *prunes downwards* — repeatedly dropping the pieces whose
+removal costs the corpus likelihood least.
+
+```csharp
+var tokenizer = UnigramTokenizer.Train(corpus, vocabularySize: 8000);
+
+tokenizer.Encode(text);                                // Viterbi: the best segmentation
+tokenizer.SampleEncoding(text, rng, alpha: 0.2);       // an alternative segmentation
+tokenizer.Decode(pieces);                              // exactly reversible
+```
+
+Two consequences follow, and both are why it is worth having alongside BPE:
+
+- **Segmentation is globally optimal**, found by Viterbi over the piece lattice rather than greedily,
+  so it does not depend on the order rules happened to be learned.
+- **Alternative segmentations can be sampled**, which is the basis of subword regularisation —
+  training a model on several segmentations of each sentence makes it markedly more robust to the
+  tokenizer's arbitrary choices. BPE cannot do this without extra machinery, having no probabilities
+  to sample from.
+
+**Whitespace is part of the input, not a delimiter.** Spaces become a visible marker and the text is
+treated as one raw stream, which is what makes the scheme fully reversible and what lets it handle
+languages that do not put spaces between words at all.
+
+Single characters are never pruned: a vocabulary that cannot spell a character cannot segment text
+containing it. The EM step accumulates each piece's expected count over *all* segmentations weighted
+by probability, not just the best one — using the Viterbi path alone makes rare pieces look worse
+than they are.
+
+## CRF sequence labelling
+
+Labelling each token independently produces sequences that are locally plausible and globally
+impossible — an `I-PER` with no `B-PER` before it. `LinearChainCrf` adds transition scores between
+adjacent labels and decodes the highest-scoring *sequence*.
+
+```csharp
+var crf = new LinearChainCrf(labels.Count);
+crf.ApplyBioConstraints(labels);           // an I-X may only follow a B-X or I-X of the same type
+crf.Fit(emissionMatrices, tagSequences);
+
+crf.Decode(emissions);        // Viterbi: the best sequence
+crf.Marginals(emissions);     // per-token confidence, by forward-backward
+crf.LogLikelihood(emissions, labels);
+```
+
+**The best sequence is not the sequence of best tokens.** Taking each token's top label
+independently ignores every transition score, which is the only thing the model added.
+
+The partition function is computed exactly by the forward algorithm in O(n·k²), over what would
+otherwise be kⁿ sequences. That is what makes this a probability model rather than a scoring
+function, and why the training gradient — observed counts minus expected counts, the classic
+exponential-family form — is exact rather than sampled.
+
+`Forbid` gives a transition a score no path can recover from. Stating a constraint that way is better
+than hoping the training data teaches it: a learned penalty can always be outvoted by a confident
+emission, and then the output is a labelling the scheme says cannot exist. Forbidden transitions have
+no gradient and never acquire one, so training cannot dissolve them.
+
+**Emissions come from outside.** The CRF takes a matrix of per-token scores — from a linear model, a
+transformer, anything — and learns only the transitions. That is what makes it composable, and it
+matches how a CRF is used in practice, as the final layer of a tagger.
+
+## Trained NER
+
+`NamedEntityRecognizer` matches gazetteers and capitalisation patterns. `TrainedNer` learns from
+annotated text, which is what lets it generalise to names it has never seen.
+
+```csharp
+var sentences = TaggedSentence.LoadConll("datasets/ner_conll.txt");
+var ner = new TrainedNer().Fit(sentences.Take(315).ToList());
+
+ner.Recognize("Kartika Wijaya bekerja di Gravicode .");
+//   PER: 'Kartika Wijaya'
+//   ORG: 'Gravicode'
+
+ner.Evaluate(heldOut);       // P 98.1%  R 97.7%  F1 97.9%  (213 predicted, 214 actual)
+```
+
+The design is two-stage: a linear model scores each token against its features, and a
+`LinearChainCrf` decodes the best sequence from those scores. That split is what makes the BIO
+constraints enforceable — the per-token model cannot know that an `I-PER` may not follow an `O`, and
+the CRF makes it structurally impossible rather than merely unlikely.
+
+Features are deliberately shape-based rather than identity-based. The word itself is one feature
+among many; the rest describe capitalisation, affixes, digit content and the neighbours. The
+word-shape feature does most of the work — mapping capitals to `X`, lower-case to `x` and digits to
+`d` turns "Jakarta" and "Bandung" into the same `Xxxxxxx`, so evidence about one transfers to the
+other. That is the whole difference between this and a gazetteer.
+
+**Evaluate on entities, not tokens.** Token accuracy is dominated by the `O` tag — a model predicting
+`O` everywhere scores above 85% on most corpora — so it is close to meaningless. `Evaluate` scores
+whole entities, requiring the boundaries and the type all to be right, which is what the CoNLL
+measure means and what published figures refer to.
+
+## Decoder stack
+
+`TransformerDecoder` is structurally an encoder with two changes: the attention is causally masked,
+and a language-model head projects each position back to the vocabulary.
+
+```csharp
+var decoder = new TransformerDecoder(config, vocabulary);
+
+decoder.Generate(prompt, maxNewTokens: 50, options: SamplingOptions.Nucleus, rng: rng);
+decoder.Generate("the cat", tokenizer, maxNewTokens: 20);
+decoder.Perplexity(tokenIds);
+```
+
+**Causal masking is what makes generation-time training possible.** Every position predicts its
+successor, and because no position can see its own answer, all n predictions come from one forward
+pass rather than one per token. Leaving the mask off does not produce a worse model — it produces one
+that appears to train beautifully and generates nothing, because at inference the future it learned
+to rely on is not there.
+
+Sampling options are applied in the usual order: penalise repeats, scale by temperature, cut by
+top-k, then by top-p. Applying temperature after the cuts would change which tokens the cuts should
+have selected. The repetition penalty's sign matters — dividing a *negative* logit by the penalty
+raises it, which is the opposite of a penalty.
+
+```csharp
+SamplingOptions.Greedy;                                  // deterministic
+SamplingOptions.Nucleus;                                 // top-p at 0.9
+new SamplingOptions(Temperature: 0.8, TopK: 40, RepetitionPenalty: 1.1);
+```
+
+This is **forward-only**, like `TransformerModel`: it runs a model whose weights came from elsewhere.
+A trainable decoder belongs on the autodiff tape alongside `TransformerTape`.
+
+**Generation is quadratic here, knowingly.** Each new token re-runs the whole prefix rather than
+caching the keys and values of tokens already processed. A KV cache makes this linear and is the
+single most valuable optimisation for a real generator; it is left out because it doubles the state a
+reader has to hold, and the shapes this runs at do not need it.
+
+---
+
+## Visualisations
+
+Rendered by `samples/GraviText.Console`. `notebooks/GraviText.Notebook.ipynb` adds a causal
+attention heatmap, where everything above the diagonal is exactly zero.
+
+![Word embeddings projected to two dimensions](screenshots/gravitext_embeddings.png)
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

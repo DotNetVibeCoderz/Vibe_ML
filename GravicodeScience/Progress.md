@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 589 passing, 0 failing
+**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 962 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -11,24 +11,24 @@ Roadmap: [PLAN.md](PLAN.md)
 | Area | Status | Notes |
 |---|---|---|
 | Solution and build | ✅ Complete | 24 projects, central package management, Release build clean |
-| GraviNum | ✅ Complete | 236 tests |
-| GraviFrame | ✅ Complete | 56 tests |
-| GraviLearn | ✅ Complete | 76 tests |
-| GraviText | ✅ Complete | 88 tests |
-| GraviGraph | ✅ Complete | 62 tests |
-| GraviProb | ✅ Complete | 71 tests |
-| Sample apps | ✅ Complete | 6 apps, all run end to end |
-| Notebooks | ✅ Complete | 6 notebooks, JSON validated |
+| GraviNum | ✅ Complete | 301 tests |
+| GraviFrame | ✅ Complete | 122 tests |
+| GraviLearn | ✅ Complete | 146 tests |
+| GraviText | ✅ Complete | 157 tests |
+| GraviGraph | ✅ Complete | 97 tests |
+| GraviProb | ✅ Complete | 139 tests |
+| Sample apps | ✅ Complete | 6 apps, all run end to end, all covering v0.4 |
+| Notebooks | ✅ Complete | 6 notebooks, cells compile-checked, 16 inline charts |
 | Benchmarks | ✅ Complete | 6 suites; GraviNum measured and published |
-| Datasets | ✅ Complete | 4 real, 3 generated |
-| Documentation | ✅ Complete | 10 pages × 2 languages |
-| Screenshots | ✅ Complete | 6, rendered by the samples |
+| Datasets | ✅ Complete | 4 real, 4 generated |
+| Documentation | ✅ Complete | 10 pages × 2 languages, with a visualisation gallery per library |
+| Screenshots | ✅ Complete | 11 rendered by the samples, plus 6 of ScienceAppGen |
 
 ---
 
 ## Libraries
 
-### GraviNum — 236 tests
+### GraviNum — 301 tests
 
 - [x] `NdArray` with shape, strides and offset; views for reshape, transpose, slice
 - [x] Slicing with index, range, step and reverse selectors
@@ -51,6 +51,9 @@ Roadmap: [PLAN.md](PLAN.md)
 - [x] `Signal.Fft` — radix-2 and Bluestein, so any length is `O(n log n)`; real transform, frequency bins, FFT convolution
 - [x] Reverse-mode autodiff: `Tensor` tape, broadcasting-aware gradients, `GradientCheck`
 - [x] Graph-shaped tape ops: `SparseMatMul`, `Gather`, `SegmentSum`, `ConcatColumns`, `LeakyRelu`, masked `SoftmaxCrossEntropy`
+- [x] **v0.4** Einstein summation
+- [x] **v0.4** `ComplexNdArray` with Hermitian operations and separable 2-D transforms
+- [x] **v0.4** Slice ergonomics: ellipsis, axis selection, masked writes, element-wise choice
 
 **Performance note.** `LinAlg.Dot` was rewritten during development from a per-row `Axpy` helper
 to four-row register blocking with an inlined SIMD loop: **0.62 → 24.5 GFLOP/s** at 512×512, with
@@ -68,7 +71,7 @@ a shifted QR/QL iteration: symmetric eigen **2,740 → 116 ms** (23.6×) and SVD
 it never reads. `SvdJacobi` and `SymmetricEigenJacobi` stay as the reference the tests check
 against — two unrelated routes to the same factorisation.
 
-### GraviFrame — 56 tests
+### GraviFrame — 122 tests
 
 - [x] Typed columns: numeric, text, boolean, timestamp
 - [x] CSV reader with type inference, quoting, configurable missing tokens
@@ -82,8 +85,13 @@ against — two unrelated routes to the same factorisation.
 - [x] Time series: shift, diff, percent change, rolling, expanding, EMA
 - [x] Calendar resampling at six frequencies
 - [x] Describe, correlation matrix, GraviNum interop
+- [x] **v0.4** Partitioned window functions: rank, cumulative sum, rolling mean, lag, lead
+- [x] **v0.4** Backward-only as-of join with staleness tolerance
+- [x] **v0.4** `CategoricalSeries` with dictionary encoding, ordered categories, one-hot
+- [x] **v0.4** SQL reader and writer over `System.Data.Common` — any ADO.NET provider, no dependency
+- [x] **v0.4** `.xlsx` reader and writer with no spreadsheet library
 
-### GraviLearn — 76 tests
+### GraviLearn — 146 tests
 
 - [x] Scalers: standard, min-max, robust, normalizer
 - [x] Imputation, label and one-hot encoding, polynomial features
@@ -100,8 +108,14 @@ against — two unrelated routes to the same factorisation.
 - [x] Dataset loaders and generators
 - [x] JSON model persistence
 - [x] `OnnxExport` — writes a fitted affine pipeline as ONNX, verified against Python's onnxruntime
+- [x] **v0.4** Permutation importance with per-feature spread
+- [x] **v0.4** Shapley values: exact enumeration and Monte Carlo, pinned against the linear closed form
+- [x] **v0.4** Calibration curves, expected calibration error, Brier score, isotonic regression
+- [x] **v0.4** Over-sampling, under-sampling, SMOTE, class weights
+- [x] **v0.4** One-class SVM by SMO, checked against the nu-property
+- [x] **v0.4** HDBSCAN, demonstrated against a DBSCAN eps sweep that cannot match it
 
-### GraviText — 88 tests
+### GraviText — 157 tests
 
 - [x] Whitespace, regex, character and WordPiece tokenizers; sentence splitter
 - [x] WordPiece vocabulary training
@@ -117,6 +131,11 @@ against — two unrelated routes to the same factorisation.
 - [x] `TransformerTape` — the same encoder on the autodiff tape, every layer gradient-checked
 - [x] `TransformerClassifier` — trains the encoder end to end on labelled text
 - [x] Task pipelines: sentiment (lexicon and supervised), classification, NER, TextRank summariser, keywords
+- [x] **v0.4** Trainable BPE tokenizer, merges saved by rank
+- [x] **v0.4** Unigram/SentencePiece tokenizer: EM pruning, Viterbi, subword-regularisation sampling
+- [x] **v0.4** Linear-chain CRF, pinned against brute-force enumeration
+- [x] **v0.4** Trained NER — 97.9% entity F1 held out, generalises to unseen names
+- [x] **v0.4** Decoder stack with causal masking and greedy/top-k/nucleus sampling
 
 ⚠️ **No pretrained weights.** Documented at the top of [GraviText.md](docs/GraviText.md) and printed
 by the sample at runtime. The architecture can now be *trained* on your own labelled text via
@@ -124,7 +143,7 @@ by the sample at runtime. The architecture can now be *trained* on your own labe
 remains the better baseline on a small dataset.
 ⚠️ **NER is rule-based.** Documented in the same places.
 
-### GraviGraph — 62 tests
+### GraviGraph — 97 tests
 
 - [x] Adjacency-list graph, directed and undirected, with node features and labels
 - [x] Sparse and dense adjacency, normalised propagation matrix, Laplacian
@@ -140,8 +159,14 @@ remains the better baseline on a small dataset.
 - [x] GCN, GraphSAGE and GAT all trained on the autodiff tape — forward pass only, no hand-derived gradients
 - [x] GAT's attention softmax composed from `Gather`/`SegmentSum`, which are adjoints of each other
 - [x] `GnnTape` layer helpers and `TapeAdam`, public so a new architecture needs no library change
+- [x] **v0.4** Heterogeneous graphs with per-type features and per-relation edges
+- [x] **v0.4** Edge feature matrices
+- [x] **v0.4** `RelationalConvolution` (R-GCN) with per-relation normalisation
+- [x] **v0.4** Temporal graphs: time-respecting reachability, snapshots, time-decayed features
+- [x] **v0.4** Graph-level pooling (mean/sum/max/attention) and graph classification
+- [x] **v0.4** GraphSAGE neighbourhood sampling with bounded fan-out
 
-### GraviProb — 71 tests
+### GraviProb — 139 tests
 
 - [x] 12 distributions with log densities, sampling, moments and support bounds
 - [x] `BayesianModel` with a fluent API and latent-variable references in likelihoods
@@ -156,6 +181,11 @@ remains the better baseline on a small dataset.
 - [x] Bayesian networks with exact enumeration and ancestral sampling
 - [x] Hidden Markov models: forward, Viterbi, forward-backward, Baum-Welch
 - [x] Conjugate Bayesian linear regression with predictive intervals
+- [x] **v0.4** Multivariate normal through one Cholesky factor, with closed-form conditioning
+- [x] **v0.4** Dirichlet with conjugate updating, and multinomial
+- [x] **v0.4** Gaussian processes: RBF, Matern, periodic and sum kernels; posterior sampling
+- [x] **v0.4** Kalman filter and RTS smoother, pinned against the closed-form steady-state gain
+- [x] **v0.4** WAIC and PSIS-LOO with Pareto-k diagnostics
 
 ---
 
@@ -223,7 +253,10 @@ Each is now covered by a regression test.
 
 1. **No pretrained transformer weights.** The architecture is correct; the weights are not
    provided.
-2. **NER is rule-based**, so it misses entities outside its gazetteers and trigger patterns.
+2. **Two NER paths, with different trade-offs.** `TrainedNer` learns from annotated text and
+   generalises to unseen names; `NamedEntityRecognizer` is rule-based and misses entities outside
+   its gazetteers. The trained model's 97.9% F1 is on a **generated** corpus, so it measures
+   whether the model learned the templates, not what it would score on newswire.
 3. **GPU is opt-in and float64-limited.** On integrated hardware it is slower than the CPU.
 4. **Cora GCN reaches 69%, not the published 81%.** No learning-rate schedule, no early stopping,
    and 60 epochs. The gradient itself is now verified against finite differences, so the gap is
@@ -247,10 +280,15 @@ Each is now covered by a regression test.
 
 ## Next
 
-See [PLAN.md](PLAN.md). Every factorisation now has a native path when a LAPACK is present, ONNX
-works in both directions, and the generic `NdArray<T>` core is built and measured — genericising
-costs nothing, so migrating the six libraries onto it is now a scheduling decision rather than a
-gamble. That migration, and the v0.4 breadth items, are what remain.
+See [PLAN.md](PLAN.md). **v0.4 is complete** — every breadth item across all six libraries is
+implemented, tested and documented in both languages, and the suite grew from 589 to 962 tests.
+
+What remains is collected in **v0.5 — Consolidation**: migrating the six libraries onto the generic
+`NdArray<T>` core (measured at 0.91–1.04×, so the risk is gone and only the API change remains),
+plus three items carried forward that were never dropped for a reason — Arrow interchange,
+out-of-core dataframes, and distributed training. Loading pretrained transformer weights is the
+oldest un-met promise and is now mostly a name-mapping problem, since `OnnxReader` imports weights
+and the new tokenizers read the formats published models ship in.
 
 ---
 

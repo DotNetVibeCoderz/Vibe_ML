@@ -251,6 +251,247 @@ plot.ShowLegend();
 plot.SavePng(Path.Combine(screenshots, "graviprob_posterior.png"), 1000, 650);
 Console.WriteLine($"  saved {Path.Combine(screenshots, "graviprob_posterior.png")}");
 
+// ---------------------------------------------------------------- v0.4: multivariate
+Section("10. Multivariate distributions");
+
+var mvnMean = NdArray.FromValues([1.0, -2.0]);
+var mvnCov = NdArray.FromArray(new double[,] { { 4.0, 1.5 }, { 1.5, 2.0 } });
+var mvn = new MultivariateNormal(mvnMean, mvnCov);
+
+Console.WriteLine($"  MultivariateNormal, correlated: rho = {mvnCov[0, 1] / Math.Sqrt(mvnCov[0, 0] * mvnCov[1, 1]):F3}");
+Console.WriteLine("  Everything runs off one Cholesky factor: density, log determinant and sampling.");
+
+var conditioned = mvn.Conditional([0], [1], NdArray.FromValues([1.0]));
+Console.WriteLine($"    unconditional: mean {mvnMean.At(0):F4}, variance {mvnCov[0, 0]:F4}");
+Console.WriteLine($"    given x1 = 1:  mean {conditioned.Mean.At(0):F4}, variance {conditioned.Covariance[0, 0]:F4}");
+Console.WriteLine("    conditioning a normal on part of itself gives another normal, in closed form -");
+Console.WriteLine("    which is the entire mechanism behind Gaussian process regression");
+
+var dirichlet = new Dirichlet(2, 3, 5);
+Console.WriteLine($"  Dirichlet(2, 3, 5): mean = [{string.Join(", ", dirichlet.Mean.ToArray().Select(v => v.ToString("F3")))}]");
+Console.WriteLine($"    every marginal is a Beta: component 0 ~ Beta({dirichlet.Marginal(0).Alpha:F0}, {dirichlet.Marginal(0).BetaParameter:F0})");
+Console.WriteLine($"    conjugate, so observing counts [10, 5, 0] is addition:");
+Console.WriteLine($"      posterior alpha = [{string.Join(", ", dirichlet.Posterior([10.0, 5.0, 0.0]).Alpha)}]");
+Console.WriteLine("    off-diagonal covariance is negative and must be - the components sum to one,");
+Console.WriteLine("    so a Dirichlet cannot express positively correlated proportions at all");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: Gaussian process
+Section("11. Gaussian processes");
+
+const int observed = 12;
+var gpX = NdArray.Zeros(observed, 1);
+var gpY = NdArray.Zeros(observed);
+for (var i = 0; i < observed; i++)
+{
+    var value = i * 2 * Math.PI / observed;
+    gpX[i, 0] = value;
+    gpY.SetAt(i, Math.Sin(value));
+}
+
+var gp = new GaussianProcess(new RbfKernel(lengthScale: 1.0), noise: 1e-6).Fit(gpX, gpY);
+
+Console.WriteLine($"  Fitted to {observed} points of a sine, with no optimisation - the posterior is");
+Console.WriteLine("  a closed-form conditional, and the uncertainty arrives with the prediction.");
+Console.WriteLine($"    log marginal likelihood = {gp.LogMarginalLikelihood():F4}");
+
+foreach (var probe in new[] { 1.0, 3.0, 20.0 })
+{
+    var point = NdArray.Zeros(1, 1);
+    point[0, 0] = probe;
+    var prediction = gp.Predict(point);
+    Console.WriteLine($"    x = {probe,5:F1}  mean {prediction.Mean.At(0),8:F4}  " +
+                      $"sd {prediction.StandardDeviation.At(0),7:F4}  (true sin = {Math.Sin(probe):F4})");
+}
+Console.WriteLine("    far from the data the uncertainty returns to the prior - honest, and the");
+Console.WriteLine("    main reason to use a GP over a point-estimate regressor");
+
+var tuned = GaussianProcess.Optimise(gpX, gpY);
+Console.WriteLine($"  Grid search over length scale and noise: {tuned.Kernel.Name}");
+Console.WriteLine("    a grid, not a gradient method - the marginal likelihood is not concave and has");
+Console.WriteLine("    real local optima, one explaining the data as signal and another as noise");
+
+// The band and a few coherent posterior draws.
+var gpPath = Path.Combine(screenshots, "graviprob_gaussian_process.png");
+var gpPlot = new ScottPlot.Plot();
+
+const int gridSize = 200;
+var gridX = NdArray.Zeros(gridSize, 1);
+var gridValues = new double[gridSize];
+for (var i = 0; i < gridSize; i++)
+{
+    gridValues[i] = -1 + i * 9.0 / (gridSize - 1);
+    gridX[i, 0] = gridValues[i];
+}
+
+var band = gp.Predict(gridX);
+var (lower, upper) = band.Interval(0.95);
+
+var fill = gpPlot.Add.FillY(gridValues, lower.ToArray(), upper.ToArray());
+fill.LegendText = "95% credible interval";
+fill.FillColor = ScottPlot.Colors.SteelBlue.WithAlpha(0.25);
+
+var meanLine = gpPlot.Add.Scatter(gridValues, band.Mean.ToArray());
+meanLine.LegendText = "posterior mean";
+meanLine.MarkerSize = 0;
+
+var gpDraws = gp.SamplePosterior(gridX, count: 3, new GraviRandom(5));
+for (var s = 0; s < 3; s++)
+{
+    var draw = new double[gridSize];
+    for (var i = 0; i < gridSize; i++) draw[i] = gpDraws[s, i];
+
+    var line = gpPlot.Add.Scatter(gridValues, draw);
+    line.MarkerSize = 0;
+    line.LineWidth = 1;
+    line.LinePattern = ScottPlot.LinePattern.Dotted;
+    if (s == 0) line.LegendText = "posterior draws";
+}
+
+var points = gpPlot.Add.Scatter(
+    Enumerable.Range(0, observed).Select(i => gpX[i, 0]).ToArray(), gpY.ToArray());
+points.LineWidth = 0;
+points.MarkerSize = 9;
+points.LegendText = "observations";
+
+gpPlot.Title("GraviProb - Gaussian process posterior");
+gpPlot.XLabel("x");
+gpPlot.YLabel("f(x)");
+gpPlot.ShowLegend();
+gpPlot.SavePng(gpPath, 900, 550);
+Console.WriteLine($"  saved {gpPath}");
+Console.WriteLine("    the band widens beyond the data; the dotted draws are coherent FUNCTIONS,");
+Console.WriteLine("    which a marginal band cannot express - it says nothing about the shape");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: state space
+Section("12. Kalman filter and smoother");
+
+var kalman = KalmanFilter.LocalLevel(processVariance: 0.05, observationVariance: 1.0);
+var (hiddenLevel, noisy) = kalman.Simulate(200, new GraviRandom(31));
+
+var filtered = kalman.Filter(noisy);
+var smoothed = kalman.Smooth(noisy);
+
+double RootMeanSquare(IReadOnlyList<double> estimate)
+{
+    var total = 0.0;
+    for (var t = 0; t < estimate.Count; t++)
+    {
+        var error = estimate[t] - hiddenLevel[t, 0];
+        total += error * error;
+    }
+    return Math.Sqrt(total / estimate.Count);
+}
+
+var rawError = 0.0;
+for (var t = 0; t < 200; t++)
+{
+    var error = noisy[t, 0] - hiddenLevel[t, 0];
+    rawError += error * error;
+}
+rawError = Math.Sqrt(rawError / 200);
+
+Console.WriteLine("  Simulated from the model, then estimated against a truth the filter never saw:");
+Console.WriteLine($"    raw observations  RMSE = {rawError:F4}");
+Console.WriteLine($"    filtered          RMSE = {RootMeanSquare(filtered.Filtered.Select(s => s.Mean.At(0)).ToList()):F4}");
+Console.WriteLine($"    smoothed          RMSE = {RootMeanSquare(smoothed.Select(s => s.Mean.At(0)).ToList()):F4}");
+Console.WriteLine("    Filtering uses only the past, which is what a real-time system can do.");
+Console.WriteLine("    Smoothing uses the whole series and is strictly better - using smoothed states");
+Console.WriteLine("    to evaluate a forecasting rule is a look-ahead error, and a common one.");
+Console.WriteLine($"    log likelihood = {filtered.LogLikelihood:F2}, which is what parameter fitting maximises");
+
+var forecast = kalman.Forecast(noisy, horizon: 20);
+Console.WriteLine($"  20-step forecast: uncertainty grows from {forecast[0].StandardDeviation.At(0):F4} " +
+                  $"to {forecast[^1].StandardDeviation.At(0):F4}");
+Console.WriteLine("    no observations arrive, so only the predict step runs and Q accumulates -");
+Console.WriteLine("    a forecast whose uncertainty does not grow is not a forecast");
+
+var kalmanPath = Path.Combine(screenshots, "graviprob_kalman.png");
+var kalmanPlot = new ScottPlot.Plot();
+var times = Enumerable.Range(0, 200).Select(t => (double)t).ToArray();
+
+var observationSeries = kalmanPlot.Add.Scatter(times,
+    Enumerable.Range(0, 200).Select(t => noisy[t, 0]).ToArray());
+observationSeries.LineWidth = 0;
+observationSeries.MarkerSize = 3;
+observationSeries.Color = ScottPlot.Colors.Gray.WithAlpha(0.5);
+observationSeries.LegendText = "observations";
+
+var truthSeries = kalmanPlot.Add.Scatter(times,
+    Enumerable.Range(0, 200).Select(t => hiddenLevel[t, 0]).ToArray());
+truthSeries.MarkerSize = 0;
+truthSeries.LineWidth = 2;
+truthSeries.LegendText = "hidden state (never observed)";
+
+var smoothSeries = kalmanPlot.Add.Scatter(times, smoothed.Select(s => s.Mean.At(0)).ToArray());
+smoothSeries.MarkerSize = 0;
+smoothSeries.LineWidth = 2;
+smoothSeries.LegendText = "smoothed estimate";
+
+kalmanPlot.Title("GraviProb - Kalman smoother recovering a hidden state");
+kalmanPlot.XLabel("time");
+kalmanPlot.YLabel("level");
+kalmanPlot.ShowLegend();
+kalmanPlot.SavePng(kalmanPath, 900, 500);
+Console.WriteLine($"  saved {kalmanPath}");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: model comparison
+Section("13. Model comparison with WAIC and LOO");
+
+var comparisonRng = new GraviRandom(41);
+var comparisonData = NdArray.Zeros(60);
+for (var i = 0; i < 60; i++) comparisonData.SetAt(i, comparisonRng.Normal());
+
+// A posterior over the mean, with a flat prior.
+var sampleMean = 0.0;
+for (var i = 0; i < 60; i++) sampleMean += comparisonData.At(i);
+sampleMean /= 60;
+
+var drawRng = new GraviRandom(43);
+var drawnMeans = new double[1500];
+for (var s = 0; s < 1500; s++) drawnMeans[s] = sampleMean + drawRng.Normal() / Math.Sqrt(60);
+
+NdArray PointwiseLogLikelihood(double sigma)
+{
+    var matrix = NdArray.Zeros(drawnMeans.Length, comparisonData.Size);
+    for (var s = 0; s < drawnMeans.Length; s++)
+    {
+        var normal = new Normal(drawnMeans[s], sigma);
+        for (var i = 0; i < comparisonData.Size; i++) matrix[s, i] = normal.LogDensity(comparisonData.At(i));
+    }
+    return matrix;
+}
+
+Console.WriteLine("  Data came from N(0, 1). Three candidate scales, judged on out-of-sample");
+Console.WriteLine("  predictive accuracy rather than in-sample fit:");
+
+var candidates = new Dictionary<string, InformationCriterion>();
+foreach (var (label, sigma) in new[] { ("sigma = 0.5", 0.5), ("sigma = 1.0", 1.0), ("sigma = 4.0", 4.0) })
+{
+    var matrix = PointwiseLogLikelihood(sigma);
+    var waic = ModelComparison.Waic(matrix);
+    var loo = ModelComparison.Loo(matrix);
+
+    candidates[label] = waic;
+    Console.WriteLine($"    {label,-12} WAIC {waic.Estimate,8:F2}  LOO {loo.Criterion.Estimate,8:F2}  " +
+                      $"p_eff {waic.EffectiveParameters,5:F2}  reliable {loo.IsReliable}");
+}
+
+Console.WriteLine("  Ranked, with the standard error of each DIFFERENCE from the best:");
+foreach (var (name, estimate, difference, error) in ModelComparison.Compare(candidates))
+    Console.WriteLine($"    {name,-12} {estimate,8:F2}  {(difference == 0 ? "best" : $"+{difference:F2} +/- {error:F2}")}");
+
+Console.WriteLine("  Lower is better, and only differences mean anything - the absolute value is not");
+Console.WriteLine("  interpretable. The error of a difference uses the PAIRED pointwise terms, because");
+Console.WriteLine("  the models are scored on the same observations and their errors are correlated.");
+Console.WriteLine("  LOO's Pareto-k diagnostic says whether its reweighting can be trusted, and here it");
+Console.WriteLine("  fired: sigma = 0.5 reports 'reliable False'. That model is badly misspecified, so a");
+Console.WriteLine("  few observations dominate the importance weights and its LOO estimate should not be");
+Console.WriteLine("  believed. WAIC has no equivalent - it fails silently in exactly the cases LOO flags.");
+Console.WriteLine();
+
 Console.WriteLine();
 Console.WriteLine(GraviInfo.Attribution);
 return;

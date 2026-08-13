@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Gravicode.Science.GraviNum;
 using Gravicode.Science.GraviNum.Compute;
 using Gravicode.Science.GraviNum.Io;
+using Gravicode.Science.GraviNum.Signal;
 
 Console.WriteLine(GraviInfo.Banner("GraviNum"));
 Console.WriteLine(GraviInfo.HardwareReport());
@@ -175,6 +176,101 @@ plot.Add.Heatmap(heat.To2DArray());
 plot.Title("GraviNum - 40x40 matrix heatmap");
 plot.SavePng(heatmapPath, 900, 700);
 Console.WriteLine($"  saved {heatmapPath}");
+
+// ---------------------------------------------------------------- v0.4: einsum
+Section("10. Einstein summation");
+
+var ea = rng.StandardNormal(4, 5);
+var eb = rng.StandardNormal(5, 3);
+
+Console.WriteLine("  One notation covers products, transposes, traces and contractions.");
+Console.WriteLine($"  \"ij,jk->ik\" matches LinAlg.Dot: {UFunc.AllClose(Einsum.Evaluate("ij,jk->ik", ea, eb), LinAlg.Dot(ea, eb), 1e-12)}");
+Console.WriteLine($"  \"ji,jk->ik\" is Dot(a.T, b), but the axes are written down rather than implied");
+
+var square = NdArray.FromArray(new double[,] { { 1, 2, 3 }, { 4, 5, 6 }, { 7, 8, 9 } });
+Console.WriteLine($"  \"ii->i\"  diagonal = {Format(Einsum.Evaluate("ii->i", square))}");
+Console.WriteLine($"  \"ii->\"   trace    = {Einsum.Evaluate("ii->", square).At(0):F1}");
+Console.WriteLine($"  \"ij->j\"  col sums = {Format(Einsum.Evaluate("ij->j", square))}");
+
+// Rank 3 is where writing this out by hand stops being readable.
+var batchA = rng.StandardNormal(3, 4, 5);
+var batchB = rng.StandardNormal(3, 5, 2);
+Console.WriteLine($"  \"bij,bjk->bik\" batched product -> shape [{Shapes.Describe(Einsum.Evaluate("bij,bjk->bik", batchA, batchB).Shape)}]");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: complex
+Section("11. Complex arrays and the 2-D transform");
+
+var signal = ComplexNdArray.FromParts(rng.StandardNormal(64), rng.StandardNormal(64));
+Console.WriteLine($"  round trip through Fft/Ifft holds: {signal.Fft().Ifft().AllClose(signal, 1e-10)}");
+
+// Parseval: energy is conserved, which pins the scaling convention.
+var timeEnergy = 0.0;
+for (var i = 0; i < signal.Size; i++) timeEnergy += signal.Power().At(i);
+var spectrum = signal.Fft();
+var freqEnergy = 0.0;
+for (var i = 0; i < spectrum.Size; i++) freqEnergy += spectrum.Power().At(i);
+Console.WriteLine($"  Parseval:  time {timeEnergy:F4}  vs  frequency/N {freqEnergy / signal.Size:F4}");
+
+var hermitian = ComplexNdArray.FromParts(rng.StandardNormal(3, 3), rng.StandardNormal(3, 3));
+var gram = ComplexNdArray.Dot(hermitian.ConjugateTranspose(), hermitian);
+Console.WriteLine("  A^H A has a real, non-negative diagonal; A^T A would not:");
+Console.WriteLine($"    diag = [{gram[0, 0].Real:F4}, {gram[1, 1].Real:F4}, {gram[2, 2].Real:F4}]  " +
+                  $"max |imag| = {Math.Max(Math.Abs(gram[0, 0].Imaginary), Math.Abs(gram[2, 2].Imaginary)):E1}");
+
+var image = ComplexNdArray.FromParts(rng.StandardNormal(16, 16));
+Console.WriteLine($"  separable 2-D transform round trips: {image.Fft2().Ifft2().AllClose(image, 1e-10)}");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: slicing
+Section("12. Slice ergonomics");
+
+var grid = NdArray.Arange(12).Reshape(3, 4).Copy();
+Console.WriteLine("  grid =");
+Console.WriteLine(grid.ToString(0));
+
+// Slice returns a view, so writing through it changes the original.
+grid.Slice(Slice.Range(1, 2)).Assign(0.0);
+Console.WriteLine("  after grid[1:2] = 0 - the write went through the view:");
+Console.WriteLine(grid.ToString(0));
+
+var volume = NdArray.Arange(24).Reshape(2, 3, 4);
+Console.WriteLine($"  SliceEllipsis([], [Slice.At(3)]) takes the last axis without counting the leading ones");
+Console.WriteLine($"    -> shape [{Shapes.Describe(volume.SliceEllipsis([], [Slice.At(3)]).Shape)}], and stays right if the rank grows");
+
+var table = NdArray.Arange(12).Reshape(3, 4);
+Console.WriteLine($"  TakeAlong([3, 0], axis: 1) picks columns: [{Shapes.Describe(table.TakeAlong([3, 0], axis: 1).Shape)}]");
+Console.WriteLine($"  IndicesWhere(v => v > 8)   = [{string.Join(", ", table.IndicesWhere(v => v > 8))}]");
+Console.WriteLine($"  Clip(2, 8) first row       = {Format(table.Clip(2, 8).Row(0))}");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: spectrum plot
+Section("13. Power spectrum");
+
+// Two tones plus noise: the transform should show two peaks and a floor.
+const int sampleCount = 512;
+const double sampleRate = 256.0;
+var tone = NdArray.Zeros(sampleCount);
+for (var i = 0; i < sampleCount; i++)
+{
+    var t = i / sampleRate;
+    tone.SetAt(i, Math.Sin(2 * Math.PI * 12 * t) + 0.5 * Math.Sin(2 * Math.PI * 40 * t) + 0.15 * rng.Normal());
+}
+
+var bins = Fft.FrequencyBins(sampleCount, sampleRate);
+var power = Fft.Magnitude(tone.ToArray());
+
+var spectrumPath = Path.Combine(screenshots, "gravinum_spectrum.png");
+var spectrumPlot = new ScottPlot.Plot();
+var half = sampleCount / 2;
+spectrumPlot.Add.Scatter(bins.ToArray().Take(half).ToArray(), power.ToArray().Take(half).ToArray());
+spectrumPlot.Title("GraviNum - power spectrum: 12 Hz and 40 Hz recovered from noise");
+spectrumPlot.XLabel("frequency (Hz)");
+spectrumPlot.YLabel("magnitude");
+spectrumPlot.SavePng(spectrumPath, 900, 500);
+Console.WriteLine($"  two tones at 12 Hz and 40 Hz, buried in noise, recovered by the transform");
+Console.WriteLine($"  saved {spectrumPath}");
+Console.WriteLine();
 
 Console.WriteLine();
 Console.WriteLine(GraviInfo.Attribution);

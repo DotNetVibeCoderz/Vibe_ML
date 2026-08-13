@@ -326,8 +326,11 @@ public sealed class KalmanFilter
         ArgumentNullException.ThrowIfNull(rng);
         if (steps <= 0) throw new ArgumentOutOfRangeException(nameof(steps));
 
-        var stateNoise = new MultivariateNormal(NdArray.Zeros(StateDimension), _processNoise);
-        var measurementNoise = new MultivariateNormal(NdArray.Zeros(ObservationDimension), _observationNoise);
+        // Zero noise is a meaningful model — a state that never moves, or a perfect sensor — but a
+        // zero covariance has no Cholesky factor, so the degenerate case is handled rather than
+        // pushed into MultivariateNormal, which would rightly refuse it.
+        var stateNoise = NoiseSampler(_processNoise, StateDimension);
+        var measurementNoise = NoiseSampler(_observationNoise, ObservationDimension);
 
         var states = NdArray.Zeros(steps, StateDimension);
         var observations = NdArray.Zeros(steps, ObservationDimension);
@@ -337,13 +340,13 @@ public sealed class KalmanFilter
         for (var t = 0; t < steps; t++)
         {
             var moved = MatrixVector(_transition, state);
-            var noise = stateNoise.Sample(rng);
+            var noise = stateNoise(rng);
 
             state = NdArray.Zeros(StateDimension);
             for (var i = 0; i < StateDimension; i++) state.SetAt(i, moved.At(i) + noise.At(i));
 
             var measured = MatrixVector(_observation, state);
-            var error = measurementNoise.Sample(rng);
+            var error = measurementNoise(rng);
 
             for (var i = 0; i < StateDimension; i++) states[t, i] = state.At(i);
             for (var i = 0; i < ObservationDimension; i++) observations[t, i] = measured.At(i) + error.At(i);
@@ -353,6 +356,28 @@ public sealed class KalmanFilter
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>
+    /// A draw-from-zero-mean sampler for a noise covariance, tolerating a degenerate one.
+    /// </summary>
+    /// <remarks>
+    /// An all-zero covariance means no noise at all, which is a legitimate model — a state that
+    /// holds still, or a noise-free sensor — but it has no Cholesky factor. A covariance that is
+    /// merely near-singular is a different matter and is still refused, because there the intent is
+    /// ambiguous.
+    /// </remarks>
+    private static Func<GraviRandom, NdArray> NoiseSampler(NdArray covariance, int dimension)
+    {
+        var zero = true;
+        for (var i = 0; i < dimension && zero; i++)
+            for (var j = 0; j < dimension; j++)
+                if (covariance[i, j] != 0) { zero = false; break; }
+
+        if (zero) return _ => NdArray.Zeros(dimension);
+
+        var distribution = new MultivariateNormal(NdArray.Zeros(dimension), covariance);
+        return distribution.Sample;
+    }
 
     private static void RequireSquare(NdArray matrix, int dimension, string name)
     {

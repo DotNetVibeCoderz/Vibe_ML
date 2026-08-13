@@ -223,6 +223,154 @@ plot.HideGrid();
 plot.SavePng(Path.Combine(screenshots, "gravigraph_network.png"), 1100, 850);
 Console.WriteLine($"  saved {Path.Combine(screenshots, "gravigraph_network.png")}");
 
+// ---------------------------------------------------------------- v0.4: heterogeneous
+Section("10. Heterogeneous graphs");
+
+var shop = new HeterogeneousGraph();
+shop.AddNodeType("user", 4);
+shop.AddNodeType("item", 5);
+
+shop.AddEdge("user", "viewed", "item", 0, 0);
+shop.AddEdge("user", "viewed", "item", 0, 1);
+shop.AddEdge("user", "viewed", "item", 1, 1);
+shop.AddEdge("user", "viewed", "item", 2, 3);
+shop.AddEdge("user", "bought", "item", 1, 2, weight: 1.0);
+shop.AddEdge("user", "bought", "item", 3, 4, weight: 1.0);
+
+Console.WriteLine($"  {shop}");
+Console.WriteLine("  Node indices are LOCAL to their type - user 0 and item 0 are different nodes,");
+Console.WriteLine("  which is what lets each type carry a different feature width:");
+
+shop.SetFeatures("user", new GraviRandom(3).StandardNormal(4, 6));
+shop.SetFeatures("item", new GraviRandom(5).StandardNormal(5, 3));
+Console.WriteLine($"    user features are {shop.Features("user")!.Shape[1]} wide, " +
+                  $"item features are {shop.Features("item")!.Shape[1]} wide");
+
+// Rating scores and timestamps: two numbers per edge, which a scalar weight cannot hold.
+var bought = new EdgeType("user", "bought", "item");
+shop.SetEdgeFeatures(bought, NdArray.FromArray(new double[,] { { 5, 1710 }, { 3, 1840 } }));
+Console.WriteLine($"    edge features on '{bought}': {shop.EdgeFeatures(bought)!.Shape[0]} edges x " +
+                  $"{shop.EdgeFeatures(bought)!.Shape[1]} attributes");
+
+shop.AddReverseEdges(new EdgeType("user", "viewed", "item"));
+Console.WriteLine("  Messages only flow along edge direction, so items could never inform users.");
+Console.WriteLine($"    added '{new EdgeType("item", "rev_viewed", "user")}' as a SEPARATE relation -");
+Console.WriteLine("    'user views item' and 'item is viewed by user' deserve different weights");
+
+var rgcn = new RelationalConvolution(shop,
+    new Dictionary<string, int> { ["user"] = 6, ["item"] = 3 }, outputSize: 8, new GraviRandom(7));
+
+var messages = rgcn.Forward(shop, new Dictionary<string, NdArray>
+{
+    ["user"] = shop.Features("user")!,
+    ["item"] = shop.Features("item")!,
+});
+
+Console.WriteLine($"  R-GCN layer -> user [{Shapes.Describe(messages["user"].Shape)}], " +
+                  $"item [{Shapes.Describe(messages["item"].Shape)}]");
+Console.WriteLine("  One weight matrix per relation, and in-degree normalised PER RELATION - a user");
+Console.WriteLine("  with a thousand views and three purchases would otherwise lose the purchases,");
+Console.WriteLine("  and the purchases are the signal.");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: temporal
+Section("11. Temporal graphs");
+
+var events = new TemporalGraph();
+events.AddEdge(0, 1, time: 1);
+events.AddEdge(1, 2, time: 2);
+events.AddEdge(2, 3, time: 0);      // happened BEFORE anything arrived at node 2
+
+Console.WriteLine("  Three events: 0->1 at t=1, 1->2 at t=2, 2->3 at t=0.");
+Console.WriteLine($"  Statically, 0 reaches 3 through 1 and 2: edge 2->3 exists = {events.Collapse().HasEdge(2, 3)}");
+
+var reachable = events.TemporallyReachable(0);
+Console.WriteLine($"  Temporally, 0 reaches: [{string.Join(", ", reachable.Keys.Order())}]");
+Console.WriteLine("    node 3 is NOT reachable - the 2->3 edge fired before anything got to node 2,");
+Console.WriteLine("    so nothing could have travelled that way. Information, money and disease all");
+Console.WriteLine("    obey that ordering, and a static analysis overstates every one of them.");
+Console.WriteLine($"  TemporalEfficiency = {events.TemporalEfficiency():F3} (1.0 would mean ordering never mattered)");
+
+// A recency-weighted embedding: recent interactions should say more than old ones.
+var decayGraph = new TemporalGraph(directed: false);
+decayGraph.AddEdge(0, 1, time: 0);        // old
+decayGraph.AddEdge(0, 2, time: 100);      // recent
+
+var signals = NdArray.Zeros(3, 1);
+signals[1, 0] = 1.0;       // what the old neighbour says
+signals[2, 0] = -1.0;      // what the recent neighbour says
+
+var decayed = decayGraph.TimeDecayedFeatures(signals, asOf: 100, halfLife: 10);
+Console.WriteLine($"  Time-decayed embedding of node 0 = {decayed[0, 0]:F4}");
+Console.WriteLine("    negative, so the recent neighbour won. A static aggregation weights a");
+Console.WriteLine("    year-old interaction the same as yesterday's, which is why collapsed-graph");
+Console.WriteLine("    recommenders keep suggesting what somebody liked once, long ago.");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: classification
+Section("12. Graph-level pooling and classification");
+
+var pooled = NdArray.FromArray(new double[,] { { 1, 2 }, { 3, 4 }, { 5, 6 } });
+Console.WriteLine("  A readout turns a variable number of node vectors into one graph vector.");
+Console.WriteLine($"    Mean    = [{string.Join(", ", GraphPooling.Pool(pooled, PoolingKind.Mean).ToArray())}]");
+Console.WriteLine($"    Sum     = [{string.Join(", ", GraphPooling.Pool(pooled, PoolingKind.Sum).ToArray())}]");
+Console.WriteLine($"    Max     = [{string.Join(", ", GraphPooling.Pool(pooled, PoolingKind.Max).ToArray())}]");
+Console.WriteLine("  Every one is a symmetric aggregate, because graph nodes have no canonical");
+Console.WriteLine("  numbering - a readout sensitive to order would depend on how the file was written.");
+Console.WriteLine("  Mean is size-invariant (judge composition); sum is not (size itself matters).");
+
+var shapes = new List<Graph>();
+var shapeLabels = new List<int>();
+for (var n = 5; n <= 12; n++)
+{
+    shapes.Add(Graph.Cycle(n));
+    shapeLabels.Add(0);
+    shapes.Add(Graph.Complete(n));
+    shapeLabels.Add(1);
+}
+
+var shapeClassifier = new GraphClassifier(inputSize: 2, hiddenSize: 16, layers: 2)
+    .Fit(shapes, shapeLabels);
+
+Console.WriteLine($"  Trained to tell cycles from complete graphs: {shapeClassifier.Accuracy(shapes, shapeLabels):P1}");
+Console.WriteLine($"    a 20-node cycle    -> class {shapeClassifier.Predict(Graph.Cycle(20))} (expected 0)");
+Console.WriteLine($"    a 20-node complete -> class {shapeClassifier.Predict(Graph.Complete(20))} (expected 1)");
+Console.WriteLine("    both sizes are outside the training range, so it generalised on structure");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: sampling
+Section("13. Neighbourhood sampling");
+
+// A hub with two thousand neighbours: full-batch message passing would pull all of them in.
+var hub = new Graph(2001);
+for (var i = 1; i <= 2000; i++) hub.AddEdge(0, i);
+
+var block = NeighborSampler.Sample(hub, [0], [5], new GraviRandom(3));
+Console.WriteLine($"  Node 0 has {hub.Degree(0)} neighbours. Sampling with fan-out 5:");
+Console.WriteLine($"    the batch touches {block.NodeCount} nodes and {block.EdgeCount} edges");
+Console.WriteLine("  The problem is not memory, it is neighbourhood explosion: a two-layer GNN on a");
+Console.WriteLine("  graph of average degree 100 touches 10,000 nodes per target, three layers a million.");
+
+var citation = Graph.Random(500, 0.02, seed: 11);
+var citationFeatures = new GraviRandom(13).StandardNormal(500, 8);
+
+var batchBlock = NeighborSampler.Sample(citation, [0, 1, 2], [10, 5], new GraviRandom(17));
+var gathered = NeighborSampler.GatherFeatures(batchBlock, citationFeatures);
+
+Console.WriteLine($"  On a 500-node graph, a 3-target batch with fan-out [10, 5]:");
+Console.WriteLine($"    {batchBlock.NodeCount} of 500 feature rows need to be resident");
+Console.WriteLine($"    layers: {string.Join(", ", batchBlock.Layers.Select(l => l.Length + " edges"))}");
+
+var sageRng = new GraviRandom(19);
+NdArray[] sageWeights = [sageRng.StandardNormal(16, 12) * 0.1, sageRng.StandardNormal(24, 4) * 0.1];
+var sageOut = NeighborSampler.Aggregate(batchBlock, gathered, sageWeights);
+
+Console.WriteLine($"    aggregated -> [{Shapes.Describe(sageOut.Shape)}], one row per target");
+Console.WriteLine("  A SAGE layer takes TWICE its feature width: self and neighbourhood are");
+Console.WriteLine("  concatenated rather than averaged together, which is what lets the model tell a");
+Console.WriteLine("  node apart from its surroundings.");
+Console.WriteLine();
+
 Console.WriteLine();
 Console.WriteLine(GraviInfo.Attribution);
 return;

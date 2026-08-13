@@ -531,6 +531,135 @@ Lihat [benchmarks.md](benchmarks.md) untuk hasil pengukurannya.
 | `AsSpan()` melempar exception | Array-nya strided; panggil `AsContiguous()` dulu |
 | GPU lebih lambat daripada CPU | Wajar untuk float64 pada perangkat terintegrasi — lihat di atas |
 
+## Penjumlahan Einstein
+
+`Einsum` memberi satu notasi untuk transpos, trace, kontraksi, dan hasil kali luar. String subscript
+menamai sumbu setiap operand dengan huruf; keluaran menamai sumbu yang dipertahankan, dan setiap
+huruf yang muncul di masukan tetapi tidak di keluaran akan dijumlahkan.
+
+```csharp
+Einsum.Evaluate("ij,jk->ik", a, b);        // perkalian matriks
+Einsum.Evaluate("ji,jk->ik", a, b);        // sama dengan Dot(a.T, b), tetapi sumbunya tertulis jelas
+Einsum.Evaluate("ij->ji", a);              // transpos
+Einsum.Evaluate("ii->i", a);               // diagonal
+Einsum.Evaluate("ii->", a);                // trace
+Einsum.Evaluate("ij,ij->", a, b);          // hasil kali dalam Frobenius
+Einsum.Evaluate("bij,bjk->bik", a, b);     // perkalian matriks berkelompok
+Einsum.Evaluate("ij,jk", a, b);            // keluaran disimpulkan: huruf yang muncul sekali, urut abjad
+```
+
+Nilainya terletak pada maksud yang tertulis. `LinAlg.Dot(a.T, b)` memaksa pembaca merekonstruksi
+sumbu mana yang bertemu; `"ji,jk->ik"` menyatakannya. Ini paling penting untuk operasi yang tidak
+punya nama — kontraksi atas dua sumbu tensor peringkat 4 tidak terbaca sebagai rangkaian transpos
+dan reshape.
+
+Ini adalah evaluator loop bersarang biasa, bukan yang mengoptimasi: ia tidak menyusun ulang rantai
+operand untuk memperkecil ukuran antara. Untuk dua operand — hampir semua penggunaan nyata — tidak
+ada pilihan urutan. Huruf yang berulang *di dalam* satu operand memilih diagonal, dan itu muncul
+dari aturan penugasan, bukan sebagai kasus khusus.
+
+Panjang sumbu yang tidak cocok akan ditolak. Jika `j` bernilai 5 pada satu operand dan 4 pada yang
+lain, kontraksinya tidak bermakna, dan tanpa pemeriksaan itu ia akan diam-diam memakai yang datang
+lebih dulu.
+
+## Array kompleks
+
+`ComplexNdArray` adalah pendamping `NdArray` untuk pekerjaan yang secara alami kompleks: spektrum,
+fungsi transfer, nilai eigen matriks tak simetris. Memecah masalah kompleks menjadi dua array riil
+memang bisa, tetapi menyiksa untuk dibaca — setiap perkalian menjadi empat, dan tanda pada salah
+satunya adalah bug yang ditulis semua orang setidaknya sekali.
+
+```csharp
+var z = ComplexNdArray.FromParts(real, imaginary);
+
+z.Magnitude();              // |z| per elemen, lewat Complex.Abs agar tidak overflow
+z.Phase();                  // arg(z) pada (-pi, pi]
+z.Power();                  // |z|^2, tanpa bolak-balik lewat akar kuadrat
+z.Conjugate();
+
+ComplexNdArray.Dot(a, b);           // perkalian matriks
+ComplexNdArray.Inner(a, b);         // hasil kali dalam Hermitian: jumlah conj(a_i) b_i
+a.ConjugateTranspose();             // A^H — yang dimaksud hampir semua rumus
+
+z.Fft();  z.Ifft();                 // transformasi 1-D
+z.Fft2(); z.Ifft2();                // transformasi 2-D yang terpisahkan
+```
+
+**`ConjugateTranspose` yang harus dipakai, bukan `Transpose`.** `A^H A` adalah semi-definit positif
+dengan diagonal riil; `A^T A` bukan keduanya, sehingga transpos biasa memberi matriks yang tampak
+masuk akal dengan "varians" kompleks di diagonalnya. Keduanya disediakan karena mudah tertukar, dan
+menyediakan hanya satu dengan nama "transpos" justru membuat yang salah terpakai.
+
+Hasil kali dalam Hermitian mengkonjugasikan operand *pertamanya*. Itulah yang membuat `<a, a>`
+bernilai riil non-negatif sama dengan norma kuadrat — tanpa itu, "norma" dari `[i]` keluar sebagai
+-1.
+
+Penyimpanannya adalah buffer `Complex` datar, sehingga tata letaknya berupa pasangan riil/imajiner
+berselang-seling yang kontigu — sama seperti FFTW dan NumPy, yang membuat buffer bisa langsung
+diberikan ke `Fft` tanpa pengemasan ulang. Berbeda dari `NdArray`, reshape dan transpos di sini
+**menyalin**, bukan mengembalikan view: aritmetika kompleks memerlukan enam flop per elemen,
+sehingga penyalinan bukan lagi yang dominan.
+
+## Ergonomi slice
+
+`Slice` dan `NdArray.Assign` sudah mencakup view dan penugasan dengan broadcast. `SliceOps`
+menambahkan yang belum ada di sekitarnya.
+
+```csharp
+grid.Slice(Sel.Range(1, 3)).Assign(0.0);      // menulis ke grid, karena Slice mengembalikan view
+grid.Slice(Sel.All, Sel.Range(2, 4)).Assign(replacement);
+
+array.SliceEllipsis([], [Sel.At(0)]);          // sumbu terakhir, tanpa menghitung sumbu di depan
+array.TakeAlong([3, 0], axis: 1);              // memilih kolom; indeks boleh berulang atau diacak
+array.AxisAt(1, 2);                            // satu posisi sumbu, sumbunya dihapus (sebuah view)
+array.AxisRange(1, 1, 3);                      // rentang sumbu, sumbunya dipertahankan (sebuah view)
+
+SliceOps.Select(condition, ifTrue, ifFalse);   // pilihan per elemen, bentuk dipertahankan
+array.SetWhere(v => v > 2, -1);                // penulisan bertopeng, di tempat
+array.IndicesWhere(v => v > 4);                // posisi, bukan nilai
+array.FilterRows(row => row.At(0) > 4);        // baris utuh, disalin
+array.Clip(0, 6);
+```
+
+Aturan yang perlu diingat: **semua yang mengembalikan array mengembalikan salinan; semua yang
+menulis, menulis lewat view ke buffer aslinya.** `a.Slice(...).Assign(b)` mengubah `a`;
+`a.Slice(...).Copy()` tidak.
+
+`SliceEllipsis` ada agar sumbu belakang bisa disebut tanpa menghitung sumbu di depannya. Mengambil
+kanal terakhir dari sebuah batch adalah `SliceEllipsis(array, [], [Sel.At(0)])` dan tetap benar jika
+batch bertambah satu sumbu, sedangkan `Slice(Sel.All, Sel.All, Sel.All, Sel.At(0))` tidak.
+
+`SliceOps.Select` berbeda dari `NdArray.Where`, yang menyaring dan hanya mengembalikan yang lolos.
+`Select` mempertahankan bentuk, dan itulah yang membuatnya bisa dirangkai — pemangkasan, penopengan
+loss, penggantian nilai sentinel.
+
+Bentuk singkat lebih terbaca daripada indeks negatif telanjang di lokasi pemanggilan:
+
+```csharp
+values.Slice(SliceShorthand.Last(3));
+values.Slice(SliceShorthand.First(2));
+values.Slice(SliceShorthand.Every(2));
+values.Slice(SliceShorthand.DropLast(2));
+values.Slice(1..3);                            // System.Range dikonversi secara implisit
+```
+
+---
+
+## Visualisasi
+
+Kedua gambar dihasilkan oleh `samples/GraviNum.Console` dan direproduksi langsung di dalam
+`notebooks/GraviNum.Notebook.ipynb`.
+
+![Matriks 40x40 sebagai heatmap](../screenshots/gravinum_heatmap.png)
+
+Fungsi dua dimensi yang mulus sebagai heatmap, sehingga strukturnya terlihat, bukan deraunya.
+
+![Spektrum daya memulihkan dua nada dari derau](../screenshots/gravinum_spectrum.png)
+
+Dua nada pada 12 Hz dan 40 Hz, terkubur derau di domain waktu dan jelas terlihat di domain
+frekuensi. `Fft` menangani panjang berapa pun — yang ini pangkat dua, tetapi panjang bilangan prima
+berbiaya sama secara asimtotik berkat jalur Bluestein.
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

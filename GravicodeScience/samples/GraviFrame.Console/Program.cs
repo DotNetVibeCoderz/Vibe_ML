@@ -174,9 +174,122 @@ plot.ShowLegend();
 plot.SavePng(chartPath, 1000, 600);
 Console.WriteLine($"  saved {chartPath}");
 
+// ---------------------------------------------------------------- v0.4: windows
+Section("10. Window functions");
+
+var sales = new DataFrame(
+[
+    new TextSeries("customer", ["a", "b", "a", "b", "a", "b"]),
+    new NumericSeries("day", [1, 1, 2, 2, 3, 3]),
+    new NumericSeries("amount", [10, 100, 20, 200, 30, 300]),
+]);
+
+Console.WriteLine("  Two interleaved customers, so a partition bug cannot hide:");
+Console.WriteLine(sales.ToString());
+
+var running = Windowing.CumulativeSum(sales, ["customer"], "amount");
+Console.WriteLine($"  CumulativeSum per customer = [{string.Join(", ", running.Values.ToArray())}]");
+
+var previous = Windowing.Lag(sales, ["customer"], "amount");
+Console.WriteLine($"  Lag per customer           = [{string.Join(", ", previous.Values.ToArray().Select(Missing))}]");
+Console.WriteLine("    the two NaNs are each group's first row - without partitioning, customer b's");
+Console.WriteLine("    first row would reach back into customer a's last, which is a real leak");
+
+var rolling = Windowing.RollingMean(sales, ["customer"], "amount", window: 2);
+Console.WriteLine($"  RollingMean(window: 2)     = [{string.Join(", ", rolling.Values.ToArray().Select(Missing))}]");
+Console.WriteLine("    incomplete windows stay missing rather than averaging over what is there");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: as-of join
+Section("11. As-of join");
+
+var trades = new DataFrame(
+[
+    new NumericSeries("time", [10, 25, 40]),
+    new NumericSeries("size", [1, 2, 3]),
+]);
+
+var quotes = new DataFrame(
+[
+    new NumericSeries("time", [30, 5, 20, 50]),      // deliberately unordered
+    new NumericSeries("price", [300, 100, 200, 400]),
+]);
+
+Console.WriteLine("  An equality join on a timestamp matches almost nothing - real clocks differ.");
+Console.WriteLine("  As-of takes the most recent quote at or before each trade:");
+Console.WriteLine(Windowing.AsOfJoin(trades, quotes, "time").ToString());
+Console.WriteLine("    t=40 sees the quote from t=30, never the one from t=50. Matching the *nearest*");
+Console.WriteLine("    row in either direction is look-ahead, and is how a backtest predicts the past.");
+
+var stale = Windowing.AsOfJoin(trades, quotes, "time", tolerance: 8);
+Console.WriteLine($"  with tolerance 8, quotes older than that are dropped: " +
+                  $"[{string.Join(", ", stale.Numeric("price").Values.ToArray().Select(Missing))}]");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: categorical
+Section("12. Categorical columns");
+
+var sizes = CategoricalSeries.FromValues(
+    "size", ["medium", "low", "high", "low", null, "medium"],
+    categories: ["low", "medium", "high"], ordered: true);
+
+Console.WriteLine($"  categories = [{string.Join(", ", sizes.Categories)}], ordered = {sizes.IsOrdered}");
+Console.WriteLine($"  codes      = [{string.Join(", ", sizes.Codes.ToArray())}]   (-1 is missing)");
+Console.WriteLine("  A TextSeries can only sort alphabetically, which puts high < low < medium.");
+Console.WriteLine($"  Ordered sort = [{string.Join(", ", sizes.ArgSort().Select(i => sizes[i] ?? "<missing>"))}]");
+
+foreach (var (category, count) in sizes.CategoryCounts())
+    Console.WriteLine($"    {category,-8} {count}");
+Console.WriteLine("  Categories with no rows are still reported - the set is part of the column's type.");
+
+var indicators = sizes.OneHot(dropFirst: true);
+Console.WriteLine($"  OneHot(dropFirst: true) -> {string.Join(", ", indicators.Select(c => c.Name))}");
+Console.WriteLine("    the dropped category is the baseline; keeping all of them alongside an");
+Console.WriteLine("    intercept makes the design matrix rank-deficient");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.4: SQL and Excel
+Section("13. SQL and Excel round trip");
+
+var workbook = Path.Combine(Path.GetTempPath(), $"gravi_{Guid.NewGuid():N}.xlsx");
+try
+{
+    var report = new DataFrame(
+    [
+        new TextSeries("city", ["Bandung", "Jakarta", "Surabaya"]),
+        new NumericSeries("population", [2.5e6, 10.6e6, 2.9e6]),
+        new DateTimeSeries("surveyed", [new DateTime(2024, 3, 1), new DateTime(2024, 6, 15), null]),
+    ]);
+
+    ExcelWriter.Write(report, workbook, sheetName: "Cities");
+    Console.WriteLine($"  wrote an .xlsx with no spreadsheet library - the format is a zip of XML");
+    Console.WriteLine($"  sheets = [{string.Join(", ", ExcelReader.SheetNames(workbook))}]");
+
+    var back = ExcelReader.Read(workbook);
+    Console.WriteLine("  read back with types intact:");
+    Console.WriteLine(back.ToString());
+    Console.WriteLine($"    the missing date came back missing: {back["surveyed"].IsMissing(2)}");
+    Console.WriteLine("    Excel stores dates as day counts marked only by a number format, so a");
+    Console.WriteLine("    reader that ignores styles gets five-digit integers instead");
+}
+finally
+{
+    if (File.Exists(workbook)) File.Delete(workbook);
+}
+
+Console.WriteLine();
+Console.WriteLine("  SqlReader/SqlWriter work the same way over any ADO.NET provider:");
+Console.WriteLine("    var frame = SqlReader.Read(connection, \"SELECT * FROM t WHERE x > $lo\",");
+Console.WriteLine("        new Dictionary<string, object?> { [\"$lo\"] = 85.0 });");
+Console.WriteLine("  Values go through parameters, never string concatenation - that is what makes");
+Console.WriteLine("  injection impossible, and column types come from the provider rather than inference.");
+Console.WriteLine();
+
 Console.WriteLine();
 Console.WriteLine(GraviInfo.Attribution);
 return;
+
+static string Missing(double value) => double.IsNaN(value) ? "NaN" : value.ToString("G6");
 
 static void Section(string title)
     => Console.WriteLine($"--- {title} " + new string('-', Math.Max(0, 60 - title.Length)));

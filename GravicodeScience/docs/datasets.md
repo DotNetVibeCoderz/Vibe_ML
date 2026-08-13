@@ -14,6 +14,7 @@ and tests run with no download step. Total size is about 750 KB.
 | `imdb_reviews.csv` | 80 | **Synthetic** — written for this repository | GraviText |
 | `bayesian_coin.csv` | 200 | **Synthetic** — generated, bias 0.62 | GraviProb |
 | `finance_timeseries.csv` | 1,116 | **Synthetic** — geometric random walk | GraviFrame |
+| `ner_conll.txt` | 420 sentences | **Synthetic** — generated Indonesian sentences | GraviText |
 
 The synthetic files are marked as such deliberately. Three of them stand in for datasets that are
 either too large to commit or encumbered; the substitution is noted below in each case.
@@ -191,6 +192,36 @@ folder, so samples, notebooks and tests all find data without hard-coded paths. 
 ```csharp
 var frame = DataFrame.ReadCsv(Datasets.ResolvePath("my-data.csv"));
 ```
+
+## ner_conll.txt
+
+420 annotated Indonesian sentences in the CoNLL column format: one token and its BIO tag per line,
+a blank line between sentences. Three entity types — `PER`, `LOC` and `ORG`.
+
+```
+Tim	O
+dari	O
+Bogor	B-LOC
+mengunjungi	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+```
+
+**Synthetic**, generated from sentence templates over a fixed pool of names, cities and companies.
+It stands in for a corpus like CoNLL-2003, which is licence-encumbered and cannot be committed here.
+
+The templates are what make it useful rather than circular. Entity types are not distinguishable
+from the words alone — `Surabaya` and `Tokopedia` are both capitalised single tokens — so the only
+way to tell them apart is the surrounding context, which is exactly what a trained tagger has to
+learn. Multi-token entities appear in both the `PER` and `ORG` classes, so BIO continuation is
+exercised rather than assumed.
+
+Because it is generated, held-out performance is high: `TrainedNer` reaches about 98% entity F1 on
+a 25% test split. That figure says the model learned the generating process, **not** that it would
+reach 98% on newswire. Treat it as a working demonstration of the architecture, not a benchmark.
+
+Read it with `TaggedSentence.LoadConll`.
 
 ---
 

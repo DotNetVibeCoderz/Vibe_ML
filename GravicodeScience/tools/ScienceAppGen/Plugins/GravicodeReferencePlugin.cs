@@ -65,6 +65,39 @@ public sealed class GravicodeReferencePlugin
             Compute: Compute.Cpu, Compute.Gpu, Compute.Best(n), Compute.DescribeDevices()
               GPU auto-dispatch is OFF by default; float64 on integrated GPUs is slower than the CPU.
             GraviInfo.Banner(module), GraviInfo.HardwareReport(), GraviInfo.Attribution
+
+            Einsum (v0.4) - one notation for products, transposes, traces, contractions
+              Einsum.Evaluate("ij,jk->ik", a, b)   matrix product
+              Einsum.Evaluate("ji,jk->ik", a, b)   == Dot(a.T, b), but the axes are written down
+              "ij->ji" transpose  "ii->i" diagonal  "ii->" trace  "ij->j" column sums
+              "i,j->ij" outer  "ij,ij->" Frobenius  "bij,bjk->bik" batched
+              Omitting "->" infers the output: letters appearing once, alphabetical.
+
+            ComplexNdArray (v0.4) - complex arrays over an interleaved Complex buffer
+              ComplexNdArray.FromParts(real, imaginary), .FromValues(...), .Zeros(shape)
+              .Real() .Imaginary() .Magnitude() .Phase() .Power() .Conjugate() .Norm()
+              .Transpose() .ConjugateTranspose()   <- A^H is what complex formulas mean, not A^T
+              ComplexNdArray.Dot(a, b), ComplexNdArray.Inner(a, b)   Inner conjugates its FIRST arg
+              .Fft() .Ifft() .Fft2() .Ifft2()      separable 2-D transform
+              Reshape/Transpose COPY here, unlike NdArray views.
+
+            SliceOps (v0.4, extension methods) - the rest of NumPy-style indexing
+              array.Assign(value)                       fill a view with a scalar
+              array.SliceEllipsis([], [Slice.At(0)])    name trailing axes, ignore leading ones
+              array.TakeAlong(indices, axis: 1)         select along any axis (copies)
+              array.AxisAt(axis, index)                 one position, axis dropped (a view)
+              array.AxisRange(axis, start, stop)        a span, axis kept (a view)
+              SliceOps.Select(condition, ifTrue, ifFalse)   element-wise choice, shape kept
+              array.SetWhere(predicate, value)          masked write, in place
+              array.IndicesWhere(predicate)             positions, not values
+              array.FilterRows(row => ...)              whole rows, copied
+              array.Clip(low, high)
+              SliceShorthand.Last(n) / First(n) / Every(n) / DropLast(n)
+              NdArray.Assign(NdArray) already existed and broadcasts - use it for arrays.
+
+            Signal.Fft - any length (radix-2, Bluestein otherwise)
+              Fft.Forward(complex[]), Fft.Inverse, Fft.ForwardReal(signal), Fft.InverseReal
+              Fft.Magnitude(signal), Fft.FrequencyBins(n, sampleRate), Fft.Convolve(a, b)
             """,
 
         ["GraviFrame"] = """
@@ -111,6 +144,41 @@ public sealed class GravicodeReferencePlugin
               Frequencies: Hourly, Daily, Weekly, Monthly, Quarterly, Yearly
 
             Io.ParquetIO.Write(df, path), Read(path), Read(path, ["col1", "col2"])
+
+            Windowing (v0.4) - window functions, partitioned, and time-series joins
+              Windowing.Rank(df, ["customer"], "amount", descending: false, dense: false)
+              Windowing.CumulativeSum(df, partitionBy, column)
+              Windowing.RollingMean(df, partitionBy, column, window: 7)
+              Windowing.Lag(df, partitionBy, column, offset: 1) / Lead(...)
+              Windowing.AsOfJoin(left, right, on: "time", tolerance: null, suffix: "_right")
+              Partitioning is the point: without it, Lag reaches across group boundaries.
+              Incomplete rolling windows stay NaN. As-of is BACKWARD-ONLY (forward = look-ahead).
+              An empty partition list treats the whole frame as one group, as SQL does.
+
+            CategoricalSeries (v0.4) - dictionary-encoded text, optionally ordered
+              CategoricalSeries.FromValues(name, values, categories: [...], ordered: true)
+              new CategoricalSeries(name, codes, categories, ordered)    codes: -1 is missing
+              .Categories .Codes .IsOrdered .CodeOf(s) .CategoryCounts()
+              .ArgSort(descending: false)      by declared rank, not alphabetically
+              .OneHot(dropFirst: false)        dropFirst leaves a baseline for a model w/ intercept
+              .ToCodes()                       missing becomes NaN, NOT -1
+              .ToText() .AddCategories(...) .RenameCategories(map) .ReorderCategories([...])
+              .RemoveUnusedCategories()
+              Categories are part of the column TYPE: Take keeps them all, and writing an
+              unlisted value throws rather than widening the dictionary.
+
+            Io.SqlReader / Io.SqlWriter (v0.4) - any ADO.NET provider, no package dependency
+              SqlReader.Read(connection, sql, parameters, commandTimeout)
+              SqlReader.FromReader(IDataReader)
+              SqlWriter.Write(frame, connection, table, batchSize: 500)
+              ALWAYS pass values via parameters, never string concatenation.
+              Table and column names are checked as plain identifiers (they cannot be parameterised).
+
+            Io.ExcelReader / Io.ExcelWriter (v0.4) - .xlsx without a spreadsheet library
+              ExcelReader.Read(path, new ExcelOptions { SheetName = "Data", HasHeader = true })
+              ExcelReader.SheetNames(path)
+              ExcelWriter.Write(frame, path, sheetName: "Sheet1")
+              Handles absent cells (gaps, not blanks), date serials, and the 1900 leap-year bug.
             """,
 
         ["GraviLearn"] = """
@@ -170,6 +238,42 @@ public sealed class GravicodeReferencePlugin
               MakeBlobs(samples, features, centers, spread, seed)   // needs no data files
               MakeMoons(samples, noise), MakeRegression(samples, features, noise)
               Returned Dataset has .Features .Target .FeatureNames .TargetNames .LabelNames
+
+            Explain (v0.4) - namespace Gravicode.Science.GraviLearn.Explain
+              PermutationImportance.Compute(model, x, y, repeats: 10, seed: 42)
+              PermutationImportance.Ranked(...)   -> FeatureImportance(Feature, Mean, StandardDeviation)
+              RUN IT ON HELD-OUT DATA; on the training set it measures memorisation.
+              ShapleyValues.Exact(predict, instance, background)     <= 20 features
+              ShapleyValues.Sample(predict, instance, background, samples: 200, seed: 42)
+              ShapleyValues.Explain(predict, instances, background)  -> (PerRow, MeanAbsolute)
+                predict is Func<NdArray, NdArray>: takes a batch, returns one value per row.
+                Explain a PROBABILITY, not a class index - a step function attributes poorly.
+                Attribution: .BaseValue .Contributions .Prediction .Ranked
+              Calibration.Curve(probabilities, labels, bins: 10) -> CalibrationPoint list
+              Calibration.ExpectedError(...), Calibration.BrierScore(...)
+              new IsotonicRegression().Fit(x, y).Predict(x) / .PredictOne(v) / .Steps
+
+            Resampling (v0.4) - namespace ...GraviLearn.Resampling
+              Resampler.OverSample(x, y, seed), UnderSample(x, y, seed)
+              Resampler.Smote(x, y, neighbours: 5, seed)     scale features first
+              Resampler.ClassWeights(y) -> per-class multiplier, without touching the data
+              Resampler.ClassBalance(y) -> (Label, Count) largest first
+              RESAMPLE THE TRAINING SPLIT ONLY - doing it first leaks into the test set.
+
+            Anomaly (v0.4) - namespace ...GraviLearn.Anomaly
+              new OneClassSvm(nu: 0.05, kernel: SvmKernel.Rbf, gamma: null, tolerance: 1e-6).Fit(x)
+                .Predict(x)  1 = normal, -1 = anomaly
+                .DecisionFunction(x)  signed distance - use this to RANK alerts
+                .SupportVectorCount .Gamma .Offset
+              nu bounds the training outlier fraction above and the SV fraction below.
+              Do not judge the model by scoring its own training data.
+
+            Clustering.Hdbscan (v0.4) - density clustering with no single threshold
+              new Hdbscan(minClusterSize: 5, minSamples: null).Fit(x)
+                .Labels (-1 = noise) .ClusterCount .Probabilities .CoreDistances
+                .FitPredict(x)
+              Use it wherever a single DBSCAN eps cannot fit clusters of differing density.
+              O(n^2) memory - a few thousand points is the practical ceiling.
             """,
 
         ["GraviText"] = """
@@ -211,6 +315,48 @@ public sealed class GravicodeReferencePlugin
               new NamedEntityRecognizer().AddGazetteer(type, entries).Recognize(text)  // rule-based
               new TextRankSummarizer().Summarize(article, sentenceCount)               // extractive
               new KeywordExtractor().Fit(corpus).Extract(document, count)
+
+            Tokenization (v0.4) - trainable sub-word tokenizers
+              BpeTokenizer.Train(corpus, vocabularySize: 1000, minFrequency: 2, preTokenizer: null)
+                .Encode(word) .Tokenize(text) .EncodeIds(text) .Decode(pieces) .DecodeIds(ids)
+                .Merges .Vocabulary .Save(path) / BpeTokenizer.Load(path)
+                The merge ORDER is the model; Save writes ranked merges, not a vocabulary.
+                Words carry BpeTokenizer.EndOfWord on their last piece.
+              UnigramTokenizer.Train(corpus, vocabularySize: 1000, seedSize: 10000)
+                .Encode(text)      Viterbi - globally optimal, not greedy
+                .SampleEncoding(text, rng, alpha: 0.2)   subword regularisation
+                .Decode(pieces)    exactly reversible; whitespace is ENCODED, not split on
+                .PieceCount .LogProbability(piece) .Save(path) / Load(path)
+
+            Sequence (v0.4) - namespace Gravicode.Science.GraviText.Sequence
+              new LinearChainCrf(labelCount)
+                .Fit(emissionMatrices, tagSequences, epochs: 50, learningRate: 0.1, l2: 1e-4)
+                .Decode(emissions)      Viterbi over the whole sequence
+                .Marginals(emissions)   per-token confidence, forward-backward
+                .LogPartition(emissions) .Score(...) .LogLikelihood(...)
+                .Transition(from, to) .SetTransition(...) .Forbid(from, to) .ForbidStart(label)
+                .ApplyBioConstraints(labelNames)   I-X may only follow B-X or I-X of the SAME type
+              Emissions come from outside: any per-token scorer feeds it.
+              The best sequence is NOT the sequence of best tokens.
+
+            Tasks.TrainedNer (v0.4) - a learned entity tagger, unlike the rule-based recognizer
+              TaggedSentence.LoadConll(path)   one token + BIO tag per line, blank line per sentence
+              new TrainedNer().Fit(sentences, epochs: 30, learningRate: 0.1, crfEpochs: 60)
+                .Tag(words) .Recognize(words) .Recognize(text)
+                .Evaluate(sentences) -> EntityScore(Precision, Recall, F1, Predicted, Actual)
+                .TokenAccuracy(sentences)   dominated by O - judge on entity F1 instead
+              Features are shape-based, so it generalises to names never seen in training.
+
+            Generation (v0.4) - namespace Gravicode.Science.GraviText.Generation
+              new TransformerDecoder(config, vocabulary, rng)
+                .Forward(tokenIds) .Logits(tokenIds) .NextTokenLogits(tokenIds)
+                .Generate(prompt, maxNewTokens, options, rng, stopTokens)
+                .Generate(text, tokenizer, maxNewTokens, options, rng)
+                .CrossEntropy(tokenIds) .Perplexity(tokenIds)
+              SamplingOptions(Temperature, TopK, TopP, RepetitionPenalty)
+                SamplingOptions.Greedy, SamplingOptions.Nucleus
+              CausalSelfAttention / TransformerDecoderLayer are the building blocks.
+              Forward-only, like TransformerModel. Generation is quadratic (no KV cache).
             """,
 
         ["GraviGraph"] = """
@@ -248,6 +394,52 @@ public sealed class GravicodeReferencePlugin
               new GraphSage(hiddenSize, epochs).Train(...)   // INDUCTIVE: .PredictInductive(newGraph, features)
               new GraphAttentionNetwork(hiddenSize, heads, epochs).Train(...)   // .AttentionWeights
               Two layers is the usual depth; beyond ~3 hops representations over-smooth.
+
+            HeterogeneousGraph (v0.4) - typed nodes and relations
+              new HeterogeneousGraph()
+                .AddNodeType(type, count) .CountOf(type)
+                .AddEdge("user", "bought", "item", source, target, weight)
+                .AddEdge(EdgeType, source, target, weight)
+                .SetFeatures(type, matrix) .Features(type)   each type may differ in width
+                .SetLabels(type, labels) .Labels(type)
+                .SetEdgeFeatures(edgeType, matrix) .EdgeFeatures(edgeType)
+                .AddReverseEdges(edgeType, reverseName)   a SEPARATE relation, not symmetry
+                .Edges(edgeType) .IncomingTypes(nodeType) .ToHomogeneous(out offsets)
+              EdgeType(Source, Relation, Target) - the TRIPLE identifies a relation.
+              Node indices are LOCAL to their type: user 0 and item 0 are different nodes.
+              new RelationalConvolution(graph, inputSizes, outputSize, rng).Forward(graph, inputs)
+                R-GCN: one weight matrix per relation, in-degree normalised PER RELATION.
+
+            TemporalGraph (v0.4) - timestamped edges
+              new TemporalGraph(directed: true).AddEdge(source, target, time, weight)
+              TemporalGraph.LoadCsv(path, directed, hasHeader)
+                .TemporallyReachable(source, startTime, maxGap)   respects edge ORDERING
+                .Snapshot(from, to) .SnapshotUpTo(time) .Windows(count) .Collapse()
+                .TemporalEfficiency()   how much a static view overstates
+                .TimeDecayedFeatures(features, asOf, halfLife)
+                .Edges (time-sorted) .TimeRange .NodeCount .EdgeCount
+              A static graph implies paths that the ordering forbids. SnapshotUpTo is the cut
+              that stops a link predictor being trained on its own test set.
+
+            GraphPooling / GraphClassifier (v0.4) - whole-graph tasks
+              GraphPooling.Pool(nodeFeatures, PoolingKind.Mean | Sum | Max | MeanMax)
+              GraphPooling.AttentionPool(nodeFeatures, gate) -> (Pooled, Weights)
+              Every readout is permutation-invariant - graph nodes have no canonical numbering.
+              Mean is size-invariant; Sum is not; Max detects presence.
+              new GraphClassifier(inputSize, hiddenSize, layers, pooling, rng)
+                .Fit(graphs, labels, features, regularisation) .Predict(graph) .Score(graph)
+                .Embed(graph, nodeFeatures) .Accuracy(graphs, labels)
+
+            NeighborSampler (v0.4) - GraphSAGE-style bounded sampling
+              NeighborSampler.Sample(graph, targets, fanOut: [10, 5], rng, replace: false)
+                -> SampledBlock(Nodes, Layers, TargetPositions)
+              NeighborSampler.Batches(nodes, batchSize, rng)
+              NeighborSampler.GatherFeatures(block, allFeatures)
+              NeighborSampler.Aggregate(block, features, weights, activation)
+              A SAGE layer takes TWICE its feature width (self and neighbourhood concatenated).
+              Solves neighbourhood explosion, not memory: fan-out bounds the cost per target.
+              NOTE: graph generators are static on Graph itself - Graph.Cycle(n), Graph.Complete(n),
+              Graph.Random(nodes, p, seed) - and Random takes a SEED int, not a GraviRandom.
             """,
 
         ["GraviProb"] = """
@@ -291,6 +483,51 @@ public sealed class GravicodeReferencePlugin
                   HiddenMarkovModel.Random(states, symbols, seed)
               new BayesianLinearRegression(priorPrecision, noisePrecision).Fit(x, y)
                   .CoefficientMeans, .Predict(x), .PredictWithUncertainty(x), .PredictInterval(x, 0.95)
+
+            MultivariateDistribution (v0.4) - distributions over vectors
+              new MultivariateNormal(mean, covariance)
+                MultivariateNormal.Standard(dim), .Diagonal(mean, variances)
+                .LogDensity(x) .Sample(rng) .Sample(rng, count) .Mean .Covariance
+                .CholeskyFactor .Conditional(unknown, observed, values)
+                Everything runs off ONE Cholesky factor. Non-positive-definite is rejected.
+              new Dirichlet(2, 3, 5) / Dirichlet.Symmetric(dim, concentration) / .Uniform(dim)
+                .Mean .Covariance .Alpha .Concentration .Sample(rng)
+                .Posterior(counts)   conjugate: the update is addition
+                .Marginal(component) -> Beta
+                Off-diagonal covariance is always negative (the components sum to one).
+              new Multinomial(trials, p0, p1, ...)  .Sample(rng) .LogDensity(counts)
+
+            GaussianProcess (v0.4) - a prior on the function, not on parameters
+              new GaussianProcess(kernel, noise: 1e-6).Fit(x, y)
+                .Predict(x) -> GpPrediction(.Mean .Variance .StandardDeviation .Interval(0.95))
+                .PredictMean(x) .LogMarginalLikelihood() .SamplePosterior(x, count, rng)
+              GaussianProcess.Optimise(x, y, lengthScales, noises)   grid search
+              Kernels: new RbfKernel(lengthScale, variance), new MaternKernel(nu, ...)
+                       new PeriodicKernel(period, ...), new SumKernel(a, b)
+                nu must be 0.5, 1.5 or 2.5. The KERNEL is the model.
+              Noise is NOT optional - it keeps the covariance invertible.
+              x is rank 2 (samples, features) even for one input dimension.
+              Cost is cubic in the observation count.
+
+            KalmanFilter (v0.4) - linear-Gaussian state space
+              KalmanFilter.LocalLevel(processVariance, observationVariance)
+              KalmanFilter.LocalLinearTrend(levelVariance, slopeVariance, observationVariance)
+              new KalmanFilter(transition, observation, processNoise, observationNoise)
+                .Filter(observations) -> (Filtered, Predicted, LogLikelihood)
+                .Smooth(observations)   uses the whole series - better, but look-ahead
+                .Forecast(observations, horizon) .Simulate(steps, rng) .Observe(states)
+              Observations are rank 2: (time, observationDimension).
+              Only the RATIO of Q to R matters, so one number tunes the filter.
+              LogLikelihood is what to maximise when fitting the variances.
+
+            ModelComparison (v0.4) - out-of-sample predictive accuracy
+              ModelComparison.Waic(logLikelihood)   (draws x observations) matrix
+              ModelComparison.Loo(logLikelihood) -> LooResult(.Criterion .ParetoK)
+                .IsReliable .UnreliableObservations    the diagnostic WAIC does not have
+              ModelComparison.Compare(dictionary of name -> InformationCriterion)
+              InformationCriterion(.Estimate .EffectiveParameters .StandardError .Pointwise)
+              Deviance scale: LOWER IS BETTER. Only DIFFERENCES are interpretable, and only
+              between models scored on the same observations.
             """,
     };
 
@@ -326,7 +563,8 @@ public sealed class GravicodeReferencePlugin
                  "starting shape for generated code rather than inventing structure.")]
     public string GravicodeExample(
         [Description("Task: classification, regression, clustering, dataframe, timeseries, " +
-                     "sentiment, graph or bayesian.")]
+                     "sentiment, graph, bayesian, explainability, anomaly, tokenizer, ner, " +
+                     "forecasting, gaussianprocess, windowfunctions or heterogeneousgraph.")]
         string task)
     {
         var key = task.ToLowerInvariant();
@@ -449,7 +687,235 @@ public sealed class GravicodeReferencePlugin
                 Console.WriteLine($"95% HDI: [{low:F4}, {high:F4}]");
                 """,
 
+            "explainability" => """
+                using Gravicode.Science.GraviLearn;
+                using Gravicode.Science.GraviLearn.Explain;
+                using Gravicode.Science.GraviLearn.ModelSelection;
+                using Gravicode.Science.GraviLearn.Trees;
+                using Gravicode.Science.GraviNum;
+
+                var data = Datasets.LoadIris();
+                var split = Selection.Split(data.Features, data.Target, testSize: 0.3, seed: 42, stratify: true);
+
+                var model = new RandomForestClassifier(nTrees: 100, seed: 42);
+                model.Fit(split.TrainX, split.TrainY);
+
+                // Held-out data: on the training set this measures memorisation, not generalisation.
+                foreach (var importance in PermutationImportance.Ranked(model, split.TestX, split.TestY, repeats: 10))
+                    Console.WriteLine($"{data.FeatureNames[importance.Feature],-16} " +
+                                      $"{importance.Mean,7:F4} +/- {importance.StandardDeviation:F4}");
+
+                // Explaining one row. Attribute the PROBABILITY, not the class index: a step
+                // function attributes poorly, because most perturbations do not move it at all.
+                var instance = split.TestX.Row(0);
+
+                NdArray AsRow(NdArray vector)
+                {
+                    var matrix = NdArray.Zeros(1, vector.Size);
+                    for (var i = 0; i < vector.Size; i++) matrix[0, i] = vector.At(i);
+                    return matrix;
+                }
+
+                var predicted = (int)model.Predict(AsRow(instance)).At(0);
+
+                NdArray ClassProbability(NdArray batch)
+                {
+                    var probabilities = model.PredictProbabilities(batch);
+                    var column = NdArray.Zeros(batch.Shape[0]);
+                    for (var i = 0; i < batch.Shape[0]; i++) column.SetAt(i, probabilities[i, predicted]);
+                    return column;
+                }
+
+                var attribution = ShapleyValues.Sample(ClassProbability, instance, split.TrainX, samples: 200);
+                Console.WriteLine($"base {attribution.BaseValue:F4} -> prediction {attribution.Prediction:F4}");
+                foreach (var (feature, contribution) in attribution.Ranked)
+                    Console.WriteLine($"  {data.FeatureNames[feature],-16} {contribution,+8:F4}");
+                """,
+
+            "anomaly" => """
+                using Gravicode.Science.GraviLearn.Anomaly;
+                using Gravicode.Science.GraviLearn.Clustering;
+                using Gravicode.Science.GraviNum;
+
+                var rng = new GraviRandom(42);
+                var normal = NdArray.Zeros(400, 2);
+                for (var i = 0; i < 400; i++)
+                {
+                    normal[i, 0] = rng.Normal();
+                    normal[i, 1] = rng.Normal();
+                }
+
+                // nu is a statement about contamination, not a tolerance to tune: it bounds the
+                // training outlier fraction above and the support-vector fraction below.
+                var detector = new OneClassSvm(nu: 0.05).Fit(normal);
+
+                var probes = NdArray.FromArray(new double[,] { { 0, 0 }, { 5, 5 } });
+                var scores = detector.DecisionFunction(probes);   // signed distance - ranks alerts
+
+                for (var i = 0; i < probes.Shape[0]; i++)
+                    Console.WriteLine($"({probes[i, 0]}, {probes[i, 1]}) {scores.At(i):F4} " +
+                                      $"{(scores.At(i) >= 0 ? "normal" : "ANOMALY")}");
+
+                // HDBSCAN where a single DBSCAN eps cannot fit clusters of differing density.
+                var clusters = new Hdbscan(minClusterSize: 10).Fit(normal);
+                Console.WriteLine($"{clusters.ClusterCount} clusters");
+                """,
+
+            "tokenizer" => """
+                using Gravicode.Science.GraviNum;
+                using Gravicode.Science.GraviText.Tokenization;
+
+                string[] corpus = ["the cat sat on the mat", "the dog sat on the log"];
+
+                // BPE: merge the most frequent adjacent pair, repeatedly. The merge ORDER is the
+                // model, which is why Save writes ranked merges rather than a vocabulary.
+                var bpe = BpeTokenizer.Train(corpus, vocabularySize: 200, minFrequency: 1);
+                Console.WriteLine($"[{string.Join(", ", bpe.Encode("lowest"))}]");
+                bpe.Save("merges.txt");
+
+                // Unigram: prune a large candidate vocabulary by EM, segment by Viterbi. Whitespace
+                // is encoded rather than split on, so decoding is exactly reversible.
+                var unigram = UnigramTokenizer.Train(corpus, vocabularySize: 120, seedSize: 500);
+                Console.WriteLine($"[{string.Join(", ", unigram.Encode("the cat sat"))}]");
+
+                // Only unigram can sample alternatives - that is subword regularisation.
+                var rng = new GraviRandom(7);
+                Console.WriteLine(string.Join(" ", unigram.SampleEncoding("the cat sat", rng, alpha: 0.2)));
+                """,
+
+            "ner" => """
+                using Gravicode.Science.GraviText.Tasks;
+
+                // CoNLL columns: one token and its BIO tag per line, blank line between sentences.
+                var sentences = TaggedSentence.LoadConll("datasets/ner_conll.txt");
+                var cut = (int)(sentences.Count * 0.75);
+
+                var ner = new TrainedNer().Fit(sentences.Take(cut).ToList());
+                var heldOut = sentences.Skip(cut).ToList();
+
+                // Score ENTITIES, not tokens: token accuracy is dominated by the O tag, so a model
+                // predicting O everywhere scores above 85% on most corpora.
+                Console.WriteLine(ner.Evaluate(heldOut));
+
+                foreach (var entity in ner.Recognize("Kartika Wijaya bekerja di Gravicode ."))
+                    Console.WriteLine($"{entity.Type,-4} {entity.Text}");
+                """,
+
+            "forecasting" => """
+                using Gravicode.Science.GraviNum;
+                using Gravicode.Science.GraviProb;
+
+                // A local level model is an EWMA whose smoothing constant is derived from the
+                // noise ratio rather than guessed - and it reports its own uncertainty.
+                var filter = KalmanFilter.LocalLevel(processVariance: 0.05, observationVariance: 1.0);
+
+                // Observations are rank 2: (time, observationDimension).
+                var (truth, observations) = filter.Simulate(200, new GraviRandom(42));
+
+                var filtered = filter.Filter(observations);   // past only - what a live system can do
+                var smoothed = filter.Smooth(observations);   // whole series - better, but look-ahead
+
+                Console.WriteLine($"log likelihood {filtered.LogLikelihood:F2}");
+
+                // Only the RATIO of Q to R matters, so the likelihood fits it with one number.
+                foreach (var q in new[] { 0.01, 0.05, 0.2 })
+                    Console.WriteLine($"Q={q}: {KalmanFilter.LocalLevel(q, 1.0).Filter(observations).LogLikelihood:F2}");
+
+                // No observations arrive during a forecast, so uncertainty grows as it must.
+                foreach (var step in filter.Forecast(observations, horizon: 10))
+                    Console.WriteLine($"{step.Mean.At(0):F4} +/- {step.StandardDeviation.At(0):F4}");
+                """,
+
+            "gaussianprocess" => """
+                using Gravicode.Science.GraviNum;
+                using Gravicode.Science.GraviProb;
+
+                // x is rank 2 (samples, features) even in one input dimension.
+                var x = NdArray.Zeros(12, 1);
+                var y = NdArray.Zeros(12);
+                for (var i = 0; i < 12; i++)
+                {
+                    var value = i * 2 * Math.PI / 12;
+                    x[i, 0] = value;
+                    y.SetAt(i, Math.Sin(value));
+                }
+
+                // The KERNEL is the model. Noise is not optional: it is what keeps the covariance
+                // invertible when inputs are close together.
+                var gp = new GaussianProcess(new RbfKernel(lengthScale: 1.0), noise: 1e-6).Fit(x, y);
+
+                var probe = NdArray.Zeros(1, 1);
+                probe[0, 0] = 1.5;
+
+                var prediction = gp.Predict(probe);
+                Console.WriteLine($"{prediction.Mean.At(0):F4} +/- {prediction.StandardDeviation.At(0):F4}");
+                Console.WriteLine($"log marginal likelihood {gp.LogMarginalLikelihood():F4}");
+
+                // Grid search, not gradient descent: the marginal likelihood is not concave and
+                // has real local optima - one explaining the data as signal, another as noise.
+                var tuned = GaussianProcess.Optimise(x, y);
+                Console.WriteLine(tuned.Kernel.Name);
+                """,
+
+            "windowfunctions" => """
+                using Gravicode.Science.GraviFrame;
+
+                var sales = new DataFrame(
+                [
+                    new TextSeries("customer", ["a", "b", "a", "b"]),
+                    new NumericSeries("amount", [10, 100, 20, 200]),
+                ]);
+
+                // Partitioning is the point: without it, Lag reaches across group boundaries and
+                // each group's first row picks up the previous group's last. That is a real leak.
+                var running = Windowing.CumulativeSum(sales, ["customer"], "amount");
+                var previous = Windowing.Lag(sales, ["customer"], "amount");
+                var rolling = Windowing.RollingMean(sales, ["customer"], "amount", window: 2);
+
+                // As-of join: backward-only. Matching the NEAREST row in either direction is
+                // look-ahead, and is how a backtest ends up predicting the past.
+                var trades = new DataFrame([new NumericSeries("time", [10, 25])]);
+                var quotes = new DataFrame(
+                [
+                    new NumericSeries("time", [5, 20]),
+                    new NumericSeries("price", [100, 200]),
+                ]);
+
+                Console.WriteLine(Windowing.AsOfJoin(trades, quotes, "time"));
+                """,
+
+            "heterogeneousgraph" => """
+                using Gravicode.Science.GraviGraph;
+                using Gravicode.Science.GraviNum;
+
+                var graph = new HeterogeneousGraph();
+                graph.AddEdge("user", "viewed", "item", 0, 1);
+                graph.AddEdge("user", "bought", "item", 1, 2);
+
+                // Node indices are LOCAL to their type, which is what lets each type carry a
+                // different feature width. An edge type is the TRIPLE, not the relation name.
+                graph.SetFeatures("user", new GraviRandom(3).StandardNormal(4, 6));
+                graph.SetFeatures("item", new GraviRandom(5).StandardNormal(5, 3));
+
+                // Messages flow along edge direction only, so items cannot inform users without
+                // the reverse relation - added separately, because it deserves its own weights.
+                graph.AddReverseEdges(new EdgeType("user", "viewed", "item"));
+
+                var layer = new RelationalConvolution(graph,
+                    new Dictionary<string, int> { ["user"] = 6, ["item"] = 3 }, outputSize: 8);
+
+                var output = layer.Forward(graph, new Dictionary<string, NdArray>
+                {
+                    ["user"] = graph.Features("user"),
+                    ["item"] = graph.Features("item"),
+                });
+
+                Console.WriteLine($"user -> [{string.Join(", ", output["user"].Shape.ToArray())}]");
+                """,
+
             _ => "Unknown task. Try: classification, regression, clustering, dataframe, " +
+                 "explainability, anomaly, tokenizer, ner, forecasting, gaussianprocess, " +
+                 "windowfunctions, heterogeneousgraph, " +
                  "timeseries, sentiment, graph, bayesian.",
         };
     }

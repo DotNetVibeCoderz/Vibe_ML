@@ -217,6 +217,158 @@ model.Fit(features, labels);
 | Transformasi tampak tidak berpengaruh | Frame immutable; gunakan nilai kembaliannya |
 | Rolling median lambat | Ia mengurutkan ulang tiap jendela; gunakan `Mean` bila cukup |
 
+## Fungsi window
+
+Fungsi window dievaluasi di dalam grup, dan itulah yang membedakannya dari agregat biasa.
+
+```csharp
+Windowing.Rank(frame, ["customer"], "amount", descending: true);
+Windowing.CumulativeSum(frame, ["customer"], "amount");
+Windowing.RollingMean(frame, ["customer"], "amount", window: 7);
+Windowing.Lag(frame, ["customer"], "amount");
+Windowing.Lead(frame, ["customer"], "amount");
+```
+
+Daftar partisi adalah intinya. Rata-rata bergulir yang dihitung atas frame berisi beberapa pelanggan
+mencampur riwayat satu pelanggan ke pelanggan lain, dan — lebih buruk lagi — `Lag` tanpa partisi
+membuat baris pertama setiap grup menjangkau baris terakhir grup sebelumnya. Itu jenis kebocoran
+yang diam-diam menggelembungkan skor model dan tidak terlihat pada keluaran.
+
+Dua pilihan yang disengaja:
+
+- **`RollingMean` membiarkan jendela yang belum penuh tetap kosong** alih-alih merata-ratakan apa
+  yang ada. Mengisinya adalah pilihan yang lebih umum dan lebih menyesatkan: beberapa nilai pertama
+  lalu membawa varians jauh lebih besar daripada sisanya, tanpa ada yang menyatakannya di keluaran.
+- **Nilai seri pada `Rank` mengikuti flag `dense`.** `false` menyisakan celah sesudahnya
+  (1, 2, 2, 4) dan `true` tidak (1, 2, 2, 3).
+
+Daftar partisi kosong memperlakukan seluruh frame sebagai satu grup, sebagaimana yang dilakukan SQL.
+
+## As-of join
+
+Join biasa pada timestamp hanya cocok bila dua sistem mencatat momen yang persis sama, dan jam
+sungguhan tidak pernah begitu. `AsOfJoin` mencocokkan setiap baris kiri dengan baris kanan terkini
+pada atau sebelum kuncinya.
+
+```csharp
+Windowing.AsOfJoin(trades, quotes, on: "time");
+Windowing.AsOfJoin(trades, quotes, on: "time", tolerance: 30);
+```
+
+**Arahnya sengaja hanya ke belakang.** Mencocokkan baris *terdekat* ke arah mana pun mudah ditulis
+dan merupakan look-ahead: ia membiarkan nilai yang tercatat setelah peristiwa menginformasikan baris
+yang menggambarkan peristiwa itu, dan begitulah sebuah backtest berakhir dengan memprediksi masa
+lalu. Baris kiri yang mendahului semua baris kanan dikembalikan sebagai kosong, bukan dicocokkan
+dengan baris masa depan pertama.
+
+`tolerance` adalah batas seberapa jauh ke belakang kecocokan boleh diambil. Kuotasi yang basi
+sembilan puluh detik sering lebih buruk daripada tidak ada kuotasi, dan inilah cara menyatakannya.
+Join ini mengurutkan frame kanan sendiri alih-alih menuntut masukan terurut, karena menuntutnya
+adalah cara mudah mendapat jawaban salah secara diam-diam.
+
+## Kolom kategorikal
+
+`CategoricalSeries` menyimpan teks sebagai kode integer ke dalam kamus bersama.
+
+```csharp
+var sizes = CategoricalSeries.FromValues(
+    "size", values, categories: ["low", "medium", "high"], ordered: true);
+
+sizes.ArgSort();                    // menurut peringkat yang dideklarasikan, bukan abjad
+sizes.CategoryCounts();             // termasuk kategori yang tidak punya baris
+sizes.OneHot(dropFirst: true);
+sizes.ToCodes();                    // nilai hilang menjadi NaN, bukan -1
+sizes.ReorderCategories(["low", "medium", "high"]);
+sizes.RemoveUnusedCategories();
+```
+
+Ada dua alasan memakainya dan keduanya saling bebas. Yang pertama adalah ukuran: kolom berisi nama
+negara per baris menyimpan beberapa lusin string yang sama ratusan ribu kali, dan pengkodean
+mengubahnya menjadi `int[]` sehingga pengelompokan dan penggabungan menjadi perbandingan integer.
+
+Yang kedua adalah **pengurutan**. `TextSeries` hanya bisa mengurut secara abjad, yang menempatkan
+"high" sebelum "low" sebelum "medium" — jawaban salah yang nyata dan mudah terlewat untuk data
+ordinal. Kategorikal terurut mengurut menurut urutan kategori yang dideklarasikan pemanggil.
+
+**Kategori adalah bagian dari tipe kolom, bukan ringkasan isinya.** Kategori tanpa baris tetap ada,
+dan itulah yang membuat group-by menghasilkan grup kosong alih-alih menghilangkannya diam-diam.
+Karena itu `Take` mempertahankan setiap kategori — menyaring baris tidak boleh mengubah tipe kolom —
+dan `RemoveUnusedCategories` adalah cara eksplisit untuk membuangnya. Dengan alasan sama, menetapkan
+nilai di luar himpunan kategori akan melempar kesalahan alih-alih melebarkan kamus: itu akan membuat
+tipe kolom bergantung pada urutan penulisan yang kebetulan terjadi.
+
+`ToCodes` memetakan nilai hilang ke `NaN`, bukan -1, karena -1 akan terbaca sebagai kategori dengan
+peringkat di bawah semua kategori lain, dan itu justru hal yang salah untuk diberikan kepada model.
+
+## SQL
+
+`SqlReader` dan `SqlWriter` ditulis terhadap `System.Data.Common`, sehingga bekerja dengan SQL
+Server, PostgreSQL, SQLite, MySQL, atau apa pun yang menyediakan `DbConnection` — dan tidak
+memerlukan dependensi paket untuk itu. Pemanggil menyediakan koneksinya, sehingga string koneksi,
+pooling, dan kredensial tetap berada di tempatnya.
+
+```csharp
+using var connection = new SqliteConnection("Data Source=data.db");
+
+var frame = SqlReader.Read(connection,
+    "SELECT id, name, score FROM people WHERE score > $floor",
+    new Dictionary<string, object?> { ["$floor"] = 85.0 });
+
+SqlWriter.Write(frame, connection, "metrics");
+```
+
+**Sampaikan nilai lewat `parameters`, jangan pernah dengan merangkai string SQL.** Menyisipkan
+masukan pengguna ke dalam teks kueri adalah asal mula SQL injection, dan kenyataan bahwa ia berhasil
+saat pengujian justru itulah yang membuatnya berbahaya.
+
+Tipe kolom berasal dari penyedia, bukan disimpulkan, dan itulah alasan utama memilih ini daripada
+mengekspor ke CSV lalu membacanya kembali: basis data sudah tahu bahwa sebuah kolom adalah tanggal,
+bukan string yang tampak seperti tanggal. Nama kolom ganda — sah di SQL, tidak sah di frame — diberi
+akhiran alih-alih saling menimpa diam-diam, dan koneksi dikembalikan ke keadaan semula.
+
+Nama tabel tidak bisa dijadikan parameter, sehingga `SqlWriter` menyisipkannya dan menolak apa pun
+yang bukan pengenal polos. Penulisan dikelompokkan ke dalam transaksi dan digulung balik saat gagal:
+data yang tertulis separuh lebih buruk daripada tidak ada, karena tidak ada apa pun di tabel yang
+menyatakan separuh yang mana.
+
+## Excel
+
+`ExcelReader` dan `ExcelWriter` menangani `.xlsx` tanpa pustaka spreadsheet. Formatnya adalah arsip
+zip berisi bagian-bagian XML, dan semuanya sudah bisa dibuka oleh BCL.
+
+```csharp
+ExcelReader.SheetNames("report.xlsx");
+var frame = ExcelReader.Read("report.xlsx", new ExcelOptions { SheetName = "Results" });
+ExcelWriter.Write(frame, "output.xlsx", sheetName: "Cities");
+```
+
+Tiga hal tentang format ini menjebak siapa pun yang menulis pembaca untuk pertama kalinya, dan
+semuanya ditangani:
+
+- **Sel kosong itu tidak ada, bukan berisi kosong.** Sebuah baris hanya mencatat sel yang berisi
+  sesuatu, sehingga elemen `<c>` ketiga pada suatu baris belum tentu kolom C. Referensi `r` milik sel
+  itulah yang menyatakan letaknya, dan membaca berdasarkan posisi akan menggeser diam-diam setiap
+  nilai setelah celah.
+- **Tanggal adalah angka.** Excel menyimpannya sebagai hari sejak 1899-12-30 dan menandainya hanya
+  lewat format angka, sehingga kolom tanggal tiba tampak seperti bilangan bulat lima digit.
+- **Bug tahun kabisat 1900.** Excel meyakini 1900 adalah tahun kabisat, demi kompatibilitas dengan
+  Lotus 1-2-3. Epoknya adalah 1899-12-30, bukan 1899-12-31, dan itulah yang membuat setiap tanggal
+  sejak 1900-03-01 keluar dengan benar.
+
+Lembar kerja dibaca secara mengalir dengan `XmlReader`, bukan dimuat sebagai dokumen, karena itulah
+satu-satunya bagian workbook yang bisa benar-benar besar. Rumus tidak dievaluasi; sel rumus
+menghasilkan nilai tersimpannya, yang memang itulah yang dicatat berkas dan hampir selalu yang
+diinginkan pemanggil.
+
+---
+
+## Visualisasi
+
+Dihasilkan oleh `samples/GraviFrame.Console`; `notebooks/GraviFrame.Notebook.ipynb` menambahkan
+grafik volatilitas bergulir yang dibangun dengan fungsi window v0.4.
+
+![Deret harga dengan rata-rata bergulir di atasnya](../screenshots/graviframe_trend.png)
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

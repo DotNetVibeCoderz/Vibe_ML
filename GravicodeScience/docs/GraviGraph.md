@@ -243,6 +243,163 @@ reassuring to see it after the move to the tape rather than before.
 | `ToDenseAdjacency` throws | The graph is too large — use `ToSparseAdjacency` |
 | GNN training does nothing | The graph has no `NodeFeatures`; pass them explicitly |
 
+## Heterogeneous graphs
+
+Most real graphs are not homogeneous. A recommendation graph has users and items; a citation graph
+has papers, authors and venues. Flattening them into one node set loses the thing that made them
+informative: that "user 3 bought item 7" and "item 7 is in category 2" are different kinds of
+evidence and should not be averaged together.
+
+```csharp
+var graph = new HeterogeneousGraph();
+graph.AddEdge("user", "watched", "film", 0, 1);
+graph.AddEdge("user", "rated", "film", 1, 2, weight: 5.0);
+graph.SetFeatures("user", userFeatures);       // each type may have a different width
+graph.SetFeatures("film", filmFeatures);
+graph.AddReverseEdges(new EdgeType("user", "watched", "film"));
+```
+
+**Node indices are local to their type** — user 0 and film 0 are different nodes — which is what
+allows each type its own feature dimension. And an edge type is the *triple*, not the relation name:
+`(user, rates, film)` and `(critic, rates, film)` are different relations that happen to share a
+verb, and a model that conflates them learns one set of weights for two behaviours.
+
+Message passing only moves along edge direction, so a bipartite graph with edges only from users to
+films gives films no way to inform users. `AddReverseEdges` is how information flows both ways, and
+it adds a *separate* relation with its own name because "user rates film" and "film is rated by
+user" deserve different weights.
+
+`RelationalConvolution` is R-GCN: one weight matrix per relation, summed at the destination.
+
+```csharp
+var layer = new RelationalConvolution(graph, inputSizes, outputSize: 64);
+var next = layer.Forward(graph, representations);
+```
+
+Normalising by in-degree **per relation** rather than overall is deliberate. A node with a thousand
+`viewed` edges and three `bought` edges would otherwise have the purchases drowned out entirely —
+and purchases are the informative signal. A self-loop weight per node type keeps a node's own
+features alive through a layer; without it an isolated node's representation is exactly zero and it
+becomes indistinguishable from every other isolated node.
+
+## Edge features
+
+A weight is the one-dimensional case. Once there is more than one number to say about an edge — a
+rating's score, a transaction's amount, a timestamp — folding it into a scalar throws the rest away.
+
+```csharp
+graph.SetEdgeFeatures(new EdgeType("user", "rated", "film"), scoresAndTimes);
+```
+
+## Temporal graphs
+
+A transaction network, a message log and a citation record are all sequences of events, and
+collapsing them into one adjacency matrix destroys the ordering. That matters more than it looks: in
+a static graph an edge `a→b` and an edge `b→c` imply a path from `a` to `c`, but if `b→c` happened
+*before* `a→b`, nothing could have travelled that way. Information, money and disease all obey that
+ordering, and a static analysis systematically overstates what is reachable.
+
+```csharp
+var graph = TemporalGraph.LoadCsv("events.csv");
+
+graph.TemporallyReachable(source, maxGap: 3600);   // respects edge ordering
+graph.Snapshot(from, to);                          // a static view of one window
+graph.SnapshotUpTo(cutoff);                        // what a model may see at that moment
+graph.Windows(count);
+graph.TemporalEfficiency();                        // how much a static view overstates
+graph.TimeDecayedFeatures(features, asOf, halfLife: 30);
+```
+
+`TemporallyReachable` is computed by one pass over the time-sorted edges. Because they are processed
+in time order, any edge that can extend a path has already had its source's earliest arrival
+finalised — which is what makes a single pass sufficient where a static graph would need a traversal.
+`maxGap` caps how long a path may wait between consecutive edges.
+
+`SnapshotUpTo` is the cut that stops a link predictor from being trained on its own test set.
+`TimeDecayedFeatures` is the cheapest useful temporal embedding: a recent interaction should say more
+about a node than one from a year ago, and a static aggregation weights them identically — which is
+why a model trained on a collapsed graph keeps recommending what someone liked once, long ago.
+
+## Graph classification
+
+Node classification has one representation per node and needs no readout. Graph classification — is
+this molecule toxic, is this program malicious — needs a single vector per graph, and graphs have
+different numbers of nodes.
+
+```csharp
+GraphPooling.Pool(nodeFeatures, PoolingKind.MeanMax);
+GraphPooling.AttentionPool(nodeFeatures, gate);
+
+var classifier = new GraphClassifier(inputSize: 2, hiddenSize: 32, layers: 2).Fit(graphs, labels);
+classifier.Predict(graph);
+classifier.Accuracy(testGraphs, testLabels);
+```
+
+**The readout must not depend on node order.** Graph nodes have no canonical numbering, so a readout
+sensitive to permutation makes the model's output depend on how the file happened to be written.
+Every pooling function here is a symmetric aggregate for exactly that reason, and it is why
+concatenating node vectors — the obvious way to get a fixed size — is not an option.
+
+The choice between them is a real modelling decision. **Mean** is invariant to graph size, which is
+right when a large molecule and a small one should be judged on composition; **sum** is not, which is
+right when size itself is informative. **Max** asks whether a feature appears at all, which detects a
+single unusual substructure that an average would dilute away. `AttentionPool` learns which nodes to
+listen to, and its weights are readable afterwards — they say which part of the graph drove the
+prediction.
+
+Message passing here uses fixed random projections with only the final classifier trained. That is a
+real architecture, not a shortcut: it is the graph analogue of a random-features model, trains in
+closed form, and is a genuinely strong baseline — a learned GNN that cannot beat it is not learning
+anything the structure did not already give away. A fully trained version belongs on the autodiff
+tape alongside `GnnTape`.
+
+Each round of message passing widens a node's receptive field by one hop; beyond three or four the
+representations tend to converge on each other, which is over-smoothing and shows up as accuracy
+falling with depth.
+
+## Neighbourhood sampling
+
+Full-batch message passing computes every node's representation in every layer, so one step needs the
+whole graph. That is fine for Cora and impossible for a social network.
+
+```csharp
+foreach (var batch in NeighborSampler.Batches(trainNodes, batchSize: 512, rng))
+{
+    var block = NeighborSampler.Sample(graph, batch, fanOut: [10, 5], rng);
+    var features = NeighborSampler.GatherFeatures(block, allFeatures);
+    var output = NeighborSampler.Aggregate(block, features, weights);
+}
+```
+
+The problem it actually solves is not memory but **neighbourhood explosion**. A two-layer GNN on a
+graph with average degree 100 touches ten thousand nodes per target; three layers touches a million.
+Capping the fan-out per hop — GraphSAGE's contribution — makes the cost per target bounded and
+independent of the graph's size.
+
+**Sampling changes the estimator, not just the speed.** Each node's aggregate is now a stochastic
+estimate of the full-neighbourhood one, unbiased for a mean aggregator and noisier for a small
+fan-out. Very small samples make training unstable rather than merely approximate.
+
+The block is built outward from the targets and then reversed, because the layer that must run first
+is the one furthest from them. `Aggregate` keeps a node's own contribution separate from the
+neighbourhood average rather than including it in the mean — that is what lets the model tell a node
+apart from its surroundings, and it is the difference between SAGE and a plain GCN. **A SAGE layer
+therefore takes twice its feature width**, because self and neighbourhood are concatenated before
+projection.
+
+Shuffling matters more here than in ordinary mini-batching. Node ids in a real graph are rarely
+arbitrary — they often follow crawl order, so consecutive ids are neighbours — and an unshuffled
+batch is then a single dense region rather than a sample of the graph.
+
+---
+
+## Visualisations
+
+Rendered by `samples/GraviGraph.Console`. `notebooks/GraviGraph.Notebook.ipynb` adds a chart of how
+fast a sampled neighbourhood grows with the fan-out — the argument for bounding it.
+
+![A network laid out with node size by centrality](screenshots/gravigraph_network.png)
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

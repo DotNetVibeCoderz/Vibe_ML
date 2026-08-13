@@ -114,8 +114,9 @@ ditemukan dengan menjalankannya terhadap endpoint sungguhan, bukan dengan membac
 
 ## Template
 
-**File → New Project** menawarkan proyek kosong atau salah satu dari sembilan template. Semuanya
-build dan berjalan apa adanya.
+**File → New Project** menawarkan lima belas template. Semuanya build dan berjalan apa adanya —
+klaim itu diperiksa dengan membangkitkan setiap template lalu mem-build-nya, bukan sekadar
+dinyatakan.
 
 | Template | Menghasilkan |
 |---|---|
@@ -129,6 +130,15 @@ build dan berjalan apa adanya.
 | `bayesian` | Posterior MCMC yang diuji terhadap jawaban konjugat eksak |
 | `timeseries` | Rolling window, persentase perubahan, resampling kalender |
 | `notebook` | Notebook .NET Interactive dengan grafik |
+| `explainability` | Permutation importance, nilai Shapley, dan kalibrasi untuk model terlatih |
+| `anomaly` | Deteksi kebaruan one-class SVM dan pengelompokan kerapatan HDBSCAN |
+| `tokenizer` | Melatih tokenizer BPE dan bergaya SentencePiece pada korpus Anda sendiri |
+| `ner` | Penanda entitas berbasis CRF yang dilatih dari anotasi format CoNLL |
+| `forecasting` | Penyaringan Kalman, pemulusan, dan peramalan dengan ketidakpastian yang jujur |
+
+Lima template yang ditambahkan pada v0.4 masuk ke kategori yang sudah ada — *Machine learning*,
+*Natural language*, dan *Statistics* — sehingga pemilih mengelompokkannya menurut fungsinya, bukan
+menurut kapan template itu ditulis.
 
 Template disimpan di dalam kode, bukan sebagai berkas lepas, sehingga tidak mungkin hilang dari
 salinan terpasang dan nama proyek disubstitusi dengan benar, bukan lewat cari-dan-ganti. Berkas
@@ -145,6 +155,12 @@ warna pustaka itu, sehingga `ml-pipeline` langsung terbaca sebagai GraviNum + Gr
 GraviLearn.
 
 ![Dialog proyek baru dengan template ml-pipeline terpilih](../screenshots/scienceappgen-new-project.png)
+
+![Pemilih template digulir ke template v0.4](../screenshots/scienceappgen-templates.png)
+
+Setelah digulir, tampak lima template yang ditambahkan pada v0.4. Pitanya bekerja dengan cara yang
+sama: `ner` dan `tokenizer` terbaca sebagai GraviNum + GraviText, `forecasting` sebagai
+GraviNum + GraviProb.
 
 Proyek langsung terbuka dengan `Program.cs` di editor dan log mencatat apa yang dibuat serta di
 mana lokasinya.
@@ -221,7 +237,7 @@ memeriksa apa yang *dikatakan* asisten, melainkan apa yang benar-benar ada di di
   PASS  GravicodeExample
 
 === 2. Template ===
-  PASS  Jumlah template (10)
+  PASS  Jumlah template (15)
   PASS  Template terbentuk
   PASS  Substitusi nama
 

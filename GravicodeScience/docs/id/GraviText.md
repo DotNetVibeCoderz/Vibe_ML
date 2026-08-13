@@ -276,6 +276,190 @@ PageRank atas graf tumpang tindih kata isi. Ia tidak mungkin berhalusinasi.
 | Stop word Indonesia tidak terbuang | Berikan `StopWords.Indonesian` atau `Bilingual` secara eksplisit |
 | Kosakata Word2Vec kosong | `minCount` di atas frekuensi korpus |
 
+## Tokenizer sub-kata yang dapat dilatih
+
+`WordPieceTokenizer` menerapkan kosakata yang diberikan kepadanya. Dua tokenizer berikut
+mempelajarinya dari korpus, lewat jalur yang benar-benar berbeda.
+
+### Byte-pair encoding
+
+`BpeTokenizer` mulai dari karakter dan berulang kali menggabungkan pasangan bersebelahan yang paling
+sering muncul, mencatat setiap penggabungan sesuai urutan. Menerapkannya kemudian berarti memutar
+ulang penggabungan itu.
+
+```csharp
+var tokenizer = BpeTokenizer.Train(corpus, vocabularySize: 8000, minFrequency: 2);
+
+tokenizer.Encode("lowest");        // ["low", "est</w>"] — belum pernah dilihat, tetapi terurai
+tokenizer.Tokenize(document);
+tokenizer.Decode(pieces);
+tokenizer.Save("merges.txt");
+```
+
+Perbedaannya dari WordPiece terletak pada pasangan mana yang digabung: BPE mengambil yang paling
+*sering*, WordPiece mengambil yang paling meningkatkan likelihood korpus. Dalam praktiknya kosakata
+keduanya mirip dan BPE lebih sederhana untuk dilatih.
+
+**Urutan penggabungan adalah modelnya.** Kosakata saja tidak bisa melakukan tokenisasi — himpunan
+token yang sama diterapkan dalam urutan berbeda menghasilkan segmentasi berbeda — dan itulah sebabnya
+`Save` menulis penggabungan berperingkat, bukan daftar token. Dengan alasan sama, penggabungan
+diterapkan menurut *peringkat*, bukan dari kiri ke kanan: penggabungan berperingkat rendah yang
+datang lebih awal bisa memakan simbol yang dibutuhkan penggabungan berperingkat lebih tinggi.
+
+Kata membawa penanda akhir-kata, sehingga `"est"` yang mengakhiri kata adalah token berbeda dari
+`"est"` di dalam kata. Tanpa itu, tokenizer mempelajari penggabungan yang melintasi batas kata dan
+menghasilkan segmentasi yang tidak bertahan ketika teks dispasi ulang. Pelatihan memutus seri secara
+deterministik, sehingga dua kali jalan atas korpus yang sama tidak mungkin menyimpang —
+ketidakterulangan di sini tak terlihat sampai model yang dilatih dengan satu tokenizer disajikan
+dengan tokenizer lain.
+
+### Unigram (SentencePiece)
+
+`UnigramTokenizer` adalah gagasan berbeda, bukan varian. Ia mulai dari kosakata kandidat yang besar,
+memberi setiap potongan sebuah probabilitas, lalu *memangkas ke bawah* — berulang kali membuang
+potongan yang penghapusannya paling sedikit merugikan likelihood korpus.
+
+```csharp
+var tokenizer = UnigramTokenizer.Train(corpus, vocabularySize: 8000);
+
+tokenizer.Encode(text);                                // Viterbi: segmentasi terbaik
+tokenizer.SampleEncoding(text, rng, alpha: 0.2);       // segmentasi alternatif
+tokenizer.Decode(pieces);                              // dapat dibalik secara persis
+```
+
+Dua konsekuensi mengikuti, dan keduanya adalah alasan ia layak dimiliki berdampingan dengan BPE:
+
+- **Segmentasinya optimal secara global**, ditemukan lewat Viterbi atas kisi potongan, bukan secara
+  serakah, sehingga tidak bergantung pada urutan aturan yang kebetulan dipelajari.
+- **Segmentasi alternatif dapat disampel**, dan itulah dasar regularisasi sub-kata — melatih model
+  pada beberapa segmentasi tiap kalimat membuatnya jauh lebih tahan terhadap pilihan sembarang
+  tokenizer. BPE tidak bisa melakukan ini tanpa perangkat tambahan, karena tidak punya probabilitas
+  untuk disampel.
+
+**Spasi adalah bagian dari masukan, bukan pembatas.** Spasi menjadi penanda yang terlihat dan teks
+diperlakukan sebagai satu aliran mentah, dan itulah yang membuat skema ini sepenuhnya dapat dibalik
+serta mampu menangani bahasa yang sama sekali tidak memberi spasi antar kata.
+
+Karakter tunggal tidak pernah dipangkas: kosakata yang tidak bisa mengeja sebuah karakter tidak bisa
+mensegmentasi teks yang memuatnya. Langkah EM mengakumulasi hitungan terharap tiap potongan atas
+*seluruh* segmentasi yang ditimbang probabilitas, bukan hanya yang terbaik — memakai jalur Viterbi
+saja membuat potongan langka tampak lebih buruk daripada kenyataannya.
+
+## Pelabelan urutan dengan CRF
+
+Melabeli setiap token secara mandiri menghasilkan urutan yang masuk akal secara lokal dan mustahil
+secara global — sebuah `I-PER` tanpa `B-PER` di depannya. `LinearChainCrf` menambahkan skor transisi
+antar label bersebelahan dan mendekode *urutan* dengan skor tertinggi.
+
+```csharp
+var crf = new LinearChainCrf(labels.Count);
+crf.ApplyBioConstraints(labels);           // I-X hanya boleh mengikuti B-X atau I-X bertipe sama
+crf.Fit(emissionMatrices, tagSequences);
+
+crf.Decode(emissions);        // Viterbi: urutan terbaik
+crf.Marginals(emissions);     // keyakinan per token, lewat forward-backward
+crf.LogLikelihood(emissions, labels);
+```
+
+**Urutan terbaik bukanlah urutan token-token terbaik.** Mengambil label teratas tiap token secara
+mandiri mengabaikan semua skor transisi, dan itulah satu-satunya hal yang ditambahkan model ini.
+
+Fungsi partisi dihitung secara persis oleh algoritma forward dalam O(n·k²), atas apa yang kalau tidak
+akan berupa kⁿ urutan. Itulah yang menjadikan ini model probabilitas, bukan sekadar fungsi penilaian,
+dan sebabnya gradien pelatihan — hitungan teramati dikurangi hitungan terharap, bentuk klasik keluarga
+eksponensial — bersifat persis, bukan hasil sampel.
+
+`Forbid` memberi sebuah transisi skor yang tidak bisa dipulihkan jalur mana pun. Menyatakan kendala
+dengan cara itu lebih baik daripada berharap data latih mengajarkannya: penalti yang dipelajari
+selalu bisa dikalahkan emisi yang percaya diri, dan keluarannya lalu berupa pelabelan yang menurut
+skemanya tidak mungkin ada. Transisi terlarang tidak punya gradien dan tidak pernah memperolehnya,
+sehingga pelatihan tidak dapat melarutkannya.
+
+**Emisi datang dari luar.** CRF menerima matriks skor per token — dari model linear, transformer, apa
+pun — dan hanya mempelajari transisinya. Itulah yang membuatnya dapat dirangkai, dan sesuai dengan
+cara CRF dipakai dalam praktik, yakni sebagai lapisan akhir sebuah tagger.
+
+## NER terlatih
+
+`NamedEntityRecognizer` mencocokkan gazetteer dan pola kapitalisasi. `TrainedNer` belajar dari teks
+beranotasi, dan itulah yang membuatnya bisa menggeneralisasi ke nama yang belum pernah dilihatnya.
+
+```csharp
+var sentences = TaggedSentence.LoadConll("datasets/ner_conll.txt");
+var ner = new TrainedNer().Fit(sentences.Take(315).ToList());
+
+ner.Recognize("Kartika Wijaya bekerja di Gravicode .");
+//   PER: 'Kartika Wijaya'
+//   ORG: 'Gravicode'
+
+ner.Evaluate(heldOut);       // P 98,1%  R 97,7%  F1 97,9%  (213 diprediksi, 214 sebenarnya)
+```
+
+Rancangannya dua tahap: model linear menyekor tiap token terhadap fiturnya, dan `LinearChainCrf`
+mendekode urutan terbaik dari skor itu. Pemisahan itulah yang membuat kendala BIO dapat ditegakkan —
+model per token tidak bisa tahu bahwa `I-PER` tidak boleh mengikuti `O`, dan CRF membuatnya mustahil
+secara struktural, bukan sekadar tidak mungkin.
+
+Fitur sengaja berbasis bentuk, bukan berbasis identitas. Katanya sendiri hanyalah satu fitur di
+antara banyak; sisanya menggambarkan kapitalisasi, imbuhan, kandungan digit, dan tetangganya. Fitur
+bentuk-kata mengerjakan sebagian besar tugasnya — memetakan huruf besar ke `X`, huruf kecil ke `x`,
+dan digit ke `d` mengubah "Jakarta" dan "Bandung" menjadi `Xxxxxxx` yang sama, sehingga bukti tentang
+yang satu berpindah ke yang lain. Itulah keseluruhan perbedaannya dengan gazetteer.
+
+**Evaluasilah atas entitas, bukan token.** Akurasi token didominasi tag `O` — model yang memprediksi
+`O` di mana-mana menyekor di atas 85% pada kebanyakan korpus — sehingga nyaris tak bermakna.
+`Evaluate` menyekor entitas utuh, menuntut batas dan tipe semuanya benar, dan itulah yang dimaksud
+ukuran CoNLL serta yang dirujuk angka-angka yang dipublikasikan.
+
+## Tumpukan dekoder
+
+`TransformerDecoder` secara struktural adalah enkoder dengan dua perubahan: perhatiannya ditopengi
+secara kausal, dan kepala model bahasa memproyeksikan tiap posisi kembali ke kosakata.
+
+```csharp
+var decoder = new TransformerDecoder(config, vocabulary);
+
+decoder.Generate(prompt, maxNewTokens: 50, options: SamplingOptions.Nucleus, rng: rng);
+decoder.Generate("the cat", tokenizer, maxNewTokens: 20);
+decoder.Perplexity(tokenIds);
+```
+
+**Penopengan kausal itulah yang memungkinkan pelatihan untuk pembangkitan.** Setiap posisi
+memprediksi penerusnya, dan karena tidak ada posisi yang bisa melihat jawabannya sendiri, seluruh n
+prediksi datang dari satu lintasan maju, bukan satu per token. Menghilangkan topeng tidak
+menghasilkan model yang lebih buruk — ia menghasilkan model yang tampak terlatih dengan indah dan
+tidak membangkitkan apa pun, karena saat inferensi masa depan yang ia pelajari untuk diandalkan
+tidak ada di sana.
+
+Opsi pengambilan sampel diterapkan dalam urutan biasa: hukum pengulangan, skalakan dengan suhu,
+potong dengan top-k, lalu dengan top-p. Menerapkan suhu setelah pemotongan akan mengubah token mana
+yang seharusnya dipilih pemotongan. Tanda pada penalti pengulangan penting — membagi logit *negatif*
+dengan penalti justru menaikkannya, yang merupakan kebalikan dari penalti.
+
+```csharp
+SamplingOptions.Greedy;                                  // deterministik
+SamplingOptions.Nucleus;                                 // top-p pada 0,9
+new SamplingOptions(Temperature: 0.8, TopK: 40, RepetitionPenalty: 1.1);
+```
+
+Ini bersifat **maju saja**, seperti `TransformerModel`: ia menjalankan model yang bobotnya berasal
+dari tempat lain. Dekoder yang dapat dilatih tempatnya di pita autodiff berdampingan dengan
+`TransformerTape`.
+
+**Pembangkitan di sini kuadratik, dan itu disadari.** Setiap token baru menjalankan ulang seluruh
+awalan alih-alih menyimpan key dan value token yang sudah diproses. Cache KV membuatnya linear dan
+merupakan optimasi paling berharga untuk pembangkit sungguhan; ia ditinggalkan karena melipatduakan
+keadaan yang harus dipegang pembaca, dan ukuran yang dijalankan di sini tidak memerlukannya.
+
+---
+
+## Visualisasi
+
+Dihasilkan oleh `samples/GraviText.Console`. `notebooks/GraviText.Notebook.ipynb` menambahkan
+heatmap perhatian kausal, yang seluruh bagian di atas diagonalnya persis nol.
+
+![Penyematan kata diproyeksikan ke dua dimensi](../screenshots/gravitext_embeddings.png)
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

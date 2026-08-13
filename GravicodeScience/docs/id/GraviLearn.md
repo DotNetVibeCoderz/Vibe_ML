@@ -279,6 +279,198 @@ sedang bekerja sebagaimana mestinya.
 | DBSCAN menaruh semuanya dalam satu klaster atau semua derau | `Epsilon` tidak sesuai skala data |
 | Kelas langka bernilai nol | Gunakan `stratify: true` saat membagi |
 
+## Menjelaskan model
+
+`PermutationImportance` menilai setiap fitur berdasarkan seberapa besar akurasi yang hilang ketika
+kolomnya diacak. Pengacakan mempertahankan distribusi kolom dan menghancurkan hubungannya dengan
+target, sehingga penurunan itulah nilai hubungan tersebut.
+
+```csharp
+var ranked = PermutationImportance.Ranked(model, xTest, yTest, repeats: 10);
+// feature 0: 0.3125 ± 0.0142
+```
+
+**Jalankan pada data uji.** Pada data latih ia mengukur apa yang dihafal model, bukan apa yang
+menggeneralisasi, dan model yang overfit akan melaporkan setiap fitur sebagai vital. Ia juga
+mengukur hal berbeda dari importance bawaan pohon, yang menggambarkan bagaimana pohon *dibangun* dan
+diketahui memihak fitur berkardinalitas tinggi terlepas dari apakah fitur itu memprediksi sesuatu.
+
+Fitur yang berkorelasi berbagi tanggung jawab dan masing-masing tampak tidak penting: mengacak satu
+membiarkan yang lain membawa informasi yang sama. Itu keterbatasan nyata metode ini, bukan bug —
+pembacaan yang jujur adalah "keduanya bersama-sama penting", dan simpangan baku yang dilaporkan
+itulah yang memperingatkan bahwa estimasinya tidak stabil.
+
+`ShapleyValues` menjawab pertanyaan berbeda: bukan "fitur mana yang diandalkan model" melainkan
+"mengapa ia mengatakan *itu*, untuk baris *ini*". Keduanya rutin berbeda — sebuah fitur bisa tidak
+penting secara global namun menentukan bagi satu pemohon.
+
+```csharp
+var attribution = ShapleyValues.Sample(predict, instance, background, samples: 200);
+attribution.BaseValue;        // rata-rata model atas data latar
+attribution.Contributions;    // jumlahnya sama dengan prediksi dikurangi nilai dasar
+attribution.Ranked;           // pengaruh terbesar lebih dulu, ke arah mana pun
+```
+
+Nilai Shapley berasal dari teori permainan kooperatif: tambahkan fitur satu per satu dalam urutan
+acak, catat seberapa besar masing-masing menggeser prediksi saat bergabung, lalu rata-ratakan atas
+semua urutan. Ia adalah satu-satunya atribusi yang memenuhi efisiensi (bagian-bagiannya menjumlah
+menjadi keseluruhan), simetri (kontributor setara mendapat kredit setara), dan sifat dummy (fitur
+yang tidak mengubah apa pun mendapat nol). Tidak ada heuristik yang lebih murah memiliki ketiganya.
+
+"Absen" berarti diganti nilai dari data latar, sehingga **data latar adalah bagian dari
+penjelasannya.** Menjelaskan penolakan pinjaman terhadap latar berisi pemohon yang disetujui
+menjawab pertanyaan berbeda dari menjelaskannya terhadap semua pemohon, dan membaca atribusi apa pun
+secara jujur menuntut pengetahuan tentang latar mana yang dipakai.
+
+`Exact` mencacah seluruh 2ⁿ subset dan ditolak di atas dua puluh fitur; `Sample` adalah Monte Carlo
+atas permutasi dan itulah yang dipakai di atas sekitar lima belas. Karena setiap permutasi bersifat
+teleskopik, `Sample` memenuhi efisiensi *secara persis* pada ukuran sampel berapa pun — hanya
+pembagian antar fitur yang bersifat hampiran.
+
+## Kalibrasi
+
+Sebuah model bisa memberi peringkat sempurna namun terkalibrasi buruk. Jika segala sesuatu yang ia
+sebut "90% mungkin" terjadi 60% dari waktu, urutannya benar dan angkanya tidak — dan setiap keputusan
+yang dibuat atas ambang, nilai harapan, atau imbal-balik biaya menjadi salah. Akurasi dan AUC tidak
+bisa melihat ini.
+
+```csharp
+Calibration.Curve(probabilities, labels, bins: 10);   // diagram reliabilitas
+Calibration.ExpectedError(probabilities, labels);     // ECE: selisih rata-rata klaim vs pengamatan
+Calibration.BrierScore(probabilities, labels);        // galat kuadrat rata-rata dari probabilitas
+```
+
+Bin kosong dibuang alih-alih dilaporkan sebagai nol, yang akan menarik kurva melewati wilayah tanpa
+bukti sama sekali. Galat kalibrasi terharap ditimbang oleh populasi bin, sehingga meleset jauh pada
+bin berisi tiga sampel tidak mengalahkan meleset kecil pada bin berisi seribu.
+
+`IsotonicRegression` adalah perbaikan bakunya. Ia mencocokkan fungsi tangga tak-menurun terbaik
+dengan pool-adjacent-violators: berjalan dari kiri ke kanan, dan setiap kali rata-rata sebuah blok
+jatuh di bawah pendahulunya, gabungkan lalu rata-ratakan ulang.
+
+```csharp
+var calibrated = new IsotonicRegression().Fit(scores, labels).Predict(scores);
+```
+
+Penggabungan diulang *mundur*, karena penggabungan bisa menciptakan pelanggaran baru dengan blok
+sebelumnya — loop dalam itulah keseluruhan algoritmanya, dan menghilangkannya menghasilkan sesuatu
+yang tampak benar pada data mulus dan gagal pada data kasar yang menjadi sasarannya. Karena
+kecocokannya monoton, peringkat pengklasifikasi dipertahankan dan hanya angkanya yang berubah, dan
+itulah persis yang seharusnya dilakukan kalibrasi ulang.
+
+## Data tak seimbang
+
+Pada data yang 99% negatif, cara termurah meminimalkan galat total adalah memprediksi "negatif" untuk
+segalanya. Model itu meraih akurasi 99% dan tidak berguna.
+
+```csharp
+Resampler.OverSample(x, y);            // gandakan kelas minoritas hingga setara mayoritas
+Resampler.UnderSample(x, y);           // buang mayoritas hingga setara minoritas
+Resampler.Smote(x, y, neighbours: 5);  // sintesis baris minoritas lewat interpolasi
+Resampler.ClassWeights(y);             // efek sama tanpa menyentuh data
+Resampler.ClassBalance(y);
+```
+
+**Lakukan penyeimbangan hanya pada bagian latih.** Menyeimbangkan sebelum pemisahan menempatkan titik
+sintetis — atau duplikat titik nyata — di kedua sisi pemisahan, sehingga data uji berisi baris
+turunan dari baris latih dan skornya kembali terlalu optimistis. Ini cara paling umum mendapatkan
+hasil yang tidak dapat direproduksi dari masalah tak seimbang.
+
+Tidak ada yang gratis. Oversampling membuat kelas minoritas tampak lebih rapat daripada
+sesungguhnya; undersampling membuang data nyata. SMOTE menempatkan titik baru di antara tetangga
+nyata sehingga pengklasifikasi melihat wilayah alih-alih kumpulan titik — tetapi ia mengandaikan ruas
+antara dua tetangga sekelas juga merupakan kelas itu, dan ketika kelas minoritas tidak konveks
+andaian itu salah. **Skalakan fitur lebih dulu:** tetangga dicari dengan jarak Euclid, sehingga kolom
+tanpa penskalaan bernilai ribuan akan menentukan sendiri setiap ketetanggaan.
+
+`ClassWeights` sering menjadi alat yang lebih baik bila learner menerima bobot sampel: ia tidak
+membuang apa pun, tidak mengarang apa pun, dan tidak menambah baris untuk dilatih.
+
+## One-class SVM
+
+Deteksi kebaruan bukanlah klasifikasi dengan satu kelas yang hilang. Tidak ada contoh negatif untuk
+mempelajari batas *di antara*; tugasnya adalah menemukan wilayah yang memuat sebagian besar data
+latih dan sesedikit mungkin selainnya.
+
+```csharp
+var detector = new OneClassSvm(nu: 0.05).Fit(normalData);
+
+detector.Predict(x);            // 1 untuk normal, -1 untuk anomali
+detector.DecisionFunction(x);   // jarak bertanda — pakai ini untuk mengurutkan peringatan
+```
+
+**`nu` adalah tombol yang menentukan.** Ia sekaligus batas atas bagi fraksi titik latih di luar batas
+dan batas bawah bagi fraksi yang menjadi support vector. Jadi `nu: 0.05` adalah pernyataan bahwa
+sekitar 5% data latih adalah kontaminasi yang layak dikeluarkan — bukan toleransi yang disetel sampai
+jawabannya tampak bagus. Perhatikan bahwa `nu` bernilai 0 tidak punya solusi, sehingga data yang
+benar-benar bersih pun tetap memerlukan nilai positif kecil.
+
+Skalakan fitur lebih dulu. Kernel RBF adalah fungsi jarak Euclid, sehingga kolom bernilai ribuan akan
+menentukan sendiri setiap kemiripan dan `gamma` menjadi tak bermakna.
+
+**Jangan menilai model dengan menyekor data latihnya sendiri.** Sebuah support vector muncul dalam
+fungsi keputusannya sendiri, sehingga titik latih terpencil mendapat kredit karena dekat dengan
+dirinya sendiri dan selalu menyekor lebih tinggi daripada titik identik yang ditahan. Ketika `rho`
+jatuh di bawah batas kotak, ia mendarat persis *di atas* batas, dan sisi mana dari nol yang
+dilaporkannya lalu ditentukan derau titik-mengambang. Evaluasilah pada data yang belum pernah dilihat
+model.
+
+Toleransi konvergensi terlihat pada hasil, bukan hanya pada waktu jalan: pada 1e-3 sifat-nu berhenti
+berlaku, dan itulah sebabnya nilai bakunya 1e-6.
+
+## HDBSCAN
+
+DBSCAN meminta satu `eps` dan menerapkannya di mana-mana. Itu baik ketika setiap klaster punya
+kerapatan sama dan tanpa harapan ketika tidak: `eps` yang cukup ketat untuk memisahkan dua klaster
+rapat akan mencabik klaster jarang menjadi derau, dan `eps` yang cukup longgar untuk menyatukan
+klaster jarang akan menggabungkan pasangan yang rapat. Tidak ada nilai yang berhasil.
+
+```csharp
+var model = new Hdbscan(minClusterSize: 10).Fit(x);
+
+model.Labels;           // -1 adalah derau
+model.ClusterCount;
+model.Probabilities;    // kekuatan keanggotaan pada [0, 1]; nol untuk derau
+model.CoreDistances;    // estimasi kerapatan lokal yang mendasari semuanya
+```
+
+Jalan keluarnya adalah menjalankan DBSCAN pada *setiap* ambang sekaligus lalu menanyakan klaster mana
+yang bertahan paling lama: hitung jarak inti setiap titik, definisikan keterjangkauan timbal balik
+sebagai `max(core(a), core(b), d(a,b))`, bangun pohon rentang minimum atas metrik itu, padatkan
+dengan membuang pemisahan yang melepas kurang dari `minClusterSize` titik, lalu pilih klaster yang
+tidak bertumpang tindih dengan stabilitas maksimum.
+
+Hasilnya, `minClusterSize` — "berapa titik yang membuat sesuatu layak disebut klaster" — menjadi
+satu-satunya parameter yang benar-benar perlu dijawab, dan berbeda dari `eps`, ia adalah pertanyaan
+tentang masalahnya, bukan tentang skala datanya.
+
+`Probabilities` sering lebih berguna daripada label datar: titik dengan nilai 0,05 secara nominal
+terklaster dan secara praktis tak terbedakan dari derau.
+
+Biayanya O(n²) dalam memori dan waktu — matriks jarak berpasangan dimaterialisasi. Implementasi nyata
+memakai space tree, yang mulai menguntungkan di atas beberapa ribu titik dan berhenti membantu di
+dimensi tinggi.
+
+---
+
+## Visualisasi
+
+Ketiganya dihasilkan oleh `samples/GraviLearn.Console` dan direproduksi oleh
+`notebooks/GraviLearn.Notebook.ipynb`.
+
+![Matriks kebingungan](../screenshots/gravilearn_confusion.png)
+
+![Diagram reliabilitas sebelum dan sesudah regresi isotonik](../screenshots/gravilearn_calibration.png)
+
+Diagram reliabilitas adalah gambaran paling jelas tentang arti kalibrasi. Kurva "sebelum" berada
+jauh di bawah diagonal — segala sesuatu yang disebut model berpeluang 60% terjadi jauh lebih jarang
+dari itu — dan regresi isotonik menariknya ke garis tanpa menyentuh peringkatnya.
+
+![HDBSCAN pada klaster dengan kerapatan berbeda](../screenshots/gravilearn_hdbscan.png)
+
+Dua klaster rapat yang berdekatan dan satu klaster menyebar yang jauh. Tidak ada satu pun nilai
+`eps` DBSCAN yang memisahkan ketiganya; HDBSCAN sama sekali tidak memerlukan ambang.
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

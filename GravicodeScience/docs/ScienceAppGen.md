@@ -112,8 +112,8 @@ This was found by running against a real endpoint, not by reading documentation.
 
 ## Templates
 
-**File → New Project** offers a blank project or one of nine templates. All of them build and run
-as written.
+**File → New Project** offers fifteen templates. All of them build and run as written — that
+claim is checked by generating every one and building it, not asserted.
 
 | Template | Produces |
 |---|---|
@@ -127,6 +127,15 @@ as written.
 | `bayesian` | An MCMC posterior checked against the exact conjugate answer |
 | `timeseries` | Rolling windows, percentage change, calendar resampling |
 | `notebook` | A .NET Interactive notebook with charts |
+| `explainability` | Permutation importance, Shapley values and calibration for a fitted model |
+| `anomaly` | One-class SVM novelty detection and HDBSCAN density clustering |
+| `tokenizer` | Trains BPE and SentencePiece-style tokenizers on your own corpus |
+| `ner` | A CRF-backed entity tagger trained on CoNLL-format annotations |
+| `forecasting` | Kalman filtering, smoothing and forecasting with honest uncertainty |
+
+The five added in v0.4 join the categories that already existed — *Machine learning*, *Natural
+language* and *Statistics* — so the picker groups them by what they do rather than by when they
+were written.
 
 Templates are held in code rather than as loose files, so one cannot go missing from an installed
 copy and the project name is substituted properly rather than by find-and-replace. The generated
@@ -140,6 +149,11 @@ run from the toolbar, with nothing typed in between.
 
 The picker shows what each template is made of — one band per library it uses, in that library's
 colour, so `ml-pipeline` reads as GraviNum + GraviFrame + GraviLearn at a glance.
+
+![The template picker scrolled to the v0.4 templates](screenshots/scienceappgen-templates.png)
+
+Scrolled down, the five templates added in v0.4. The bands do the same work here: `ner` and
+`tokenizer` read as GraviNum + GraviText, `forecasting` as GraviNum + GraviProb.
 
 ![New project dialog with the ml-pipeline template selected](screenshots/scienceappgen-new-project.png)
 
@@ -218,7 +232,7 @@ what the assistant *said*; it checks what ended up on disk:
   PASS  GravicodeExample
 
 === 2. Templates ===
-  PASS  Template count (10)
+  PASS  Template count (15)
   PASS  Template materialises
   PASS  Name substitution
 

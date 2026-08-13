@@ -253,6 +253,214 @@ point estimate cannot express.
 | VI variance looks too small | Expected — mean-field understates spread by construction |
 | VI result outside the parameter's range | Fixed: parameters are transformed; check `SupportBounds` on a custom distribution |
 
+## Multivariate distributions
+
+`MultivariateDistribution` is kept separate from `Distribution` rather than generalising it. The
+scalar interface is used everywhere — priors, likelihoods, the samplers — and widening it to vectors
+would make every implementation carry a dimension it does not have.
+
+### Multivariate normal
+
+```csharp
+var mvn = new MultivariateNormal(mean, covariance);
+mvn.LogDensity(x);
+mvn.Sample(rng, count);
+mvn.Conditional(unknown: [0], observed: [1], values);
+```
+
+Everything goes through the Cholesky factor `Σ = LLᵀ`, computed once at construction. That single
+factorisation gives all three things needed: the quadratic form by forward substitution instead of an
+explicit inverse, the log determinant as twice the sum of the log diagonal, and sampling as `μ + Lz`.
+Inverting `Σ` directly would be slower and markedly less accurate for an ill-conditioned covariance,
+which is exactly when it matters.
+
+A covariance that is not positive definite is rejected at construction. Singular covariance is a real
+modelling situation — perfectly correlated components — but the density is then unbounded on a
+lower-dimensional subspace and does not exist as written, so failing loudly beats returning
+infinities later.
+
+`Conditional` is the property that makes Gaussians useful for prediction: conditioning a normal on
+part of itself gives another normal, in closed form. That is the whole mechanism behind Gaussian
+process regression.
+
+### Dirichlet and multinomial
+
+```csharp
+var prior = Dirichlet.Symmetric(dimension: 3, concentration: 1.0);
+var posterior = prior.Posterior([10.0, 5.0, 0.0]);     // conjugacy: the update is addition
+prior.Marginal(0);                                     // every marginal is a Beta
+```
+
+A Dirichlet draw is a vector of non-negative numbers summing to one, which makes it the natural prior
+over the parameters of a `Categorical`. With two components it *is* a Beta. The concentration vector
+controls both location and spread: its normalised value is the mean, its total governs how tightly
+draws cluster, and α below one pushes mass into the corners — draws that are nearly one-hot, which is
+what makes a sparse prior sparse.
+
+**Every off-diagonal covariance entry is negative, necessarily.** The components sum to a constant,
+so one going up means another comes down. A Dirichlet cannot express positively correlated
+proportions at all, which is the main reason to reach for a logistic normal instead.
+
+Sampling draws one Gamma per component and normalises — independent `Gamma(αᵢ, 1)` divided by their
+sum is exactly `Dirichlet(α)`.
+
+`Multinomial` is the counts from repeated categorical draws, the generalisation of the binomial. Its
+sampler walks a chain of binomials on the remaining trials, which keeps the counts summing to the
+trial count exactly where sampling each category independently would not.
+
+## Gaussian processes
+
+The idea is to put a prior directly on the function rather than on the parameters of one. Any finite
+set of inputs has a jointly normal set of outputs, with covariance given by the kernel; conditioning
+that normal on the observed outputs gives another normal, and that is the posterior. No optimisation
+is involved, and the predictive uncertainty comes out with the prediction.
+
+```csharp
+var gp = new GaussianProcess(new RbfKernel(lengthScale: 1.0), noise: 0.01).Fit(x, y);
+
+var prediction = gp.Predict(xTest);
+prediction.Mean;
+prediction.StandardDeviation;
+prediction.Interval(0.95);
+
+gp.SamplePosterior(xTest, count: 20, rng);     // whole functions, not a band
+gp.LogMarginalLikelihood();
+GaussianProcess.Optimise(x, y);                // grid search over length scale and noise
+```
+
+**The kernel is the model.** It encodes every assumption — how smooth the function is, what length
+scale it varies on, whether it repeats — and choosing it is the modelling decision.
+
+| Kernel | Assumption |
+|---|---|
+| `RbfKernel` | Infinitely differentiable. Strong, often too strong. |
+| `MaternKernel(0.5)` | Continuous but nowhere differentiable. |
+| `MaternKernel(1.5)` | Once differentiable. |
+| `MaternKernel(2.5)` | Twice differentiable — a less credulous stand-in for the RBF. |
+| `PeriodicKernel` | Repeats forever. Use only when that is a genuine belief. |
+| `SumKernel` | A trend plus a seasonal cycle. |
+
+**Noise is not optional.** The `noise` term is both the observation-error model and what keeps the
+covariance invertible — with duplicate or nearly duplicate inputs it is singular without it, and the
+factorisation fails. A zero-noise GP that works is one that happened to have well-separated inputs.
+
+`LogMarginalLikelihood` is what to maximise when choosing hyperparameters. Unlike a training-set
+likelihood it does not simply improve as the model gets more flexible: the log-determinant term is a
+complexity penalty that grows as the kernel lets the function wiggle, so the maximum sits at a genuine
+trade-off. `Optimise` uses a grid rather than a gradient method deliberately — the marginal likelihood
+is not concave and has genuine local optima with different interpretations, one explaining the data as
+signal and another as noise.
+
+Targets are centred before fitting, because a GP has a zero prior mean and without centring it pulls
+predictions towards zero rather than towards the data's own level.
+
+`SamplePosterior` gives coherent functions, distinct from the marginal band `Interval` reports. A band
+cannot tell you whether the function wiggles inside it or stays flat.
+
+**Cost is cubic in the number of observations.** A few thousand points is the practical ceiling for
+the exact method; beyond that, sparse or inducing-point approximations are a different algorithm.
+
+## State-space models
+
+The model is a hidden state that evolves and an observation that sees part of it, both linearly and
+both with Gaussian noise. Within those assumptions the Kalman filter is not a good method, it is
+*the* method: the exact posterior over the state, and the minimum-variance estimator among all
+estimators, not merely linear ones.
+
+```csharp
+var filter = KalmanFilter.LocalLevel(processVariance: 0.01, observationVariance: 1.0);
+var trend = KalmanFilter.LocalLinearTrend(1e-4, 1e-6, 0.25);
+
+var result = filter.Filter(observations);
+result.Filtered;         // each state given observations up to it
+result.LogLikelihood;    // from the one-step-ahead prediction errors
+
+filter.Smooth(observations);              // uses the whole series
+filter.Forecast(observations, horizon: 10);
+filter.Simulate(steps, rng);
+```
+
+A great deal fits this shape once written down. A local level model is an exponentially weighted
+moving average whose smoothing constant is *derived from the noise ratio* rather than guessed. Adding
+a slope gives a trend that adapts — and the slope is never observed, being inferred entirely from how
+the level moves.
+
+**Filtering and smoothing answer different questions.** `Filter` estimates each state from the past
+only, which is what a real-time system can do; `Smooth` uses the whole series, which is strictly
+better and only available after the fact. Using smoothed states to evaluate a forecasting rule is a
+look-ahead error, and a common one.
+
+**Only the ratio between Q and R matters**, which is why a filter can be tuned with one number. A
+large Q relative to R says the state moves faster than the sensor lies, and the filter tracks the
+measurements closely; the reverse says the sensor is noisy and the filter smooths hard.
+
+The covariance update uses the Joseph form. Algebraically it equals the short `P − KHP`, and
+numerically it is far better behaved: the short form can drift into an asymmetric or negative-definite
+covariance over a long series, and then the filter diverges with no warning.
+
+`LogLikelihood` decomposes the series into independent one-step-ahead prediction errors, which is what
+makes parameter fitting possible — it is a real likelihood with a maximum in the right place.
+
+## Model comparison
+
+The question is "how well would this model predict data it has not seen", and the reason these exist
+is that the obvious in-sample answer is systematically optimistic — a more flexible model always fits
+the data it was fitted on better.
+
+```csharp
+var waic = ModelComparison.Waic(logLikelihoodMatrix);      // (draws × observations)
+var loo = ModelComparison.Loo(logLikelihoodMatrix);
+
+loo.IsReliable;                  // whether the importance sampling can be trusted
+loo.UnreliableObservations;      // which observations it could not handle
+
+ModelComparison.Compare(new Dictionary<string, InformationCriterion>
+{
+    ["simple"] = simpleWaic,
+    ["complex"] = complexWaic,
+});
+```
+
+**WAIC** estimates the optimism as the posterior variance of each observation's log likelihood, so the
+penalty measures effective complexity rather than a parameter count. The `lppd` term is the log of a
+*mean*, not the mean of logs — computing it the wrong way round gives a number in the right range that
+is not WAIC.
+
+**PSIS-LOO** asks the same question by importance sampling: reweighting the posterior to approximate
+what it would have been with one observation removed. It is generally preferred, not because it is
+more accurate on well-behaved problems — the two agree closely there — but because it comes with a
+diagnostic. The Pareto `k` for each observation says whether the reweighting was trustworthy, and
+above 0.7 the weights have infinite variance. **WAIC has no equivalent: it fails silently in exactly
+the cases LOO reports.**
+
+Both are on the deviance scale, so lower is better, and neither means anything in absolute terms —
+only differences between models fitted to the same observations are interpretable, which is why
+`Compare` refuses models scored on different data.
+
+The standard error of a *difference* is computed from the paired pointwise terms, not from the two
+models' individual errors. The models are evaluated on the same observations, so their errors are
+strongly correlated, and treating them as independent makes every difference look insignificant.
+
+---
+
+## Visualisations
+
+All three are rendered by `samples/GraviProb.Console` and reproduced by
+`notebooks/GraviProb.Notebook.ipynb`.
+
+![An MCMC posterior against the exact conjugate answer](screenshots/graviprob_posterior.png)
+
+![A Gaussian process posterior with credible band and draws](screenshots/graviprob_gaussian_process.png)
+
+The band collapses onto the observations and fans out beyond them, which is a GP being honest about
+what it does not know. The dotted lines are coherent *functions* drawn from the posterior — a
+marginal band says nothing about shape, and these do.
+
+![A Kalman smoother recovering a hidden state](screenshots/graviprob_kalman.png)
+
+The grey dots are what was measured; the smooth line is the state the filter never observed
+directly. Recovering it is the whole point.
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

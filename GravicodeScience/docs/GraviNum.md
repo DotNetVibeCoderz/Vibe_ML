@@ -520,6 +520,131 @@ See [benchmarks.md](benchmarks.md) for the measurements.
 | `AsSpan()` throws | The array is strided; call `AsContiguous()` first |
 | GPU is slower than CPU | Expected for float64 on integrated hardware — see above |
 
+## Einstein summation
+
+`Einsum` gives one notation for transposing, tracing, contracting and outer products. A subscript
+string names each operand's axes with letters; the output names the axes to keep, and every letter
+that appears in the inputs but not the output is summed over.
+
+```csharp
+Einsum.Evaluate("ij,jk->ik", a, b);        // matrix product
+Einsum.Evaluate("ji,jk->ik", a, b);        // the same as Dot(a.T, b), but the axes are written down
+Einsum.Evaluate("ij->ji", a);              // transpose
+Einsum.Evaluate("ii->i", a);               // diagonal
+Einsum.Evaluate("ii->", a);                // trace
+Einsum.Evaluate("ij,ij->", a, b);          // Frobenius inner product
+Einsum.Evaluate("bij,bjk->bik", a, b);     // batched matrix product
+Einsum.Evaluate("ij,jk", a, b);            // output inferred: letters appearing once, alphabetical
+```
+
+The value is that the intent is written down. `LinAlg.Dot(a.T, b)` makes the reader reconstruct
+which axes met; `"ji,jk->ik"` says so. That matters most for operations with no name — a contraction
+over two axes of a rank-4 tensor is unreadable as a sequence of transposes and reshapes.
+
+This is a straightforward nested-loop evaluator, not an optimising one: it does not reorder a chain
+of operands to minimise intermediate size. For two operands — nearly every real use — there is no
+ordering choice to make. A repeated letter *within* one operand selects the diagonal, which falls
+out of the assignment rule rather than being a special case.
+
+Mismatched axis lengths are rejected. If `j` is 5 in one operand and 4 in another the contraction is
+meaningless, and without the check it would quietly run over whichever came first.
+
+## Complex arrays
+
+`ComplexNdArray` is the companion to `NdArray` for work that is naturally complex: spectra, transfer
+functions, the eigenvalues of a non-symmetric matrix. Splitting a complex problem into two real
+arrays works and is miserable to read — every multiplication becomes four, and the sign on one of
+them is the bug everyone writes at least once.
+
+```csharp
+var z = ComplexNdArray.FromParts(real, imaginary);
+
+z.Magnitude();              // element-wise |z|, via Complex.Abs so nothing overflows
+z.Phase();                  // arg(z) on (-pi, pi]
+z.Power();                  // |z|^2, without the round trip through a square root
+z.Conjugate();
+
+ComplexNdArray.Dot(a, b);           // matrix product
+ComplexNdArray.Inner(a, b);         // Hermitian inner product: sum conj(a_i) b_i
+a.ConjugateTranspose();             // A^H — what nearly every formula means
+
+z.Fft();  z.Ifft();                 // 1-D transform
+z.Fft2(); z.Ifft2();                // separable 2-D transform
+```
+
+**`ConjugateTranspose` is the one to reach for, not `Transpose`.** `A^H A` is positive semi-definite
+with a real diagonal; `A^T A` is neither, so a plain transpose gives a matrix that looks plausible
+and has complex "variances" on its diagonal. Both are provided because the two are easy to confuse,
+and having only one under the name "transpose" is how the wrong one gets used.
+
+The Hermitian inner product conjugates its *first* operand. That is what makes `<a, a>` a real,
+non-negative number equal to the squared norm — without it, the "norm" of `[i]` comes out as -1.
+
+Storage is a flat `Complex` buffer, so the layout is contiguous interleaved real/imaginary pairs —
+the same as FFTW and NumPy, which is what lets the buffer go to `Fft` without a repack. Unlike
+`NdArray`, reshaping and transposing **copy** rather than returning views: complex arithmetic does
+six flops per element, so the copy is no longer what dominates.
+
+## Slice ergonomics
+
+`Slice` and `NdArray.Assign` already cover views and broadcast assignment. `SliceOps` adds what was
+missing around them.
+
+```csharp
+grid.Slice(Sel.Range(1, 3)).Assign(0.0);      // writes into grid, because Slice returns a view
+grid.Slice(Sel.All, Sel.Range(2, 4)).Assign(replacement);
+
+array.SliceEllipsis([], [Sel.At(0)]);          // the last axis, without counting the leading ones
+array.TakeAlong([3, 0], axis: 1);              // select columns; indices may repeat or reorder
+array.AxisAt(1, 2);                            // one position of an axis, that axis dropped (a view)
+array.AxisRange(1, 1, 3);                      // a span of an axis, keeping it (a view)
+
+SliceOps.Select(condition, ifTrue, ifFalse);   // element-wise choice, keeping the shape
+array.SetWhere(v => v > 2, -1);                // masked write, in place
+array.IndicesWhere(v => v > 4);                // positions, not values
+array.FilterRows(row => row.At(0) > 4);        // whole rows, copied
+array.Clip(0, 6);
+```
+
+The rule to keep in mind: **everything returning an array returns a copy; everything that writes,
+writes through the view into the original buffer.** `a.Slice(...).Assign(b)` changes `a`;
+`a.Slice(...).Copy()` does not.
+
+`SliceEllipsis` exists so a trailing axis can be named without counting the leading ones. Taking the
+last channel of a batch is `SliceEllipsis(array, [], [Sel.At(0)])` and stays correct if the batch
+gains an axis, where `Slice(Sel.All, Sel.All, Sel.All, Sel.At(0))` does not.
+
+`SliceOps.Select` is distinct from `NdArray.Where`, which filters and returns only the survivors.
+`Select` keeps the shape, which is what makes it composable — clipping, masking a loss, replacing a
+sentinel.
+
+Shorthands read better than a bare negative index at the call site:
+
+```csharp
+values.Slice(SliceShorthand.Last(3));
+values.Slice(SliceShorthand.First(2));
+values.Slice(SliceShorthand.Every(2));
+values.Slice(SliceShorthand.DropLast(2));
+values.Slice(1..3);                            // System.Range converts implicitly
+```
+
+---
+
+## Visualisations
+
+Both images are rendered by `samples/GraviNum.Console` and reproduced inline by
+`notebooks/GraviNum.Notebook.ipynb`.
+
+![A 40x40 matrix rendered as a heatmap](screenshots/gravinum_heatmap.png)
+
+A smooth two-dimensional function as a heatmap, so the structure is visible rather than noise.
+
+![Power spectrum recovering two tones from noise](screenshots/gravinum_spectrum.png)
+
+Two tones at 12 Hz and 40 Hz, buried under noise in the time domain and unmistakable in the
+frequency domain. `Fft` handles any length — this one is a power of two, but a prime length costs
+the same asymptotically because of the Bluestein path.
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

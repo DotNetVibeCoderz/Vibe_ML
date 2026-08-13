@@ -244,6 +244,170 @@ justru *setelah* pindah ke tape lebih meyakinkan daripada sebelumnya.
 | `ToDenseAdjacency` melempar exception | Grafnya terlalu besar — gunakan `ToSparseAdjacency` |
 | Pelatihan GNN tidak berbuat apa-apa | Graf tidak punya `NodeFeatures`; berikan secara eksplisit |
 
+## Graf heterogen
+
+Sebagian besar graf nyata tidak homogen. Graf rekomendasi punya pengguna dan item; graf sitasi punya
+makalah, penulis, dan tempat terbit. Meratakannya menjadi satu himpunan simpul menghilangkan hal yang
+membuatnya informatif: bahwa "pengguna 3 membeli item 7" dan "item 7 ada di kategori 2" adalah jenis
+bukti berbeda dan tidak boleh dirata-ratakan bersama.
+
+```csharp
+var graph = new HeterogeneousGraph();
+graph.AddEdge("user", "watched", "film", 0, 1);
+graph.AddEdge("user", "rated", "film", 1, 2, weight: 5.0);
+graph.SetFeatures("user", userFeatures);       // tiap tipe boleh punya lebar berbeda
+graph.SetFeatures("film", filmFeatures);
+graph.AddReverseEdges(new EdgeType("user", "watched", "film"));
+```
+
+**Indeks simpul bersifat lokal terhadap tipenya** — pengguna 0 dan film 0 adalah simpul berbeda — dan
+itulah yang memungkinkan tiap tipe punya dimensi fiturnya sendiri. Dan tipe sisi adalah *tripelnya*,
+bukan nama relasinya: `(user, rates, film)` dan `(critic, rates, film)` adalah relasi berbeda yang
+kebetulan berbagi kata kerja, dan model yang menyatukan keduanya mempelajari satu himpunan bobot
+untuk dua perilaku.
+
+Penyampaian pesan hanya bergerak searah sisi, sehingga graf bipartit dengan sisi hanya dari pengguna
+ke film tidak memberi film cara untuk menginformasikan pengguna. `AddReverseEdges` adalah cara
+informasi mengalir dua arah, dan ia menambahkan relasi *terpisah* dengan namanya sendiri karena
+"pengguna menilai film" dan "film dinilai pengguna" layak mendapat bobot berbeda.
+
+`RelationalConvolution` adalah R-GCN: satu matriks bobot per relasi, dijumlahkan di tujuan.
+
+```csharp
+var layer = new RelationalConvolution(graph, inputSizes, outputSize: 64);
+var next = layer.Forward(graph, representations);
+```
+
+Normalisasi menurut derajat-masuk **per relasi**, bukan secara keseluruhan, dilakukan dengan sengaja.
+Simpul dengan seribu sisi `viewed` dan tiga sisi `bought` kalau tidak akan membuat pembeliannya
+tenggelam sama sekali — padahal pembelian itulah sinyal yang informatif. Bobot self-loop per tipe
+simpul menjaga fitur simpul itu sendiri tetap hidup melewati satu lapisan; tanpanya representasi
+simpul terpencil persis nol dan ia menjadi tak terbedakan dari setiap simpul terpencil lainnya.
+
+## Fitur sisi
+
+Bobot adalah kasus satu dimensi. Begitu ada lebih dari satu angka yang perlu dikatakan tentang sebuah
+sisi — skor penilaian, nilai transaksi, sebuah timestamp — melipatnya menjadi skalar membuang
+sisanya.
+
+```csharp
+graph.SetEdgeFeatures(new EdgeType("user", "rated", "film"), scoresAndTimes);
+```
+
+## Graf temporal
+
+Jaringan transaksi, log pesan, dan catatan sitasi semuanya adalah barisan peristiwa, dan meruntuhkan
+semuanya menjadi satu matriks ketetanggaan menghancurkan urutannya. Itu lebih penting daripada
+tampaknya: pada graf statis, sisi `a→b` dan sisi `b→c` menyiratkan adanya jalur dari `a` ke `c`,
+tetapi jika `b→c` terjadi *sebelum* `a→b`, tidak ada yang bisa menempuh jalan itu. Informasi, uang,
+dan penyakit semuanya menuruti urutan tersebut, dan analisis statis secara sistematis melebih-lebihkan
+apa yang terjangkau.
+
+```csharp
+var graph = TemporalGraph.LoadCsv("events.csv");
+
+graph.TemporallyReachable(source, maxGap: 3600);   // menghormati urutan sisi
+graph.Snapshot(from, to);                          // tampilan statis satu jendela
+graph.SnapshotUpTo(cutoff);                        // yang boleh dilihat model pada saat itu
+graph.Windows(count);
+graph.TemporalEfficiency();                        // seberapa besar tampilan statis melebih-lebihkan
+graph.TimeDecayedFeatures(features, asOf, halfLife: 30);
+```
+
+`TemporallyReachable` dihitung dengan satu lintasan atas sisi yang terurut waktu. Karena diproses
+menurut urutan waktu, setiap sisi yang bisa memperpanjang jalur sudah memiliki waktu kedatangan
+paling awal sumbernya yang final — dan itulah yang membuat satu lintasan mencukupi, sementara graf
+statis memerlukan penelusuran. `maxGap` membatasi berapa lama sebuah jalur boleh menunggu di antara
+sisi berurutan.
+
+`SnapshotUpTo` adalah pemotongan yang mencegah prediktor tautan dilatih pada data ujinya sendiri.
+`TimeDecayedFeatures` adalah penyematan temporal termurah yang berguna: interaksi terkini seharusnya
+mengatakan lebih banyak tentang sebuah simpul daripada interaksi setahun lalu, dan agregasi statis
+menimbangnya sama — itulah sebabnya model yang dilatih pada graf yang diruntuhkan terus
+merekomendasikan apa yang pernah disukai seseorang, dahulu sekali.
+
+## Klasifikasi graf
+
+Klasifikasi simpul punya satu representasi per simpul dan tidak memerlukan readout. Klasifikasi graf
+— apakah molekul ini beracun, apakah program ini berbahaya — memerlukan satu vektor per graf, dan
+graf memiliki jumlah simpul yang berbeda-beda.
+
+```csharp
+GraphPooling.Pool(nodeFeatures, PoolingKind.MeanMax);
+GraphPooling.AttentionPool(nodeFeatures, gate);
+
+var classifier = new GraphClassifier(inputSize: 2, hiddenSize: 32, layers: 2).Fit(graphs, labels);
+classifier.Predict(graph);
+classifier.Accuracy(testGraphs, testLabels);
+```
+
+**Readout tidak boleh bergantung pada urutan simpul.** Simpul graf tidak punya penomoran kanonik,
+sehingga readout yang peka terhadap permutasi membuat keluaran model bergantung pada bagaimana
+berkasnya kebetulan ditulis. Setiap fungsi pooling di sini adalah agregat simetris justru karena
+alasan itu, dan itulah sebabnya menyambung vektor simpul — cara paling jelas mendapatkan ukuran tetap
+— bukan pilihan.
+
+Pilihan di antaranya adalah keputusan pemodelan yang nyata. **Mean** invarian terhadap ukuran graf,
+yang tepat ketika molekul besar dan kecil harus dinilai berdasarkan komposisi; **sum** tidak, yang
+tepat ketika ukuran itu sendiri informatif. **Max** menanyakan apakah sebuah fitur muncul sama
+sekali, yang mendeteksi satu substruktur tak biasa yang akan diencerkan oleh rata-rata.
+`AttentionPool` mempelajari simpul mana yang perlu didengarkan, dan bobotnya dapat dibaca setelahnya
+— ia menyatakan bagian graf mana yang mendorong prediksi.
+
+Penyampaian pesan di sini memakai proyeksi acak tetap dengan hanya pengklasifikasi akhir yang
+dilatih. Itu arsitektur yang nyata, bukan jalan pintas: ia adalah padanan graf dari model fitur acak,
+dilatih dalam bentuk tertutup, dan merupakan baseline yang sungguh kuat — GNN terlatih yang tidak
+mampu mengalahkannya tidak sedang mempelajari apa pun yang belum diberikan strukturnya. Versi yang
+terlatih penuh tempatnya di pita autodiff berdampingan dengan `GnnTape`.
+
+Setiap putaran penyampaian pesan melebarkan medan reseptif sebuah simpul sejauh satu lompatan; di
+atas tiga atau empat, representasinya cenderung saling menyatu, dan itu adalah over-smoothing yang
+tampak sebagai akurasi yang menurun seiring kedalaman.
+
+## Pengambilan sampel ketetanggaan
+
+Penyampaian pesan batch penuh menghitung representasi setiap simpul di setiap lapisan, sehingga satu
+langkah memerlukan seluruh graf. Itu baik untuk Cora dan mustahil untuk jejaring sosial.
+
+```csharp
+foreach (var batch in NeighborSampler.Batches(trainNodes, batchSize: 512, rng))
+{
+    var block = NeighborSampler.Sample(graph, batch, fanOut: [10, 5], rng);
+    var features = NeighborSampler.GatherFeatures(block, allFeatures);
+    var output = NeighborSampler.Aggregate(block, features, weights);
+}
+```
+
+Masalah yang sebenarnya dipecahkannya bukan memori melainkan **ledakan ketetanggaan**. GNN dua
+lapisan pada graf berderajat rata-rata 100 menyentuh sepuluh ribu simpul per target; tiga lapisan
+menyentuh sejuta. Membatasi fan-out per lompatan — sumbangan GraphSAGE — membuat biaya per target
+terbatas dan tidak bergantung pada ukuran graf.
+
+**Pengambilan sampel mengubah estimatornya, bukan sekadar kecepatannya.** Agregat tiap simpul kini
+merupakan estimasi stokastik dari agregat ketetanggaan penuh, tak bias untuk agregator rata-rata dan
+lebih berderau untuk fan-out kecil. Sampel yang sangat kecil membuat pelatihan tidak stabil, bukan
+sekadar menjadi hampiran.
+
+Blok dibangun ke luar dari target lalu dibalik, karena lapisan yang harus dijalankan lebih dulu
+adalah yang terjauh darinya. `Aggregate` memisahkan kontribusi simpul itu sendiri dari rata-rata
+ketetanggaan alih-alih memasukkannya ke dalam rata-rata — itulah yang membuat model bisa membedakan
+sebuah simpul dari sekelilingnya, dan itulah perbedaan antara SAGE dan GCN biasa. **Karena itu satu
+lapisan SAGE menerima dua kali lebar fiturnya**, sebab diri dan ketetanggaan disambung sebelum
+diproyeksikan.
+
+Pengacakan lebih penting di sini daripada pada mini-batching biasa. Id simpul pada graf nyata jarang
+sembarang — sering mengikuti urutan penelusuran, sehingga id berurutan adalah tetangga — dan batch
+tanpa pengacakan lalu menjadi satu wilayah padat, bukan sampel dari grafnya.
+
+---
+
+## Visualisasi
+
+Dihasilkan oleh `samples/GraviGraph.Console`. `notebooks/GraviGraph.Notebook.ipynb` menambahkan
+grafik seberapa cepat ketetanggaan tersampel membesar seiring fan-out — argumen untuk membatasinya.
+
+![Jaringan dengan ukuran simpul menurut sentralitas](../screenshots/gravigraph_network.png)
+
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

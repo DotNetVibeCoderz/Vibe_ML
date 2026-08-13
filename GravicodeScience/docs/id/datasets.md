@@ -14,6 +14,7 @@ tes berjalan tanpa langkah unduh. Total ukurannya sekitar 750 KB.
 | `imdb_reviews.csv` | 80 | **Sintetis** — ditulis untuk repositori ini | GraviText |
 | `bayesian_coin.csv` | 200 | **Sintetis** — dibangkitkan, bias 0,62 | GraviProb |
 | `finance_timeseries.csv` | 1.116 | **Sintetis** — geometric random walk | GraviFrame |
+| `ner_conll.txt` | 420 kalimat | **Sintetis** — kalimat bahasa Indonesia yang dibangkitkan | GraviText |
 
 Berkas sintetis ditandai dengan sengaja. Tiga di antaranya menggantikan dataset yang terlalu besar
 untuk disertakan atau terkendala lisensi; penggantian itu dicatat di bawah pada masing-masing kasus.
@@ -193,6 +194,38 @@ Letakkan berkas di `datasets/` lalu baca langsung:
 ```csharp
 var frame = DataFrame.ReadCsv(Datasets.ResolvePath("data-saya.csv"));
 ```
+
+## ner_conll.txt
+
+420 kalimat bahasa Indonesia beranotasi dalam format kolom CoNLL: satu token dan tag BIO-nya per
+baris, dengan baris kosong antar kalimat. Tiga tipe entitas — `PER`, `LOC`, dan `ORG`.
+
+```
+Tim	O
+dari	O
+Bogor	B-LOC
+mengunjungi	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+```
+
+**Sintetis**, dibangkitkan dari templat kalimat atas kumpulan tetap berisi nama, kota, dan
+perusahaan. Ia menggantikan korpus seperti CoNLL-2003, yang terbebani lisensi dan tidak dapat
+disertakan di sini.
+
+Templatnya itulah yang membuatnya berguna alih-alih sirkular. Tipe entitas tidak dapat dibedakan
+dari katanya saja — `Surabaya` dan `Tokopedia` sama-sama token tunggal berhuruf kapital — sehingga
+satu-satunya cara membedakannya adalah konteks di sekitarnya, dan itu persis yang harus dipelajari
+tagger terlatih. Entitas multi-token muncul pada kelas `PER` maupun `ORG`, sehingga kelanjutan BIO
+benar-benar diuji, bukan diandaikan.
+
+Karena dibangkitkan, kinerjanya pada data uji tinggi: `TrainedNer` mencapai sekitar 98% F1 entitas
+pada pemisahan uji 25%. Angka itu menyatakan bahwa model mempelajari proses pembangkitnya, **bukan**
+bahwa ia akan mencapai 98% pada teks berita. Perlakukan sebagai demonstrasi arsitektur yang
+berfungsi, bukan sebagai tolok ukur.
+
+Bacalah dengan `TaggedSentence.LoadConll`.
 
 ---
 
