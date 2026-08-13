@@ -273,6 +273,9 @@ public sealed class LogisticRegression(
     /// <summary>The intercept of a binary model.</summary>
     public double Intercept => _intercepts.Length > 0 ? _intercepts[0] : 0.0;
 
+    /// <summary>The intercept of every one-vs-rest sub-model, aligned with <see cref="CoefficientMatrix"/>.</summary>
+    public NdArray Intercepts => NdArray.FromValues(_intercepts);
+
     /// <inheritdoc />
     public void Fit(NdArray x, NdArray y)
     {

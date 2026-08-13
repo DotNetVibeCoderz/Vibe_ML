@@ -269,6 +269,54 @@ specifically to exercise that.
 The question every .NET data-science library has to answer is how it compares to NumPy, pandas
 and scikit-learn. Here is the measured answer, with no thumb on the scale.
 
+### Does a native BLAS change these numbers?
+
+**Yes, decisively — and every figure in this section is the managed path.**
+
+That needs stating plainly, because it is the single biggest thing that can make these numbers
+irreproducible. `NativeBlas` and `NativeLapack` look for a library the machine already has. A clean
+machine has none, so the comparison below measures the managed kernels. A machine with OpenBLAS on
+the path measures something else entirely.
+
+Both configurations, against the same NumPy figures:
+
+| | Managed | With OpenBLAS | NumPy | Native vs NumPy |
+|---|---:|---:|---:|---|
+| 512×512 matrix product | 8.6 ms | **2.3 ms** | 3.1 ms | **.NET 1.3×** |
+| QR, 256×256 | 151.2 ms | **10.7 ms** | 10.4 ms | parity |
+| Cholesky, 256×256 | 14.4 ms | **1.6 ms** | 1.2 ms | Python 1.3× |
+| LU, 256×256 | 77.9 ms | **4.5 ms** | 3.3 ms | Python 1.4× |
+| symmetric eigen, 256×256 | 119.7 ms | **45.6 ms** | 19.7 ms | Python 2.3× |
+| matrix inverse, 256×256 | 135.2 ms | **58.0 ms** | 9.9 ms | Python 5.9× |
+| SVD, 256×256 | 330.8 ms | **176.1 ms** | 27.1 ms | Python 6.5× |
+
+With a BLAS present the 512-cube product is **faster than NumPy**, and QR, LU and Cholesky all land
+within about 40% of it — unsurprising once you notice both stacks are then calling the same
+OpenBLAS, and what remains is marshalling.
+
+Every routine now has a native path: `dgemm`, `dgesv`, `dgeqrf`/`dorgqr`, `dgesvd`, `dsyev`,
+`dgetrf`, `dpotrf`. SVD and eigen stay furthest behind because this library asks for the full
+factorisation where NumPy's benchmark takes a cheaper form.
+
+> **A caveat on `solve`.** The harness above reports it as roughly unchanged, and that is a
+> measurement artifact rather than a result: three repeats do not warm a method past tiered JIT.
+> Measured properly — both versions alternating, forty warm-up calls, best of eleven — the native
+> path wins from 64 upward: **3.9×** at 256 with one right-hand side, and **14×** at 256 / **51×**
+> at 512 when solving many at once, which is the shape `Inverse` uses.
+
+**So which numbers are real?** Both — they answer different questions. The managed figures say what
+this library does on its own, which is what matters for a deployment that ships one self-contained
+package. The native figures say what it does when the machine is already set up for numerical work,
+which is what matters on a data-science workstation. Neither is the "true" number, and quoting one
+without saying which it is would be the actual error.
+
+To reproduce either, set or clear `GRAVICODE_BLAS`:
+
+```bash
+dotnet run --project benchmarks/comparison/Gravicode.Science.Comparison -c Release
+GRAVICODE_BLAS=/path/to/libopenblas.so dotnet run --project benchmarks/comparison/... -c Release
+```
+
 ### How the comparison is run
 
 ```bash

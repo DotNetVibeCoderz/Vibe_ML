@@ -146,6 +146,141 @@ same factorisations by rotating column pairs until nothing changes — far slowe
 different route to the same answer, which is what makes them useful as the reference the tests
 check against.
 
+## Going faster
+
+Three optional paths sit behind `LinAlg.Dot`, chosen automatically. All of them are checked against
+the managed kernel, which stays in place as the reference.
+
+### A native BLAS, if the machine has one
+
+```csharp
+using Gravicode.Science.GraviNum.Compute;
+
+NativeBlas.Describe();      // what was found, or "none found"
+NativeBlas.IsAvailable;
+NativeBlas.Enabled = false; // force the managed path, for comparison
+```
+
+**Nothing is bundled.** A tuned BLAS is a large platform-specific binary, and shipping one per
+runtime identifier would cost every user megabytes they did not ask for. So this looks for one the
+machine already has — OpenBLAS, MKL, Accelerate — and keeps silently to the managed kernels when it
+finds none. Point it somewhere specific with the `GRAVICODE_BLAS` environment variable.
+
+Measured with the OpenBLAS that ships inside numpy:
+
+| Size | Managed | Native | |
+|---:|---:|---:|---|
+| 256 | 1.28 ms | 0.36 ms | **3.6×** |
+| 512 | 9.05 ms | 1.90 ms | **4.8×** |
+| 1024 | 74.2 ms | 18.7 ms | **4.0×** |
+
+Both integer widths are handled. A stock OpenBLAS exports `cblas_dgemm` with 32-bit indices; an
+ILP64 build exports `cblas_dgemm64_` with 64-bit ones. They are not interchangeable — calling one
+through the other's signature reads the wrong bytes as a dimension — so the width is detected from
+which symbol resolves. numpy and scipy also rename every symbol with a `scipy_` prefix to avoid
+collisions, which is handled too, and is usually the only BLAS on a data-science machine.
+
+### The factorisations, if there is a LAPACK
+
+`NativeLapack` binds `dgesv`, `dgeqrf`/`dorgqr`, `dgesvd`, `dsyev`, `dgetrf` and `dpotrf` through
+the same probe, so `LinAlg.Solve`, `LinAlg.Inverse`, `Decomposition.Lu`, `Cholesky`, `Qr`, `Svd`,
+`SingularValues` and `SymmetricEigen` all pick it up.
+
+| | Managed | Native | |
+|---|---:|---:|---|
+| solve, 512×512, many RHS | 887 ms | 17.4 ms | **51×** |
+| QR, 256×256 | 151 ms | 10.7 ms | **14×** |
+| LU, 256×256 | 77.9 ms | 4.5 ms | **17×** |
+| Cholesky, 256×256 | 14.4 ms | 1.6 ms | **9×** |
+| symmetric eigen, 256×256 | 120 ms | 45.6 ms | 2.6× |
+| SVD, 256×256 | 331 ms | 176 ms | 1.9× |
+
+The **LAPACKE** interface is bound rather than the Fortran one: LAPACKE takes a layout argument, so
+row-major matrices pass straight through, while the Fortran entry points are column-major and every
+call would need a transpose in and another out.
+
+Four conventions differ and are converted rather than assumed:
+
+- Eigenvalues come back **ascending**; this library promises descending.
+- `dgesvd` returns `V^T`; `SvdResult` carries `V`.
+- With a row-major layout LAPACKE already presents eigenvector *j* in column *j*. Transposing it —
+  as Fortran habits suggest — breaks `A V = V Λ` while leaving the eigenvalues perfectly correct,
+  which is exactly the kind of half-right result that survives a weak test.
+- `dgetrf` reports a **sequence of row swaps**, not a finished permutation: at step *i*, row *i*
+  was exchanged with row `ipiv[i]`. `LuResult.Pivot` is the permutation itself, so the swaps are
+  replayed. Reading one as the other yields a valid-looking L and U that reconstructs the wrong
+  matrix.
+
+`dpotrf` also writes only the triangle it was asked for and leaves the other holding the input, so
+the caller clears it; a non-positive-definite matrix comes back as a positive `info` and is turned
+into the same exception the managed routine throws.
+
+> Every native path is checked against the *defining property* of its factorisation — `A = QR`,
+> `A V = V Λ`, `A x = b` recovering a known `x` — not against the managed routine. Two
+> implementations agreeing shows only that they share an assumption.
+
+### A packed kernel, when there is no BLAS
+
+`LinAlg.Dot` packs both operands into tile-contiguous buffers above roughly eight million
+multiply-adds. The copy costs one pass and is repaid many times, because the packed panel is then
+read by every row block instead of being re-strided out of main memory.
+
+| Size | Simple | Packed | |
+|---:|---:|---:|---|
+| 256 | 1.45 ms | 0.88 ms | 1.65× |
+| 1024 | 83.9 ms | 42.7 ms | 1.96× |
+| 2048 | 759 ms | 365 ms | **2.08×** |
+
+Below the threshold it loses — packing is a fixed cost — so the threshold is set conservatively
+above the noisy region. `PackedMatMul.Enabled = false` forces the simple kernel.
+
+> Measuring this taught a lesson worth repeating: an early run showed a 192-cube taking *eight
+> times longer* than a 224-cube, which is physically impossible. The cause was tiered JIT — the
+> first sizes were still running unoptimised. Two warm-up calls are not enough; a hot method is
+> recompiled after about thirty.
+
+### Single precision — a prototype
+
+`Single.SingleKernels` has `float` versions of the two kernels that dominate runtime. It is a
+**measurement tool, not a second API**: making `NdArray` generic over `INumber<T>` would touch all
+six libraries, and that is not a change worth starting without knowing the payoff.
+
+| | double | float | |
+|---|---:|---:|---|
+| element-wise add, 1M | 2.24 ms | 1.07 ms | **2.09×** |
+| element-wise add, 10M | 24.9 ms | 11.7 ms | **2.13×** |
+| 1024-cube product | 94.9 ms | 52.2 ms | 1.82× |
+
+The two gains have different causes, which is why they differ. `Vector<float>` holds eight lanes
+against `Vector<double>`'s four, which helps compute-bound work; and every value is half the bytes,
+which helps bandwidth-bound work. Element-wise arithmetic is bandwidth-bound and lands at a clean
+2.1×.
+
+The cost: a 1000-cube product came out with a relative error of **1.3e-6**, which is float32 doing
+what float32 does — roughly seven decimal digits against double's sixteen.
+
+## Reading ONNX weights
+
+```csharp
+using Gravicode.Science.GraviNum.Io;
+
+var weights = OnnxReader.ReadWeightsByName("model.onnx");
+weights["encoder.weight"].ToNdArray();
+```
+
+A weight reader, not a runtime: it extracts the graph's *initializers* — the named constant tensors
+holding trained parameters — and stops there. That is the half that matters here, because this
+library has the layers and lacks the numbers.
+
+Dependency-free by design. ONNX Runtime is a large native package, and pulling it in to read a few
+arrays would be a poor trade; only the protobuf wire format is needed, and only a handful of its
+fields. Float32, float64, float16, int8/16/32/64 all decode and widen to `double`. A tensor whose
+type is not decodable, or whose data does not match its declared shape, is **skipped rather than
+guessed at** — returning wrong numbers silently is far worse than returning fewer of them.
+
+Verified against files written by the official Python `onnx` library, not against a fixture written
+to match the reader.
+
 ## Automatic differentiation
 
 `Gravicode.Science.GraviNum.Autodiff` is a reverse-mode tape. Write the forward computation once

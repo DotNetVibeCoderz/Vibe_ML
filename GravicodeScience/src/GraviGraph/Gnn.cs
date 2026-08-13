@@ -1,4 +1,5 @@
 using Gravicode.Science.GraviNum;
+using Gravicode.Science.GraviNum.Autodiff;
 
 namespace Gravicode.Science.GraviGraph.Neural;
 
@@ -37,6 +38,250 @@ internal sealed class AdamState(int rows, int columns)
 }
 
 /// <summary>Shared numeric helpers for the GNN layers.</summary>
+/// <summary>
+/// Graph layers expressed on the autodiff tape.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A layer written here needs only its forward pass; the backward pass comes from
+/// <see cref="Tensor.Backward"/>. That is the whole point — the hand-derived gradients these
+/// replaced were correct but did not extend, so a fourth architecture meant a fourth derivation,
+/// and one through an attention softmax is genuinely easy to get subtly wrong.
+/// </para>
+/// <para>
+/// This is also the regime where reverse mode is unambiguously the right tool. A GNN forward pass
+/// is a handful of large matrix operations, so the tape allocates a few dozen nodes and each one
+/// does real work — the opposite of the low-dimensional log posteriors in GraviProb, where the
+/// per-node overhead dominates and finite differences win.
+/// </para>
+/// </remarks>
+public static class GnnTape
+{
+    /// <summary>
+    /// One graph convolution: propagate, project, add bias.
+    /// </summary>
+    /// <remarks>
+    /// The bias is a row vector broadcast down the node axis, so its gradient is the column sum
+    /// over nodes. The tape's broadcasting rule handles that; the hand-written version needed an
+    /// explicit <c>ColumnSums</c> helper, and getting it wrong is invisible until accuracy is
+    /// quietly worse.
+    /// </remarks>
+    public static Tensor Convolve(SparseMatrix propagation, Tensor x, Tensor weight, Tensor bias)
+        => TensorOps.SparseMatMul(propagation, x).MatMul(weight) + bias;
+
+    /// <summary>
+    /// Inverted dropout as a fixed mask.
+    /// </summary>
+    /// <remarks>
+    /// The mask is drawn once and enters the graph as a constant, which is exactly right: dropout
+    /// is a random choice of sub-network, not a function being differentiated. Scaling at training
+    /// time rather than inference is what lets the prediction path use the full network unchanged.
+    /// </remarks>
+    public static Tensor Dropout(Tensor x, double rate, GraviRandom rng)
+    {
+        if (rate <= 0) return x;
+
+        var scale = 1.0 / (1.0 - rate);
+        var mask = NdArray.Zeros(x.Shape[0], x.Shape[1]);
+        for (var i = 0; i < x.Shape[0]; i++)
+            for (var j = 0; j < x.Shape[1]; j++)
+                mask[i, j] = rng.NextDouble() < rate ? 0.0 : scale;
+
+        return x * Tensor.Constant(mask);
+    }
+
+    /// <summary>
+    /// The mean-of-neighbours aggregator as a sparse matrix, <c>D^-1 A</c>.
+    /// </summary>
+    /// <remarks>
+    /// Writing the aggregator as a matrix rather than a loop is what lets it reuse
+    /// <see cref="TensorOps.SparseMatMul"/>, and with it the transpose that pushes gradients back
+    /// to neighbours. The hand-written path needed a separate scatter routine for exactly that,
+    /// which had to be kept correct by inspection.
+    /// </remarks>
+    public static SparseMatrix MeanAggregator(Graph graph)
+    {
+        var builder = new SparseBuilder(graph.NodeCount, graph.NodeCount);
+
+        for (var i = 0; i < graph.NodeCount; i++)
+        {
+            var neighbours = graph.Neighbors(i);
+            if (neighbours.Count == 0) continue;
+
+            var weight = 1.0 / neighbours.Count;
+            foreach (var (target, _) in neighbours) builder.Add(i, target, weight);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// One GraphSAGE layer: <c>[h ; mean(h_neighbours)] W</c>.
+    /// </summary>
+    public static Tensor SageLayer(SparseMatrix aggregator, Tensor h, Tensor weight)
+        => TensorOps.ConcatColumns(h, TensorOps.SparseMatMul(aggregator, h)).MatMul(weight);
+
+    /// <summary>
+    /// The edge list a graph attention layer walks: every neighbour, plus a self-loop.
+    /// </summary>
+    /// <param name="Sources">The attending node of each edge.</param>
+    /// <param name="Targets">The attended-to node of each edge.</param>
+    /// <param name="NodeCount">Nodes in the graph.</param>
+    /// <remarks>
+    /// Self-loops are included so a node can attend to itself; without them a node's own features
+    /// reach the output only through its neighbours.
+    /// </remarks>
+    public readonly record struct EdgeList(int[] Sources, int[] Targets, int NodeCount)
+    {
+        /// <summary>Builds the edge list of <paramref name="graph"/>, with self-loops.</summary>
+        public static EdgeList From(Graph graph)
+        {
+            var sources = new List<int>();
+            var targets = new List<int>();
+
+            for (var i = 0; i < graph.NodeCount; i++)
+                foreach (var target in graph.Neighbors(i).Select(t => t.Target).Append(i).Distinct())
+                {
+                    sources.Add(i);
+                    targets.Add(target);
+                }
+
+            return new EdgeList([.. sources], [.. targets], graph.NodeCount);
+        }
+    }
+
+    /// <summary>
+    /// Softmax within each segment: every edge is normalised against the other edges leaving the
+    /// same node.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Composed from <see cref="TensorOps.Gather"/>, <see cref="TensorOps.SegmentSum"/> and
+    /// <c>Exp</c> rather than written as its own tape operation. Each piece is already checked
+    /// against finite differences, so the composition inherits that — where a bespoke kernel would
+    /// need its own derivation of the softmax Jacobian, which is exactly the step the hand-written
+    /// GAT had to get right by hand.
+    /// </para>
+    /// <para>
+    /// The per-segment maximum is subtracted before exponentiating, and enters the graph as a
+    /// <em>constant</em>. That is exact rather than an approximation: softmax is invariant to a
+    /// shift within a segment, so the shift carries no gradient, and detaching it keeps the
+    /// backward pass from chasing a term that cancels.
+    /// </para>
+    /// </remarks>
+    public static Tensor SegmentSoftmax(Tensor scores, IReadOnlyList<int> segments, int count)
+    {
+        var maxima = NdArray.Full(double.NegativeInfinity, count, 1);
+        for (var e = 0; e < segments.Count; e++)
+            maxima[segments[e], 0] = Math.Max(maxima[segments[e], 0], scores.Value[e, 0]);
+
+        // A segment with no edges would leave -inf here, which would poison the subtraction.
+        for (var s = 0; s < count; s++)
+            if (double.IsNegativeInfinity(maxima[s, 0])) maxima[s, 0] = 0.0;
+
+        var shifted = scores - TensorOps.Gather(Tensor.Constant(maxima), segments);
+        var weights = shifted.Exp();
+
+        return weights / TensorOps.Gather(TensorOps.SegmentSum(weights, segments, count), segments);
+    }
+
+    /// <summary>
+    /// One graph attention layer: <c>h_i = sum_j softmax_j(LeakyReLU(a_src·z_i + a_dst·z_j)) z_j</c>.
+    /// </summary>
+    /// <param name="edges">Edge list including self-loops.</param>
+    /// <param name="x">Node features.</param>
+    /// <param name="weight">The projection <c>W</c>.</param>
+    /// <param name="attentionSource">Attention vector applied to the attending node.</param>
+    /// <param name="attentionTarget">Attention vector applied to the attended-to node.</param>
+    /// <remarks>
+    /// Where a GCN weights each neighbour by <c>1/sqrt(d_i d_j)</c> — a property of the graph
+    /// alone — this learns the weight from what the neighbour contains. The score is factored as
+    /// two dot products computed per node and then added per edge, rather than one dot product
+    /// per edge over a concatenated pair: same result, but the expensive part scales with nodes
+    /// instead of edges.
+    /// </remarks>
+    public static Tensor AttentionLayer(EdgeList edges, Tensor x, Tensor weight,
+        Tensor attentionSource, Tensor attentionTarget)
+        => AttentionLayer(edges, x, weight, attentionSource, attentionTarget, out _);
+
+    /// <inheritdoc cref="AttentionLayer(EdgeList, Tensor, Tensor, Tensor, Tensor)"/>
+    /// <param name="attention">
+    /// The per-edge attention coefficients, in edge-list order. Useful for inspecting which
+    /// neighbours a node learned to attend to.
+    /// </param>
+    public static Tensor AttentionLayer(EdgeList edges, Tensor x, Tensor weight,
+        Tensor attentionSource, Tensor attentionTarget, out Tensor attention)
+    {
+        var z = x.MatMul(weight);
+
+        var sourceScore = TensorOps.Gather(z.MatMul(attentionSource), edges.Sources);
+        var targetScore = TensorOps.Gather(z.MatMul(attentionTarget), edges.Targets);
+
+        attention = SegmentSoftmax(
+            TensorOps.LeakyRelu(sourceScore + targetScore, GnnMath.LeakyReluSlope),
+            edges.Sources, edges.NodeCount);
+
+        // The (E,1) attention column broadcasts across the (E,d) gathered features.
+        var messages = attention * TensorOps.Gather(z, edges.Targets);
+        return TensorOps.SegmentSum(messages, edges.Sources, edges.NodeCount);
+    }
+
+    /// <summary>One plain gradient-descent step on a parameter, in place.</summary>
+    /// <remarks>
+    /// Used for the bias vectors. Adam on the weights and plain descent on the biases is not an
+    /// oversight: putting the biases on Adam as well was measured and cost 1.6 points of test
+    /// accuracy on Cora.
+    /// </remarks>
+    public static void Descend(Tensor parameter, double learningRate)
+    {
+        if (parameter.Gradient is null) return;
+
+        var value = parameter.Value;
+        for (var i = 0; i < value.Size; i++)
+            value.SetAt(i, value.At(i) - learningRate * parameter.Gradient.At(i));
+    }
+}
+
+/// <summary>Adam over tape parameters, updating each tensor's value in place.</summary>
+/// <remarks>
+/// Public because a layer written with <see cref="GnnTape"/> needs an optimiser to go with it;
+/// the point of putting the layers on the tape is that someone can add a fourth architecture
+/// without also having to supply their own training machinery.
+/// </remarks>
+public sealed class TapeAdam(Tensor parameter, double weightDecay = 0.0)
+{
+    private readonly NdArray _m = NdArray.ZerosLike(parameter.Value);
+    private readonly NdArray _v = NdArray.ZerosLike(parameter.Value);
+    private int _step;
+
+    /// <summary>Applies one step from the gradient currently on the tensor.</summary>
+    public void Step(double learningRate, double beta1 = 0.9, double beta2 = 0.999, double epsilon = 1e-8)
+    {
+        if (parameter.Gradient is null) return;
+
+        _step++;
+        var correction1 = 1 - Math.Pow(beta1, _step);
+        var correction2 = 1 - Math.Pow(beta2, _step);
+
+        var value = parameter.Value;
+        var gradient = parameter.Gradient;
+
+        for (var i = 0; i < value.Size; i++)
+        {
+            // Decoupled weight decay: applied to the gradient, matching the hand-written path
+            // this replaced so the two can be compared directly.
+            var g = gradient.At(i) + weightDecay * value.At(i);
+
+            _m.SetAt(i, beta1 * _m.At(i) + (1 - beta1) * g);
+            _v.SetAt(i, beta2 * _v.At(i) + (1 - beta2) * g * g);
+
+            var mHat = _m.At(i) / correction1;
+            var vHat = _v.At(i) / correction2;
+            value.SetAt(i, value.At(i) - learningRate * mHat / (Math.Sqrt(vHat) + epsilon));
+        }
+    }
+}
+
 internal static class GnnMath
 {
     public const double LeakyReluSlope = 0.2;
@@ -173,9 +418,17 @@ public sealed class GraphConvolutionalNetwork(
         _propagation = graph.ToSparseAdjacency(addSelfLoops: true, symmetricNormalize: true);
         _features = x;
 
-        var adam1 = new AdamState(featureCount, HiddenSize);
-        var adam2 = new AdamState(HiddenSize, ClassCount);
-        var n = graph.NodeCount;
+        // The parameters are tape leaves. They are created once and updated in place, so the
+        // graph rebuilt each epoch always closes over the current weights.
+        var w1 = Tensor.Parameter(_w1);
+        var w2 = Tensor.Parameter(_w2);
+        var b1 = Tensor.Parameter(_b1);
+        var b2 = Tensor.Parameter(_b2);
+
+        var adamW1 = new TapeAdam(w1, weightDecay);
+        var adamW2 = new TapeAdam(w2, weightDecay);
+
+        var input = Tensor.Constant(x);
 
         var lossHistory = new List<double>();
         var trainHistory = new List<double>();
@@ -183,47 +436,22 @@ public sealed class GraphConvolutionalNetwork(
 
         for (var epoch = 0; epoch < epochs; epoch++)
         {
-            // ---- forward ----
-            var xDropped = ApplyDropout(x, dropout, rng, training: true);
-            var propagatedInput = GnnMath.Propagate(_propagation, xDropped);
-            var hiddenPre = LinAlg.Dot(propagatedInput, _w1);
-            AddBias(hiddenPre, _b1);
+            // Forward only — the backward pass is derived from this, not written alongside it.
+            var hidden = GnnTape.Convolve(_propagation, GnnTape.Dropout(input, dropout, rng), w1, b1).Relu();
+            var logits = GnnTape.Convolve(_propagation, GnnTape.Dropout(hidden, dropout, rng), w2, b2);
+            var loss = TensorOps.SoftmaxCrossEntropy(logits, labels, train);
 
-            var hidden = NdArray.Zeros(n, HiddenSize);
-            for (var i = 0; i < n; i++)
-                for (var j = 0; j < HiddenSize; j++)
-                    hidden[i, j] = Math.Max(0.0, hiddenPre[i, j]);
+            loss.Backward();
 
-            var hiddenDropped = ApplyDropout(hidden, dropout, rng, training: true);
-            var propagatedHidden = GnnMath.Propagate(_propagation, hiddenDropped);
-            var logits = LinAlg.Dot(propagatedHidden, _w2);
-            AddBias(logits, _b2);
+            // Adam on the weights, plain SGD on the biases. That asymmetry looks like an
+            // oversight and is not: switching the biases to Adam as well was tried and cost
+            // 1.6 points of test accuracy on Cora, so it stays as it was.
+            adamW1.Step(learningRate);
+            adamW2.Step(learningRate);
+            GnnTape.Descend(b1, learningRate);
+            GnnTape.Descend(b2, learningRate);
 
-            var (loss, dLogits) = GnnMath.SoftmaxCrossEntropy(logits, labels, train);
-
-            // ---- backward ----
-            var dLogitsArray = ToNdArray(dLogits, n, ClassCount);
-
-            // dW2 = (A_hat H1)^T dZ
-            var gradientW2 = ToJagged(LinAlg.Dot(propagatedHidden.T, dLogitsArray));
-            var gradientB2 = ColumnSums(dLogitsArray);
-
-            // dH1 = A_hat^T dZ W2^T, then through ReLU.
-            var dPropagatedHidden = LinAlg.Dot(dLogitsArray, _w2.T);
-            var dHidden = GnnMath.Propagate(_propagation, dPropagatedHidden);
-            for (var i = 0; i < n; i++)
-                for (var j = 0; j < HiddenSize; j++)
-                    if (hiddenPre[i, j] <= 0) dHidden[i, j] = 0.0;
-
-            var gradientW1 = ToJagged(LinAlg.Dot(propagatedInput.T, dHidden));
-            var gradientB1 = ColumnSums(dHidden);
-
-            adam1.Apply(_w1, gradientW1, learningRate, weightDecay: weightDecay);
-            adam2.Apply(_w2, gradientW2, learningRate, weightDecay: weightDecay);
-            for (var j = 0; j < HiddenSize; j++) _b1.SetAt(j, _b1.At(j) - learningRate * gradientB1[j]);
-            for (var c = 0; c < ClassCount; c++) _b2.SetAt(c, _b2.At(c) - learningRate * gradientB2[c]);
-
-            lossHistory.Add(loss);
+            lossHistory.Add(loss.Item);
             var evaluation = ForwardInference(x);
             trainHistory.Add(GnnMath.Accuracy(evaluation, labels, train));
             if (validationMask is not null)
@@ -305,18 +533,6 @@ public sealed class GraphConvolutionalNetwork(
     private void RequireTrained()
     {
         if (!IsTrained) throw new InvalidOperationException("The network must be trained before use.");
-    }
-
-    internal static NdArray ApplyDropout(NdArray x, double rate, GraviRandom rng, bool training)
-    {
-        if (!training || rate <= 0) return x;
-        var scale = 1.0 / (1.0 - rate);
-        var result = NdArray.Zeros(x.Shape[0], x.Shape[1]);
-        for (var i = 0; i < x.Shape[0]; i++)
-            for (var j = 0; j < x.Shape[1]; j++)
-                // Inverted dropout: scale at training time so inference needs no adjustment.
-                result[i, j] = rng.NextDouble() < rate ? 0.0 : x[i, j] * scale;
-        return result;
     }
 
     internal static void AddBias(NdArray matrix, NdArray bias)
@@ -405,8 +621,14 @@ public sealed class GraphSage(
         _w1 = GnnMath.Glorot(featureCount * 2, hiddenSize, rng);
         _w2 = GnnMath.Glorot(hiddenSize * 2, ClassCount, rng);
 
-        var adam1 = new AdamState(featureCount * 2, hiddenSize);
-        var adam2 = new AdamState(hiddenSize * 2, ClassCount);
+        // The aggregator depends only on the graph, so it is built once rather than per epoch.
+        var aggregator = GnnTape.MeanAggregator(graph);
+
+        var w1 = Tensor.Parameter(_w1);
+        var w2 = Tensor.Parameter(_w2);
+        var adam1 = new TapeAdam(w1, weightDecay);
+        var adam2 = new TapeAdam(w2, weightDecay);
+        var input = Tensor.Constant(x);
 
         var lossHistory = new List<double>();
         var trainHistory = new List<double>();
@@ -414,48 +636,15 @@ public sealed class GraphSage(
 
         for (var epoch = 0; epoch < epochs; epoch++)
         {
-            var concat1 = Concatenate(x, MeanAggregate(graph, x));
-            var hiddenPre = LinAlg.Dot(concat1, _w1);
-            var hidden = NdArray.Zeros(n, hiddenSize);
-            for (var i = 0; i < n; i++)
-                for (var j = 0; j < hiddenSize; j++)
-                    hidden[i, j] = Math.Max(0.0, hiddenPre[i, j]);
+            var hidden = GnnTape.SageLayer(aggregator, input, w1).Relu();
+            var logits = GnnTape.SageLayer(aggregator, hidden, w2);
+            var loss = TensorOps.SoftmaxCrossEntropy(logits, labels, train);
 
-            var concat2 = Concatenate(hidden, MeanAggregate(graph, hidden));
-            var logits = LinAlg.Dot(concat2, _w2);
+            loss.Backward();
+            adam1.Step(learningRate);
+            adam2.Step(learningRate);
 
-            var (loss, dLogits) = GnnMath.SoftmaxCrossEntropy(logits, labels, train);
-            var dLogitsArray = GraphConvolutionalNetwork.ToNdArray(dLogits, n, ClassCount);
-
-            var gradientW2 = GraphConvolutionalNetwork.ToJagged(LinAlg.Dot(concat2.T, dLogitsArray));
-
-            // The gradient reaching the hidden layer arrives through both halves of concat2:
-            // directly as the self part, and spread over neighbours as the aggregate part.
-            var dConcat2 = LinAlg.Dot(dLogitsArray, _w2.T);
-            var dHidden = NdArray.Zeros(n, hiddenSize);
-            for (var i = 0; i < n; i++)
-                for (var j = 0; j < hiddenSize; j++)
-                    dHidden[i, j] = dConcat2[i, j];
-
-            var dAggregate = NdArray.Zeros(n, hiddenSize);
-            for (var i = 0; i < n; i++)
-                for (var j = 0; j < hiddenSize; j++)
-                    dAggregate[i, j] = dConcat2[i, hiddenSize + j];
-
-            var scattered = ScatterMean(graph, dAggregate);
-            for (var i = 0; i < n; i++)
-                for (var j = 0; j < hiddenSize; j++)
-                {
-                    dHidden[i, j] += scattered[i, j];
-                    if (hiddenPre[i, j] <= 0) dHidden[i, j] = 0.0;
-                }
-
-            var gradientW1 = GraphConvolutionalNetwork.ToJagged(LinAlg.Dot(concat1.T, dHidden));
-
-            adam1.Apply(_w1, gradientW1, learningRate, weightDecay: weightDecay);
-            adam2.Apply(_w2, gradientW2, learningRate, weightDecay: weightDecay);
-
-            lossHistory.Add(loss);
+            lossHistory.Add(loss.Item);
             var evaluation = ForwardInference(graph, x);
             trainHistory.Add(GnnMath.Accuracy(evaluation, labels, train));
             if (validationMask is not null)
@@ -523,21 +712,6 @@ public sealed class GraphSage(
                 for (var j = 0; j < x.Shape[1]; j++)
                     result[i, j] += x[target, j];
             for (var j = 0; j < x.Shape[1]; j++) result[i, j] /= neighbours.Count;
-        }
-        return result;
-    }
-
-    /// <summary>Transpose of <see cref="MeanAggregate"/>, used to push gradients back to neighbours.</summary>
-    internal static NdArray ScatterMean(Graph graph, NdArray gradient)
-    {
-        var result = NdArray.Zeros(gradient.Shape[0], gradient.Shape[1]);
-        for (var i = 0; i < graph.NodeCount; i++)
-        {
-            var neighbours = graph.Neighbors(i);
-            if (neighbours.Count == 0) continue;
-            foreach (var (target, _) in neighbours)
-                for (var j = 0; j < gradient.Shape[1]; j++)
-                    result[target, j] += gradient[i, j] / neighbours.Count;
         }
         return result;
     }
@@ -639,12 +813,24 @@ public sealed class GraphAttentionNetwork(
         _aSrc2 = GnnMath.Glorot(ClassCount, 1, rng).Reshape(ClassCount);
         _aDst2 = GnnMath.Glorot(ClassCount, 1, rng).Reshape(ClassCount);
 
-        var adamW1 = Enumerable.Range(0, Heads).Select(_ => new AdamState(featureCount, hiddenSize)).ToArray();
-        var adamA1Src = Enumerable.Range(0, Heads).Select(_ => new AdamState(hiddenSize, 1)).ToArray();
-        var adamA1Dst = Enumerable.Range(0, Heads).Select(_ => new AdamState(hiddenSize, 1)).ToArray();
-        var adamW2 = new AdamState(hiddenSize * Heads, ClassCount);
-        var adamA2Src = new AdamState(ClassCount, 1);
-        var adamA2Dst = new AdamState(ClassCount, 1);
+        // Reshape returns a view over the same buffer, so updating the tensor updates the field
+        // the inference path reads.
+        var edges = GnnTape.EdgeList.From(graph);
+        var input = Tensor.Constant(x);
+
+        var w1 = _w1.Select(Tensor.Parameter).ToArray();
+        var aSrc1 = _aSrc1.Select(a => Tensor.Parameter(a.Reshape(hiddenSize, 1))).ToArray();
+        var aDst1 = _aDst1.Select(a => Tensor.Parameter(a.Reshape(hiddenSize, 1))).ToArray();
+        var w2 = Tensor.Parameter(_w2);
+        var aSrc2 = Tensor.Parameter(_aSrc2.Reshape(ClassCount, 1));
+        var aDst2 = Tensor.Parameter(_aDst2.Reshape(ClassCount, 1));
+
+        var adamW1 = w1.Select(p => new TapeAdam(p, weightDecay)).ToArray();
+        var adamA1Src = aSrc1.Select(p => new TapeAdam(p)).ToArray();
+        var adamA1Dst = aDst1.Select(p => new TapeAdam(p)).ToArray();
+        var adamW2 = new TapeAdam(w2, weightDecay);
+        var adamA2Src = new TapeAdam(aSrc2);
+        var adamA2Dst = new TapeAdam(aDst2);
 
         var lossHistory = new List<double>();
         var trainHistory = new List<double>();
@@ -652,53 +838,32 @@ public sealed class GraphAttentionNetwork(
 
         for (var epoch = 0; epoch < epochs; epoch++)
         {
-            // ---- forward, hidden layer: one attention head at a time, then concatenate ----
-            var headOutputs = new NdArray[Heads];
-            var headStates = new AttentionState[Heads];
-            for (var h = 0; h < Heads; h++)
-            {
-                headStates[h] = AttentionForward(x, _w1[h], _aSrc1[h], _aDst1[h]);
-                headOutputs[h] = Relu(headStates[h].Output, out headStates[h].PreActivation);
-            }
+            // Forward only. The attention softmax was the hardest backward pass in this library
+            // to derive by hand; here it is simply not derived.
+            var headAttention = new Tensor[Heads];
+            var head = GnnTape.AttentionLayer(edges, input, w1[0], aSrc1[0], aDst1[0], out headAttention[0]).Relu();
 
-            var concatenated = ConcatenateHeads(headOutputs);
+            for (var h = 1; h < Heads; h++)
+                head = TensorOps.ConcatColumns(head,
+                    GnnTape.AttentionLayer(edges, input, w1[h], aSrc1[h], aDst1[h], out headAttention[h]).Relu());
 
-            // ---- forward, output layer: a single averaged head ----
-            var outputState = AttentionForward(concatenated, _w2, _aSrc2, _aDst2);
-            var logits = outputState.Output;
+            var logits = GnnTape.AttentionLayer(edges, head, w2, aSrc2, aDst2);
+            var loss = TensorOps.SoftmaxCrossEntropy(logits, labels, train);
 
-            var (loss, dLogitsRaw) = GnnMath.SoftmaxCrossEntropy(logits, labels, train);
-            var dLogits = GraphConvolutionalNetwork.ToNdArray(dLogitsRaw, n, ClassCount);
-
-            // ---- backward ----
-            var (dConcat, gradientW2, gradientASrc2, gradientADst2) =
-                AttentionBackward(concatenated, outputState, dLogits, _w2, _aSrc2, _aDst2);
+            loss.Backward();
 
             for (var h = 0; h < Heads; h++)
             {
-                var dHead = NdArray.Zeros(n, hiddenSize);
-                for (var i = 0; i < n; i++)
-                    for (var j = 0; j < hiddenSize; j++)
-                    {
-                        var value = dConcat[i, h * hiddenSize + j];
-                        // Back through the ReLU applied to this head's output.
-                        dHead[i, j] = headStates[h].PreActivation![i, j] > 0 ? value : 0.0;
-                    }
-
-                var (_, gradientW1, gradientASrc1, gradientADst1) =
-                    AttentionBackward(x, headStates[h], dHead, _w1[h], _aSrc1[h], _aDst1[h]);
-
-                adamW1[h].Apply(_w1[h], gradientW1, learningRate, weightDecay: weightDecay);
-                adamA1Src[h].Apply(_aSrc1[h].Reshape(hiddenSize, 1), ToColumn(gradientASrc1), learningRate);
-                adamA1Dst[h].Apply(_aDst1[h].Reshape(hiddenSize, 1), ToColumn(gradientADst1), learningRate);
+                adamW1[h].Step(learningRate);
+                adamA1Src[h].Step(learningRate);
+                adamA1Dst[h].Step(learningRate);
             }
+            adamW2.Step(learningRate);
+            adamA2Src.Step(learningRate);
+            adamA2Dst.Step(learningRate);
 
-            adamW2.Apply(_w2, gradientW2, learningRate, weightDecay: weightDecay);
-            adamA2Src.Apply(_aSrc2.Reshape(ClassCount, 1), ToColumn(gradientASrc2), learningRate);
-            adamA2Dst.Apply(_aDst2.Reshape(ClassCount, 1), ToColumn(gradientADst2), learningRate);
-
-            AttentionWeights = headStates.Select(s => s.Attention).ToList();
-            lossHistory.Add(loss);
+            AttentionWeights = [.. headAttention.Select(a => ToEdgeMap(edges, a))];
+            lossHistory.Add(loss.Item);
 
             var evaluation = ForwardInference(x);
             trainHistory.Add(GnnMath.Accuracy(evaluation, labels, train));
@@ -711,123 +876,43 @@ public sealed class GraphAttentionNetwork(
         return this;
     }
 
-    /// <summary>Intermediate values one attention layer needs for its backward pass.</summary>
-    private sealed class AttentionState
-    {
-        public NdArray Projected = NdArray.Zeros(0, 0);
-        public NdArray Output = NdArray.Zeros(0, 0);
-        public NdArray? PreActivation;
-        public Dictionary<(int Source, int Target), double> Attention = [];
-        public Dictionary<(int Source, int Target), double> RawScores = [];
-    }
 
-    private AttentionState AttentionForward(NdArray x, NdArray w, NdArray aSrc, NdArray aDst)
-    {
-        var n = x.Shape[0];
-        var d = w.Shape[1];
-        var z = LinAlg.Dot(x, w);
-
-        var state = new AttentionState { Projected = z, Output = NdArray.Zeros(n, d) };
-
-        // Pre-computing a_src . z_i and a_dst . z_j turns the per-edge score into one addition.
-        var srcScore = new double[n];
-        var dstScore = new double[n];
-        for (var i = 0; i < n; i++)
-            for (var k = 0; k < d; k++)
-            {
-                srcScore[i] += z[i, k] * aSrc.At(k);
-                dstScore[i] += z[i, k] * aDst.At(k);
-            }
-
-        for (var i = 0; i < n; i++)
-        {
-            var neighbours = _neighbours[i];
-            var scores = new double[neighbours.Length];
-            for (var t = 0; t < neighbours.Length; t++)
-            {
-                var raw = srcScore[i] + dstScore[neighbours[t]];
-                state.RawScores[(i, neighbours[t])] = raw;
-                scores[t] = raw > 0 ? raw : GnnMath.LeakyReluSlope * raw;
-            }
-
-            var attention = MathUtil.Softmax(scores);
-            for (var t = 0; t < neighbours.Length; t++)
-            {
-                state.Attention[(i, neighbours[t])] = attention[t];
-                for (var k = 0; k < d; k++)
-                    state.Output[i, k] += attention[t] * z[neighbours[t], k];
-            }
-        }
-        return state;
-    }
-
-    private (NdArray InputGradient, double[,] WeightGradient, double[] SrcGradient, double[] DstGradient)
-        AttentionBackward(NdArray x, AttentionState state, NdArray dOutput, NdArray w, NdArray aSrc, NdArray aDst)
-    {
-        var n = x.Shape[0];
-        var d = w.Shape[1];
-        var z = state.Projected;
-
-        var dz = NdArray.Zeros(n, d);
-        var gradientSrc = new double[d];
-        var gradientDst = new double[d];
-
-        for (var i = 0; i < n; i++)
-        {
-            var neighbours = _neighbours[i];
-
-            // Gradient of the loss with respect to each attention coefficient.
-            var dAlpha = new double[neighbours.Length];
-            for (var t = 0; t < neighbours.Length; t++)
-            {
-                var j = neighbours[t];
-                var accumulator = 0.0;
-                for (var k = 0; k < d; k++)
-                {
-                    accumulator += dOutput[i, k] * z[j, k];
-                    // Aggregation path: the neighbour's projection is scaled by alpha.
-                    dz[j, k] += state.Attention[(i, j)] * dOutput[i, k];
-                }
-                dAlpha[t] = accumulator;
-            }
-
-            // Softmax Jacobian: dE_t = alpha_t * (dAlpha_t - sum_k alpha_k dAlpha_k).
-            var weighted = 0.0;
-            for (var t = 0; t < neighbours.Length; t++)
-                weighted += state.Attention[(i, neighbours[t])] * dAlpha[t];
-
-            for (var t = 0; t < neighbours.Length; t++)
-            {
-                var j = neighbours[t];
-                var alpha = state.Attention[(i, j)];
-                var dScore = alpha * (dAlpha[t] - weighted);
-
-                // Back through LeakyReLU.
-                var raw = state.RawScores[(i, j)];
-                var dRaw = dScore * (raw > 0 ? 1.0 : GnnMath.LeakyReluSlope);
-
-                for (var k = 0; k < d; k++)
-                {
-                    gradientSrc[k] += dRaw * z[i, k];
-                    gradientDst[k] += dRaw * z[j, k];
-                    dz[i, k] += dRaw * aSrc.At(k);
-                    dz[j, k] += dRaw * aDst.At(k);
-                }
-            }
-        }
-
-        var weightGradient = GraphConvolutionalNetwork.ToJagged(LinAlg.Dot(x.T, dz));
-        var inputGradient = LinAlg.Dot(dz, w.T);
-        return (inputGradient, weightGradient, gradientSrc, gradientDst);
-    }
-
+    /// <summary>
+    /// The same forward pass used for training, run for prediction.
+    /// </summary>
+    /// <remarks>
+    /// Built on the tape as well, so there is exactly one definition of what the network computes.
+    /// The tensors are constants here, so nothing is recorded for a backward pass that will not
+    /// happen.
+    /// </remarks>
     private NdArray ForwardInference(NdArray x)
     {
-        var headOutputs = new NdArray[Heads];
-        for (var h = 0; h < Heads; h++)
-            headOutputs[h] = Relu(AttentionForward(x, _w1[h], _aSrc1[h], _aDst1[h]).Output, out _);
+        var edges = GnnTape.EdgeList.From(_graph!);
+        var input = Tensor.Constant(x);
 
-        return AttentionForward(ConcatenateHeads(headOutputs), _w2, _aSrc2, _aDst2).Output;
+        var head = GnnTape.AttentionLayer(edges, input, Tensor.Constant(_w1[0]),
+            Tensor.Constant(_aSrc1[0].Reshape(_w1[0].Shape[1], 1)),
+            Tensor.Constant(_aDst1[0].Reshape(_w1[0].Shape[1], 1))).Relu();
+
+        for (var h = 1; h < Heads; h++)
+            head = TensorOps.ConcatColumns(head,
+                GnnTape.AttentionLayer(edges, input, Tensor.Constant(_w1[h]),
+                    Tensor.Constant(_aSrc1[h].Reshape(_w1[h].Shape[1], 1)),
+                    Tensor.Constant(_aDst1[h].Reshape(_w1[h].Shape[1], 1))).Relu());
+
+        return GnnTape.AttentionLayer(edges, head, Tensor.Constant(_w2),
+            Tensor.Constant(_aSrc2.Reshape(ClassCount, 1)),
+            Tensor.Constant(_aDst2.Reshape(ClassCount, 1))).Value;
+    }
+
+    /// <summary>Reads per-edge attention back out as a (source, target) lookup.</summary>
+    private static Dictionary<(int Source, int Target), double> ToEdgeMap(
+        GnnTape.EdgeList edges, Tensor attention)
+    {
+        var result = new Dictionary<(int, int), double>(edges.Sources.Length);
+        for (var e = 0; e < edges.Sources.Length; e++)
+            result[(edges.Sources[e], edges.Targets[e])] = attention.Value[e, 0];
+        return result;
     }
 
     /// <summary>The predicted class of every node.</summary>
@@ -849,32 +934,4 @@ public sealed class GraphAttentionNetwork(
     public double Score(Graph graph, IReadOnlyList<int> mask)
         => GnnMath.Accuracy(ForwardInference(_features!), graph.NodeLabels, mask);
 
-    private static NdArray Relu(NdArray x, out NdArray? preActivation)
-    {
-        preActivation = x.Copy();
-        var result = NdArray.Zeros(x.Shape[0], x.Shape[1]);
-        for (var i = 0; i < x.Shape[0]; i++)
-            for (var j = 0; j < x.Shape[1]; j++)
-                result[i, j] = Math.Max(0.0, x[i, j]);
-        return result;
-    }
-
-    private static NdArray ConcatenateHeads(NdArray[] heads)
-    {
-        var n = heads[0].Shape[0];
-        var d = heads[0].Shape[1];
-        var result = NdArray.Zeros(n, d * heads.Length);
-        for (var h = 0; h < heads.Length; h++)
-            for (var i = 0; i < n; i++)
-                for (var j = 0; j < d; j++)
-                    result[i, h * d + j] = heads[h][i, j];
-        return result;
-    }
-
-    private static double[,] ToColumn(double[] values)
-    {
-        var result = new double[values.Length, 1];
-        for (var i = 0; i < values.Length; i++) result[i, 0] = values[i];
-        return result;
-    }
 }

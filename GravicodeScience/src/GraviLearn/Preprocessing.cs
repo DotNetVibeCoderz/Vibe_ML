@@ -93,6 +93,16 @@ public sealed class MinMaxScaler(double minimum = 0.0, double maximum = 1.0) : M
     /// <summary>Upper bound of the output range.</summary>
     public double Maximum { get; } = maximum;
 
+    /// <summary>Per-feature minimum seen during <see cref="Fit"/>.</summary>
+    public NdArray DataMinimum => NdArray.FromValues(_min);
+
+    /// <summary>Per-feature range seen during <see cref="Fit"/>, with zero ranges left as one.</summary>
+    /// <remarks>
+    /// Exposed for the same reason <see cref="StandardScaler.Mean"/> is: the fitted state is what
+    /// an exporter or a diagnostic needs, and hiding it forces callers to re-derive it.
+    /// </remarks>
+    public NdArray DataRange => NdArray.FromValues(_range);
+
     /// <inheritdoc />
     public void Fit(NdArray x, NdArray? y = null)
     {

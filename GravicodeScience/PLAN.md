@@ -1,4 +1,4 @@
-# PLAN — Gravicode.Science roadmap
+?# PLAN — Gravicode.Science roadmap
 
 Status of the current release is in [Progress.md](Progress.md). This file is about direction.
 
@@ -68,51 +68,132 @@ work is bound by memory bandwidth, not instruction width. `Vector<T>` already ma
 element-wise fix bought 2.9 → 10.2 GB/s by moving *less* data, which no amount of wider registers
 would have done.
 
-### BLAS/LAPACK interop — still quantified, now smaller
+### BLAS/LAPACK interop — ✅ done, and optional
 
-What is left is genuinely the native-code gap, and it is one order of magnitude rather than two:
+**The open question is answered**: leave it optional. `Compute.NativeBlas` probes for a library the
+machine already has, and keeps silently to the managed kernels otherwise — the same shape as the
+GPU backend. Nothing is bundled, because a tuned BLAS is a large platform-specific binary and every
+user would pay for it.
 
-| | Gravicode.Science | NumPy | Gap |
+`NativeLapack` now binds the factorisations too — `dgesv`, `dgeqrf`/`dorgqr`, `dgesvd`, `dsyev` —
+through the **LAPACKE** interface, which takes a layout argument so row-major matrices pass straight
+through. The Fortran entry points would need a transpose in and another out on every call.
+
+| | Managed | Native | | vs NumPy, before → after |
+|---|---:|---:|---|---|
+| solve, 512×512, many RHS | 887 ms | 17.4 ms | **51×** | — |
+| LU, 256×256 | 77.9 ms | 4.5 ms | **17×** | 21.6× → **1.4×** |
+| QR, 256×256 | 151 ms | 10.7 ms | **14×** | 15× → **1.0×** |
+| Cholesky, 256×256 | 14.4 ms | 1.6 ms | **9×** | 14.4× → **1.3×** |
+| symmetric eigen, 256×256 | 120 ms | 45.6 ms | 2.6× | 5.6× → **2.3×** |
+| matrix inverse, 256×256 | 135 ms | 58.0 ms | 2.3× | 15× → **5.9×** |
+| SVD, 256×256 | 331 ms | 176 ms | 1.9× | 11× → **6.5×** |
+
+With a BLAS present the 512-cube product is **faster than NumPy**, and LU, QR and Cholesky land
+within 40% of it — which follows once you notice both stacks are then calling the same OpenBLAS,
+and what is left is marshalling.
+
+Three conventions had to be converted rather than assumed: LAPACK sorts eigenvalues ascending,
+returns `V^T` from `dgesvd`, and — the one that nearly slipped through — with a row-major layout
+already presents eigenvector *j* in column *j*, so transposing it as the Fortran convention suggests
+breaks `A V = V Λ` while leaving the eigenvalues perfectly correct. The `A V = V Λ` check caught it.
+
+`dgetrf` and `dpotrf` followed, so `Lu` and `Cholesky` are covered too — **LU 77.9 → 4.5 ms** and
+**Cholesky 14.4 → 1.6 ms** at 256, both now within 40% of NumPy. Every factorisation in the library
+now has a native path.
+
+The pivot conversion was the reason those two waited, and it earned the caution: LAPACK reports a
+*sequence of row swaps*, not a finished permutation. Reading one as the other produces a perfectly
+valid-looking L and U that reconstructs the wrong matrix, so the tests check `P A = L U`, that the
+permutation is a bijection, and that the determinant sign agrees — the last catching a sign
+convention error the first two would miss.
+
+### The benchmark now depends on what is installed
+
+Worth stating as a methodology point, because it is the biggest threat to reproducibility here: the
+published comparison figures are the **managed** path, since a clean machine finds no BLAS. On a
+machine with OpenBLAS the same harness measures something quite different — parity with NumPy on
+matmul, 1.3× on QR. Both are real; quoting either without saying which would be the error.
+`docs/benchmarks.md` now reports both configurations side by side.
+
+For `dgemm` specifically, measured against the OpenBLAS that ships inside numpy: **3.6× at 256,
+4.8× at 512, 4.0× at 1024**, agreeing with the managed kernel to 1e-13. Two details that would
+otherwise have been silent corruption:
+ILP64 builds export `cblas_dgemm64_` and take 64-bit dimensions, so the width is detected rather
+than assumed; and numpy/scipy rename every symbol with a `scipy_` prefix, which on a data-science
+machine is usually the only BLAS present.
+
+### A packed matrix product — ✅ done
+
+`PackedMatMul` packs both operands into tile-contiguous buffers, parallel over row blocks with a
+shared packed B panel. **1.65× at 256, 1.96× at 1024, 2.08× at 2048**, against the kernel it
+replaced. Below about eight million multiply-adds packing costs more than it saves, so the
+threshold sits above that, conservatively.
+
+Two things worth recording. The first attempt was *slower everywhere* because it was
+single-threaded while the kernel it was compared against ran on four cores — the packing was fine,
+the parallelism had been dropped. And an early measurement showed a 192-cube taking eight times
+longer than a 224-cube, which is impossible: tiered JIT had not yet recompiled the kernel, and two
+warm-up calls are not enough when promotion happens after about thirty.
+
+### Single precision — ✅ prototyped, and it is worth doing
+
+Following this file's own advice to prototype before committing. `Single.SingleKernels` has `float`
+versions of the element-wise and matrix-product kernels — deliberately not an `NdArray`-shaped
+surface, because a half-finished second numeric stack would be worse than none.
+
+| | double | float | |
 |---|---:|---:|---|
-| matrix inverse, 256×256 | 147 ms | 9.9 ms | 15× |
-| QR, 256×256 | 154 ms | 10.4 ms | 15× |
-| LU, 256×256 | 41 ms | 3.3 ms | 13× |
-| SVD, 256×256 | 308 ms | 27.1 ms | 11× |
-| matmul, 1024×1024 | 93 ms | 27.8 ms | 3.4× |
+| element-wise add, 1M | 2.24 ms | 1.07 ms | **2.09×** |
+| element-wise add, 10M | 24.9 ms | 11.7 ms | **2.13×** |
+| 1024-cube product | 94.9 ms | 52.2 ms | 1.82× |
 
-The plan is a native backend behind the existing `IComputeBackend` interface, so it becomes a
-fourth dispatch target rather than a rewrite:
+The two gains have different causes and correctly differ: twice the SIMD lanes helps compute-bound
+work, half the bytes helps bandwidth-bound work, and element-wise arithmetic — being purely
+bandwidth-bound — lands at a clean 2.1×. Accuracy cost on a 1000-cube product: **1.3e-6** relative.
 
-- P/Invoke bindings for `dgemm`, `dgesv`, `dgeqrf`, `dgesvd`, `dsyev`
-- Runtime probing with a silent fall back to the managed path, exactly as the GPU backend does
-- The managed implementations stay as the reference the tests compare against
+So the answer to "is the generic `NdArray<T>` rewrite worth it" is **yes**, and that rewrite is now
+a decision with numbers behind it rather than an assumption. It remains the largest single change
+here.
 
-**Open question before starting**: this ships no native binary, so it only helps users who already
-have OpenBLAS or MKL on the machine. Deciding what to do when they don't — bundle per-RID native
-assets, or leave it opt-in and document it — is the real design work, not the P/Invoke.
+### ONNX — ✅ weight import done
 
-### A packed matrix product
-Independent of native interop, the remaining 3.4× on `matmul` is reachable in managed code: pack A
-and B into tile-contiguous buffers and block on three levels, the way OpenBLAS does. The v0.2
-kernel took the cheap part of that (register accumulation and a `k` slice) and got 1.05–1.4×;
-the rest needs the packing, which is a few hundred lines of careful work.
+`Io.OnnxReader` reads the initializers out of an ONNX file: float32, float64, float16 and the
+integer types, widened to `double`. `TransformerModel.LoadOnnxWeights` uses it, which is the route
+to a transformer whose embeddings mean something — the library's oldest documented limitation.
 
-### Single precision
-Every array is currently `double`. A `float` path would roughly double SIMD throughput and, more
-importantly, make the GPU backend genuinely worthwhile — the float64 penalty is the single reason
-the GPU loses today. This means a generic `NdArray<T>` over `INumber<T>`.
+Dependency-free on purpose. ONNX Runtime is a large native package and this needs a few hundred
+lines of protobuf wire format, so pulling it in to read some arrays would be the same bad trade as
+`TensorPrimitives`. Verified against files written by the official Python `onnx` library, not
+against a fixture built to match the reader.
 
-This is the largest single change on the roadmap: `NdArray` is the type every other library is
-written against, so making it generic touches all six. It is also the item where the payoff is
-least certain on a machine like the reference one — the measured `TensorPrimitives` figures showed
-single precision buying nothing for transcendentals, and the element-wise path is bandwidth-bound,
-where halving the element size genuinely does help. Worth prototyping on one library before
-committing the whole stack to it.
+A tensor whose type will not decode, or whose data does not match its declared shape, is skipped
+rather than guessed at.
 
-### ONNX Runtime and ML.NET
-- Export a fitted `Pipeline` to ONNX so a model trained here can be served anywhere
-- Import an ONNX model as an `IEstimator`, which would also give `TransformerModel` real weights
-- `IDataView` adapters both ways for `DataFrame`
+### ONNX export — ✅ done
+
+`OnnxExport.Save` writes a fitted `Pipeline` as ONNX, so a model trained here can be served
+anywhere. Scalers, PCA and linear models all export; each is an affine map, which is why the whole
+pipeline collapses into `Sub`, `Div`, `MatMul`, `Add` and `ArgMax`. Core operators are used rather
+than `ai.onnx.ml` because every runtime implements them.
+
+Verified against the real tooling rather than against this library's own reader: `onnx.checker`
+confirms the graph is valid, and Python's **onnxruntime** reproduces the .NET predictions —
+150/150 labels on two Iris pipelines, 5.9e-07 maximum difference on a regression one.
+
+Two mistakes it was worth designing against, because both produce a model that loads cleanly and
+predicts wrongly:
+
+- Writing the batch dimension as a **number** rather than a symbol, which pins the model to the
+  training set's row count and makes it useless for the single row a serving endpoint sends.
+- Storing PCA components untransposed. The graph multiplies rows of `x` by them, so the constant
+  has to be the transpose of `ComponentVectors`.
+
+Trees, forests and kNN are **refused**, not approximated. `OnnxExport.Supports` reports this before
+anything is written.
+
+**Still open**: the reader remains a weight reader, not a runtime — it cannot execute an arbitrary
+ONNX graph. The `IDataView` adapters for ML.NET are untouched.
 
 ### Arrow
 Zero-copy interchange with pandas, Polars and Spark via the Arrow memory format. `DataFrame` is
@@ -132,8 +213,8 @@ can.
 elementwise and linear-algebra operations, `Backward()`, and a `GradientCheck` helper that pins any
 new gradient against central finite differences.
 
-What it has **not** yet done is replace the hand-derived gradients in the GNN layers — the other
-half of the original item, now unblocked but unstarted. See *GNN layers on the tape* below.
+The other half of the original item — replacing the hand-derived gradients in the GNN layers — is
+now done for all three. See *GNN layers on the tape* below.
 
 ### Better MCMC — ✅ done
 `SampleHMC` and `SampleNUTS`, both with dual-averaging step-size adaptation, working in
@@ -149,15 +230,74 @@ allocates a node per operation while finite differences just call a cheap scalar
 times. The crossover is near 50 parameters. Variational inference therefore picks its gradient
 method by dimension rather than always paying for the tape.
 
-### GNN layers on the tape
-GCN, GraphSAGE and GAT still carry hand-derived backward passes, including through the attention
-softmax. They work and they are tested, so this is not urgent — but a fourth architecture would
-mean a fourth derivation, which is exactly the cost the tape exists to remove. The same applies to
-`TransformerModel` in GraviText.
+### GNN layers on the tape — ✅ done
 
-The tape's per-node allocation is the thing to watch here: a GNN forward pass is a handful of large
-matrix operations rather than thousands of scalar ones, which is the regime where reverse mode is
-unambiguously the right choice — the opposite of the low-dimensional log posteriors above.
+All three architectures now express only their forward pass; `Backward()` supplies the rest. The
+graph-shaped tape operations this needed — `SparseMatMul`, `Gather`, `SegmentSum`, `ConcatColumns`,
+`LeakyRelu` and a masked `SoftmaxCrossEntropy` — are in `GraviNum.Autodiff`, and the layer helpers
+are public in `GnnTape` so a fourth architecture can be written without touching the library.
+
+GAT was the one this was really for. Its attention needs a softmax over each node's incident edges,
+and that was the hardest backward pass in the library to derive by hand. It turned out not to need
+a bespoke kernel at all: `Gather` and `SegmentSum` are adjoints of one another, and segment softmax
+*composes* from them plus `Exp`, inheriting their already-verified gradients rather than requiring
+the softmax Jacobian to be worked out again. Two new primitives covered a case that looked like it
+would need several.
+
+**It immediately found a real bug.** The hand-derived GCN backward pass omitted the dropout mask on
+the hidden layer, making the gradient roughly **40% wrong** whenever dropout was active. It had
+been that way since the layer was written, and the model still trained to a plausible 71% on Cora —
+which is precisely why it survived review. Corrected, Cora sits at 69.3%; the old number came from
+a broken gradient acting as an accidental regulariser.
+
+Measured cost, hand-written against tape, one epoch, interleaved in one process:
+
+| Shape | hand-written | tape | |
+|---|---:|---:|---|
+| 500 nodes × 100 features | 2.90 ms | 5.61 ms | 1.93× |
+| 2,708 × 1,433 (Cora) | 55.74 ms | 70.48 ms | **1.26×** |
+| 5,000 × 500 | 48.43 ms | 70.09 ms | 1.45× |
+
+So the tape costs about a quarter on the realistic shape and less as the matrices grow — the
+opposite of its behaviour on the scalar log posteriors above, and the reason this was the right
+place to apply it. GraphSAGE actually got *faster* end to end (26.9 s → 19.8 s on Cora), because
+expressing mean aggregation as a sparse matrix replaced two hand-written gather/scatter loops.
+
+On Cora at 60 epochs the three now sit at GCN 69.3%, GraphSAGE 70.3%, **GAT 72.1%** — attention
+ahead of a fixed degree normalisation, which is the expected ordering and more convincing observed
+after the move than before it.
+
+### The transformer on the tape — ✅ done, and the premise was wrong
+
+This roadmap said `TransformerModel` "still carries hand-derived gradients". It does not — it never
+carried any. `LayerNorm`, `DenseLayer`, `MultiHeadAttention`, `TransformerEncoderLayer` and
+`TransformerModel` all define `Forward` and nothing else. There was no backward pass to replace,
+which is why a fresh model stayed randomly initialised for ever: nothing could move a weight.
+
+So the work was not a refactor but a capability that did not exist. `TransformerTape` is the same
+architecture on the tape, and `TransformerClassifier` trains it end to end on labelled text.
+
+It needed **one** new tape primitive, `SliceColumns` — the inverse of `ConcatColumns`, for cutting
+a wide projection into per-head slices. Everything else composed from what the graph networks
+already needed:
+
+| Layer | Built from |
+|---|---|
+| Layer normalisation | `Sum(axis)`, `Reshape`, `Sqrt`, broadcast arithmetic |
+| Row softmax | `Exp`, `Sum(axis)`, a detached row maximum |
+| GELU | `Tanh`, `Pow` |
+| Multi-head attention | `MatMul`, `Transpose`, `SliceColumns`, `ConcatColumns` |
+| Embedding lookup | `Gather` — so a repeated token accumulates both occurrences' gradient |
+
+The layer-norm and attention-softmax backward passes are the two most commonly got wrong by hand;
+neither was written down at all. Every layer is checked against central finite differences, and the
+tape version reproduces the forward-only implementation to 1e-10, so the architecture is provably
+unchanged.
+
+**Scope is unchanged.** This does not make the library a deep learning framework and does not
+produce pretrained weights — see *Non-goals*. A model trained here learns from the corpus it is
+given, and for a small labelled set TF-IDF plus a linear model remains the better baseline. What
+changed is that the architecture is trainable at all.
 
 ### Distributed training
 Data-parallel training across processes for the tree ensembles and GNNs, which are the two places
@@ -196,7 +336,7 @@ via WAIC and LOO.
 
 These are not versioned; they run alongside everything above.
 
-- **Test coverage.** 458 tests today. Every bug found gets a regression test — that is how the
+- **Test coverage.** 541 tests today. Every bug found gets a regression test — that is how the
   memory-mapped CSV page-padding bug and the directed-graph connectivity bug are now covered.
   Where a fast path replaces a simple one, the simple one stays as the reference it is checked
   against, as `SvdJacobi` and `SymmetricEigenJacobi` now do.
@@ -232,3 +372,4 @@ Worth stating so the scope stays legible:
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*
+

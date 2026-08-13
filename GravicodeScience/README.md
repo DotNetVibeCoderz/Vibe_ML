@@ -1,10 +1,10 @@
-# Gravicode.Science
+?# Gravicode.Science
 
 A data science and AI ecosystem for **.NET 10** — six libraries that mirror the Python stack,
 each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
-[![tests](https://img.shields.io/badge/tests-400%20passing-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-541%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
 | Library | Python analogue | Focus |
@@ -54,7 +54,7 @@ samples/      six console apps, each printing real results
 notebooks/    six .NET Interactive notebooks with charts
 benchmarks/   six BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        458 tests
+tests/        541 tests
 tools/        ScienceAppGen — an IDE that builds apps from a prompt
 docs/         English, with Bahasa Indonesia in docs/id/
 ```
@@ -133,11 +133,14 @@ The first row used to read *5–140×*. Two v0.2 changes moved it:
   extra passes over memory to satisfy a lambda capture. Removing them made it **3× faster** and
   put it *ahead* of NumPy.
 
-The split is not random. Wherever an operation bottoms out in decades-tuned Fortran, Python wins
-and this library does not pretend otherwise — **BLAS/LAPACK interop is the top roadmap item**.
-Wherever the work is a tight scalar loop that cannot be vectorised into one library call, a
-JIT-compiled language wins outright, and that is most of graph analytics, sampling and text
-processing.
+The split is not random. Wherever an operation bottoms out in decades-tuned Fortran, Python wins,
+and wherever the work is a tight scalar loop that cannot be vectorised into one library call, a
+JIT-compiled language wins outright — that is most of graph analytics, sampling and text processing.
+
+**Those figures are the managed path.** If the machine has OpenBLAS or MKL, `NativeBlas` and
+`NativeLapack` find it and the first row changes completely: matmul reaches **parity with NumPy**
+and QR goes from 15× behind to 1.3×. Nothing native is bundled, and nothing breaks without it. Both
+configurations are reported in [benchmarks.md](docs/benchmarks.md#does-a-native-blas-change-these-numbers).
 
 > The comparison paid for itself immediately: it exposed an **O(n²) decision-tree split** that made
 > the random-forest benchmark run for 83 minutes without finishing. Fixed, it fits in 1.9 s — and
@@ -196,3 +199,4 @@ MIT.
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*
+

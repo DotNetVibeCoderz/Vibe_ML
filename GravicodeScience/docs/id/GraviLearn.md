@@ -231,6 +231,45 @@ var snapshot = ModelPersistence.Load("model.json");
 Parameter ditulis eksplisit sebagai JSON, bukan dengan menserialisasi grafik objek, sehingga model
 tersimpan dapat diperiksa dan dibandingkan, dan tidak ada deserialisasi biner yang terlibat.
 
+### Mengekspor ke ONNX
+
+Untuk melayani model di luar .NET, pipeline yang sudah dilatih bisa ditulis sebagai ONNX:
+
+```csharp
+OnnxExport.Supports(pipeline);          // periksa dulu sebelum mencoba
+OnnxExport.Save(pipeline, "model.onnx", features: 4);
+```
+
+```python
+import onnxruntime as ort
+session = ort.InferenceSession("model.onnx")
+session.run(None, {"input": x.astype("float32")})
+```
+
+**Yang bisa diekspor.** Scaler, PCA, dan model linear — setiap langkah yang berupa *pemetaan afin*,
+dan itulah sebabnya seluruh pipeline runtuh menjadi segelintir operator inti ONNX (`Sub`, `Div`,
+`MatMul`, `Add`, `ArgMax`). Operator inti dipakai, bukan himpunan `ai.onnx.ml`, karena setiap
+runtime mengimplementasikannya.
+
+**Yang tidak bisa.** Decision tree, forest, atau k-nearest-neighbour bukan pemetaan afin, dan
+`Save` melempar exception alih-alih memancarkan hampiran. Model yang dimuat mulus tetapi
+memprediksi salah lebih buruk daripada model yang menolak diekspor.
+
+Dua detail yang mudah terbalik dan menghasilkan model yang tampak sah tetapi salah:
+
+- Dimensi batch ditulis secara **simbolik**, sehingga model hasil ekspor menerima berapa pun
+  jumlah barisnya. Memakukannya ke jumlah baris data latih adalah bug ekspor yang umum dan membuat
+  modelnya tak berguna untuk satu baris yang justru dikirim endpoint pelayanan.
+- Komponen PCA disimpan **tertranspos**, karena graf mengalikan baris `x` dengannya.
+
+Semuanya ditulis sebagai `float32`: runtime ONNX mendukungnya secara universal dan `float64` hanya
+sebagian. Klasifikasi cocok persis; regresi cocok sampai sekitar **1e-6** relatif — presisi tunggal
+sedang bekerja sebagaimana mestinya.
+
+> Diverifikasi terhadap tooling sungguhan, bukan terhadap pembaca milik library ini sendiri:
+> `onnx.checker` memastikan grafnya valid, dan **onnxruntime** Python mereproduksi prediksi .NET —
+> 150/150 label pada pipeline Iris, dan selisih maksimum 5,9e-07 pada pipeline regresi.
+
 ## Kesalahan yang sering terjadi
 
 | Gejala | Penyebab |

@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 458 passing, 0 failing
+**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 541 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -11,11 +11,11 @@ Roadmap: [PLAN.md](PLAN.md)
 | Area | Status | Notes |
 |---|---|---|
 | Solution and build | ✅ Complete | 24 projects, central package management, Release build clean |
-| GraviNum | ✅ Complete | 134 tests |
+| GraviNum | ✅ Complete | 188 tests |
 | GraviFrame | ✅ Complete | 56 tests |
-| GraviLearn | ✅ Complete | 70 tests |
-| GraviText | ✅ Complete | 74 tests |
-| GraviGraph | ✅ Complete | 53 tests |
+| GraviLearn | ✅ Complete | 76 tests |
+| GraviText | ✅ Complete | 88 tests |
+| GraviGraph | ✅ Complete | 62 tests |
 | GraviProb | ✅ Complete | 71 tests |
 | Sample apps | ✅ Complete | 6 apps, all run end to end |
 | Notebooks | ✅ Complete | 6 notebooks, JSON validated |
@@ -28,7 +28,7 @@ Roadmap: [PLAN.md](PLAN.md)
 
 ## Libraries
 
-### GraviNum — 134 tests
+### GraviNum — 188 tests
 
 - [x] `NdArray` with shape, strides and offset; views for reshape, transpose, slice
 - [x] Slicing with index, range, step and reverse selectors
@@ -41,8 +41,13 @@ Roadmap: [PLAN.md](PLAN.md)
 - [x] `Statistics`: moments, quantiles, axis reductions, correlation, covariance, histogram
 - [x] `SparseMatrix` CSR with builder, transpose, SpMV and SpMM
 - [x] IO: CSV, JSON, binary `.gnb`, memory-mapped arrays
-- [x] Compute backends: CPU (SIMD + TPL) and GPU (ILGPU)
+- [x] Compute backends: CPU (SIMD + TPL), GPU (ILGPU), and an optional native BLAS/LAPACK when the machine has one
+- [x] Native `dgesv`, `dgeqrf`/`dorgqr`, `dgesvd`, `dsyev`, `dgetrf`, `dpotrf` — every factorisation has a native path
+- [x] Packed cache-blocked matrix product, for machines without a BLAS
+- [x] `Io.OnnxReader` — dependency-free ONNX weight import
+- [x] `Single.SingleKernels` — single-precision prototype for the two hot kernels
 - [x] Reverse-mode autodiff: `Tensor` tape, broadcasting-aware gradients, `GradientCheck`
+- [x] Graph-shaped tape ops: `SparseMatMul`, `Gather`, `SegmentSum`, `ConcatColumns`, `LeakyRelu`, masked `SoftmaxCrossEntropy`
 
 **Performance note.** `LinAlg.Dot` was rewritten during development from a per-row `Axpy` helper
 to four-row register blocking with an inlined SIMD loop: **0.62 → 24.5 GFLOP/s** at 512×512, with
@@ -75,7 +80,7 @@ against — two unrelated routes to the same factorisation.
 - [x] Calendar resampling at six frequencies
 - [x] Describe, correlation matrix, GraviNum interop
 
-### GraviLearn — 70 tests
+### GraviLearn — 76 tests
 
 - [x] Scalers: standard, min-max, robust, normalizer
 - [x] Imputation, label and one-hot encoding, polynomial features
@@ -91,8 +96,9 @@ against — two unrelated routes to the same factorisation.
 - [x] Train/test split, k-fold, stratified k-fold, grid search
 - [x] Dataset loaders and generators
 - [x] JSON model persistence
+- [x] `OnnxExport` — writes a fitted affine pipeline as ONNX, verified against Python's onnxruntime
 
-### GraviText — 74 tests
+### GraviText — 88 tests
 
 - [x] Whitespace, regex, character and WordPiece tokenizers; sentence splitter
 - [x] WordPiece vocabulary training
@@ -105,13 +111,17 @@ against — two unrelated routes to the same factorisation.
 - [x] GloVe
 - [x] Common-component removal for embeddings
 - [x] Transformer: multi-head attention, layer norm, GELU feed-forward, residuals, encoder stack
+- [x] `TransformerTape` — the same encoder on the autodiff tape, every layer gradient-checked
+- [x] `TransformerClassifier` — trains the encoder end to end on labelled text
 - [x] Task pipelines: sentiment (lexicon and supervised), classification, NER, TextRank summariser, keywords
 
 ⚠️ **No pretrained weights.** Documented at the top of [GraviText.md](docs/GraviText.md) and printed
-by the sample at runtime.
+by the sample at runtime. The architecture can now be *trained* on your own labelled text via
+`TransformerClassifier`; that is not the same as shipping BERT, and TF-IDF plus a linear model
+remains the better baseline on a small dataset.
 ⚠️ **NER is rule-based.** Documented in the same places.
 
-### GraviGraph — 53 tests
+### GraviGraph — 62 tests
 
 - [x] Adjacency-list graph, directed and undirected, with node features and labels
 - [x] Sparse and dense adjacency, normalised propagation matrix, Laplacian
@@ -124,7 +134,9 @@ by the sample at runtime.
 - [x] Label propagation and modularity
 - [x] Random walks: uniform and node2vec-biased
 - [x] DeepWalk and node2vec
-- [x] GCN, GraphSAGE and GAT — all fully trained with hand-derived gradients, GAT including through the attention softmax
+- [x] GCN, GraphSAGE and GAT all trained on the autodiff tape — forward pass only, no hand-derived gradients
+- [x] GAT's attention softmax composed from `Gather`/`SegmentSum`, which are adjoints of each other
+- [x] `GnnTape` layer helpers and `TapeAdam`, public so a new architecture needs no library change
 
 ### GraviProb — 71 tests
 
@@ -166,6 +178,7 @@ Each is now covered by a regression test.
 | Erf inaccurate beyond ~1e-5 | Wrong partial denominators in the continued fraction | Corrected, with a wider series crossover |
 | **New QL eigen returned unsorted eigenvalues** | The iteration deflates blocks as they converge, which has nothing to do with magnitude; the wrapper assumed ascending order | Sort explicitly, carrying the eigenvector columns along. Caught by checking against the Jacobi reference — `A V = V Λ` still passed, so only the cross-check found it |
 | **Element-wise parallel path copied its own inputs** | `RunBinaryContiguous` called `ToArray()` on both operands and allocated a third array for the result, because a `Span<T>` cannot cross a lambda closure — three extra passes over memory per operation | Pin the buffers and hand the workers pointers. **3.06× faster** on a 1M add (7.23 → 2.36 ms), bit-identical results, and element-wise arithmetic moved from *Python 2–3×* to *.NET 1.8×*. `Unary` had no parallel path at all and gained one |
+| **The GCN's hand-derived gradient was ~40% wrong** | The backward pass omitted the dropout mask on the hidden layer, so with dropout active it differed from the true gradient by 4.06e-01 relative. It had been wrong since the layer was written, and the model still trained to a plausible 71% on Cora — which is why review never caught it | Put GCN and GraphSAGE on the autodiff tape: the forward pass is written once and `Backward()` derives the rest. Pinned by `GnnGradientTests`, which checks both against central finite differences with and without dropout. Corrected accuracy is 69.3% |
 | **Gradient-based sampling was unusably slow on real datasets** | The tape built a few nodes *per observation*, so a 200-row model put thousands of nodes on the graph for every gradient — and a gradient is evaluated at every leapfrog step of every iteration of every chain | Vectorise each likelihood over the whole dataset, broadcasting the scalar parameters against the data vector. Graph size no longer depends on the data. The GraviProb suite fell from **34 s to 5 s** |
 
 ---
@@ -178,7 +191,18 @@ Each is now covered by a regression test.
 | Digits, scaler → PCA(30) → kNN(3) | ~98% | 97.96% |
 | Titanic random forest | 0.78–0.83 published | above 0.75 required, passes |
 | Cora largest weak component | 2,485 nodes | 2,485 |
-| Cora GCN vs 30.2% baseline | ~81% published | 71.2% |
+| Cora GCN vs 30.2% baseline | ~81% published | 69.3% with the corrected gradient (was 71.2% with the buggy one) |
+| Cora GraphSAGE / GAT, same split | — | 70.3% / **72.1%** — attention ahead, as expected |
+| GCN, GraphSAGE and GAT gradients vs finite differences | agreement to ~1e-6 | passes, including through the attention softmax |
+| GAT attention rows sum to 1 | exactly 1 | within 3.3e-16 |
+| Transformer tape vs the forward-only encoder | identical architecture | agrees to 1e-10 |
+| Transformer layer gradients vs finite differences | agreement to ~1e-6 | passes, layer norm and attention softmax included |
+| Native BLAS product vs the managed kernel | identical to rounding | agrees to 1e-13 |
+| Native LAPACK factorisations vs their defining property | `A=QR`, `A V = V Λ`, `A x = b` | all agree to ~1e-14 |
+| Packed product vs a naive triple loop | exact | agrees to 5e-14 |
+| ONNX reader vs files written by the official Python library | exact | all 5 initializer types read correctly |
+| ONNX export vs Python onnxruntime | same predictions | 150/150 labels; 5.9e-07 on regression |
+| Single-precision 1000-cube product vs double | float32 accuracy | 1.3e-6 relative |
 | Coin posterior mean vs exact conjugate | 0.623762 | within 0.002 |
 | HMC and NUTS vs the same exact posterior | 0.623762 | within 0.01, mean and sd |
 | Autodiff gradients vs central differences | agreement to ~1e-6 | passes on 14 functions |
@@ -194,8 +218,9 @@ Each is now covered by a regression test.
    provided.
 2. **NER is rule-based**, so it misses entities outside its gazetteers and trigger patterns.
 3. **GPU is opt-in and float64-limited.** On integrated hardware it is slower than the CPU.
-4. **Cora GCN reaches 71%, not the published 81%.** No learning-rate schedule, no early stopping,
-   and 60 epochs.
+4. **Cora GCN reaches 69%, not the published 81%.** No learning-rate schedule, no early stopping,
+   and 60 epochs. The gradient itself is now verified against finite differences, so the gap is
+   training procedure rather than correctness.
 5. **DBSCAN and agglomerative clustering have no out-of-sample prediction.** This is inherent to
    the algorithms; both throw rather than inventing an answer.
 6. **Betweenness centrality is `O(VE)`** even with Brandes' algorithm.
@@ -206,17 +231,19 @@ Each is now covered by a regression test.
 8. **A likelihood built through `DistributionSpec.From` has no differentiable form**, because the
    resolver is an opaque function of doubles. Such models report `IsDifferentiable == false` and
    the gradient samplers refuse rather than guessing. Use `FromTensor` or the named factories.
-9. **GNN and transformer layers still carry hand-derived gradients.** The tape now exists but has
-   not been applied to them.
+9. **`TransformerModel` computes a forward pass only and cannot be trained.** It never carried
+   gradients — earlier notes here claiming otherwise were wrong. Use `TransformerClassifier` for
+   the trainable version; `TransformerModel` remains the right choice for running a reference
+   architecture with loaded weights.
 
 ---
 
 ## Next
 
-See [PLAN.md](PLAN.md). The nearest items are putting the GNN and transformer layers on the
-autodiff tape — now unblocked, and the regime where reverse mode is unambiguously right, since a
-GNN forward pass is a few large matrix operations rather than thousands of scalar ones — then
-BLAS/LAPACK interop, a single-precision path, and ONNX import.
+See [PLAN.md](PLAN.md). Every factorisation now has a native path when a LAPACK is present, and
+ONNX works in both directions. The nearest remaining item is the generic `NdArray<T>` rewrite,
+which the single-precision prototype now says is worth doing with numbers behind it — and which
+remains the largest single change on the roadmap.
 
 ---
 

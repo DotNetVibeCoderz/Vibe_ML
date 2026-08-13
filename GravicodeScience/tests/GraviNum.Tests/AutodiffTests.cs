@@ -141,6 +141,133 @@ public class AutodiffTests
         Assert.True(reshaped.Passed(1e-6), $"reshape: {reshaped}");
     }
 
+    // ---------------------------------------------------------------- GNN building blocks
+
+    [Fact]
+    public void SparseMatMulGradient_AgreesWithFiniteDifferences()
+    {
+        // A deliberately asymmetric sparse matrix: if the backward rule used A instead of A^T,
+        // a symmetric one would hide the mistake completely.
+        var builder = new SparseBuilder(4, 4);
+        builder.Add(0, 1, 2.0);
+        builder.Add(1, 0, -1.5);
+        builder.Add(1, 3, 0.5);
+        builder.Add(2, 2, 3.0);
+        builder.Add(3, 0, 1.0);
+        var a = builder.Build();
+
+        var rng = new GraviRandom(31);
+        var weights = Tensor.Constant(rng.StandardNormal(4, 2));
+
+        var result = GradientCheck.Check(
+            x => (TensorOps.SparseMatMul(a, x) * weights).Sum(),
+            rng.StandardNormal(4, 2));
+
+        Assert.True(result.Passed(1e-6), result.ToString());
+    }
+
+    [Fact]
+    public void ConcatColumnsGradient_RoutesEachHalfBackToItsOwnOperand()
+    {
+        var left = Tensor.Parameter(NdArray.FromArray(new double[,] { { 1.0, 2.0 }, { 3.0, 4.0 } }));
+        var right = Tensor.Parameter(NdArray.FromArray(new double[,] { { 5.0 }, { 6.0 } }));
+
+        // Weight every output column differently, so a backward pass that mixed up the split
+        // would produce visibly wrong numbers rather than a plausible average.
+        var weights = Tensor.Constant(NdArray.FromArray(new double[,] { { 10.0, 20.0, 30.0 }, { 40.0, 50.0, 60.0 } }));
+        (TensorOps.ConcatColumns(left, right) * weights).Sum().Backward();
+
+        Assert.Equal([2, 3], TensorOps.ConcatColumns(left, right).Shape);
+
+        Assert.Equal(10.0, left.Gradient![0, 0], 12);
+        Assert.Equal(20.0, left.Gradient![0, 1], 12);
+        Assert.Equal(40.0, left.Gradient![1, 0], 12);
+        Assert.Equal(50.0, left.Gradient![1, 1], 12);
+
+        Assert.Equal(30.0, right.Gradient![0, 0], 12);
+        Assert.Equal(60.0, right.Gradient![1, 0], 12);
+    }
+
+    [Fact]
+    public void ConcatColumnsGradient_AgreesWithFiniteDifferences()
+    {
+        // Everything the function closes over is drawn once, outside it. GradientCheck evaluates
+        // f many times, so a lambda that draws its own randomness is not the same function twice
+        // and the finite differences measure noise.
+        var rng = new GraviRandom(41);
+        var other = Tensor.Constant(rng.StandardNormal(3, 2));
+        var projection = Tensor.Constant(rng.StandardNormal(4, 4)).T();
+        var weights = Tensor.Constant(rng.StandardNormal(3, 4));
+
+        var result = GradientCheck.Check(
+            a => (TensorOps.ConcatColumns(a, other).MatMul(projection) * weights).Sum(),
+            rng.StandardNormal(3, 2));
+
+        Assert.True(result.Passed(1e-6), result.ToString());
+    }
+
+    [Fact]
+    public void SoftmaxCrossEntropyGradient_AgreesWithFiniteDifferences()
+    {
+        int[] labels = [2, 0, 1, 1, 0];
+        int[] mask = [0, 2, 4];
+
+        var rng = new GraviRandom(37);
+        var result = GradientCheck.Check(
+            logits => TensorOps.SoftmaxCrossEntropy(logits, labels, mask),
+            rng.StandardNormal(5, 3));
+
+        Assert.True(result.Passed(1e-6), result.ToString());
+    }
+
+    [Fact]
+    public void SoftmaxCrossEntropy_IgnoresRowsOutsideTheMask()
+    {
+        int[] labels = [0, 1, 2];
+        int[] mask = [0, 2];
+
+        var logits = Tensor.Parameter(NdArray.FromArray(new double[,]
+        {
+            { 2.0, 0.1, 0.1 },
+            { 0.0, 5.0, 0.0 },   // unmasked: contributes nothing, gets no gradient
+            { 0.1, 0.1, 2.0 },
+        }));
+
+        TensorOps.SoftmaxCrossEntropy(logits, labels, mask).Backward();
+
+        for (var c = 0; c < 3; c++)
+            Assert.Equal(0.0, logits.Gradient![1, c], 12);
+
+        // The masked rows do get one, and each row's gradient sums to zero because softmax
+        // probabilities and the one-hot target both sum to one.
+        for (var i = 0; i < 3; i += 2)
+        {
+            var rowSum = 0.0;
+            for (var c = 0; c < 3; c++) rowSum += logits.Gradient![i, c];
+            Assert.Equal(0.0, rowSum, 12);
+        }
+    }
+
+    [Fact]
+    public void SoftmaxCrossEntropy_SurvivesLogitsThatWouldOverflowExp()
+    {
+        // exp(1000) is infinity. Shifting out the row maximum is what keeps this finite.
+        var logits = Tensor.Parameter(NdArray.FromArray(new double[,] { { 1000.0, 1002.0 } }));
+        var loss = TensorOps.SoftmaxCrossEntropy(logits, [1], [0]);
+        loss.Backward();
+
+        Assert.True(double.IsFinite(loss.Item), "loss overflowed");
+        Assert.Equal(Math.Log(1 + Math.Exp(-2.0)), loss.Item, 10);
+        Assert.True(double.IsFinite(logits.Gradient![0, 0]));
+    }
+
+    [Fact]
+    public void SoftmaxCrossEntropy_OnAConfidentCorrectPredictionIsNearlyZero()
+    {
+        var logits = Tensor.Constant(NdArray.FromArray(new double[,] { { 20.0, 0.0, 0.0 } }));
+        Assert.True(TensorOps.SoftmaxCrossEntropy(logits, [0], [0]).Item < 1e-8);
+    }
+
     // ---------------------------------------------------------------- graph structure
 
     [Fact]

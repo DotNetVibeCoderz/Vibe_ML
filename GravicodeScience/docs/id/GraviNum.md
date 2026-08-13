@@ -146,6 +146,145 @@ tridiagonalisasi lalu iterasi QL implisit dengan pergeseran Wilkinson. `SvdJacob
 ada yang berubah — jauh lebih lambat, tetapi lewat jalan yang sama sekali berbeda menuju jawaban
 yang sama, dan justru itulah yang membuatnya berguna sebagai rujukan pembanding dalam pengujian.
 
+## Mempercepat
+
+Tiga jalur opsional berada di balik `LinAlg.Dot`, dipilih otomatis. Semuanya diperiksa terhadap
+kernel terkelola, yang tetap ada sebagai rujukan.
+
+### BLAS native, bila mesin punya
+
+```csharp
+using Gravicode.Science.GraviNum.Compute;
+
+NativeBlas.Describe();      // apa yang ditemukan, atau "none found"
+NativeBlas.IsAvailable;
+NativeBlas.Enabled = false; // paksa jalur terkelola, untuk pembanding
+```
+
+**Tidak ada yang dibundel.** BLAS tersetel adalah binari besar dan spesifik platform; mengirim satu
+per runtime identifier akan membebani setiap pengguna dengan megabyte yang tidak mereka minta. Jadi
+ini mencari yang sudah ada di mesin — OpenBLAS, MKL, Accelerate — dan diam-diam tetap memakai kernel
+terkelola bila tidak menemukannya. Arahkan ke build tertentu lewat variabel lingkungan
+`GRAVICODE_BLAS`.
+
+Diukur dengan OpenBLAS yang terbundel di dalam numpy:
+
+| Ukuran | Terkelola | Native | |
+|---:|---:|---:|---|
+| 256 | 1,28 ms | 0,36 ms | **3,6×** |
+| 512 | 9,05 ms | 1,90 ms | **4,8×** |
+| 1024 | 74,2 ms | 18,7 ms | **4,0×** |
+
+Kedua lebar integer ditangani. OpenBLAS standar mengekspor `cblas_dgemm` dengan indeks 32-bit;
+build ILP64 mengekspor `cblas_dgemm64_` dengan 64-bit. Keduanya tidak bisa dipertukarkan — memanggil
+yang satu lewat signature yang lain membaca byte yang salah sebagai dimensi — sehingga lebarnya
+dideteksi dari simbol mana yang berhasil di-resolve. numpy dan scipy juga mengganti nama setiap
+simbol dengan prefiks `scipy_` agar tidak bentrok; itu ikut ditangani, dan biasanya itulah satu-satunya
+BLAS di mesin data science.
+
+### Faktorisasi, bila ada LAPACK
+
+`NativeLapack` mengikat `dgesv`, `dgeqrf`/`dorgqr`, `dgesvd`, `dsyev`, `dgetrf`, dan `dpotrf` lewat
+probe yang sama, sehingga `LinAlg.Solve`, `LinAlg.Inverse`, `Decomposition.Lu`, `Cholesky`, `Qr`,
+`Svd`, `SingularValues`, dan `SymmetricEigen` semuanya memakainya.
+
+| | Terkelola | Native | |
+|---|---:|---:|---|
+| solve, 512×512, banyak RHS | 887 ms | 17,4 ms | **51×** |
+| QR, 256×256 | 151 ms | 10,7 ms | **14×** |
+| LU, 256×256 | 77,9 ms | 4,5 ms | **17×** |
+| Cholesky, 256×256 | 14,4 ms | 1,6 ms | **9×** |
+| Eigen simetris, 256×256 | 120 ms | 45,6 ms | 2,6× |
+| SVD, 256×256 | 331 ms | 176 ms | 1,9× |
+
+Yang diikat adalah antarmuka **LAPACKE**, bukan Fortran: LAPACKE menerima argumen layout sehingga
+matriks row-major bisa langsung dilewatkan, sedangkan entry point Fortran hanya column-major dan
+setiap panggilan akan butuh transpose masuk dan transpose keluar.
+
+Empat konvensi berbeda dan dikonversi, bukan diasumsikan:
+
+- Nilai eigen kembali **menaik**; library ini menjanjikan menurun.
+- `dgesvd` mengembalikan `V^T`; `SvdResult` membawa `V`.
+- Dengan layout row-major, LAPACKE sudah menaruh vektor eigen ke-*j* di kolom ke-*j*.
+  Mentransposnya — seperti disarankan kebiasaan Fortran — merusak `A V = V Λ` sementara nilai
+  eigennya tetap benar sempurna, persis jenis hasil setengah-benar yang lolos dari uji yang lemah.
+- `dgetrf` melaporkan **urutan tukar baris**, bukan permutasi jadi: pada langkah *i*, baris *i*
+  ditukar dengan baris `ipiv[i]`. `LuResult.Pivot` adalah permutasinya sendiri, jadi tukarannya
+  diputar ulang. Membaca yang satu sebagai yang lain menghasilkan L dan U yang tampak sah tetapi
+  merekonstruksi matriks yang salah.
+
+`dpotrf` juga hanya menulis segitiga yang diminta dan meninggalkan sisanya berisi masukan, sehingga
+pemanggil harus membersihkannya; matriks yang bukan definit positif kembali sebagai `info` positif
+dan diubah menjadi exception yang sama dengan yang dilempar rutin terkelola.
+
+> Setiap jalur native diperiksa terhadap *sifat pendefinisi* faktorisasinya — `A = QR`,
+> `A V = V Λ`, `A x = b` yang memulihkan `x` yang diketahui — bukan terhadap rutin terkelola. Dua
+> implementasi yang sepakat hanya menunjukkan keduanya berbagi asumsi yang sama.
+
+### Kernel packed, bila tidak ada BLAS
+
+`LinAlg.Dot` mengemas kedua operand ke buffer kontigu per petak di atas kira-kira delapan juta
+multiply-add. Penyalinannya berbiaya satu lintasan dan terbayar berkali-kali, karena panel yang
+sudah dikemas lalu dibaca oleh setiap blok baris alih-alih diambil ulang secara strided dari memori
+utama.
+
+| Ukuran | Sederhana | Packed | |
+|---:|---:|---:|---|
+| 256 | 1,45 ms | 0,88 ms | 1,65× |
+| 1024 | 83,9 ms | 42,7 ms | 1,96× |
+| 2048 | 759 ms | 365 ms | **2,08×** |
+
+Di bawah ambang ia kalah — packing adalah biaya tetap — sehingga ambangnya disetel konservatif di
+atas wilayah yang berisik. `PackedMatMul.Enabled = false` memaksa kernel sederhana.
+
+> Mengukur ini memberi pelajaran yang layak diulang: satu run awal menunjukkan kubus 192 memakan
+> waktu *delapan kali lebih lama* daripada kubus 224 — mustahil secara fisik. Penyebabnya tiered
+> JIT: ukuran-ukuran awal masih berjalan tanpa optimasi. Dua kali pemanasan tidak cukup; metode
+> panas baru dikompilasi ulang setelah sekitar tiga puluh panggilan.
+
+### Presisi tunggal — sebuah prototipe
+
+`Single.SingleKernels` berisi versi `float` dari dua kernel yang mendominasi waktu jalan. Ini
+**alat ukur, bukan API kedua**: membuat `NdArray` generik atas `INumber<T>` akan menyentuh keenam
+library, dan itu bukan perubahan yang layak dimulai tanpa tahu imbalannya.
+
+| | double | float | |
+|---|---:|---:|---|
+| penjumlahan elemen, 1 juta | 2,24 ms | 1,07 ms | **2,09×** |
+| penjumlahan elemen, 10 juta | 24,9 ms | 11,7 ms | **2,13×** |
+| perkalian kubus 1024 | 94,9 ms | 52,2 ms | 1,82× |
+
+Kedua peningkatan itu berbeda penyebabnya, dan karena itu berbeda besarnya. `Vector<float>` menampung
+delapan lane melawan empat milik `Vector<double>`, yang menolong kerja compute-bound; dan setiap
+nilai berukuran separuh, yang menolong kerja bandwidth-bound. Aritmetika elemen bersifat
+bandwidth-bound dan mendarat rapi di 2,1×.
+
+Biayanya: perkalian kubus 1000 menghasilkan galat relatif **1,3e-6** — float32 melakukan apa yang
+memang dilakukan float32, sekitar tujuh digit desimal melawan enam belas milik double.
+
+## Membaca bobot ONNX
+
+```csharp
+using Gravicode.Science.GraviNum.Io;
+
+var weights = OnnxReader.ReadWeightsByName("model.onnx");
+weights["encoder.weight"].ToNdArray();
+```
+
+Ini pembaca bobot, bukan runtime: ia mengekstrak *initializer* graf — tensor konstan bernama yang
+menyimpan parameter terlatih — dan berhenti di situ. Itulah bagian yang penting di sini, karena
+library ini punya lapisannya dan justru kekurangan angkanya.
+
+Bebas dependensi secara sengaja. ONNX Runtime adalah paket native berukuran besar, dan menariknya
+hanya untuk membaca beberapa array bukan pertukaran yang baik; yang dibutuhkan hanyalah format kawat
+protobuf, dan hanya segelintir field-nya. Float32, float64, float16, int8/16/32/64 semuanya
+di-decode dan dilebarkan ke `double`. Tensor yang tipenya tak bisa di-decode, atau yang datanya tidak
+cocok dengan bentuk yang dideklarasikan, **dilewati alih-alih ditebak** — mengembalikan angka salah
+secara diam-diam jauh lebih buruk daripada mengembalikan lebih sedikit angka.
+
+Diverifikasi terhadap berkas yang ditulis library `onnx` resmi Python, bukan terhadap fixture yang
+dibuat agar cocok dengan pembacanya.
+
 ## Diferensiasi otomatis
 
 `Gravicode.Science.GraviNum.Autodiff` adalah tape mode-mundur (reverse-mode). Tulis komputasi

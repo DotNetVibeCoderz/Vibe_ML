@@ -4,8 +4,10 @@
 
 > **Baca ini dulu.** Library ini tidak menyertakan bobot transformer terlatih. Forward pass
 > encoder-nya lengkap dan benar, tetapi `TransformerModel` yang baru dibuat diinisialisasi secara
-> acak, sehingga vektor keluarannya adalah derau berstruktur. Untuk makna semantik tanpa berkas
-> bobot, gunakan `Word2Vec` atau `TfidfVectorizer`, yang belajar dari korpus *Anda*. Lihat bagian
+> acak, sehingga vektor keluarannya adalah derau berstruktur. Ada dua jalan keluar: latih
+> arsitekturnya pada teks berlabel Anda sendiri dengan
+> [`TransformerClassifier`](#melatih-transformer), atau pakai `Word2Vec` / `TfidfVectorizer`, yang
+> belajar dari korpus Anda dan merupakan pilihan lebih baik untuk data kecil. Lihat bagian
 > [Transformer](#transformer) di bawah.
 
 Bahasa Inggris dan Bahasa Indonesia didukung sepenuhnya — daftar stop word, stemming, dan leksikon
@@ -181,6 +183,39 @@ perkalian titik tumbuh seiring lebar model, softmax jenuh, dan gradien lenyap.
 Pooling memakai **rata-rata** hidden state akhir, bukan vektor `[CLS]`, karena `[CLS]` baru membawa
 makna kalimat setelah model di-fine-tune untuk menaruhnya di sana.
 
+### Melatih transformer
+
+`TransformerModel` hanya menghitung forward pass, tidak lebih. Itulah sebabnya model baru tetap
+acak selamanya: tidak ada gradien, jadi tidak ada cara mengubah bobotnya. `TransformerClassifier`
+adalah arsitektur yang sama, dibangun di atas
+[tape autodiff](GraviNum.md#diferensiasi-otomatis), sehingga bobotnya bisa dilatih dengan teks
+berlabel Anda sendiri.
+
+```csharp
+var config = new TransformerConfig(vocabularySize: 5000, HiddenSize: 64, Layers: 2, Heads: 4,
+                                   IntermediateSize: 128, MaxPositions: 64);
+
+var model = new TransformerClassifier(config, seed: 42)
+    .Fit(dokumenTerTokenisasi, label, epochs: 20, learningRate: 0.005);
+
+model.Predict(tokenIds);
+model.Score(dokumenUji, labelUji);
+model.LossHistory;                       // rata-rata loss per epoch
+```
+
+Lapisannya tersedia terpisah untuk membangun hal lain — `TransformerTape.LayerNorm`,
+`MultiHeadAttention`, `EncoderLayer`, `Gelu`, `SoftmaxRows`, `Embed`, `MeanPool`. Semuanya tersusun
+dari operasi tape yang sudah ada untuk graph network; tidak satu pun butuh kernel khusus, jadi
+tidak satu pun butuh penurunan rumus sendiri. Periksa lapisan yang Anda tulis dengan
+`GradientCheck`.
+
+> **Ini bukan cara memperoleh BERT.** Model yang dilatih di sini hanya belajar dari korpus yang
+> Anda berikan, dan beberapa ratus dokumen tidak akan menghasilkan pemahaman bahasa yang umum —
+> yang bisa dihasilkan adalah klasifier khusus tugas. Untuk data berlabel kecil, `TfidfVectorizer`
+> yang diumpankan ke model linear tetap baseline yang lebih kuat dan jauh lebih murah, dan layak
+> dikalahkan lebih dulu sebelum beralih ke sini. Yang berubah adalah arsitekturnya kini bisa
+> dilatih sama sekali, bukan bahwa ia kini sudah terlatih.
+
 ## Pipeline tugas
 
 ### Sentimen
@@ -236,7 +271,7 @@ PageRank atas graf tumpang tindih kata isi. Ia tidak mungkin berhalusinasi.
 
 | Gejala | Penyebab |
 |---|---|
-| Vektor transformer tampak tak bermakna | Tidak ada bobot terlatih — lihat catatan di awal |
+| Vektor transformer tampak tak bermakna | Tidak ada bobot terlatih — lihat catatan di awal. `TransformerModel` tidak bisa dilatih; pakai `TransformerClassifier` |
 | Semua kemiripan kata ≈ 1,0 | Panggil `RemoveCommonComponent()` |
 | Stop word Indonesia tidak terbuang | Berikan `StopWords.Indonesian` atau `Bilingual` secara eksplisit |
 | Kosakata Word2Vec kosong | `minCount` di atas frekuensi korpus |

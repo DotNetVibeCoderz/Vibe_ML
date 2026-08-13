@@ -151,8 +151,53 @@ new GraphSage(hiddenSize: 16, epochs: 200).Train(graph, trainMask);
 new GraphAttentionNetwork(hiddenSize: 8, heads: 4, epochs: 200).Train(graph, trainMask);
 ```
 
-All three are **fully trained**, with hand-derived gradients — including through GAT's attention
-softmax, so its attention parameters are genuinely learned rather than treated as constants.
+All three are **fully trained**, and all three get their gradients from the
+[autodiff tape](GraviNum.md#automatic-differentiation): each layer is written forwards and the
+backward pass is derived from it. GAT's attention parameters are genuinely learned, including
+through the softmax over each node's incident edges — the one derivation in this library that was
+hardest to do by hand, and is now not done by hand at all.
+
+### Writing your own layer
+
+The tape is what makes a fourth architecture cheap: write the forward pass and the gradient
+follows.
+
+```csharp
+using Gravicode.Science.GraviGraph.Neural;
+using Gravicode.Science.GraviNum.Autodiff;
+
+var propagation = graph.ToSparseAdjacency(addSelfLoops: true, symmetricNormalize: true);
+
+var w = Tensor.Parameter(GnnMath.Glorot(features, classes, rng));
+var adam = new TapeAdam(w, weightDecay: 5e-4);
+
+for (var epoch = 0; epoch < 200; epoch++)
+{
+    var logits = GnnTape.Convolve(propagation, Tensor.Constant(x), w, bias);
+    var loss = TensorOps.SoftmaxCrossEntropy(logits, graph.NodeLabels, trainMask);
+
+    loss.Backward();      // no derivation anywhere
+    adam.Step(0.01);
+}
+```
+
+`GnnTape` supplies `Convolve`, `SageLayer`, `AttentionLayer`, `SegmentSoftmax`, `Dropout`,
+`MeanAggregator`, `EdgeList` and `Descend`. Underneath them sit the graph-shaped tape operations:
+`SparseMatMul` for message passing, `Gather` and `SegmentSum` for edge-level work, plus
+`ConcatColumns`, `LeakyRelu` and a masked `SoftmaxCrossEntropy`. Check any new gradient with
+`GradientCheck` before trusting it.
+
+`Gather` and `SegmentSum` are adjoints of one another — gathering forwards is summing backwards —
+which is why attention needs no bespoke kernel. `SegmentSoftmax` is *composed* from them rather
+than written as its own operation, so it inherits their verified gradients instead of needing the
+softmax Jacobian derived again.
+
+> **A hand-derived gradient was wrong for the entire life of the GCN.** The backward pass omitted
+> the dropout mask on the hidden layer, so with dropout active the gradient was about **40%**
+> off — and the model still trained to a plausible 71% on Cora, which is exactly why it went
+> unnoticed. The tape found it immediately, because a forward pass has nowhere to hide a missing
+> term. Test accuracy with the corrected gradient is 69.3%; the older, higher number came from
+> a broken gradient that happened to act as an odd regulariser.
 
 ### How they differ
 
@@ -175,9 +220,19 @@ Two layers is the usual depth. Each layer mixes in one more hop, and beyond abou
 node's representation converges toward the graph average — the over-smoothing problem.
 
 Training is transductive for GCN and GAT: the whole graph is seen every epoch, but the loss is
-computed only on the labelled nodes in `trainMask`. On Cora with 140 labelled papers (20 per
-class) this implementation reaches about 71% test accuracy against a 30.2% majority baseline;
-the published GCN figure is ~81%.
+computed only on the labelled nodes in `trainMask`. On Cora with 140 labelled papers (20 per class)
+and 60 epochs, against a 30.2% majority baseline:
+
+| | Test accuracy |
+|---|---:|
+| GCN | 69.3% |
+| GraphSAGE | 70.3% |
+| **GAT** | **72.1%** |
+
+The published GCN figure is ~81%. The remaining gap is the absent learning-rate schedule, no early
+stopping, and 60 epochs — not the gradient, which is now checked against finite differences.
+Attention earning its keep over a fixed degree normalisation is the expected ordering, and it is
+reassuring to see it after the move to the tape rather than before.
 
 ## Common mistakes
 

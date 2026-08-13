@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Gravicode.Science.GraviNum;
 using Gravicode.Science.GraviText.Tokenization;
 
@@ -431,6 +431,55 @@ public sealed class TransformerModel
         HasPretrainedWeights = true;
     }
 
+    /// <summary>
+    /// Loads embedding tables from an ONNX file exported by another framework.
+    /// </summary>
+    /// <param name="path">Path to a <c>.onnx</c> file.</param>
+    /// <param name="tokenEmbeddingName">
+    /// Name of the token embedding initializer. The default matches what HuggingFace exports for a
+    /// BERT-family model; other exporters name it differently, and
+    /// <see cref="Gravicode.Science.GraviNum.Io.OnnxReader.ReadWeightsByName"/> will list what a given file actually contains.
+    /// </param>
+    /// <param name="positionEmbeddingName">Name of the position embedding initializer.</param>
+    /// <remarks>
+    /// <para>
+    /// This is the route to weights that mean something. Everything else in this class is exact
+    /// given the right numbers; what it never had was the numbers. Export a trained model to ONNX
+    /// from PyTorch or HuggingFace and its embedding tables can be read straight in.
+    /// </para>
+    /// <para>
+    /// The shapes are checked rather than trusted. A weight file from a different architecture
+    /// would otherwise load silently and produce plausible nonsense.
+    /// </para>
+    /// </remarks>
+    public void LoadOnnxWeights(string path,
+        string tokenEmbeddingName = "bert.embeddings.word_embeddings.weight",
+        string positionEmbeddingName = "bert.embeddings.position_embeddings.weight")
+    {
+        var weights = Gravicode.Science.GraviNum.Io.OnnxReader.ReadWeightsByName(path);
+
+        if (!weights.TryGetValue(tokenEmbeddingName, out var tokens))
+            throw new InvalidDataException(
+                $"'{path}' has no initializer named '{tokenEmbeddingName}'. It contains: "
+                + string.Join(", ", weights.Keys.Take(12))
+                + (weights.Count > 12 ? $", and {weights.Count - 12} more" : ""));
+
+        if (tokens.Shape.Length != 2 || tokens.Shape[1] != Config.HiddenSize)
+            throw new InvalidDataException(
+                $"'{tokenEmbeddingName}' is [{string.Join("x", tokens.Shape)}], "
+                + $"but this model has hidden size {Config.HiddenSize}.");
+
+        TokenEmbeddings = tokens.ToNdArray();
+
+        if (weights.TryGetValue(positionEmbeddingName, out var positions)
+            && positions.Shape.Length == 2 && positions.Shape[1] == Config.HiddenSize)
+        {
+            PositionEmbeddings = positions.ToNdArray();
+        }
+
+        HasPretrainedWeights = true;
+    }
+
     /// <summary>Writes the embedding tables so a model can be reloaded later.</summary>
     public void SaveWeights(string path)
     {
@@ -449,3 +498,4 @@ public sealed class TransformerModel
         $"TransformerModel(hidden={Config.HiddenSize}, layers={Config.Layers}, heads={Config.Heads}, " +
         $"params~{Config.ParameterCount:N0}, pretrained={HasPretrainedWeights})";
 }
+

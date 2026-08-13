@@ -272,6 +272,55 @@ menjalankan urutan 10.000 langkah justru untuk menguji hal itu.
 Pertanyaan yang harus dijawab setiap library data science di .NET adalah bagaimana ia dibandingkan
 dengan NumPy, pandas, dan scikit-learn. Berikut jawabannya berdasarkan pengukuran, tanpa dipoles.
 
+### Apakah BLAS native mengubah angka-angka ini?
+
+**Ya, secara menentukan — dan setiap angka di bagian ini adalah jalur terkelola.**
+
+Ini perlu dinyatakan terang-terangan, karena inilah satu hal terbesar yang bisa membuat angka di
+sini tidak bisa direproduksi. `NativeBlas` dan `NativeLapack` mencari library yang sudah ada di
+mesin. Mesin bersih tidak punya, jadi perbandingan di bawah mengukur kernel terkelola. Mesin dengan
+OpenBLAS di path mengukur sesuatu yang sama sekali lain.
+
+Kedua konfigurasi, terhadap angka NumPy yang sama:
+
+| | Terkelola | Dengan OpenBLAS | NumPy | Native vs NumPy |
+|---|---:|---:|---:|---|
+| Perkalian matriks 512×512 | 8,6 ms | **2,3 ms** | 3,1 ms | **.NET 1,3×** |
+| QR, 256×256 | 151,2 ms | **10,7 ms** | 10,4 ms | seimbang |
+| Cholesky, 256×256 | 14,4 ms | **1,6 ms** | 1,2 ms | Python 1,3× |
+| LU, 256×256 | 77,9 ms | **4,5 ms** | 3,3 ms | Python 1,4× |
+| Eigen simetris, 256×256 | 119,7 ms | **45,6 ms** | 19,7 ms | Python 2,3× |
+| Invers matriks, 256×256 | 135,2 ms | **58,0 ms** | 9,9 ms | Python 5,9× |
+| SVD, 256×256 | 330,8 ms | **176,1 ms** | 27,1 ms | Python 6,5× |
+
+Dengan BLAS hadir, perkalian kubus 512 **lebih cepat daripada NumPy**, dan QR, LU, serta Cholesky
+semuanya berada dalam sekitar 40% darinya — tidak mengejutkan begitu disadari kedua ekosistem lalu
+memanggil OpenBLAS yang sama, dan yang tersisa hanyalah marshalling.
+
+Kini setiap rutin punya jalur native: `dgemm`, `dgesv`, `dgeqrf`/`dorgqr`, `dgesvd`, `dsyev`,
+`dgetrf`, `dpotrf`. SVD dan eigen tertinggal paling jauh karena library ini meminta faktorisasi
+penuh sementara benchmark NumPy memakai bentuk yang lebih murah.
+
+> **Satu catatan tentang `solve`.** Harness di atas melaporkannya nyaris tak berubah, dan itu
+> artefak pengukuran, bukan hasil: tiga ulangan tidak cukup memanaskan metode melewati tiered JIT.
+> Diukur dengan benar — kedua versi berselang-seling, 40 kali pemanasan, terbaik dari sebelas —
+> jalur native menang dari ukuran 64 ke atas: **3,9×** pada 256 dengan satu ruas kanan, dan
+> **14×** pada 256 / **51×** pada 512 saat menyelesaikan banyak sekaligus, yang persis bentuk
+> yang dipakai `Inverse`.
+
+**Jadi angka mana yang benar?** Keduanya — keduanya menjawab pertanyaan berbeda. Angka terkelola
+menyatakan apa yang dilakukan library ini sendirian, yang penting bagi deployment yang mengirim satu
+paket mandiri. Angka native menyatakan apa yang dilakukannya ketika mesin memang sudah disiapkan
+untuk kerja numerik, yang penting di workstation data science. Tidak ada yang merupakan angka "yang
+sebenarnya", dan mengutip salah satunya tanpa menyebut yang mana justru kesalahan yang nyata.
+
+Untuk mereproduksi keduanya, set atau kosongkan `GRAVICODE_BLAS`:
+
+```bash
+dotnet run --project benchmarks/comparison/Gravicode.Science.Comparison -c Release
+GRAVICODE_BLAS=/path/to/libopenblas.so dotnet run --project benchmarks/comparison/... -c Release
+```
+
 ### Cara menjalankan perbandingan
 
 ```bash

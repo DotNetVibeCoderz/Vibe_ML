@@ -111,6 +111,14 @@ public static class Decomposition
     {
         LinAlg.RequireSquare(a, nameof(Lu));
         var n = a.Shape[0];
+
+        if (Compute.NativeLapack.ShouldUse(n))
+        {
+            var packed = a.ToArray();
+            if (Compute.NativeLapack.Lu(packed, n, out var nativePivot, out var nativeSign) >= 0)
+                return Unpack(packed, n, nativePivot, nativeSign);
+        }
+
         var work = a.Copy();
         var pivot = new int[n];
         for (var i = 0; i < n; i++) pivot[i] = i;
@@ -145,13 +153,28 @@ public static class Decomposition
             }
         }
 
+        return Unpack(work.ToArray(), n, pivot, sign);
+    }
+
+    /// <summary>
+    /// Splits a combined LU array into its separate factors.
+    /// </summary>
+    /// <remarks>
+    /// Both paths produce the same packing — L below the diagonal with its unit diagonal implied,
+    /// U on and above — so they share this. LAPACK returns it that way because the compact form is
+    /// what its solve routines consume; this API hands back two matrices instead.
+    /// </remarks>
+    private static LuResult Unpack(double[] packed, int n, int[] pivot, double sign)
+    {
         var lower = NdArray.Eye(n);
         var upper = NdArray.Zeros(n, n);
+
         for (var i = 0; i < n; i++)
         {
-            for (var j = 0; j < i; j++) lower[i, j] = work[i, j];
-            for (var j = i; j < n; j++) upper[i, j] = work[i, j];
+            for (var j = 0; j < i; j++) lower[i, j] = packed[(long)i * n + j];
+            for (var j = i; j < n; j++) upper[i, j] = packed[(long)i * n + j];
         }
+
         return new LuResult(lower, upper, pivot, sign);
     }
 
@@ -164,6 +187,16 @@ public static class Decomposition
         if (a.Rank != 2) throw new ArgumentException("Qr expects a rank 2 array.");
         var m = a.Shape[0];
         var n = a.Shape[1];
+
+        // LAPACK returns the reduced factors directly, which is what the default asks for. The
+        // full form would need the reflectors expanded to m x m, so it stays on the managed path.
+        if (reduced && m >= n && Compute.NativeLapack.ShouldUse(Math.Min(m, n))
+            && Compute.NativeLapack.Qr(a.ToArray(), m, n, out var nq, out var nr) == 0)
+        {
+            var k = Math.Min(m, n);
+            return new QrResult(new NdArray(nq, m, k), new NdArray(nr, k, n));
+        }
+
         var r = a.Copy();
         var q = NdArray.Eye(m);
 
@@ -223,6 +256,29 @@ public static class Decomposition
     {
         LinAlg.RequireSquare(a, nameof(Cholesky));
         var n = a.Shape[0];
+
+        if (Compute.NativeLapack.ShouldUse(n))
+        {
+            var packed = a.ToArray();
+            var info = Compute.NativeLapack.Cholesky(packed, n);
+
+            if (info > 0)
+                throw new InvalidOperationException(
+                    $"Matrix is not positive definite (leading minor {info} is not).");
+
+            if (info == 0)
+            {
+                // LAPACK writes only the triangle it was asked for; the rest still holds the
+                // input, so it has to be cleared rather than left as it lies.
+                var factor = NdArray.Zeros(n, n);
+                for (var i = 0; i < n; i++)
+                    for (var j = 0; j <= i; j++)
+                        factor[i, j] = packed[(long)i * n + j];
+
+                return factor;
+            }
+        }
+
         var l = NdArray.Zeros(n, n);
 
         for (var i = 0; i < n; i++)
@@ -270,6 +326,24 @@ public static class Decomposition
 
         var rows = a.Shape[0];
         var cols = a.Shape[1];
+
+        if (Compute.NativeLapack.ShouldUse(Math.Min(rows, cols))
+            && Compute.NativeLapack.Svd(a.ToArray(), rows, cols, out var nu, out var ns, out var nvt) == 0)
+        {
+            // LAPACK returns the full m x m U and V^T, and values already descending. This API
+            // hands back the thin U and V, so the extra columns are dropped and V^T transposed.
+            var thinU = NdArray.Zeros(rows, cols);
+            for (var i = 0; i < rows; i++)
+                for (var j = 0; j < cols; j++)
+                    thinU[i, j] = nu[(long)i * rows + j];
+
+            var v = NdArray.Zeros(cols, cols);
+            for (var i = 0; i < cols; i++)
+                for (var j = 0; j < cols; j++)
+                    v[i, j] = nvt[(long)j * cols + i];
+
+            return new SvdResult(thinU, new NdArray(ns, cols), v);
+        }
 
         var work = a.ToArray();
         var uFlat = new double[rows * cols];
@@ -334,6 +408,11 @@ public static class Decomposition
         var tall = a.Shape[0] >= a.Shape[1] ? a : a.T.Copy();
         var rows = tall.Shape[0];
         var cols = tall.Shape[1];
+
+        // Neither factor is wanted, and LAPACK can skip accumulating both.
+        if (Compute.NativeLapack.ShouldUse(cols)
+            && Compute.NativeLapack.SingularValues(tall.ToArray(), rows, cols, out var native) == 0)
+            return new NdArray(native, cols);
 
         var sFlat = new double[cols];
         DecompositionKernels.GolubKahanSvd(tall.ToArray(), rows, cols, [], sFlat, [],
@@ -450,6 +529,25 @@ public static class Decomposition
         LinAlg.RequireSquare(a, nameof(SymmetricEigen));
         var n = a.Shape[0];
 
+        double[] z;
+        double[] d;
+
+        if (Compute.NativeLapack.ShouldUse(n))
+        {
+            z = a.ToArray();
+            if (Compute.NativeLapack.SymmetricEigen(z, n, out d) != 0)
+                return SymmetricEigenManaged(a, n);
+
+            // LAPACKE in row-major already presents eigenvector j in column j, so the layout
+            // matches the managed kernel's. What differs is the order: LAPACK returns ascending.
+            return SortDescending(z, d, n);
+        }
+
+        return SymmetricEigenManaged(a, n);
+    }
+
+    private static EigenResult SymmetricEigenManaged(NdArray a, int n)
+    {
         var z = a.ToArray();
         var d = new double[n];
         var e = new double[n];
@@ -457,8 +555,20 @@ public static class Decomposition
         DecompositionKernels.Tridiagonalize(z, d, e, n);
         DecompositionKernels.TridiagonalQl(d, e, z, n);
 
-        // The QL iteration deflates blocks in whatever order they converge, so the values arrive
-        // unordered; the public contract is descending.
+        return SortDescending(z, d, n);
+    }
+
+    /// <summary>
+    /// Orders eigenvalues descending, carrying their eigenvectors, and fixes each vector's sign.
+    /// </summary>
+    /// <remarks>
+    /// Shared by both paths so they are interchangeable. Neither source produces a defined order —
+    /// the QL iteration deflates blocks as they converge, LAPACK sorts ascending — and an
+    /// eigenvector is only defined up to sign, so pinning the largest-magnitude component positive
+    /// is what makes repeated runs, and the two implementations, agree.
+    /// </remarks>
+    private static EigenResult SortDescending(double[] z, double[] d, int n)
+    {
         var order = Enumerable.Range(0, n).OrderByDescending(i => d[i]).ToArray();
         var valuesOut = NdArray.Zeros(n);
         var vectorsOut = NdArray.Zeros(n, n);

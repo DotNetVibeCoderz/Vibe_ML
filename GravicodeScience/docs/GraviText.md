@@ -4,9 +4,10 @@
 
 > **Read this first.** No pretrained transformer weights ship with this library. The encoder's
 > forward pass is complete and correct, but a freshly constructed `TransformerModel` is randomly
-> initialised, so its output vectors are structured noise. For semantics without a weight file,
-> use `Word2Vec` or `TfidfVectorizer`, which learn from *your* corpus. See
-> [Transformers](#transformers) below.
+> initialised, so its output vectors are structured noise. Two ways out: train the architecture on
+> your own labelled text with [`TransformerClassifier`](#training-one), or use `Word2Vec` /
+> `TfidfVectorizer`, which learn from your corpus and are the better choice for a small dataset.
+> See [Transformers](#transformers) below.
 
 Both English and Bahasa Indonesia are supported throughout — stop words, stemming and the
 sentiment lexicon all ship in both.
@@ -178,6 +179,38 @@ cosmetic — without it dot products grow with width, the softmax saturates and 
 Pooling uses the **mean** of the final hidden states rather than the `[CLS]` vector, because
 `[CLS]` only carries sentence meaning after a model has been fine-tuned to put it there.
 
+### Training one
+
+`TransformerModel` computes a forward pass and nothing else. That is why a fresh one stays random
+for ever: there was no gradient, so there was no way to change a weight. `TransformerClassifier`
+is the same architecture built on the
+[autodiff tape](GraviNum.md#automatic-differentiation), which makes the weights trainable on your
+own labelled text.
+
+```csharp
+var config = new TransformerConfig(vocabularySize: 5000, HiddenSize: 64, Layers: 2, Heads: 4,
+                                   IntermediateSize: 128, MaxPositions: 64);
+
+var model = new TransformerClassifier(config, seed: 42)
+    .Fit(tokenisedDocuments, labels, epochs: 20, learningRate: 0.005);
+
+model.Predict(tokenIds);
+model.Score(heldOutDocuments, heldOutLabels);
+model.LossHistory;                       // mean loss per epoch
+```
+
+The layers are available on their own for building something else — `TransformerTape.LayerNorm`,
+`MultiHeadAttention`, `EncoderLayer`, `Gelu`, `SoftmaxRows`, `Embed`, `MeanPool`. Every one of them
+composes from tape operations that already existed for the graph networks; none needed a bespoke
+kernel, so none needed its own derivation. Check any layer you write with `GradientCheck`.
+
+> **This is not a way to obtain BERT.** A model trained here learns only from the corpus you give
+> it, and a few hundred documents will not produce general language understanding — what they can
+> produce is a task-specific classifier. For a small labelled set, `TfidfVectorizer` feeding a
+> linear model is the stronger and far cheaper baseline, and is worth beating before reaching for
+> this. What changed is that the architecture is now trainable at all, not that it is now
+> pretrained.
+
 ## Task pipelines
 
 ### Sentiment
@@ -233,7 +266,7 @@ a graph of content-word overlap. It cannot hallucinate.
 
 | Symptom | Cause |
 |---|---|
-| Transformer vectors look meaningless | No pretrained weights — see the note at the top |
+| Transformer vectors look meaningless | No pretrained weights — see the note at the top. `TransformerModel` cannot be trained; use `TransformerClassifier` |
 | Every word similarity is ~1.0 | Call `RemoveCommonComponent()` |
 | Indonesian stop words are not removed | Pass `StopWords.Indonesian` or `Bilingual` explicitly |
 | Word2Vec vocabulary is empty | `minCount` is above the corpus frequencies |

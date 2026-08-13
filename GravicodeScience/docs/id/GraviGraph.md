@@ -152,9 +152,53 @@ new GraphSage(hiddenSize: 16, epochs: 200).Train(graph, trainMask);
 new GraphAttentionNetwork(hiddenSize: 8, heads: 4, epochs: 200).Train(graph, trainMask);
 ```
 
-Ketiganya **dilatih penuh** dengan gradien yang diturunkan manual — termasuk melalui softmax
-attention pada GAT, sehingga parameter attention-nya benar-benar dipelajari, bukan diperlakukan
-sebagai konstanta.
+Ketiganya **dilatih penuh**, dan ketiganya mengambil gradiennya dari
+[tape autodiff](GraviNum.md#diferensiasi-otomatis): setiap lapisan ditulis maju, dan backward
+pass-nya diturunkan dari situ. Parameter attention GAT benar-benar dipelajari, termasuk melalui
+softmax atas edge yang masuk ke tiap node — penurunan tersulit di library ini, dan kini tidak
+diturunkan dengan tangan sama sekali.
+
+### Menulis lapisan sendiri
+
+Tape inilah yang membuat arsitektur keempat menjadi murah: tulis forward pass, gradiennya menyusul.
+
+```csharp
+using Gravicode.Science.GraviGraph.Neural;
+using Gravicode.Science.GraviNum.Autodiff;
+
+var propagation = graph.ToSparseAdjacency(addSelfLoops: true, symmetricNormalize: true);
+
+var w = Tensor.Parameter(GnnMath.Glorot(features, classes, rng));
+var adam = new TapeAdam(w, weightDecay: 5e-4);
+
+for (var epoch = 0; epoch < 200; epoch++)
+{
+    var logits = GnnTape.Convolve(propagation, Tensor.Constant(x), w, bias);
+    var loss = TensorOps.SoftmaxCrossEntropy(logits, graph.NodeLabels, trainMask);
+
+    loss.Backward();      // tanpa penurunan rumus di mana pun
+    adam.Step(0.01);
+}
+```
+
+`GnnTape` menyediakan `Convolve`, `SageLayer`, `AttentionLayer`, `SegmentSoftmax`, `Dropout`,
+`MeanAggregator`, `EdgeList`, dan `Descend`. Di bawahnya ada operasi tape berbentuk graf:
+`SparseMatMul` untuk message passing, `Gather` dan `SegmentSum` untuk kerja tingkat edge, plus
+`ConcatColumns`, `LeakyRelu`, dan `SoftmaxCrossEntropy` bermasker. Periksa setiap gradien baru
+dengan `GradientCheck` sebelum mempercayainya.
+
+`Gather` dan `SegmentSum` saling adjoint — mengumpulkan ke depan berarti menjumlahkan ke belakang —
+dan itulah sebabnya attention tidak butuh kernel khusus. `SegmentSoftmax` *disusun* dari keduanya,
+bukan ditulis sebagai operasi tersendiri, sehingga ia mewarisi gradien yang sudah terverifikasi
+alih-alih menuntut Jacobian softmax diturunkan ulang.
+
+> **Satu gradien turunan tangan ternyata salah sepanjang usia GCN.** Backward pass-nya melewatkan
+> mask dropout pada lapisan tersembunyi, sehingga ketika dropout aktif gradiennya meleset sekitar
+> **40%** — dan modelnya tetap terlatih sampai 71% pada Cora yang terlihat masuk akal, dan justru
+> itulah sebabnya tidak ada yang menyadarinya. Tape menemukannya seketika, karena forward pass
+> tidak punya tempat untuk menyembunyikan suku yang hilang. Akurasi uji dengan gradien yang benar
+> adalah 69,3%; angka lama yang lebih tinggi berasal dari gradien rusak yang kebetulan berperan
+> sebagai regularisasi aneh.
 
 ### Perbedaannya
 
@@ -177,9 +221,19 @@ Dua lapisan adalah kedalaman lazim. Setiap lapisan mencampurkan satu hop tambaha
 sekitar tiga hop representasi tiap node menyatu ke rata-rata graf — masalah over-smoothing.
 
 Pelatihan GCN dan GAT bersifat transduktif: seluruh graf dilihat setiap epoch, tetapi loss hanya
-dihitung pada node berlabel di `trainMask`. Pada Cora dengan 140 paper berlabel (20 per kelas),
-implementasi ini mencapai sekitar 71% akurasi uji terhadap baseline mayoritas 30,2%; angka GCN yang
-dipublikasikan ~81%.
+dihitung pada node berlabel di `trainMask`. Pada Cora dengan 140 paper berlabel (20 per kelas) dan
+60 epoch, terhadap baseline mayoritas 30,2%:
+
+| | Akurasi uji |
+|---|---:|
+| GCN | 69,3% |
+| GraphSAGE | 70,3% |
+| **GAT** | **72,1%** |
+
+Angka GCN yang dipublikasikan ~81%. Sisa jurangnya adalah tiadanya penjadwalan learning rate, tanpa
+early stopping, dan hanya 60 epoch — bukan gradiennya, yang kini diperiksa terhadap beda hingga.
+Attention mengungguli normalisasi derajat tetap adalah urutan yang memang diharapkan, dan melihatnya
+justru *setelah* pindah ke tape lebih meyakinkan daripada sebelumnya.
 
 ## Kesalahan yang sering terjadi
 
