@@ -54,6 +54,18 @@
       <SolidColorBrush x:Key="EditorGround" Color="#11161C" />
       <SolidColorBrush x:Key="EditorGutter" Color="#7D8A9C" />
       <SolidColorBrush x:Key="EditorCurrentLine" Color="#19222B" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#2A5567" />
+
+      <!-- Code palette: the six library wavelengths, lifted for the dark editor ground.
+           Every colour here clears 4.5:1 against #11161C; the structural ones clear 7:1. -->
+      <Color x:Key="CodeComment">#7C8EA1</Color>      <!-- slate, italic          -->
+      <Color x:Key="CodeKeyword">#9B9BEA</Color>      <!-- violet   ← GraviProb    -->
+      <Color x:Key="CodeType">#62BEDC</Color>         <!-- cyan     ← GraviGraph   -->
+      <Color x:Key="CodeMethod">#E6D06A</Color>       <!-- yellow   ← GraviLearn   -->
+      <Color x:Key="CodeString">#74C99A</Color>       <!-- green    ← GraviText    -->
+      <Color x:Key="CodeNumber">#EBA05C</Color>       <!-- orange   ← GraviFrame   -->
+      <Color x:Key="CodeMeta">#EC7378</Color>         <!-- red      ← GraviNum     -->
+      <Color x:Key="CodePunctuation">#97A4B4</Color>
 
     </ResourceDictionary>
 
@@ -95,6 +107,18 @@
       <SolidColorBrush x:Key="EditorGround" Color="#FFFFFF" />
       <SolidColorBrush x:Key="EditorGutter" Color="#8B98A8" />
       <SolidColorBrush x:Key="EditorCurrentLine" Color="#EFF4FA" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#BFE0EC" />
+
+      <!-- The same six wavelengths, deepened for white. Same hue order, same meaning;
+           every colour clears 4.5:1 against #FFFFFF. -->
+      <Color x:Key="CodeComment">#5F7183</Color>
+      <Color x:Key="CodeKeyword">#5A45B8</Color>
+      <Color x:Key="CodeType">#0E6E8C</Color>
+      <Color x:Key="CodeMethod">#7E610F</Color>
+      <Color x:Key="CodeString">#1E7A45</Color>
+      <Color x:Key="CodeNumber">#A6520B</Color>
+      <Color x:Key="CodeMeta">#B3272C</Color>
+      <Color x:Key="CodePunctuation">#47535F</Color>
 
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>

@@ -17,6 +17,9 @@
     <!-- Visualization hooks used by samples and notebooks -->
     <PackageVersion Include="ScottPlot" Version="5.1.59" />
 
+    <!-- Avalonia core. Kept next to Avalonia.Desktop so the versions cannot drift apart. -->
+    <PackageVersion Include="Avalonia" Version="12.1.1" />
+
     <!-- Benchmarking -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
 
@@ -24,6 +27,21 @@
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+
+    <!-- ScienceAppGen (tools/) -->
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageVersion Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="System.Configuration.ConfigurationManager" Version="10.0.11" />
+
+    <!-- Semantic Kernel. Google and Ollama ship as alpha only; Anthropic has no official
+         connector, so Claude is served by a hand-written IChatCompletionService. -->
+    <PackageVersion Include="Microsoft.SemanticKernel" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.AzureOpenAI" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Google" Version="1.79.0-alpha" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Ollama" Version="1.79.0-alpha" />
   </ItemGroup>
 
 </Project>

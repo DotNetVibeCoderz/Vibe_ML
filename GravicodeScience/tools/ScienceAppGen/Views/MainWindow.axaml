@@ -1,0 +1,153 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ScienceAppGen.ViewModels"
+        xmlns:views="using:ScienceAppGen.Views"
+        x:Class="ScienceAppGen.Views.MainWindow"
+        x:DataType="vm:ShellViewModel"
+        Title="{Binding Title}"
+        Width="1500" Height="940"
+        MinWidth="960" MinHeight="620"
+        Background="{DynamicResource AppGround}"
+        FontFamily="{DynamicResource UiFont}">
+
+  <Grid RowDefinitions="Auto,Auto,3,*,Auto">
+
+    <!-- ================================================== menu -->
+    <Border Grid.Row="0" Background="{DynamicResource PanelGround}"
+            BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto" Height="{DynamicResource TitleBarHeight}">
+
+        <Menu Grid.Column="0" VerticalAlignment="Center" Margin="6,0">
+          <MenuItem Header="_File">
+            <MenuItem Header="_New Project…" Click="OnNewProject" InputGesture="Ctrl+Shift+N" />
+            <MenuItem Header="_Open Project…" Click="OnOpenProject" InputGesture="Ctrl+O" />
+            <MenuItem Header="Open _File…" Click="OnOpenFile" />
+            <Separator />
+            <MenuItem Header="_Save" Click="OnSave" InputGesture="Ctrl+S" />
+            <MenuItem Header="Save _All" Click="OnSaveAll" InputGesture="Ctrl+Shift+S" />
+            <Separator />
+            <MenuItem Header="_Close Project" Click="OnCloseProject" />
+            <MenuItem Header="E_xit" Click="OnExit" />
+          </MenuItem>
+
+          <MenuItem Header="_Edit">
+            <MenuItem Header="_Go to Line…" Click="OnGoToLine" InputGesture="Ctrl+G" />
+            <MenuItem Header="_Format Code" Click="OnFormat" InputGesture="Ctrl+K" />
+          </MenuItem>
+
+          <MenuItem Header="_View">
+            <MenuItem Header="Show _Line Numbers" Click="OnToggleLineNumbers" />
+            <MenuItem Header="Show _Chat Panel" Click="OnToggleChat" InputGesture="Ctrl+B" />
+            <MenuItem Header="Show _Logs" Click="OnToggleLogs" InputGesture="Ctrl+L" />
+          </MenuItem>
+
+          <MenuItem Header="_Build">
+            <MenuItem Header="_Build" Click="OnBuild" InputGesture="F6" />
+            <MenuItem Header="_Run" Click="OnRun" InputGesture="F5" />
+            <MenuItem Header="_Deploy" Click="OnDeploy" />
+          </MenuItem>
+
+          <MenuItem Header="_Tools">
+            <MenuItem Header="_Settings…" Click="OnSettings" InputGesture="Ctrl+," />
+            <MenuItem Header="_Clear Logs" Click="OnClearLogs" />
+          </MenuItem>
+        </Menu>
+
+        <!-- Wordmark. The spectrum bar is the app's signature: a prompt refracted into
+             the six libraries it can produce code for. -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
+          <TextBlock Text="SCIENCE APP GEN" FontSize="{DynamicResource FontMicro}"
+                     FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}"
+                     VerticalAlignment="Center" />
+          <Border Width="52" Height="3" CornerRadius="2" Margin="10,0,0,0"
+                  Background="{DynamicResource SpectrumRule}" VerticalAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- ================================================== toolbar -->
+    <Border Grid.Row="1" Background="{DynamicResource PanelGround}"
+            BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1">
+      <StackPanel Orientation="Horizontal" Height="{DynamicResource ToolBarHeight}"
+                  Margin="8,0" VerticalAlignment="Center">
+        <Button Classes="tool" Content="New" Click="OnNewProject" ToolTip.Tip="New project (Ctrl+Shift+N)" />
+        <Button Classes="tool" Content="Open" Click="OnOpenProject" ToolTip.Tip="Open project (Ctrl+O)" />
+        <Button Classes="tool" Content="Save" Click="OnSave" ToolTip.Tip="Save (Ctrl+S)" />
+        <Border Width="1" Margin="8,10" Background="{DynamicResource BorderSoft}" />
+        <Button Classes="tool" Content="Build" Click="OnBuild" ToolTip.Tip="Build (F6)" />
+        <Button Classes="tool" Content="Run" Click="OnRun" ToolTip.Tip="Run (F5)" />
+        <Button Classes="tool" Content="Deploy" Click="OnDeploy" ToolTip.Tip="Publish a release build" />
+        <Border Width="1" Margin="8,10" Background="{DynamicResource BorderSoft}" />
+        <Button Classes="tool" Content="Format" Click="OnFormat" ToolTip.Tip="Format code (Ctrl+K)" />
+        <Button Classes="tool" Content="Go to Line" Click="OnGoToLine" ToolTip.Tip="Go to line (Ctrl+G)" />
+      </StackPanel>
+    </Border>
+
+    <!-- The spectrum rule reappears as a hairline under the toolbar, tying the header
+         to the panels below it. -->
+    <Border Grid.Row="2" Height="2" Background="{DynamicResource SpectrumRule}" Opacity="0.55" />
+
+    <!--
+      Workspace. Panel size and visibility live on the shell, but each panel's DataContext is
+      its own view model, so those bindings reach back through $parent[Window].DataContext.
+      A cast in the binding path cannot be resolved at runtime and throws on startup.
+    -->
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,4,*,4,Auto">
+
+      <views:ExplorerView Grid.Column="0" DataContext="{Binding Explorer}"
+                          Width="{Binding $parent[Window].DataContext.ExplorerWidth, Mode=TwoWay}"
+                          MinWidth="170" MaxWidth="520" />
+
+      <GridSplitter Grid.Column="1" ResizeDirection="Columns" Width="4" />
+
+      <Grid Grid.Column="2" RowDefinitions="*,4,Auto">
+        <views:EditorView Grid.Row="0" DataContext="{Binding Editor}" />
+
+        <GridSplitter Grid.Row="1" ResizeDirection="Rows" Height="4"
+                      IsVisible="{Binding LogsVisible}" />
+
+        <views:LogsView Grid.Row="2" DataContext="{Binding Logs}"
+                        IsVisible="{Binding $parent[Window].DataContext.LogsVisible}"
+                        Height="{Binding $parent[Window].DataContext.LogsHeight, Mode=TwoWay}" />
+      </Grid>
+
+      <GridSplitter Grid.Column="3" ResizeDirection="Columns" Width="4"
+                    IsVisible="{Binding ChatVisible}" />
+
+      <views:ChatView Grid.Column="4" DataContext="{Binding Chat}"
+                      IsVisible="{Binding $parent[Window].DataContext.ChatVisible}"
+                      Width="{Binding $parent[Window].DataContext.ChatWidth, Mode=TwoWay}"
+                      MinWidth="300" MaxWidth="760" />
+    </Grid>
+
+    <!-- ================================================== status bar -->
+    <Border Grid.Row="4" Background="{DynamicResource PanelGround}"
+            BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto"
+            Height="{DynamicResource StatusBarHeight}" Margin="12,0">
+
+        <TextBlock Grid.Column="0" Classes="caption" VerticalAlignment="Center"
+                   Text="{Binding ProjectLabel}" />
+
+        <Border Grid.Column="1" Width="1" Height="12" Margin="12,0"
+                Background="{DynamicResource BorderSoft}" VerticalAlignment="Center" />
+
+        <TextBlock Grid.Column="2" Classes="caption" VerticalAlignment="Center"
+                   Text="{Binding StatusMessage}" TextTrimming="CharacterEllipsis" />
+
+        <!-- Tabular figures so the caret position does not jitter as it changes. -->
+        <TextBlock Grid.Column="3" Classes="mono" VerticalAlignment="Center" Margin="0,0,14,0"
+                   Foreground="{DynamicResource TextMutedBrush}">
+          <Run Text="Ln" /><Run Text=" " /><Run Text="{Binding Editor.CaretLine}" />
+          <Run Text="  Col" /><Run Text=" " /><Run Text="{Binding Editor.CaretColumn}" />
+        </TextBlock>
+
+        <TextBlock Grid.Column="4" Classes="caption" VerticalAlignment="Center" Margin="0,0,14,0"
+                   Text="{Binding Chat.SelectedModel}" Foreground="{DynamicResource AccentBrush}" />
+
+        <Border Grid.Column="5" Width="8" Height="8" CornerRadius="4" VerticalAlignment="Center"
+                Background="{DynamicResource Spec4}" ToolTip.Tip="Ready" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

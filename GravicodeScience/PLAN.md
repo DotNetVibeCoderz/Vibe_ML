@@ -26,10 +26,25 @@ deliberately *not* claimed, and are documented as such wherever they appear:
 The theme is making the numeric core competitive with native libraries and easy to plug into
 existing .NET ML work.
 
-### BLAS/LAPACK interop
-`LinAlg.Dot` reaches ~24 GFLOP/s in managed code. A tuned OpenBLAS reaches several times that on
-the same CPU. The plan is a native backend behind the existing `IComputeBackend` interface, so it
-becomes a fourth dispatch target rather than a rewrite:
+### BLAS/LAPACK interop — now quantified
+
+The cross-stack comparison put numbers on this, and they are the strongest argument in the
+roadmap. Against NumPy on the same machine:
+
+| | Gravicode.Science | NumPy | Gap |
+|---|---:|---:|---|
+| symmetric eigen, 256×256 | 2,740 ms | 19.7 ms | **139×** |
+| SVD, 256×256 | 1,795 ms | 27.1 ms | **66×** |
+| PCA to 5 components (SVD underneath) | 375 ms | 5.9 ms | **64×** |
+| LU, 256×256 | 49.4 ms | 3.3 ms | 15× |
+| matmul, 1024×1024 | 170 ms | 27.8 ms | 6× |
+
+The Jacobi SVD and eigen solvers were chosen for robustness and zero dependencies, and they cost
+one to two orders of magnitude against LAPACK's divide-and-conquer routines. Nothing else on this
+roadmap would improve the library as much.
+
+The plan is a native backend behind the existing `IComputeBackend` interface, so it becomes a
+fourth dispatch target rather than a rewrite:
 
 - P/Invoke bindings for `dgemm`, `dgesv`, `dgeqrf`, `dgesvd`, `dsyev`
 - Runtime probing with a silent fall back to the managed path, exactly as the GPU backend does

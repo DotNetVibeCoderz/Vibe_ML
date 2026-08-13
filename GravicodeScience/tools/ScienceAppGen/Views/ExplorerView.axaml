@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScienceAppGen.ViewModels"
+             x:Class="ScienceAppGen.Views.ExplorerView"
+             x:DataType="vm:ExplorerViewModel">
+
+  <Border Background="{DynamicResource PanelGround}"
+          BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,1,0">
+    <Grid RowDefinitions="Auto,*">
+
+      <Border Grid.Row="0" Height="{DynamicResource PanelHeaderHeight}" Padding="12,0"
+              BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <TextBlock Grid.Column="0" Classes="panelHeader" Text="EXPLORER" />
+          <Button Grid.Column="2" Classes="icon" Content="⟳" Click="OnRefresh"
+                  ToolTip.Tip="Refresh" FontSize="13" />
+        </Grid>
+      </Border>
+
+      <TreeView Grid.Row="1" ItemsSource="{Binding Roots}" Background="Transparent"
+                BorderThickness="0" Padding="4,6"
+                SelectedItem="{Binding Selected}"
+                DoubleTapped="OnItemActivated">
+
+        <!-- The container's expansion has to be bound to the node, or setting IsExpanded on the
+             view model has no visible effect and the root looks empty. -->
+        <TreeView.Styles>
+          <Style Selector="TreeViewItem">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+          </Style>
+        </TreeView.Styles>
+
+        <TreeView.ItemTemplate>
+          <TreeDataTemplate ItemsSource="{Binding Children}">
+            <StackPanel Orientation="Horizontal" Spacing="7" Margin="0,1">
+              <TextBlock Text="{Binding Glyph}" FontFamily="{DynamicResource MonoFont}"
+                         FontSize="11" Width="14" VerticalAlignment="Center"
+                         Foreground="{DynamicResource AccentBrush}" />
+              <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+            </StackPanel>
+          </TreeDataTemplate>
+        </TreeView.ItemTemplate>
+      </TreeView>
+
+      <TextBlock Grid.Row="1" Text="{Binding EmptyMessage}" Classes="caption"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                 IsVisible="{Binding EmptyMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </Grid>
+  </Border>
+</UserControl>

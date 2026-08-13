@@ -52,11 +52,39 @@ Console.WriteLine(Metrics.ClassificationReport(split.TestY, pipeline.Predict(spl
 src/          six class libraries
 samples/      six console apps, each printing real results
 notebooks/    six .NET Interactive notebooks with charts
-benchmarks/   six BenchmarkDotNet suites
+benchmarks/   six BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
 tests/        400 tests
+tools/        ScienceAppGen — an IDE that builds apps from a prompt
 docs/         English, with Bahasa Indonesia in docs/id/
 ```
+
+## ScienceAppGen
+
+[![ScienceAppGen](docs/screenshots/scienceappgen.png)](docs/ScienceAppGen.md)
+
+A desktop IDE with an assistant that **writes the files and runs the build itself** rather than
+printing code for you to copy.
+
+```bash
+dotnet run --project tools/ScienceAppGen
+```
+
+Editor with syntax highlighting and a file explorer, ten data-science project templates, and a chat
+panel backed by Semantic Kernel with 16 kernel functions — project and file operations, build and
+run, web search, scraping, exact arithmetic, the clock, and a curated Gravicode API reference.
+
+Works with **OpenAI, Azure OpenAI, Anthropic, Google and Ollama**. Claude is served by a
+hand-written chat completion service, because Semantic Kernel has no official Anthropic connector.
+
+Verified end to end against a live endpoint: from one prompt it created a project, wrote the code
+and built it — and the test harness independently rebuilt and ran the result to confirm the output.
+The template path was driven through the UI separately; here is `ml-pipeline` generated, built and
+run without a line typed in between.
+
+[![The generated project running, printing a classification report](docs/screenshots/scienceappgen-run.png)](docs/ScienceAppGen.md#a-template-start-to-finish)
+
+Details in [ScienceAppGen.md](docs/ScienceAppGen.md).
 
 ## Design
 
@@ -79,6 +107,31 @@ about 20× the textbook triple loop. GPU support exists through ILGPU but is **o
 here is float64, and on integrated hardware the GPU measured 5–8× *slower*. See
 [benchmarks.md](docs/benchmarks.md).
 
+## How it compares to NumPy, pandas and scikit-learn
+
+Measured with an identical harness on both sides — same shapes, same fixtures, same warmup and
+repeat protocol. Full tables in [benchmarks.md](docs/benchmarks.md#against-the-python-stack).
+
+| Where the work is… | Winner | Examples |
+|---|---|---|
+| A **LAPACK/BLAS call** in disguise | **Python**, 5–140× | SVD 66×, symmetric eigen 139×, PCA 64×, matmul 6–13× |
+| Compiled Cython inner loops | Python, 2–11× | pandas group-by 6.8×, kNN 11×, k-means 5× |
+| **Scalar, branchy or sequential** | **.NET**, 2–132× | scalar log-density 132×, BFS 40×, MCMC 13×, Dijkstra 5.6× |
+| A better **algorithm** | .NET | rolling mean 8.6× (incremental accumulator vs recompute) |
+| Tree building | .NET 1.4× | random forest fit beats scikit-learn |
+
+Tally: .NET faster on 9 measurements, Python faster on 25, parity on 3.
+
+The split is not random. Wherever an operation bottoms out in decades-tuned Fortran, Python wins
+and this library does not pretend otherwise — **BLAS/LAPACK interop is the top roadmap item**.
+Wherever the work is a tight scalar loop that cannot be vectorised into one library call, a
+JIT-compiled language wins outright, and that is most of graph analytics, sampling and text
+processing.
+
+> The comparison paid for itself immediately: it exposed an **O(n²) decision-tree split** that made
+> the random-forest benchmark run for 83 minutes without finishing. Fixed, it fits in 1.9 s — and
+> now beats scikit-learn. It also caught a benchmark that the JIT had optimised into nothing.
+
 ## Verified against reference implementations
 
 The test suite pins results that are independently known, so a regression shows up as a test
@@ -100,6 +153,7 @@ failure rather than as a plausible-looking number:
 | Getting started | [getting_started.md](docs/getting_started.md) | [id/getting_started.md](docs/id/getting_started.md) |
 | Benchmarks | [benchmarks.md](docs/benchmarks.md) | [id/benchmarks.md](docs/id/benchmarks.md) |
 | Datasets | [datasets.md](docs/datasets.md) | [id/datasets.md](docs/id/datasets.md) |
+| ScienceAppGen | [ScienceAppGen.md](docs/ScienceAppGen.md) | [id/ScienceAppGen.md](docs/id/ScienceAppGen.md) |
 
 Per-library guides sit alongside them in [`docs/`](docs) and [`docs/id/`](docs/id).
 

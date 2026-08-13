@@ -88,7 +88,7 @@ foreach (var length in new[] { 1_000_000, 10_000_000 })
 
     var data = rng.StandardNormal(1_000_000);
     Measure("statistics_1m", "GraviNum", "mean + std over 1,000,000",
-        () => { _ = Statistics.Mean(data) + Statistics.Std(data); });
+        () => Sink.Consume(Statistics.Mean(data) + Statistics.Std(data)));
 }
 
 // ---------------------------------------------------------------- GraviFrame
@@ -214,7 +214,7 @@ Measure("csv_read_200k", "GraviFrame", "read 200,000-row CSV", () => DataFrame.R
     {
         var total = 0.0;
         for (var i = 0; i < 1_000_000; i++) total += normal.LogDensity(i * 1e-6);
-        _ = total;
+        Sink.Consume(total);
     });
 }
 
@@ -232,6 +232,7 @@ File.WriteAllText(outputPath, JsonSerializer.Serialize(payload, new JsonSerializ
 
 Console.WriteLine();
 Console.WriteLine($"Wrote {results.Count} measurements to {outputPath}");
+Console.WriteLine($"  (sink checksum {Sink.Total:E3} - printed so the JIT cannot elide the work)");
 File.Delete(csvPath);
 return;
 
@@ -285,6 +286,26 @@ static string[] BuildCorpus(int count, int wordsPerDocument)
         documents[i] = string.Join(' ', words);
     }
     return documents;
+}
+
+/// <summary>
+/// Keeps computed values alive so the JIT cannot delete the loop that produced them.
+/// </summary>
+/// <remarks>
+/// Without this, a benchmark whose result is discarded gets eliminated as dead code. The scalar
+/// log-density loop originally "ran" 1,000,000 iterations in 0.45 ms - about 1.5 cycles each,
+/// which is impossible for a logarithm. Writing to a non-inlined static sink forces the work to
+/// actually happen.
+/// </remarks>
+internal static class Sink
+{
+    private static double _value;
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void Consume(double value) => _value += value;
+
+    /// <summary>Read at the end so the accumulated total is observably used.</summary>
+    public static double Total => _value;
 }
 
 internal sealed record Measurement(

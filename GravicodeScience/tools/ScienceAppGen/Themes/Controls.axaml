@@ -14,6 +14,30 @@
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
+  <!-- ================================================================ Card list
+       A picker whose items are cards. The item container is made invisible so the card's own
+       border carries the state: the default Fluent selection fill would paint over the card and
+       swallow both its background and the library bands that identify it.
+  -->
+  <Style Selector="ListBox.cards > ListBoxItem">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+  </Style>
+
+  <Style Selector="ListBox.cards > ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <Style Selector="ListBox.cards > ListBoxItem:pointerover Border#Card">
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}" />
+  </Style>
+
+  <Style Selector="ListBox.cards > ListBoxItem:selected Border#Card">
+    <Setter Property="Background" Value="{DynamicResource SelectedGround}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+  </Style>
+
   <Style Selector="TextBlock.caption">
     <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
     <Setter Property="FontSize" Value="{DynamicResource FontSmall}" />

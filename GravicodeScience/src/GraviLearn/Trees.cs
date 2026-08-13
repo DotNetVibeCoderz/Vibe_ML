@@ -175,49 +175,161 @@ public class DecisionTree(
         };
     }
 
+    /// <summary>
+    /// Finds the split with the largest impurity decrease.
+    /// </summary>
+    /// <remarks>
+    /// Each candidate feature is sorted once, then the split point sweeps that order while
+    /// running class counts (classification) or running sum and sum-of-squares (regression) are
+    /// moved one sample at a time from the right side to the left. Impurity at a given split is
+    /// then O(classes) for classification and O(1) for regression.
+    /// <para>
+    /// Doing it any other way is a trap: materialising <c>sorted[..k]</c> and <c>sorted[k..]</c>
+    /// per split point and re-deriving impurity from them is O(n) work at each of O(n) split
+    /// points, so a single node becomes O(n²). At 20,000 samples that turned a two-second forest
+    /// into a multi-hour one.
+    /// </para>
+    /// </remarks>
     private (int Feature, double Threshold, double Gain, int[]? Left, int[]? Right) FindBestSplit(
         NdArray x, NdArray y, int[] indices, double parentImpurity)
     {
         var candidates = SelectFeatures();
+        var n = indices.Length;
 
         var bestFeature = -1;
         var bestThreshold = 0.0;
         var bestGain = 0.0;
-        int[]? bestLeft = null;
-        int[]? bestRight = null;
+        var bestSplitIndex = -1;
+        int[]? bestSorted = null;
+
+        // Class ordinals are resolved once per node rather than per split point.
+        var classCount = _classes.Length;
+        int[]? classOf = null;
+        if (!IsRegression && classCount > 0)
+        {
+            classOf = new int[n];
+            for (var i = 0; i < n; i++) classOf[i] = Array.IndexOf(_classes, y.At(indices[i]));
+        }
+
+        var order = new int[n];
+        var keys = new double[n];
+        var leftCounts = classCount > 0 ? new double[classCount] : [];
+        var rightCounts = classCount > 0 ? new double[classCount] : [];
 
         foreach (var feature in candidates)
         {
-            // Sorting once per feature turns threshold search into a single sweep.
-            var sorted = indices.OrderBy(i => x[i, feature]).ToArray();
-
-            for (var k = MinSamplesLeaf; k <= sorted.Length - MinSamplesLeaf; k++)
+            // Sort positions within `indices`, so the class ordinals stay addressable by position.
+            for (var i = 0; i < n; i++)
             {
-                var lowValue = x[sorted[k - 1], feature];
-                var highValue = x[sorted[k], feature];
-                if (lowValue == highValue) continue;   // no threshold separates equal values
+                order[i] = i;
+                keys[i] = x[indices[i], feature];
+            }
+            Array.Sort(keys, order);
 
-                var leftIndices = sorted[..k];
-                var rightIndices = sorted[k..];
+            double leftSum = 0, leftSumSquares = 0, rightSum = 0, rightSumSquares = 0;
 
-                var leftImpurity = Impurity(y, leftIndices);
-                var rightImpurity = Impurity(y, rightIndices);
-                var weighted = (leftIndices.Length * leftImpurity + rightIndices.Length * rightImpurity)
-                    / sorted.Length;
-                var gain = parentImpurity - weighted;
-
-                if (gain > bestGain + 1e-12)
+            if (IsRegression)
+            {
+                for (var i = 0; i < n; i++)
                 {
-                    bestGain = gain;
-                    bestFeature = feature;
-                    bestThreshold = (lowValue + highValue) / 2.0;
-                    bestLeft = leftIndices;
-                    bestRight = rightIndices;
+                    var value = y.At(indices[i]);
+                    rightSum += value;
+                    rightSumSquares += value * value;
                 }
+            }
+            else if (classOf is not null)
+            {
+                Array.Clear(leftCounts);
+                Array.Clear(rightCounts);
+                for (var i = 0; i < n; i++)
+                {
+                    var c = classOf[i];
+                    if (c >= 0) rightCounts[c]++;
+                }
+            }
+
+            for (var k = 1; k < n; k++)
+            {
+                // Move sample k-1 across the boundary before scoring the split after it.
+                var moving = order[k - 1];
+                if (IsRegression)
+                {
+                    var value = y.At(indices[moving]);
+                    leftSum += value; leftSumSquares += value * value;
+                    rightSum -= value; rightSumSquares -= value * value;
+                }
+                else if (classOf is not null)
+                {
+                    var c = classOf[moving];
+                    if (c >= 0) { leftCounts[c]++; rightCounts[c]--; }
+                }
+
+                if (k < MinSamplesLeaf || n - k < MinSamplesLeaf) continue;
+                if (keys[k - 1] == keys[k]) continue;   // no threshold separates equal values
+
+                var leftImpurity = IsRegression
+                    ? MeanSquaredError(leftSum, leftSumSquares, k)
+                    : ImpurityFromCounts(leftCounts, k);
+                var rightImpurity = IsRegression
+                    ? MeanSquaredError(rightSum, rightSumSquares, n - k)
+                    : ImpurityFromCounts(rightCounts, n - k);
+
+                var gain = parentImpurity - (k * leftImpurity + (n - k) * rightImpurity) / n;
+                if (gain <= bestGain + 1e-12) continue;
+
+                bestGain = gain;
+                bestFeature = feature;
+                bestThreshold = (keys[k - 1] + keys[k]) / 2.0;
+                bestSplitIndex = k;
+                bestSorted = (int[])order.Clone();
             }
         }
 
-        return (bestFeature, bestThreshold, bestGain, bestLeft, bestRight);
+        if (bestFeature < 0 || bestSorted is null) return (-1, 0, 0, null, null);
+
+        // The child index arrays are materialised once, for the winning split only.
+        var left = new int[bestSplitIndex];
+        var right = new int[n - bestSplitIndex];
+        for (var i = 0; i < bestSplitIndex; i++) left[i] = indices[bestSorted[i]];
+        for (var i = bestSplitIndex; i < n; i++) right[i - bestSplitIndex] = indices[bestSorted[i]];
+
+        return (bestFeature, bestThreshold, bestGain, left, right);
+    }
+
+    /// <summary>Gini or entropy from running class counts, without touching the samples again.</summary>
+    private double ImpurityFromCounts(double[] counts, int total)
+    {
+        if (total <= 0) return 0.0;
+
+        if (Criterion == SplitCriterion.Entropy)
+        {
+            var entropy = 0.0;
+            foreach (var count in counts)
+            {
+                if (count <= 0) continue;
+                var p = count / total;
+                entropy -= p * Math.Log2(p);
+            }
+            return entropy;
+        }
+
+        var gini = 1.0;
+        foreach (var count in counts)
+        {
+            if (count <= 0) continue;
+            var p = count / total;
+            gini -= p * p;
+        }
+        return gini;
+    }
+
+    /// <summary>Variance from a running sum and sum of squares.</summary>
+    private static double MeanSquaredError(double sum, double sumSquares, int count)
+    {
+        if (count <= 0) return 0.0;
+        var mean = sum / count;
+        // Clamped because catastrophic cancellation can push this a hair below zero.
+        return Math.Max(0.0, sumSquares / count - mean * mean);
     }
 
     private int[] SelectFeatures()

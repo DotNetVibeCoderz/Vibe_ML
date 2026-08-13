@@ -134,6 +134,9 @@ Each is now covered by a regression test.
 
 | Bug | Cause | Fix |
 |---|---|---|
+| **Decision-tree split was O(n²)** | `FindBestSplit` materialised `sorted[..k]` / `sorted[k..]` and rebuilt a count dictionary at every candidate split point | Sweep the sorted order with running class counts; **83 min → 1.9 s** on the 20k-sample forest, and it now beats scikit-learn |
+| k-means 20× slower than scikit-learn | The distance loop went through `NdArray`'s two-index accessor, paying stride maths and bounds checks per feature | Run Lloyd's loop on the raw contiguous buffers; 9.9 s → 2.5 s |
+| A comparison benchmark measured nothing | The scalar log-density result was discarded, so the JIT deleted the loop (0.45 ms for 1M logarithms) | Route values through a non-inlined sink; real figure 2.08 ms |
 | Memory-mapped CSV read one extra row | `CreateViewStream(0, 0, …)` rounds the mapping to the page size; trailing NUL bytes decoded as a line | Pass the exact file length |
 | Cora reported 1,550 components, largest 77 nodes | `ConnectedComponents` followed out-edges only on a directed graph | Weak connectivity; added `StronglyConnectedComponents` |
 | Node embeddings put same-topic papers *further* apart | Random walks on a directed citation graph strand after one step | Added `Graph.AsUndirected()` |

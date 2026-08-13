@@ -1,0 +1,342 @@
+{
+  "Stack": "dotnet",
+  "Runtime": ".NET 10.0.11",
+  "Processors": 8,
+  "SimdWidth": 4,
+  "TimestampUtc": "2026-08-13T08:11:27.9863088Z",
+  "Results": [
+    {
+      "Id": "matmul_256",
+      "Library": "GraviNum",
+      "Operation": "256x256 matrix product",
+      "MedianMs": 5.2171,
+      "MinMs": 4.0765,
+      "MaxMs": 7.3446,
+      "Repeats": 7
+    },
+    {
+      "Id": "matmul_512",
+      "Library": "GraviNum",
+      "Operation": "512x512 matrix product",
+      "MedianMs": 27.7261,
+      "MinMs": 21.5306,
+      "MaxMs": 35.2733,
+      "Repeats": 7
+    },
+    {
+      "Id": "matmul_1024",
+      "Library": "GraviNum",
+      "Operation": "1024x1024 matrix product",
+      "MedianMs": 169.6896,
+      "MinMs": 156.6425,
+      "MaxMs": 185.0284,
+      "Repeats": 7
+    },
+    {
+      "Id": "elementwise_add_1000000",
+      "Library": "GraviNum",
+      "Operation": "element-wise add, 1,000,000 elements",
+      "MedianMs": 15.2483,
+      "MinMs": 11.7128,
+      "MaxMs": 32.5267,
+      "Repeats": 7
+    },
+    {
+      "Id": "elementwise_add_10000000",
+      "Library": "GraviNum",
+      "Operation": "element-wise add, 10,000,000 elements",
+      "MedianMs": 97.028,
+      "MinMs": 84.0754,
+      "MaxMs": 191.7702,
+      "Repeats": 7
+    },
+    {
+      "Id": "lu_256",
+      "Library": "GraviNum",
+      "Operation": "LU factorisation, 256x256",
+      "MedianMs": 49.3645,
+      "MinMs": 46.841,
+      "MaxMs": 64.2237,
+      "Repeats": 7
+    },
+    {
+      "Id": "qr_256",
+      "Library": "GraviNum",
+      "Operation": "QR factorisation, 256x256",
+      "MedianMs": 115.4216,
+      "MinMs": 112.7077,
+      "MaxMs": 117.5681,
+      "Repeats": 7
+    },
+    {
+      "Id": "cholesky_256",
+      "Library": "GraviNum",
+      "Operation": "Cholesky factorisation, 256x256",
+      "MedianMs": 12.665,
+      "MinMs": 12.5298,
+      "MaxMs": 12.9888,
+      "Repeats": 7
+    },
+    {
+      "Id": "svd_256",
+      "Library": "GraviNum",
+      "Operation": "SVD, 256x256",
+      "MedianMs": 1794.6514,
+      "MinMs": 1666.7455,
+      "MaxMs": 1964.4777,
+      "Repeats": 3
+    },
+    {
+      "Id": "eigh_256",
+      "Library": "GraviNum",
+      "Operation": "symmetric eigen, 256x256",
+      "MedianMs": 2739.9334,
+      "MinMs": 2651.5714,
+      "MaxMs": 2859.7474,
+      "Repeats": 3
+    },
+    {
+      "Id": "solve_256",
+      "Library": "GraviNum",
+      "Operation": "solve Ax=b, 256x256",
+      "MedianMs": 44.0329,
+      "MinMs": 42.8471,
+      "MaxMs": 49.1678,
+      "Repeats": 7
+    },
+    {
+      "Id": "inverse_256",
+      "Library": "GraviNum",
+      "Operation": "matrix inverse, 256x256",
+      "MedianMs": 121.9939,
+      "MinMs": 117.3345,
+      "MaxMs": 130.0217,
+      "Repeats": 7
+    },
+    {
+      "Id": "sparse_matvec_2000",
+      "Library": "GraviNum",
+      "Operation": "sparse matrix-vector, 2000x2000 @ 1%",
+      "MedianMs": 0.1653,
+      "MinMs": 0.136,
+      "MaxMs": 0.2874,
+      "Repeats": 7
+    },
+    {
+      "Id": "dense_matvec_2000",
+      "Library": "GraviNum",
+      "Operation": "dense matrix-vector, 2000x2000",
+      "MedianMs": 5.381,
+      "MinMs": 5.081,
+      "MaxMs": 5.8908,
+      "Repeats": 7
+    },
+    {
+      "Id": "random_normal_1m",
+      "Library": "GraviNum",
+      "Operation": "1,000,000 normal deviates",
+      "MedianMs": 17.01,
+      "MinMs": 16.0696,
+      "MaxMs": 17.7408,
+      "Repeats": 7
+    },
+    {
+      "Id": "statistics_1m",
+      "Library": "GraviNum",
+      "Operation": "mean \u002B std over 1,000,000",
+      "MedianMs": 12.2776,
+      "MinMs": 12.1483,
+      "MaxMs": 12.6316,
+      "Repeats": 7
+    },
+    {
+      "Id": "csv_read_200k",
+      "Library": "GraviFrame",
+      "Operation": "read 200,000-row CSV",
+      "MedianMs": 371.3651,
+      "MinMs": 258.5429,
+      "MaxMs": 393.6147,
+      "Repeats": 3
+    },
+    {
+      "Id": "groupby_mean_200k",
+      "Library": "GraviFrame",
+      "Operation": "group-by mean, 500 groups",
+      "MedianMs": 39.884,
+      "MinMs": 37.3359,
+      "MaxMs": 75.4895,
+      "Repeats": 7
+    },
+    {
+      "Id": "groupby_composite_200k",
+      "Library": "GraviFrame",
+      "Operation": "group-by two keys",
+      "MedianMs": 51.0852,
+      "MinMs": 49.4475,
+      "MaxMs": 56.0986,
+      "Repeats": 7
+    },
+    {
+      "Id": "sort_200k",
+      "Library": "GraviFrame",
+      "Operation": "sort by a numeric column",
+      "MedianMs": 47.8485,
+      "MinMs": 44.2192,
+      "MaxMs": 65.3735,
+      "Repeats": 3
+    },
+    {
+      "Id": "rolling_mean_200k",
+      "Library": "GraviFrame",
+      "Operation": "rolling mean, window 30",
+      "MedianMs": 1.0302,
+      "MinMs": 0.9646,
+      "MaxMs": 1.0483,
+      "Repeats": 7
+    },
+    {
+      "Id": "filter_200k",
+      "Library": "GraviFrame",
+      "Operation": "filter a numeric column",
+      "MedianMs": 6.3929,
+      "MinMs": 5.9758,
+      "MaxMs": 7.706,
+      "Repeats": 7
+    },
+    {
+      "Id": "describe_200k",
+      "Library": "GraviFrame",
+      "Operation": "describe all numeric columns",
+      "MedianMs": 112.3144,
+      "MinMs": 110.9268,
+      "MaxMs": 138.1864,
+      "Repeats": 3
+    },
+    {
+      "Id": "logistic_fit_20k",
+      "Library": "GraviLearn",
+      "Operation": "logistic regression, 20k x 20, 100 iterations",
+      "MedianMs": 346.9453,
+      "MinMs": 342.0818,
+      "MaxMs": 356.5093,
+      "Repeats": 3
+    },
+    {
+      "Id": "randomforest_fit_20k",
+      "Library": "GraviLearn",
+      "Operation": "random forest fit, 50 trees, depth 8",
+      "MedianMs": 1906.1871,
+      "MinMs": 1878.469,
+      "MaxMs": 1991.3784,
+      "Repeats": 3
+    },
+    {
+      "Id": "randomforest_predict_20k",
+      "Library": "GraviLearn",
+      "Operation": "random forest predict, 20k rows",
+      "MedianMs": 134.5354,
+      "MinMs": 119.3314,
+      "MaxMs": 143.0199,
+      "Repeats": 3
+    },
+    {
+      "Id": "kmeans_20k",
+      "Library": "GraviLearn",
+      "Operation": "k-means, k=5, 3 restarts",
+      "MedianMs": 2541.9757,
+      "MinMs": 2524.4762,
+      "MaxMs": 2547.5535,
+      "Repeats": 3
+    },
+    {
+      "Id": "pca_20k",
+      "Library": "GraviLearn",
+      "Operation": "PCA to 5 components, 20k x 20",
+      "MedianMs": 375.3955,
+      "MinMs": 368.508,
+      "MaxMs": 382.9429,
+      "Repeats": 3
+    },
+    {
+      "Id": "knn_predict_2k",
+      "Library": "GraviLearn",
+      "Operation": "kNN predict, 2k queries against 5k points",
+      "MedianMs": 609.9206,
+      "MinMs": 602.5866,
+      "MaxMs": 640.3295,
+      "Repeats": 3
+    },
+    {
+      "Id": "tfidf_20k",
+      "Library": "GraviText",
+      "Operation": "TF-IDF fit\u002Btransform, 20k documents",
+      "MedianMs": 262.5033,
+      "MinMs": 246.8716,
+      "MaxMs": 265.3561,
+      "Repeats": 3
+    },
+    {
+      "Id": "tokenize_20k",
+      "Library": "GraviText",
+      "Operation": "regex tokenize 20k documents",
+      "MedianMs": 153.9171,
+      "MinMs": 150.4567,
+      "MaxMs": 156.9316,
+      "Repeats": 3
+    },
+    {
+      "Id": "pagerank_50k",
+      "Library": "GraviGraph",
+      "Operation": "PageRank, 50k nodes",
+      "MedianMs": 276.3221,
+      "MinMs": 268.1618,
+      "MaxMs": 277.8525,
+      "Repeats": 3
+    },
+    {
+      "Id": "bfs_50k",
+      "Library": "GraviGraph",
+      "Operation": "breadth-first search, 50k nodes",
+      "MedianMs": 9.5374,
+      "MinMs": 9.0281,
+      "MaxMs": 10.1468,
+      "Repeats": 3
+    },
+    {
+      "Id": "components_50k",
+      "Library": "GraviGraph",
+      "Operation": "connected components, 50k nodes",
+      "MedianMs": 9.2814,
+      "MinMs": 9.2463,
+      "MaxMs": 9.8589,
+      "Repeats": 3
+    },
+    {
+      "Id": "dijkstra_50k",
+      "Library": "GraviGraph",
+      "Operation": "Dijkstra from one source, 50k nodes",
+      "MedianMs": 32.344,
+      "MinMs": 31.4653,
+      "MaxMs": 33.3742,
+      "Repeats": 3
+    },
+    {
+      "Id": "mcmc_4x5000",
+      "Library": "GraviProb",
+      "Operation": "Metropolis-Hastings, 4 chains x 5000 draws",
+      "MedianMs": 21.367,
+      "MinMs": 18.8445,
+      "MaxMs": 74.919,
+      "Repeats": 3
+    },
+    {
+      "Id": "logpdf_1m",
+      "Library": "GraviProb",
+      "Operation": "1,000,000 normal log densities",
+      "MedianMs": 2.0846,
+      "MinMs": 2.0701,
+      "MaxMs": 3.4141,
+      "Repeats": 7
+    }
+  ]
+}

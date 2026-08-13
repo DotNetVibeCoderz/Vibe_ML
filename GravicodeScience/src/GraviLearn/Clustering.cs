@@ -60,14 +60,22 @@ public sealed class KMeans(
             var labels = new int[samples];
             var iterations = 0;
 
+            // Lloyd's loop runs on flat buffers; the NdArray views are only used at the edges.
+            var flatData = x.AsContiguous().ToArray();
+            var flatCentres = centroids.ToArray();
+
             for (; iterations < MaxIterations; iterations++)
             {
-                var changed = AssignPoints(x, centroids, labels);
-                var shift = UpdateCentroids(x, labels, centroids, rng);
+                var changed = AssignPointsFast(flatData, flatCentres, samples, labels);
+                var shift = UpdateCentroidsFast(flatData, flatCentres, samples, labels, rng);
                 if (!changed || shift < Tolerance) { iterations++; break; }
             }
 
-            AssignPoints(x, centroids, labels);
+            AssignPointsFast(flatData, flatCentres, samples, labels);
+            for (var c = 0; c < Clusters; c++)
+                for (var j = 0; j < FeatureCount; j++)
+                    centroids[c, j] = flatCentres[c * FeatureCount + j];
+
             var inertia = ComputeInertia(x, centroids, labels);
             if (inertia < Inertia)
             {
@@ -102,6 +110,86 @@ public sealed class KMeans(
                 squaredDistances[i] = Math.Min(squaredDistances[i], SquaredDistance(x, i, centroids, c));
         }
         return centroids;
+    }
+
+    /// <summary>
+    /// Assigns every point to its nearest centroid, working on the raw buffers.
+    /// </summary>
+    /// <remarks>
+    /// The assignment step is the whole cost of k-means: it is O(samples x clusters x features)
+    /// on every iteration, of every restart. Going through <see cref="NdArray"/>'s two-index
+    /// accessor there pays stride arithmetic and a bounds check per feature, which on a
+    /// 20,000 x 20 problem is tens of millions of redundant operations per iteration. Reading the
+    /// contiguous buffers directly is what closes most of the gap to a BLAS-backed implementation.
+    /// </remarks>
+    private bool AssignPointsFast(double[] data, double[] centres, int samples, int[] labels)
+    {
+        var changed = false;
+        var features = FeatureCount;
+        var clusters = Clusters;
+
+        for (var i = 0; i < samples; i++)
+        {
+            var rowOffset = i * features;
+            var best = 0;
+            var bestDistance = double.MaxValue;
+
+            for (var c = 0; c < clusters; c++)
+            {
+                var centreOffset = c * features;
+                var accumulator = 0.0;
+                for (var j = 0; j < features; j++)
+                {
+                    var delta = data[rowOffset + j] - centres[centreOffset + j];
+                    accumulator += delta * delta;
+                    // Abandoning early once the running distance already exceeds the best
+                    // candidate saves most of the inner loop on well-separated data.
+                    if (accumulator >= bestDistance) break;
+                }
+                if (accumulator < bestDistance) { bestDistance = accumulator; best = c; }
+            }
+
+            if (labels[i] != best) { labels[i] = best; changed = true; }
+        }
+        return changed;
+    }
+
+    /// <summary>Recomputes centroids from the current assignment, on raw buffers.</summary>
+    private double UpdateCentroidsFast(double[] data, double[] centres, int samples, int[] labels,
+        GraviRandom rng)
+    {
+        var features = FeatureCount;
+        var sums = new double[Clusters * features];
+        var counts = new int[Clusters];
+
+        for (var i = 0; i < samples; i++)
+        {
+            var label = labels[i];
+            counts[label]++;
+            var rowOffset = i * features;
+            var sumOffset = label * features;
+            for (var j = 0; j < features; j++) sums[sumOffset + j] += data[rowOffset + j];
+        }
+
+        var shift = 0.0;
+        for (var c = 0; c < Clusters; c++)
+        {
+            var centreOffset = c * features;
+            if (counts[c] == 0)
+            {
+                // An empty cluster is re-seeded rather than left to collapse.
+                var replacement = rng.Next(samples) * features;
+                for (var j = 0; j < features; j++) centres[centreOffset + j] = data[replacement + j];
+                continue;
+            }
+            for (var j = 0; j < features; j++)
+            {
+                var updated = sums[centreOffset + j] / counts[c];
+                shift += Math.Abs(updated - centres[centreOffset + j]);
+                centres[centreOffset + j] = updated;
+            }
+        }
+        return shift;
     }
 
     private bool AssignPoints(NdArray x, NdArray centroids, int[] labels)

@@ -1,0 +1,21 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ScienceAppGen.App"
+             RequestedThemeVariant="Dark">
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://ScienceAppGen/Themes/Tokens.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+    <!-- The package is Avalonia.AvaloniaEdit but the assembly inside it is AvaloniaEdit. -->
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+    <StyleInclude Source="avares://ScienceAppGen/Themes/Controls.axaml" />
+  </Application.Styles>
+
+</Application>
