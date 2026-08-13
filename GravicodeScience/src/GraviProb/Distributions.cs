@@ -1,4 +1,5 @@
 using Gravicode.Science.GraviNum;
+using Gravicode.Science.GraviNum.Autodiff;
 
 namespace Gravicode.Science.GraviProb;
 
@@ -18,6 +19,35 @@ public abstract class Distribution
 
     /// <summary>Natural log of the density (or mass) at <paramref name="x"/>.</summary>
     public abstract double LogDensity(double x);
+
+    /// <summary>
+    /// The same log density built as a tape expression, so it can be differentiated with respect
+    /// to <paramref name="x"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what lets Hamiltonian Monte Carlo and variational inference get an exact gradient
+    /// of the log posterior instead of a finite-difference estimate. The distribution's own
+    /// parameters are fixed at construction, so this differentiates with respect to the value
+    /// only — which is exactly what a prior on a latent variable needs. A likelihood whose
+    /// parameters are themselves latent goes through <see cref="DistributionSpec"/> instead.
+    /// </para>
+    /// <para>
+    /// Notice that no term here ever needs a differentiable log-gamma: every <c>lgamma</c> in
+    /// these densities takes a fixed hyperparameter or an observed count, never a latent, so it
+    /// stays a constant and the digamma function is never required.
+    /// </para>
+    /// <para>
+    /// Distributions that do not override this cannot be used with gradient-based inference;
+    /// <see cref="IsDifferentiable"/> reports which.
+    /// </para>
+    /// </remarks>
+    public virtual Tensor LogDensity(Tensor x)
+        => throw new NotSupportedException(
+            $"{Name} has no differentiable log density, so it cannot be used with gradient-based inference.");
+
+    /// <summary>Whether <see cref="LogDensity(Tensor)"/> is implemented.</summary>
+    public virtual bool IsDifferentiable => false;
 
     /// <summary>Draws one value.</summary>
     public abstract double Sample(GraviRandom rng);
@@ -134,6 +164,16 @@ public sealed class Normal(double mean, double stdDev) : Distribution
     }
 
     /// <inheritdoc />
+    public override bool IsDifferentiable => stdDev > 0;
+
+    /// <inheritdoc />
+    public override Tensor LogDensity(Tensor x)
+    {
+        var z = (x - Tensor.Constant(mean)) / Tensor.Constant(stdDev);
+        return Tensor.Constant(_logNormaliser) - Tensor.Constant(0.5) * z * z;
+    }
+
+    /// <inheritdoc />
     public override double Sample(GraviRandom rng) => rng.Normal(mean, stdDev);
 
     /// <inheritdoc />
@@ -163,6 +203,17 @@ public sealed class Uniform(double low, double high) : Distribution
 
     /// <inheritdoc />
     public override double LogDensity(double x) => Supports(x) ? -Math.Log(high - low) : double.NegativeInfinity;
+
+    /// <inheritdoc />
+    public override bool IsDifferentiable => high > low;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Flat inside the support, so the gradient is zero — correct, and the reason a uniform prior
+    /// contributes nothing to the Hamiltonian beyond bounding the region.
+    /// </remarks>
+    public override Tensor LogDensity(Tensor x)
+        => Tensor.Constant(-Math.Log(high - low)) + Tensor.Constant(0.0) * x;
 
     /// <inheritdoc />
     public override double Sample(GraviRandom rng) => rng.Uniform(low, high);
@@ -292,6 +343,15 @@ public sealed class Gamma(double shape, double rate) : Distribution
     }
 
     /// <inheritdoc />
+    public override bool IsDifferentiable => shape > 0 && rate > 0;
+
+    /// <inheritdoc />
+    public override Tensor LogDensity(Tensor x)
+        => Tensor.Constant(shape * Math.Log(rate) - MathUtil.LogGamma(shape))
+           + Tensor.Constant(shape - 1) * x.Log()
+           - Tensor.Constant(rate) * x;
+
+    /// <inheritdoc />
     public override double Sample(GraviRandom rng) => rng.Gamma(shape, 1.0 / rate);
 
     /// <inheritdoc />
@@ -333,6 +393,15 @@ public sealed class Beta(double alpha, double beta) : Distribution
     }
 
     /// <inheritdoc />
+    public override bool IsDifferentiable => alpha > 0 && beta > 0;
+
+    /// <inheritdoc />
+    public override Tensor LogDensity(Tensor x)
+        => Tensor.Constant(_logNormaliser)
+           + Tensor.Constant(alpha - 1) * x.Log()
+           + Tensor.Constant(beta - 1) * (Tensor.Constant(1.0) - x).Log();
+
+    /// <inheritdoc />
     public override double Sample(GraviRandom rng) => rng.Beta(alpha, beta);
 
     /// <inheritdoc />
@@ -372,6 +441,13 @@ public sealed class Exponential(double rate) : Distribution
         => !Supports(x) || rate <= 0 ? double.NegativeInfinity : Math.Log(rate) - rate * x;
 
     /// <inheritdoc />
+    public override bool IsDifferentiable => rate > 0;
+
+    /// <inheritdoc />
+    public override Tensor LogDensity(Tensor x)
+        => Tensor.Constant(Math.Log(rate)) - Tensor.Constant(rate) * x;
+
+    /// <inheritdoc />
     public override double Sample(GraviRandom rng) => rng.Exponential(rate);
 
     /// <inheritdoc />
@@ -401,6 +477,23 @@ public sealed class StudentT(double degreesOfFreedom, double location, double sc
             - 0.5 * Math.Log(degreesOfFreedom * Math.PI)
             - Math.Log(scale)
             - (degreesOfFreedom + 1) / 2 * Math.Log(1 + z * z / degreesOfFreedom);
+    }
+
+    /// <inheritdoc />
+    public override bool IsDifferentiable => scale > 0 && degreesOfFreedom > 0;
+
+    /// <inheritdoc />
+    public override Tensor LogDensity(Tensor x)
+    {
+        var normaliser = MathUtil.LogGamma((degreesOfFreedom + 1) / 2)
+            - MathUtil.LogGamma(degreesOfFreedom / 2)
+            - 0.5 * Math.Log(degreesOfFreedom * Math.PI)
+            - Math.Log(scale);
+
+        var z = (x - Tensor.Constant(location)) / Tensor.Constant(scale);
+        return Tensor.Constant(normaliser)
+               - Tensor.Constant((degreesOfFreedom + 1) / 2)
+                 * (Tensor.Constant(1.0) + z * z / Tensor.Constant(degreesOfFreedom)).Log();
     }
 
     /// <inheritdoc />
@@ -434,6 +527,18 @@ public sealed class LogNormal(double mu, double sigma) : Distribution
     }
 
     /// <inheritdoc />
+    public override bool IsDifferentiable => sigma > 0;
+
+    /// <inheritdoc />
+    public override Tensor LogDensity(Tensor x)
+    {
+        var z = (x.Log() - Tensor.Constant(mu)) / Tensor.Constant(sigma);
+        return Tensor.Constant(-Math.Log(sigma * Math.Sqrt(2 * Math.PI)))
+               - x.Log()
+               - Tensor.Constant(0.5) * z * z;
+    }
+
+    /// <inheritdoc />
     public override double Sample(GraviRandom rng) => rng.LogNormal(mu, sigma);
 }
 
@@ -461,6 +566,14 @@ public sealed class HalfNormal(double sigma) : Distribution
         if (!Supports(x)) return double.NegativeInfinity;
         return 0.5 * Math.Log(2 / Math.PI) - Math.Log(sigma) - x * x / (2 * sigma * sigma);
     }
+
+    /// <inheritdoc />
+    public override bool IsDifferentiable => sigma > 0;
+
+    /// <inheritdoc />
+    public override Tensor LogDensity(Tensor x)
+        => Tensor.Constant(0.5 * Math.Log(2 / Math.PI) - Math.Log(sigma))
+           - x * x / Tensor.Constant(2 * sigma * sigma);
 
     /// <inheritdoc />
     public override double Sample(GraviRandom rng) => Math.Abs(rng.Normal(0, sigma));

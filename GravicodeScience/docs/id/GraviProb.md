@@ -78,6 +78,50 @@ berkorelasi, karena langkah satu koordinat tidak dapat menyusuri punggungan diag
 Rantai berjalan paralel dan saling bebas, itulah sebabnya sampling multi-rantai nyaris gratis dan
 R-hat menjadi bermakna.
 
+### Sampling berbasis gradien
+
+```csharp
+var nuts = model.SampleNUTS(iterations: 2000, chains: 4);   // ini yang sebaiknya dipakai
+var hmc  = model.SampleHMC(iterations: 2000, chains: 4, leapfrogSteps: 20);
+
+model.IsDifferentiable;                    // false berarti keduanya akan melempar exception
+model.LogPosteriorGradient(values);        // (densitas, gradien) urut sesuai ParameterNames
+```
+
+**Hamiltonian Monte Carlo** mensimulasikan lintasan fisik memakai gradien log densitas, sehingga
+usulannya menempuh *menyeberangi* sebaran, bukan berdifusi di sekitarnya. **NUTS** menghapus satu
+knob penyetelan terakhir dengan melipatgandakan lintasan sampai kedua ujungnya mulai bergerak
+saling mendekat. Keduanya menyesuaikan ukuran langkah lewat dual averaging menuju penerimaan 0,8 —
+jauh lebih tinggi daripada 0,234 milik random walk, karena lintasan yang ditolak membuang jauh
+lebih banyak kerja daripada satu langkah yang ditolak.
+
+Gradiennya berasal dari tape di
+[`GraviNum.Autodiff`](GraviNum.md#diferensiasi-otomatis). Setiap parameter dipetakan dulu ke
+seluruh garis bilangan riil, dan transformasinya pun dibangun di atas tape, sehingga aturan rantai
+melaluinya tidak pernah diturunkan dengan tangan. Itu juga yang menjaga setiap draw tetap berada di
+dalam support.
+
+### Memilih sampler, secara jujur
+
+Diukur di mesin ini, 4 rantai, parameter terburuk yang dilaporkan:
+
+| Model | Sampler | Waktu | ESS/draw | ESS/detik | R-hat terburuk |
+|---|---|---:|---:|---:|---:|
+| koin, 1 parameter | random walk | 58 ms | 16,5% | **11.340** | 1,006 |
+| | NUTS | 669 ms | 44,5% | 2.663 | 1,000 |
+| 20 parameter | random walk | 44 ms | 0,4% | 161 | **1,773** |
+| | NUTS | 9.915 ms | **100,0%** | **202** | **1,000** |
+
+Pada model satu parameter, random walk empat kali lebih cepat *per sampel efektif* dan tidak ada
+alasan memakai gradien. Namun bacalah baris 20 parameter dengan cermat: random walk memberi R-hat
+**1,773**, dan apa pun di atas sekitar 1,01 berarti rantai-rantainya tidak sepakat dan draw-nya
+bukan berasal dari posterior. Ia bukan menghasilkan sampel yang lebih buruk dengan cepat — ia tidak
+menghasilkan apa pun yang bisa dipakai, dengan cepat. NUTS memberi draw yang sepenuhnya bebas
+(100% di antaranya efektif) dan tetap menang pada sampel per detik.
+
+Jadi: **random walk untuk segelintir parameter, NUTS di atas itu.** Titik silangnya adalah titik
+di mana difusi tak lagi mampu menyeberangi posterior, bukan sebuah titik pada kurva kecepatan.
+
 ## Membaca posterior
 
 ```csharp
@@ -125,8 +169,13 @@ parameter Beta pada (0,1), log untuk skala pada (0,∞) — dengan log Jacobian 
 objektif. Tanpa transformasi itu, pengoptimal akan melangkah keluar dari support dan hasilnya tak
 bermakna.
 
-Gradien memakai beda hingga terpusat alih-alih diferensiasi otomatis, yang menjaga implementasi
-bebas dependensi dan cukup akurat untuk jumlah parameter yang menjadi sasaran metode ini.
+Gradien berasal dari tape autodiff begitu model memiliki minimal 32 parameter, dan dari beda hingga
+terpusat di bawah itu. Ambang ini perlu dijelaskan, karena jawaban intuitifnya justru terbalik:
+pada model dua parameter, tape terukur **11× lebih lambat**, sebab membangun dan menelusuri graf
+lebih mahal daripada empat evaluasi skalar yang murah. Keunggulan mode mundur adalah satu backward
+pass mencakup semua parameter, sementara beda hingga butuh `2d` evaluasi tambahan — jadi ia menang
+karena dimensi yang bertambah, bukan karena lebih cepat per panggilan. Titik silang terukurnya ada
+di sekitar 50 parameter.
 
 ## Bayesian network
 

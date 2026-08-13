@@ -77,6 +77,48 @@ cannot travel along a diagonal ridge.
 Chains run in parallel and are independent, which is both why multi-chain sampling is nearly free
 and why R-hat is meaningful.
 
+### Gradient-based sampling
+
+```csharp
+var nuts = model.SampleNUTS(iterations: 2000, chains: 4);   // reach for this one
+var hmc  = model.SampleHMC(iterations: 2000, chains: 4, leapfrogSteps: 20);
+
+model.IsDifferentiable;                    // false means these will throw
+model.LogPosteriorGradient(values);        // (density, gradient) in ParameterNames order
+```
+
+**Hamiltonian Monte Carlo** simulates a physical trajectory using the gradient of the log density,
+so proposals travel *across* the distribution instead of diffusing around it. **NUTS** removes the
+last tuning knob by doubling the trajectory until the two ends start moving back towards each
+other. Both adapt the step size by dual averaging toward 0.8 acceptance — far higher than a random
+walk's 0.234, because a rejected trajectory wastes much more work than a rejected step.
+
+The gradients come from the tape in [`GraviNum.Autodiff`](GraviNum.md#automatic-differentiation).
+Every parameter is mapped to the whole real line first, and the transform is built on the tape too,
+so the chain rule through it is never derived by hand. That is also what keeps every draw inside
+the support.
+
+### Which sampler, honestly
+
+Measured on this machine, 4 chains, worst parameter reported:
+
+| Model | Sampler | Wall clock | ESS/draw | ESS/sec | Worst R-hat |
+|---|---|---:|---:|---:|---:|
+| coin, 1 parameter | random walk | 58 ms | 16.5% | **11,340** | 1.006 |
+| | NUTS | 669 ms | 44.5% | 2,663 | 1.000 |
+| 20 parameters | random walk | 44 ms | 0.4% | 161 | **1.773** |
+| | NUTS | 9,915 ms | **100.0%** | **202** | **1.000** |
+
+On a one-parameter model the random walk is four times faster *per effective sample* and there is
+no reason to reach for a gradient. Read the 20-parameter row carefully, though: the random walk
+returns an R-hat of **1.773**, and anything above about 1.01 means the chains disagree and the
+draws are not from the posterior. It is not producing worse samples quickly — it is producing
+nothing usable, quickly. NUTS returns perfectly independent draws (100% of them effective) and
+still wins on samples per second.
+
+So: **random walk below a handful of parameters, NUTS above.** The crossover is the point where
+diffusion stops being able to cross the posterior, not a point on a speed curve.
+
 ## Reading the posterior
 
 ```csharp
@@ -123,9 +165,12 @@ Constrained parameters are mapped onto the whole real line before fitting — a 
 parameter on (0,1), a log for a scale on (0,∞) — with the log Jacobian included in the objective.
 Without that transform the optimiser walks straight out of the support and the fit is meaningless.
 
-Gradients use central finite differences rather than automatic differentiation, which keeps the
-implementation dependency-free and is accurate enough for the handful of parameters this method
-targets.
+Gradients come from the autodiff tape once the model has at least 32 parameters, and from central
+differences below that. That threshold is worth explaining, because the intuitive answer is
+backwards: on a two-parameter model the tape measured **11× slower**, since building and walking a
+graph costs more than four cheap scalar evaluations. Reverse mode's advantage is that one backward
+pass covers every parameter, while finite differences need `2d` extra evaluations — so it wins by
+growing dimension, not by being faster per call. The measured crossover is near 50 parameters.
 
 ## Bayesian networks
 

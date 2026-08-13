@@ -190,6 +190,121 @@ public class LinAlgTests
         Assert.Equal(11.0, values[2], 8);
     }
 
+    // ---------------------------------------------------------------- fast path vs reference
+    //
+    // Svd and SymmetricEigen use Householder reduction plus a shifted QR/QL iteration.
+    // SvdJacobi and SymmetricEigenJacobi compute the same factorisations by rotating pairs
+    // until nothing changes — a completely different route to the same answer, which is what
+    // makes them a real check rather than a restatement.
+
+    [Theory]
+    [InlineData(9, 5)]
+    [InlineData(5, 9)]
+    [InlineData(12, 12)]
+    public void Svd_AgreesWithTheJacobiReference(int rows, int columns)
+    {
+        var rng = new GraviRandom(101);
+        var a = rng.StandardNormal(rows, columns);
+
+        var fast = Decomposition.Svd(a);
+        var reference = Decomposition.SvdJacobi(a);
+
+        Assert.True(UFunc.AllClose(fast.SingularValues, reference.SingularValues, 1e-9),
+            $"singular values differ for {rows}x{columns}");
+    }
+
+    [Fact]
+    public void SymmetricEigen_AgreesWithTheJacobiReference()
+    {
+        var rng = new GraviRandom(103);
+        var m = rng.StandardNormal(20, 20);
+        var symmetric = (m + m.T) * 0.5;
+
+        var fast = Decomposition.SymmetricEigen(symmetric);
+        var reference = Decomposition.SymmetricEigenJacobi(symmetric);
+
+        Assert.True(UFunc.AllClose(fast.Values, reference.Values, 1e-9));
+    }
+
+    [Fact]
+    public void SymmetricEigen_OrdersRepeatedEigenvaluesWithoutLosingAny()
+    {
+        // The QL iteration deflates blocks in convergence order, not magnitude order, so the
+        // wrapper has to sort. A repeated eigenvalue is where an off-by-one in that sort shows:
+        // it silently drops one copy and duplicates a neighbour.
+        var a = NdArray.FromArray(new double[,]
+        {
+            { 5, 0, 0, 0 },
+            { 0, -2, 0, 0 },
+            { 0, 0, 5, 0 },
+            { 0, 0, 0, 0 },
+        });
+
+        var eigen = Decomposition.SymmetricEigen(a);
+
+        Assert.Equal(5.0, eigen.Values.At(0), 10);
+        Assert.Equal(5.0, eigen.Values.At(1), 10);
+        Assert.Equal(0.0, eigen.Values.At(2), 10);
+        Assert.Equal(-2.0, eigen.Values.At(3), 10);
+
+        // The eigenvectors must still be sorted alongside their values.
+        for (var k = 0; k < 4; k++)
+        {
+            var v = eigen.Vectors.Column(k).Copy();
+            Assert.True(UFunc.AllClose(LinAlg.Dot(a, v), v * eigen.Values.At(k), 1e-9));
+        }
+    }
+
+    [Fact]
+    public void Svd_HandlesRankDeficientAndZeroMatrices()
+    {
+        // Every row identical: one nonzero singular value, and the bidiagonal iteration has to
+        // deflate the other three rather than divide by a zero pivot.
+        var rankOne = NdArray.Zeros(6, 4);
+        for (var i = 0; i < 6; i++)
+            for (var j = 0; j < 4; j++)
+                rankOne[i, j] = j + 1;
+
+        var svd = Decomposition.Svd(rankOne);
+        Assert.True(UFunc.AllClose(svd.Reconstruct(), rankOne, 1e-8));
+        for (var i = 1; i < 4; i++)
+            Assert.True(svd.SingularValues.At(i) < 1e-9, $"s[{i}] = {svd.SingularValues.At(i)}");
+
+        var zeros = Decomposition.Svd(NdArray.Zeros(5, 3));
+        for (var i = 0; i < 3; i++)
+            Assert.Equal(0.0, zeros.SingularValues.At(i), 10);
+    }
+
+    [Theory]
+    [InlineData(20, 6)]
+    [InlineData(6, 20)]
+    [InlineData(14, 14)]
+    public void PartialSvd_MatchesTheFullFactorisation(int rows, int columns)
+    {
+        // Skipping a factor must change only what is computed, never the answer — including for
+        // a wide matrix, where the transpose swaps which factor is the one being skipped.
+        var rng = new GraviRandom(109);
+        var a = rng.StandardNormal(rows, columns);
+        var full = Decomposition.Svd(a);
+
+        Assert.True(UFunc.AllClose(Decomposition.SingularValues(a), full.SingularValues, 1e-12));
+
+        var (values, v) = Decomposition.SvdRightVectors(a);
+        Assert.True(UFunc.AllClose(values, full.SingularValues, 1e-12));
+        Assert.True(UFunc.AllClose(UFunc.Abs(v), UFunc.Abs(full.V), 1e-12));
+    }
+
+    [Fact]
+    public void SymmetricEigen_ProducesOrthonormalVectors()
+    {
+        var rng = new GraviRandom(107);
+        var m = rng.StandardNormal(16, 16);
+        var symmetric = (m + m.T) * 0.5;
+
+        var eigen = Decomposition.SymmetricEigen(symmetric);
+        Assert.True(UFunc.AllClose(LinAlg.Dot(eigen.Vectors.T, eigen.Vectors), NdArray.Eye(16), 1e-9));
+    }
+
     [Fact]
     public void Eigenvalues_OfANonSymmetricMatrixIncludeComplexPairs()
     {

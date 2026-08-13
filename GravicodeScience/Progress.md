@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v0.1.0 · **Target framework**: .NET 10 · **Tests**: 400 passing, 0 failing
+**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 458 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -11,12 +11,12 @@ Roadmap: [PLAN.md](PLAN.md)
 | Area | Status | Notes |
 |---|---|---|
 | Solution and build | ✅ Complete | 24 projects, central package management, Release build clean |
-| GraviNum | ✅ Complete | 95 tests |
+| GraviNum | ✅ Complete | 134 tests |
 | GraviFrame | ✅ Complete | 56 tests |
 | GraviLearn | ✅ Complete | 70 tests |
 | GraviText | ✅ Complete | 74 tests |
 | GraviGraph | ✅ Complete | 53 tests |
-| GraviProb | ✅ Complete | 52 tests |
+| GraviProb | ✅ Complete | 71 tests |
 | Sample apps | ✅ Complete | 6 apps, all run end to end |
 | Notebooks | ✅ Complete | 6 notebooks, JSON validated |
 | Benchmarks | ✅ Complete | 6 suites; GraviNum measured and published |
@@ -28,23 +28,37 @@ Roadmap: [PLAN.md](PLAN.md)
 
 ## Libraries
 
-### GraviNum — 95 tests
+### GraviNum — 134 tests
 
 - [x] `NdArray` with shape, strides and offset; views for reshape, transpose, slice
 - [x] Slicing with index, range, step and reverse selectors
 - [x] NumPy broadcasting with clear errors on incompatible shapes
 - [x] Ufuncs with SIMD, threaded and strided-broadcast dispatch
 - [x] `LinAlg`: dot, solve, inverse, pseudo-inverse, least squares, rank, condition, norms, Kronecker
-- [x] Decompositions: LU, QR (Householder), Cholesky, SVD (one-sided Jacobi), symmetric eigen (Jacobi), general eigenvalues (Hessenberg + shifted QR)
+- [x] Decompositions: LU, QR (Householder), Cholesky, SVD (Golub–Kahan bidiagonal QR), symmetric eigen (Householder tridiagonal + QL), general eigenvalues (Hessenberg + shifted QR)
+- [x] Partial SVD: `SvdRightVectors` and `SingularValues` skip the factors a caller does not need
 - [x] `GraviRandom`: xoshiro256++, 12 distributions with exact sampling algorithms
 - [x] `Statistics`: moments, quantiles, axis reductions, correlation, covariance, histogram
 - [x] `SparseMatrix` CSR with builder, transpose, SpMV and SpMM
 - [x] IO: CSV, JSON, binary `.gnb`, memory-mapped arrays
 - [x] Compute backends: CPU (SIMD + TPL) and GPU (ILGPU)
+- [x] Reverse-mode autodiff: `Tensor` tape, broadcasting-aware gradients, `GradientCheck`
 
 **Performance note.** `LinAlg.Dot` was rewritten during development from a per-row `Axpy` helper
 to four-row register blocking with an inlined SIMD loop: **0.62 → 24.5 GFLOP/s** at 512×512, with
 identical results.
+
+**v0.2 element-wise and matmul.** The parallel element-wise path stopped copying its operands
+(**3.06×**, and now ahead of NumPy); `Unary` gained a parallel path; `MathUtil.Tanh` goes through
+`Math.Exp` (**1.6×**); and `LinAlg.Dot` holds its C tile in registers across a slice of `k`
+(**1.7×** at 128, 1.05–1.4× from 512 up).
+
+**v0.2 decompositions.** SVD and symmetric eigen moved off Jacobi onto Householder reduction plus
+a shifted QR/QL iteration: symmetric eigen **2,740 → 116 ms** (23.6×) and SVD **1,795 → 328 ms**
+(5.5×) at 256×256, closing the gap to NumPy from 139× and 66× to 5.9× and 12.1×. PCA fell
+**375 → 63.9 ms**, partly from the new SVD and partly from no longer accumulating the left factor
+it never reads. `SvdJacobi` and `SymmetricEigenJacobi` stay as the reference the tests check
+against — two unrelated routes to the same factorisation.
 
 ### GraviFrame — 56 tests
 
@@ -112,12 +126,14 @@ by the sample at runtime.
 - [x] DeepWalk and node2vec
 - [x] GCN, GraphSAGE and GAT — all fully trained with hand-derived gradients, GAT including through the attention softmax
 
-### GraviProb — 52 tests
+### GraviProb — 71 tests
 
 - [x] 12 distributions with log densities, sampling, moments and support bounds
 - [x] `BayesianModel` with a fluent API and latent-variable references in likelihoods
 - [x] Metropolis-Hastings with warmup-only adaptation to 0.234 acceptance
 - [x] Metropolis within Gibbs
+- [x] Hamiltonian Monte Carlo and NUTS, with dual-averaging step-size adaptation
+- [x] Differentiable log densities, and `LogPosteriorGradient` from one tape pass
 - [x] Parallel chains
 - [x] Mean-field variational inference with support transforms and log Jacobians
 - [x] Posterior trace: HDI, credible intervals, R-hat, effective sample size, summary table
@@ -148,6 +164,9 @@ Each is now covered by a regression test.
 | Matrix multiply ran at 0.62 GFLOP/s | Per-row helper call defeated inlining | Four-row register blocking |
 | `StripAccents` did nothing | `InvariantGlobalization` disables `String.Normalize` | Explicit folding table |
 | Erf inaccurate beyond ~1e-5 | Wrong partial denominators in the continued fraction | Corrected, with a wider series crossover |
+| **New QL eigen returned unsorted eigenvalues** | The iteration deflates blocks as they converge, which has nothing to do with magnitude; the wrapper assumed ascending order | Sort explicitly, carrying the eigenvector columns along. Caught by checking against the Jacobi reference — `A V = V Λ` still passed, so only the cross-check found it |
+| **Element-wise parallel path copied its own inputs** | `RunBinaryContiguous` called `ToArray()` on both operands and allocated a third array for the result, because a `Span<T>` cannot cross a lambda closure — three extra passes over memory per operation | Pin the buffers and hand the workers pointers. **3.06× faster** on a 1M add (7.23 → 2.36 ms), bit-identical results, and element-wise arithmetic moved from *Python 2–3×* to *.NET 1.8×*. `Unary` had no parallel path at all and gained one |
+| **Gradient-based sampling was unusably slow on real datasets** | The tape built a few nodes *per observation*, so a 200-row model put thousands of nodes on the graph for every gradient — and a gradient is evaluated at every leapfrog step of every iteration of every chain | Vectorise each likelihood over the whole dataset, broadcasting the scalar parameters against the data vector. Graph size no longer depends on the data. The GraviProb suite fell from **34 s to 5 s** |
 
 ---
 
@@ -161,6 +180,9 @@ Each is now covered by a regression test.
 | Cora largest weak component | 2,485 nodes | 2,485 |
 | Cora GCN vs 30.2% baseline | ~81% published | 71.2% |
 | Coin posterior mean vs exact conjugate | 0.623762 | within 0.002 |
+| HMC and NUTS vs the same exact posterior | 0.623762 | within 0.01, mean and sd |
+| Autodiff gradients vs central differences | agreement to ~1e-6 | passes on 14 functions |
+| Log posterior gradient at the Beta(8,4) mode θ=0.7 | exactly 0 | < 1e-8 |
 | Baum-Welch vs generating model | should approach | slightly exceeds, as EM allows |
 | LU, QR, SVD, Cholesky reconstruction | exact to 1e-8 | passes |
 
@@ -177,15 +199,24 @@ Each is now covered by a regression test.
 5. **DBSCAN and agglomerative clustering have no out-of-sample prediction.** This is inherent to
    the algorithms; both throw rather than inventing an answer.
 6. **Betweenness centrality is `O(VE)`** even with Brandes' algorithm.
-7. **Variational inference uses finite-difference gradients**, which limits it to a modest number
-   of parameters.
+7. **Reverse-mode autodiff is slower than finite differences below ~50 parameters.** The tape
+   allocates a node per operation, so on a small log posterior it loses to `2d` cheap scalar
+   evaluations; it wins by growing dimension, not by being faster per call. Variational inference
+   picks its gradient method accordingly.
+8. **A likelihood built through `DistributionSpec.From` has no differentiable form**, because the
+   resolver is an opaque function of doubles. Such models report `IsDifferentiable == false` and
+   the gradient samplers refuse rather than guessing. Use `FromTensor` or the named factories.
+9. **GNN and transformer layers still carry hand-derived gradients.** The tape now exists but has
+   not been applied to them.
 
 ---
 
 ## Next
 
-See [PLAN.md](PLAN.md). The nearest items are BLAS/LAPACK interop, a single-precision path, and
-ONNX import — the last of which would also give `TransformerModel` real weights.
+See [PLAN.md](PLAN.md). The nearest items are putting the GNN and transformer layers on the
+autodiff tape — now unblocked, and the regime where reverse mode is unambiguously right, since a
+GNN forward pass is a few large matrix operations rather than thousands of scalar ones — then
+BLAS/LAPACK interop, a single-precision path, and ONNX import.
 
 ---
 

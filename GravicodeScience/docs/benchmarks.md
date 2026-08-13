@@ -23,10 +23,27 @@ For the cross-stack comparison, see [Against the Python stack](#against-the-pyth
 
 | | |
 |---|---|
-| CPU | x86-64-v3, 8 logical processors, AVX2 + FMA (`Vector<double>` width 4) |
+| CPU | Intel Core i7-8650U, **4 cores / 8 threads**, AVX2 + FMA (`Vector<double>` width 4) |
 | GPU | Intel UHD Graphics 620 (integrated), OpenCL |
 | Runtime | .NET 10.0.11, RyuJIT, Server GC |
 | Job | `ShortRun` — 3 warmup, 5 measured iterations |
+
+### A note on this machine
+
+This is a 15 W ultrabook part, and it matters for reading every number here.
+
+- **Four physical cores, not eight.** `Environment.ProcessorCount` reports 8 because of
+  hyperthreading, and the parallel kernels partition by that count. Two threads sharing one core's
+  vector unit do not double floating-point throughput.
+- **It throttles under sustained AVX load.** Short bursts reach turbo; a minute of dense linear
+  algebra does not. The same build measured 78 ms and 168 ms for a 1024-cube product within the
+  same hour, purely from thermal state and background load.
+
+So absolute figures carry roughly ±30% run-to-run, and a ratio between two numbers measured in
+*different* runs is not evidence of anything. Where this page reports a before/after, the two
+versions were run **alternately inside one process** and the best of many taken — that comparison
+survives throttling because both sides suffer it equally. Ratios against the Python stack come
+from runs taken back to back under the same conditions.
 
 ---
 
@@ -87,8 +104,8 @@ Cost at 256×256, relative to LU:
 | Cholesky | ~0.5× | Only valid for symmetric positive-definite input |
 | LU | 1.0× | The general-purpose default |
 | QR (Householder) | ~2× | More stable; what least squares uses |
-| SVD (one-sided Jacobi) | ~8× | Also yields rank and condition number |
-| Symmetric eigen (Jacobi) | ~6× | Iterative; cost depends on the spectrum |
+| SVD (bidiagonal QR) | ~6× | Also yields rank and condition number |
+| Symmetric eigen (tridiagonal QL) | ~2× | Iterative; cost depends on the spectrum |
 
 ### Sparse versus dense
 
@@ -273,36 +290,97 @@ networkx 3.6.1), 8 logical processors, AVX2.
 
 | Operation | Gravicode.Science | Python | Ratio |
 |---|---:|---:|---|
-| 256×256 matrix product | 5.22 ms | 0.41 ms | Python 12.8× |
-| 512×512 matrix product | 27.73 ms | 3.07 ms | Python 9.0× |
-| 1024×1024 matrix product | 169.69 ms | 27.76 ms | Python 6.1× |
-| LU, 256×256 | 49.36 ms | 3.28 ms | Python 15.0× |
-| QR, 256×256 | 115.42 ms | 10.36 ms | Python 11.1× |
-| Cholesky, 256×256 | 12.66 ms | 1.23 ms | Python 10.3× |
-| **SVD, 256×256** | 1,794.65 ms | 27.11 ms | **Python 66.2×** |
-| **symmetric eigen, 256×256** | 2,739.93 ms | 19.74 ms | **Python 138.8×** |
-| solve Ax=b, 256×256 | 44.03 ms | 6.18 ms | Python 7.1× |
-| matrix inverse, 256×256 | 121.99 ms | 9.90 ms | Python 12.3× |
+| 256×256 matrix product | 2.58 ms | 0.41 ms | Python 6.3× |
+| 512×512 matrix product | 15.64 ms | 3.07 ms | Python 5.1× |
+| 1024×1024 matrix product | 93.45 ms | 27.76 ms | Python 3.4× |
+| LU, 256×256 | 41.13 ms | 3.28 ms | Python 12.5× |
+| QR, 256×256 | 153.63 ms | 10.36 ms | Python 14.8× |
+| Cholesky, 256×256 | 12.24 ms | 1.23 ms | Python 10.0× |
+| SVD, 256×256 | 308.41 ms | 27.11 ms | Python 11.4× |
+| symmetric eigen, 256×256 | 110.22 ms | 19.74 ms | Python 5.6× |
+| solve Ax=b, 256×256 | 66.78 ms | 6.18 ms | Python 10.8× |
+| matrix inverse, 256×256 | 147.48 ms | 9.90 ms | Python 14.9× |
 
 NumPy is not doing this in Python. It hands every one of these to LAPACK and BLAS — decades of
 hand-tuned Fortran and assembly, cache-blocked and multithreaded. Managed code with `Vector<T>`
 does not close that gap, and this library does not pretend otherwise.
 
-The two worst results are the most informative. `Decomposition.Svd` uses one-sided Jacobi and
-`SymmetricEigen` uses cyclic Jacobi: both are iterative, both are chosen for numerical robustness
-and zero dependencies, and both are one to two orders of magnitude slower than LAPACK's
-divide-and-conquer routines. That is the price of having no native dependency, and it is
-[the top item on the roadmap](../PLAN.md).
+#### What changed in v0.2
+
+SVD and symmetric eigen used to be the two worst results on this page by a wide margin — 66× and
+139× — because both used a Jacobi method: sweep the whole matrix rotating pairs until nothing
+changes. Correct, easy to verify, and hopelessly wasteful, since every sweep touches every entry
+however close to converged it already is.
+
+Both now reduce the matrix once with Householder reflections and then iterate on the condensed
+form, where a shift makes convergence cubic:
+
+| | v0.1 (Jacobi) | v0.2 | Gain | vs NumPy, before → after |
+|---|---:|---:|---|---|
+| symmetric eigen, 256×256 | 2,739.93 ms | 116.21 ms | **23.6×** | 138.8× → 5.9× |
+| SVD, 256×256 | 1,794.65 ms | 327.63 ms | **5.5×** | 66.2× → 12.1× |
+| PCA to 5 components, 20k × 20 | 375.40 ms | 63.87 ms | **5.9×** | 63.5× → 10.8× |
+
+The Jacobi implementations remain, as `Decomposition.SvdJacobi` and
+`Decomposition.SymmetricEigenJacobi`. They are not dead code: the tests pin the fast path against
+them, and because the two arrive at the same factorisation by entirely different routes, that is a
+real check rather than a restatement.
+
+PCA gains more than the SVD underneath it because it also stopped computing a factor it never
+read. A 20 000×20 SVD spends most of its time accumulating `U`, one row per sample; PCA needs only
+the component directions and their variances, which live in `V` and the singular values.
+`SvdRightVectors` and `SingularValues` skip what the caller does not ask for — the values are
+bit-identical either way, since the rotations that produce them run regardless.
+
+A native BLAS/LAPACK backend remains [on the roadmap](../PLAN.md) and is the only way to close what
+is left, but the gap it has to close is now one order of magnitude, not two.
+
+#### Element-wise arithmetic, and a bug that was costing 3×
+
+The parallel element-wise path used to copy **both** operands into fresh arrays and the result back
+out, purely so the lambda could capture them — spans cannot cross a closure. On a million-element
+add that is three extra passes over 8 MB each, to save nothing. Pinning the buffers and handing the
+workers pointers removes all of it:
+
+| | before | after | gain |
+|---|---:|---:|---|
+| element-wise add, 1M | 7.23 ms | 2.36 ms | **3.06×** |
+| element-wise add, 10M | 82.33 ms | 27.62 ms | **2.98×** |
+
+Measured by running both versions alternately in one process and taking the best of fifteen — see
+*[a note on this machine](#a-note-on-this-machine)* for why. The results are bit-identical.
+
+These operations are bound by memory bandwidth, not arithmetic: the figure that matters is the
+2.9 → 10.2 GB/s the fix bought, and it is why wider SIMD registers would not have helped. That is
+also what moved element-wise arithmetic past NumPy in the table above.
+
+`Unary` had no parallel path at all and now has one, which is what makes `Exp` and `Log` over large
+arrays scale with cores.
+
+#### Matrix product
+
+The kernel now holds a 4×vector tile of C in registers across a slice of `k`, rather than reloading
+and restoring C at every step of `k`. Slicing `k` is what keeps the strided walk through B inside
+cache; register accumulation without it is *slower* at 1024 and above, which is worth knowing
+before anyone tries half of the change.
+
+Interleaved against the previous kernel, best of many: **1.7× at 128**, no change at 256, and
+**1.05–1.4×** from 512 up. Honest reading: this is a modest win, not a breakthrough. Closing the
+remaining 3.4× to NumPy needs the packed, three-level blocking that OpenBLAS uses, which is a much
+larger piece of work.
+
+Column panelling — blocking the *j* loop instead — was also tried and is consistently **worse** at
+every size. It is recorded here so nobody spends the afternoon rediscovering it.
 
 ### Arrays, statistics, dataframes — Python ahead, but not by orders of magnitude
 
 | Operation | Gravicode.Science | Python | Ratio |
 |---|---:|---:|---|
-| element-wise add, 1M | 15.25 ms | 4.80 ms | Python 3.2× |
-| element-wise add, 10M | 97.03 ms | 47.21 ms | Python 2.1× |
-| sparse matrix-vector, 2000² @ 1% | 0.17 ms | 0.06 ms | Python 3.0× |
-| 1,000,000 normal deviates | 17.01 ms | 16.22 ms | parity |
-| mean + std over 1M | 12.28 ms | 7.62 ms | Python 1.6× |
+| **element-wise add, 1M** | 2.52 ms | 4.80 ms | **.NET 1.9×** |
+| **element-wise add, 10M** | 26.70 ms | 47.21 ms | **.NET 1.8×** |
+| sparse matrix-vector, 2000² @ 1% | 0.16 ms | 0.06 ms | Python 2.8× |
+| 1,000,000 normal deviates | 13.75 ms | 16.22 ms | **.NET 1.2×** |
+| mean + std over 1M | 11.50 ms | 7.62 ms | Python 1.5× |
 | read 200,000-row CSV | 371.37 ms | 135.88 ms | Python 2.7× |
 | group-by mean, 500 groups | 39.88 ms | 5.86 ms | Python 6.8× |
 | sort by a numeric column | 47.85 ms | 27.24 ms | Python 1.8× |
@@ -322,7 +400,7 @@ differences survive the language gap.
 | **random forest fit, 50 trees** | 1,906.19 ms | 2,584.07 ms | **.NET 1.4×** |
 | random forest predict, 20k rows | 134.54 ms | 98.20 ms | Python 1.4× |
 | k-means, k=5, 3 restarts | 2,541.98 ms | 497.53 ms | Python 5.1× |
-| **PCA to 5 components** | 375.40 ms | 5.92 ms | **Python 63.5×** |
+| PCA to 5 components | 63.87 ms | 5.92 ms | Python 10.8× |
 | kNN predict, 2k vs 5k | 609.92 ms | 55.17 ms | Python 11.1× |
 
 Random forest is the one model where this library is faster, and the reason is instructive: tree
@@ -330,7 +408,8 @@ fitting is branch-heavy, cache-unfriendly, pointer-chasing work that no BLAS cal
 It is exactly the shape of problem a JIT-compiled language handles well and an interpreter does
 not — scikit-learn only competes here because its trees are compiled Cython.
 
-PCA is 63× slower purely because it is SVD underneath. Fix the SVD and this number moves with it.
+PCA is SVD underneath, so it moved with the SVD: 63.5× in v0.1, 10.8× now. Two thirds of that came
+from the new decomposition and the rest from no longer computing a factor PCA never reads.
 
 ### Text, graphs, sampling — .NET wins, and by a lot
 
@@ -357,22 +436,35 @@ array while the loop keeps everything in registers.
 
 ### The tally, and what it means
 
-**.NET faster on 9 measurements, Python faster on 25, parity on 3.**
+**.NET faster on 12 measurements, Python faster on 22, parity on 3.**
 
 Read past the tally, though, because the split is not random:
 
-- Wherever the operation bottoms out in **LAPACK, BLAS or compiled Cython**, Python wins, usually
-  by 5–15× and occasionally by 60–140×.
+- Wherever the operation bottoms out in **LAPACK, BLAS or compiled Cython**, Python wins, now
+  consistently by 3–15× rather than the 60–140× the Jacobi decompositions used to cost.
 - Wherever the operation is **scalar, branchy or sequential**, .NET wins, by 2–40× and once by 132×.
+- Wherever the operation is **bound by memory bandwidth** — element-wise arithmetic — the two are
+  close, and .NET is now slightly ahead.
+
+Two things moved the numbers in v0.2. The decomposition rewrite removed the extreme end of that
+first range, so nothing on this page is more than about 15× off the Python stack. Removing the
+copies from the element-wise path then flipped both of those rows from *Python 2–3×* to
+*.NET 1.8–1.9×*.
 
 So the honest summary is: this library is not a replacement for NumPy on dense linear algebra
 today, and adding BLAS/LAPACK interop is the single change that would most improve it. It already
 beats the Python stack on graph algorithms, MCMC, tokenization and any workload built from tight
 scalar loops — and it does so while staying in one type-safe, deployable, dependency-light process.
 
-### Two bugs this comparison found
+### Three bugs this comparison found
 
 Running the two stacks side by side surfaced problems that the .NET-only benchmarks had not.
+
+**The element-wise parallel path copied its own inputs.** `RunBinaryContiguous` called `ToArray()`
+on both operands and allocated a third array for the result, because a `Span<T>` cannot be captured
+by a lambda. Every large `Add` therefore moved 24 MB it did not need to. Being 2–3× behind NumPy on
+an operation that is *nothing but* a memory copy was the clue; the fix is `fixed` pointers, and it
+made element-wise arithmetic **3× faster** and moved it ahead of NumPy.
 
 **Decision tree splitting was O(n²).** `FindBestSplit` materialised `sorted[..k]` and `sorted[k..]`
 at every candidate split point and rebuilt the class-count dictionary from them — O(n) work at

@@ -59,14 +59,16 @@ public class PrincipalComponentAnalysis(int components) : ModelBase, ITransforme
             for (var j = 0; j < FeatureCount; j++)
                 centred[i, j] = x[i, j] - Mean.At(j);
 
-        var svd = GraviNum.Decomposition.Svd(centred);
+        // Only the right factor matters here: its columns are the component directions and the
+        // singular values give their variances. U would be one row per sample and go unread.
+        var (singularValues, v) = GraviNum.Decomposition.SvdRightVectors(centred);
 
         ComponentVectors = NdArray.Zeros(Components, FeatureCount);
         ExplainedVariance = NdArray.Zeros(Components);
         for (var c = 0; c < Components; c++)
         {
-            for (var j = 0; j < FeatureCount; j++) ComponentVectors[c, j] = svd.V[j, c];
-            var singular = svd.SingularValues.At(c);
+            for (var j = 0; j < FeatureCount; j++) ComponentVectors[c, j] = v[j, c];
+            var singular = singularValues.At(c);
             ExplainedVariance.SetAt(c, singular * singular / Math.Max(1, samples - 1));
         }
 

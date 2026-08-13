@@ -120,7 +120,7 @@ public static class Activations
 {
     /// <summary>The Gaussian error linear unit, BERT's activation (tanh approximation).</summary>
     public static double Gelu(double x)
-        => 0.5 * x * (1.0 + Math.Tanh(Math.Sqrt(2.0 / Math.PI) * (x + 0.044715 * x * x * x)));
+        => 0.5 * x * (1.0 + MathUtil.Tanh(Math.Sqrt(2.0 / Math.PI) * (x + 0.044715 * x * x * x)));
 
     /// <summary>Rectified linear unit.</summary>
     public static double Relu(double x) => x > 0 ? x : 0;

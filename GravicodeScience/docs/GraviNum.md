@@ -128,6 +128,70 @@ lu.Solve(b);  qr.Solve(b);  svd.Reconstruct();
 `Cholesky` throws when the input is not positive definite rather than returning NaNs, so it
 doubles as a positive-definiteness check.
 
+**Ask for only the factors you need.** A full SVD spends most of its time accumulating `U`, one
+row per input row. When that is not what you are after, say so:
+
+```csharp
+var (values, v) = Decomposition.SvdRightVectors(m);  // skips U — what PCA needs
+var s           = Decomposition.SingularValues(m);   // skips both — rank, condition number
+```
+
+The singular values are identical to the last bit either way; the rotations that produce them run
+regardless. On a 20 000×20 matrix, skipping `U` is most of the runtime.
+
+**On the algorithms.** `Svd` reduces to bidiagonal form with Householder reflections and then runs
+an implicit shifted QR iteration (Golub–Kahan–Reinsch); `SymmetricEigen` tridiagonalises and runs
+an implicit QL iteration with Wilkinson shifts. `SvdJacobi` and `SymmetricEigenJacobi` compute the
+same factorisations by rotating column pairs until nothing changes — far slower, but an entirely
+different route to the same answer, which is what makes them useful as the reference the tests
+check against.
+
+## Automatic differentiation
+
+`Gravicode.Science.GraviNum.Autodiff` is a reverse-mode tape. Write the forward computation once
+and the derivatives come back from one backward pass — no hand-derived backward passes.
+
+```csharp
+using Gravicode.Science.GraviNum.Autodiff;
+
+var w = Tensor.Parameter(NdArray.Zeros(2, 1));
+var b = Tensor.Parameter(NdArray.Zeros(1));
+
+var error = Tensor.Constant(x).MatMul(w) + b - Tensor.Constant(y);
+var loss  = (error * error).Mean();
+
+loss.Backward();
+w.Gradient;   // dLoss/dw, same shape as w
+b.Gradient;   // summed over the batch, because b was broadcast
+```
+
+`Parameter` accumulates a gradient; `Constant` stops one. Operations cover arithmetic, `Exp`,
+`Log`, `Sqrt`, `Pow`, `Tanh`, `Sigmoid`, `Relu`, `Abs`, `Softplus`, `Sum`, `Mean`, `LogSumExp`,
+`MatMul`, `Transpose` and `Reshape`. `LogSumExp` shifts out the maximum, so it survives inputs
+around 1000 where the naive `log(sum(exp(x)))` returns infinity.
+
+**Check every new gradient.** `GradientCheck` compares the tape against central finite differences,
+which share none of its code:
+
+```csharp
+var result = GradientCheck.Check(t => (t.Sigmoid() * t.Tanh()).Log().Sum(), NdArray.FromValues([0.8, 1.4]));
+result.Passed(1e-6);   // false prints which entry disagreed and by how much
+```
+
+### Two things worth knowing
+
+**Broadcast gradients sum.** A bias of shape `[3]` added to a batch `[64, 3]` influenced 64
+outputs, so its gradient is the *sum* over the batch — not one row, not the mean. This is the
+single most common way a hand-written backward pass goes wrong, and it fails quietly: the gradient
+is off by exactly the batch size and the model still appears to train.
+
+**It is a tape, not a framework.** No graph optimiser, no fused kernels, no device placement. It
+exists so a new layer or a new log density can be written once, forwards. Reverse mode costs one
+backward pass regardless of parameter count, while finite differences cost `2d` extra forward
+evaluations — but the tape allocates a node per operation, so on a *small* model the finite
+differences are genuinely faster. Measured on the log posterior of a Bayesian model, the crossover
+sits near 50 parameters. Below that, the tape is buying you correctness and convenience, not speed.
+
 ## Random numbers
 
 `GraviRandom` is xoshiro256++ seeded through SplitMix64: fast, statistically solid and

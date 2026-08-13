@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Gravicode.Science.GraviFrame;
 using Gravicode.Science.GraviNum;
 using Gravicode.Science.GraviProb;
@@ -69,7 +69,36 @@ Console.WriteLine($"  sampled in {watch.ElapsedMilliseconds} ms, acceptance {gib
 Console.WriteLine($"  mean {gibbs.Mean("theta"):F6}, r_hat {gibbs.RHat("theta"):F4}, ESS {gibbs.EffectiveSampleSize("theta"):F0}");
 Console.WriteLine();
 
-Section("5. Variational inference");
+Section("5. Hamiltonian Monte Carlo and NUTS");
+
+Console.WriteLine($"  model is differentiable: {model.IsDifferentiable}");
+
+// One tape pass gives the gradient of the whole log posterior. At the mode of the Beta(126, 76)
+// posterior it must vanish, which is a check the sampler itself cannot give you.
+var mode = (exact.Alpha - 1) / (exact.Alpha + exact.BetaParameter - 2);
+var (_, gradientAtMode) = model.LogPosteriorGradient(
+    new Dictionary<string, double>(StringComparer.Ordinal) { ["theta"] = mode });
+Console.WriteLine($"  d/dtheta at the posterior mode {mode:F6} = {gradientAtMode[0]:E2}  (exactly 0)");
+Console.WriteLine();
+
+watch.Restart();
+var nuts = model.SampleNUTS(iterations: 2000, chains: 4, seed: 42);
+watch.Stop();
+
+Console.WriteLine($"  NUTS: {watch.ElapsedMilliseconds} ms, mean {nuts.Mean("theta"):F6}, " +
+                  $"r_hat {nuts.RHat("theta"):F4}");
+Console.WriteLine($"  error against the exact posterior: {Math.Abs(exact.Mean - nuts.Mean("theta")):E2}");
+Console.WriteLine($"  effective draws: {nuts.EffectiveSampleSize("theta"):F0} of {nuts.TotalDraws} " +
+                  $"({nuts.EffectiveSampleSize("theta") / nuts.TotalDraws:P1})");
+Console.WriteLine($"  versus the random walk above: " +
+                  $"{posterior.EffectiveSampleSize("theta") / posterior.TotalDraws:P1} of its draws were effective");
+Console.WriteLine();
+Console.WriteLine("  On one parameter the random walk is the faster choice per effective sample.");
+Console.WriteLine("  NUTS earns its cost as the dimension grows, where a random walk stops");
+Console.WriteLine("  converging at all rather than merely slowing down.");
+Console.WriteLine();
+
+Section("6. Variational inference");
 
 watch.Restart();
 var variational = model.FitVariational(iterations: 1200, learningRate: 0.05, seed: 42);
@@ -81,7 +110,7 @@ Console.WriteLine("  the posterior rather than sampling from it.");
 Console.WriteLine();
 
 // ---------------------------------------------------------------- predictive
-Section("6. Posterior predictive check");
+Section("7. Posterior predictive check");
 
 var replicated = posterior.PosteriorPredictive(
     (values, rng) => rng.Binomial(trials, values["theta"]), draws: 5000, seed: 42);
@@ -93,7 +122,7 @@ Console.WriteLine("  (a value near the middle means the model can plausibly prod
 Console.WriteLine();
 
 // ---------------------------------------------------------------- multi parameter
-Section("7. A two-parameter model");
+Section("8. A two-parameter model");
 
 var rng = new GraviRandom(7);
 var measurements = Enumerable.Range(0, 250).Select(_ => rng.Normal(12.5, 3.2)).ToArray();
@@ -114,7 +143,7 @@ Console.Write(normalPosterior.Summary());
 Console.WriteLine();
 
 // ---------------------------------------------------------------- bayesian network
-Section("8. A Bayesian network");
+Section("9. A Bayesian network");
 
 var network = new BayesianNetwork()
     .AddVariable("rain", 0.8, 0.2)
@@ -137,7 +166,7 @@ Console.WriteLine("  grass, rain becomes a less necessary explanation.");
 Console.WriteLine();
 
 // ---------------------------------------------------------------- hmm
-Section("9. A hidden Markov model");
+Section("10. A hidden Markov model");
 
 var weather = new HiddenMarkovModel(
     [0.6, 0.4],
@@ -166,7 +195,7 @@ Console.WriteLine($"  (the generating model scores {sequences.Sum(weather.LogLik
 Console.WriteLine();
 
 // ---------------------------------------------------------------- regression
-Section("10. Bayesian linear regression");
+Section("11. Bayesian linear regression");
 
 var x = new GraviRandom(17).StandardNormal(120, 1);
 var y = NdArray.Zeros(120);
@@ -185,7 +214,7 @@ Console.WriteLine("  Uncertainty grows outside the observed range, which a point
 Console.WriteLine();
 
 // ---------------------------------------------------------------- chart
-Section("11. Posterior plot");
+Section("12. Posterior plot");
 
 var draws = posterior["theta"].ToArray();
 var (edges, counts) = Statistics.Histogram(posterior["theta"], bins: 60);
@@ -249,3 +278,4 @@ static string ResolveScreenshots()
     Directory.CreateDirectory(fallback);
     return fallback;
 }
+

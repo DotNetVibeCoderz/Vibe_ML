@@ -46,7 +46,36 @@ public static class UFunc
         return result;
     }
 
-    private static void RunUnary(
+    private static unsafe void RunUnary(
+        ReadOnlySpan<double> src, Span<double> dst,
+        Func<double, double> scalar, Func<Vector<double>, Vector<double>>? vector)
+    {
+        var n = src.Length;
+
+        // Above the threshold, split across cores. Pointers rather than spans because a span
+        // cannot be captured by the lambda; taking a copy to work around that would cost more
+        // memory traffic than the parallelism saves.
+        if (n >= ParallelThreshold)
+        {
+            fixed (double* source = src, destination = dst)
+            {
+                var s = source;
+                var d = destination;
+                Parallel.For(0, Environment.ProcessorCount, worker =>
+                {
+                    var (from, to) = Partition(n, worker);
+                    if (to > from)
+                        SimdUnary(new ReadOnlySpan<double>(s + from, to - from),
+                                  new Span<double>(d + from, to - from), scalar, vector);
+                });
+            }
+            return;
+        }
+
+        SimdUnary(src, dst, scalar, vector);
+    }
+
+    private static void SimdUnary(
         ReadOnlySpan<double> src, Span<double> dst,
         Func<double, double> scalar, Func<Vector<double>, Vector<double>>? vector)
     {
@@ -106,52 +135,62 @@ public static class UFunc
         return output;
     }
 
-    private static void RunBinaryContiguous(
+    private static unsafe void RunBinaryContiguous(
         ReadOnlySpan<double> left, ReadOnlySpan<double> right, Span<double> dst,
         Func<double, double, double> scalar,
         Func<Vector<double>, Vector<double>, Vector<double>>? vector)
     {
         var n = left.Length;
 
-        if (n >= ParallelThreshold && vector is not null && Vector.IsHardwareAccelerated)
+        // Element-wise work is bound by memory bandwidth, not arithmetic, so the one thing this
+        // path must not do is move data it does not have to. An earlier version copied both
+        // operands into fresh arrays purely so the lambda could capture them, then copied the
+        // result back — three extra passes over the data, which on a 1M-element add is 24 MB of
+        // traffic to save nothing. Pinning and handing the workers pointers avoids all of it.
+        if (n >= ParallelThreshold)
         {
-            // Copy to arrays so the lambda can capture them; spans cannot cross the closure.
-            var la = left.ToArray();
-            var ra = right.ToArray();
-            var oa = new double[n];
-            Parallel.For(0, Environment.ProcessorCount, worker =>
+            fixed (double* lp = left, rp = right, dp = dst)
             {
-                var (from, to) = Partition(n, worker);
-                SimdBinary(la.AsSpan(from, to - from), ra.AsSpan(from, to - from), oa.AsSpan(from, to - from), scalar, vector);
-            });
-            oa.AsSpan().CopyTo(dst);
+                var l = lp;
+                var r = rp;
+                var d = dp;
+                Parallel.For(0, Environment.ProcessorCount, worker =>
+                {
+                    var (from, to) = Partition(n, worker);
+                    if (to > from)
+                        SimdBinary(new ReadOnlySpan<double>(l + from, to - from),
+                                   new ReadOnlySpan<double>(r + from, to - from),
+                                   new Span<double>(d + from, to - from), scalar, vector);
+                });
+            }
             return;
         }
 
-        if (vector is not null && Vector.IsHardwareAccelerated && n >= Vector<double>.Count)
-        {
-            SimdBinary(left, right, dst, scalar, vector);
-            return;
-        }
-
-        for (var i = 0; i < n; i++) dst[i] = scalar(left[i], right[i]);
+        SimdBinary(left, right, dst, scalar, vector);
     }
 
     private static void SimdBinary(
         ReadOnlySpan<double> left, ReadOnlySpan<double> right, Span<double> dst,
         Func<double, double, double> scalar,
-        Func<Vector<double>, Vector<double>, Vector<double>> vector)
+        Func<Vector<double>, Vector<double>, Vector<double>>? vector)
     {
-        var width = Vector<double>.Count;
         var n = left.Length;
-        var i = 0;
-        for (; i <= n - width; i += width)
+
+        if (vector is not null && Vector.IsHardwareAccelerated && n >= Vector<double>.Count)
         {
-            var l = new Vector<double>(left.Slice(i, width));
-            var r = new Vector<double>(right.Slice(i, width));
-            vector(l, r).CopyTo(dst.Slice(i, width));
+            var width = Vector<double>.Count;
+            var i = 0;
+            for (; i <= n - width; i += width)
+            {
+                var l = new Vector<double>(left.Slice(i, width));
+                var r = new Vector<double>(right.Slice(i, width));
+                vector(l, r).CopyTo(dst.Slice(i, width));
+            }
+            for (; i < n; i++) dst[i] = scalar(left[i], right[i]);
+            return;
         }
-        for (; i < n; i++) dst[i] = scalar(left[i], right[i]);
+
+        for (var i = 0; i < n; i++) dst[i] = scalar(left[i], right[i]);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -247,7 +286,7 @@ public static class UFunc
     public static NdArray Tan(NdArray a) => Unary(a, Math.Tan);
 
     /// <summary>Element-wise hyperbolic tangent.</summary>
-    public static NdArray Tanh(NdArray a) => Unary(a, Math.Tanh);
+    public static NdArray Tanh(NdArray a) => Unary(a, MathUtil.Tanh);
 
     /// <summary>Element-wise logistic sigmoid.</summary>
     public static NdArray Sigmoid(NdArray a) => Unary(a, MathUtil.Sigmoid);

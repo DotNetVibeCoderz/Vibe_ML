@@ -9,12 +9,12 @@ each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 | Library | Python analogue | Focus |
 |---|---|---|
-| [**GraviNum**](docs/GraviNum.md) | NumPy | N-dimensional arrays, linear algebra, random, statistics |
+| [**GraviNum**](docs/GraviNum.md) | NumPy + autograd | N-dimensional arrays, linear algebra, autodiff, random, statistics |
 | [**GraviFrame**](docs/GraviFrame.md) | pandas | DataFrames, group-by, pivot, joins, time series |
 | [**GraviLearn**](docs/GraviLearn.md) | scikit-learn | Preprocessing, supervised & unsupervised ML, pipelines, metrics |
 | [**GraviText**](docs/GraviText.md) | HuggingFace Transformers | Tokenization, embeddings, transformers, NLP tasks |
 | [**GraviGraph**](docs/GraviGraph.md) | PyTorch Geometric / DGL | Graph structures, embeddings, GNNs |
-| [**GraviProb**](docs/GraviProb.md) | PyMC / Stan | Distributions, Bayesian inference, probabilistic models |
+| [**GraviProb**](docs/GraviProb.md) | PyMC / Stan | Distributions, MCMC and NUTS, variational inference, probabilistic models |
 
 ## Quick start
 
@@ -54,7 +54,7 @@ samples/      six console apps, each printing real results
 notebooks/    six .NET Interactive notebooks with charts
 benchmarks/   six BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        400 tests
+tests/        458 tests
 tools/        ScienceAppGen — an IDE that builds apps from a prompt
 docs/         English, with Bahasa Indonesia in docs/id/
 ```
@@ -114,13 +114,24 @@ repeat protocol. Full tables in [benchmarks.md](docs/benchmarks.md#against-the-p
 
 | Where the work is… | Winner | Examples |
 |---|---|---|
-| A **LAPACK/BLAS call** in disguise | **Python**, 5–140× | SVD 66×, symmetric eigen 139×, PCA 64×, matmul 6–13× |
+| A **LAPACK/BLAS call** in disguise | **Python**, 3–15× | SVD 11×, symmetric eigen 5.6×, PCA 11×, matmul 3–6× |
 | Compiled Cython inner loops | Python, 2–11× | pandas group-by 6.8×, kNN 11×, k-means 5× |
 | **Scalar, branchy or sequential** | **.NET**, 2–132× | scalar log-density 132×, BFS 40×, MCMC 13×, Dijkstra 5.6× |
+| **Bound by memory bandwidth** | **.NET**, 1.8× | element-wise add, 1M and 10M elements |
 | A better **algorithm** | .NET | rolling mean 8.6× (incremental accumulator vs recompute) |
 | Tree building | .NET 1.4× | random forest fit beats scikit-learn |
 
-Tally: .NET faster on 9 measurements, Python faster on 25, parity on 3.
+Tally: .NET faster on 12 measurements, Python faster on 22, parity on 3.
+
+The first row used to read *5–140×*. Two v0.2 changes moved it:
+
+- **Decompositions.** SVD and symmetric eigen used Jacobi methods, which sweep the entire matrix
+  until it stops changing. Householder reduction plus a shifted QR/QL iteration made symmetric
+  eigen **23.6× faster** and SVD **5.5× faster**, taking the worst gaps from 139× and 66× down to
+  5.6× and 11×.
+- **Element-wise arithmetic.** The parallel path was copying both operands and the result — three
+  extra passes over memory to satisfy a lambda capture. Removing them made it **3× faster** and
+  put it *ahead* of NumPy.
 
 The split is not random. Wherever an operation bottoms out in decades-tuned Fortran, Python wins
 and this library does not pretend otherwise — **BLAS/LAPACK interop is the top roadmap item**.

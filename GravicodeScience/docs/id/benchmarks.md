@@ -1,4 +1,4 @@
-# Benchmark
+?# Benchmark
 
 *[English](../benchmarks.md)*
 
@@ -21,10 +21,27 @@ Release bersifat wajib; BenchmarkDotNet menolak berjalan pada build Debug.
 
 | | |
 |---|---|
-| CPU | x86-64-v3, 8 prosesor logis, AVX2 + FMA (lebar `Vector<double>` 4) |
+| CPU | Intel Core i7-8650U, **4 core / 8 thread**, AVX2 + FMA (lebar `Vector<double>` 4) |
 | GPU | Intel UHD Graphics 620 (terintegrasi), OpenCL |
 | Runtime | .NET 10.0.11, RyuJIT, Server GC |
 | Job | `ShortRun` — 3 iterasi pemanasan, 5 iterasi terukur |
+
+### Catatan tentang mesin ini
+
+Ini prosesor ultrabook 15 W, dan itu penting untuk membaca setiap angka di halaman ini.
+
+- **Empat core fisik, bukan delapan.** `Environment.ProcessorCount` melaporkan 8 karena
+  hyperthreading, dan kernel paralel membagi kerja menurut angka itu. Dua thread yang berbagi satu
+  unit vektor tidak melipatduakan throughput floating-point.
+- **Ia throttle di beban AVX berkelanjutan.** Ledakan singkat mencapai turbo; satu menit aljabar
+  linear padat tidak. Build yang sama terukur 78 ms dan 168 ms untuk perkalian 1024-kubik dalam jam
+  yang sama, murni karena kondisi termal dan beban latar.
+
+Jadi angka absolut membawa ragam sekitar ±30% antar-run, dan rasio antara dua angka yang diukur di
+**run berbeda** bukan bukti apa pun. Di mana halaman ini melaporkan sebelum/sesudah, kedua versi
+dijalankan **berselang-seling dalam satu proses** lalu diambil yang terbaik dari sekian ulangan —
+perbandingan itu tahan terhadap throttling karena kedua sisi mengalaminya sama rata. Rasio terhadap
+tumpukan Python berasal dari run yang diambil berurutan pada kondisi yang sama.
 
 ---
 
@@ -88,8 +105,8 @@ Biaya pada 256×256, relatif terhadap LU:
 | Cholesky | ~0,5× | Hanya berlaku untuk matriks simetris definit positif |
 | LU | 1,0× | Bawaan untuk keperluan umum |
 | QR (Householder) | ~2× | Lebih stabil; dipakai oleh least squares |
-| SVD (Jacobi satu sisi) | ~8× | Sekaligus memberi rank dan condition number |
-| Eigen simetris (Jacobi) | ~6× | Iteratif; biaya bergantung pada spektrum |
+| SVD (QR bidiagonal) | ~6× | Sekaligus memberi rank dan condition number |
+| Eigen simetris (QL tridiagonal) | ~2× | Iteratif; biaya bergantung pada spektrum |
 
 ### Sparse versus dense
 
@@ -276,33 +293,95 @@ networkx 3.6.1), 8 prosesor logis, AVX2.
 
 | Operasi | Gravicode.Science | Python | Rasio |
 |---|---:|---:|---|
-| Perkalian matriks 256×256 | 5,22 ms | 0,41 ms | Python 12,8× |
-| Perkalian matriks 512×512 | 27,73 ms | 3,07 ms | Python 9,0× |
-| Perkalian matriks 1024×1024 | 169,69 ms | 27,76 ms | Python 6,1× |
-| LU, 256×256 | 49,36 ms | 3,28 ms | Python 15,0× |
-| QR, 256×256 | 115,42 ms | 10,36 ms | Python 11,1× |
-| Cholesky, 256×256 | 12,66 ms | 1,23 ms | Python 10,3× |
-| **SVD, 256×256** | 1.794,65 ms | 27,11 ms | **Python 66,2×** |
-| **Eigen simetris, 256×256** | 2.739,93 ms | 19,74 ms | **Python 138,8×** |
-| Selesaikan Ax=b, 256×256 | 44,03 ms | 6,18 ms | Python 7,1× |
-| Invers matriks, 256×256 | 121,99 ms | 9,90 ms | Python 12,3× |
+| Perkalian matriks 256×256 | 2,58 ms | 0,41 ms | Python 6,3× |
+| Perkalian matriks 512×512 | 15,64 ms | 3,07 ms | Python 5,1× |
+| Perkalian matriks 1024×1024 | 93,45 ms | 27,76 ms | Python 3,4× |
+| LU, 256×256 | 41,13 ms | 3,28 ms | Python 12,5× |
+| QR, 256×256 | 153,63 ms | 10,36 ms | Python 14,8× |
+| Cholesky, 256×256 | 12,24 ms | 1,23 ms | Python 10,0× |
+| SVD, 256×256 | 308,41 ms | 27,11 ms | Python 11,4× |
+| Eigen simetris, 256×256 | 110,22 ms | 19,74 ms | Python 5,6× |
+| Selesaikan Ax=b, 256×256 | 66,78 ms | 6,18 ms | Python 10,8× |
+| Invers matriks, 256×256 | 147,48 ms | 9,90 ms | Python 14,9× |
 
 NumPy tidak mengerjakan ini di Python. Semuanya diserahkan ke LAPACK dan BLAS — Fortran dan
 assembly yang disetel tangan selama puluhan tahun, ter-cache-block dan multithread. Kode terkelola
 dengan `Vector<T>` tidak menutup jurang itu, dan library ini tidak berpura-pura sebaliknya.
 
-Dua hasil terburuk justru paling informatif. `Decomposition.Svd` memakai Jacobi satu sisi dan
-`SymmetricEigen` memakai Jacobi siklik: keduanya iteratif, keduanya dipilih demi kekokohan numerik
-dan nol dependensi, dan keduanya satu sampai dua orde besaran lebih lambat daripada rutin
-divide-and-conquer milik LAPACK. Itu harga dari tidak memiliki dependensi native, dan itu
-[item teratas pada roadmap](../../PLAN.md).
+#### Yang berubah di v0.2
+
+SVD dan eigen simetris dulunya dua hasil terburuk di halaman ini dengan selisih jauh — 66× dan
+139× — karena keduanya memakai metode Jacobi: menyapu seluruh matriks sambil merotasi pasangan
+kolom sampai tidak ada lagi yang berubah. Benar, mudah diverifikasi, dan sangat boros, sebab setiap
+sapuan menyentuh setiap elemen betapapun elemen itu sudah konvergen.
+
+Keduanya kini mereduksi matriks sekali dengan refleksi Householder, lalu beriterasi pada bentuk
+terkondensasi itu, di mana pergeseran (shift) membuat konvergensinya kubik:
+
+| | v0.1 (Jacobi) | v0.2 | Peningkatan | vs NumPy, sebelum → sesudah |
+|---|---:|---:|---|---|
+| Eigen simetris, 256×256 | 2.739,93 ms | 116,21 ms | **23,6×** | 138,8× → 5,9× |
+| SVD, 256×256 | 1.794,65 ms | 327,63 ms | **5,5×** | 66,2× → 12,1× |
+| PCA ke 5 komponen, 20rb × 20 | 375,40 ms | 63,87 ms | **5,9×** | 63,5× → 10,8× |
+
+Implementasi Jacobi tetap ada, sebagai `Decomposition.SvdJacobi` dan
+`Decomposition.SymmetricEigenJacobi`. Keduanya bukan kode mati: pengujian menyandingkan jalur cepat
+terhadap keduanya, dan karena kedua metode sampai pada faktorisasi yang sama lewat jalan yang sama
+sekali berbeda, itu pemeriksaan sungguhan, bukan sekadar pengulangan.
+
+PCA naik lebih banyak daripada SVD di bawahnya karena PCA juga berhenti menghitung faktor yang tak
+pernah dibacanya. SVD 20.000×20 menghabiskan sebagian besar waktunya mengakumulasi `U`, satu baris
+per sampel; PCA hanya butuh arah komponen dan variansinya, yang ada di `V` dan nilai singular.
+`SvdRightVectors` dan `SingularValues` melewati apa yang tidak diminta pemanggil — nilainya identik
+bit demi bit, karena rotasi yang menghasilkannya tetap berjalan.
+
+Backend BLAS/LAPACK native tetap [ada di roadmap](../../PLAN.md) dan hanya itu cara menutup sisanya,
+tetapi jurang yang harus ditutupnya kini satu orde besaran, bukan dua.
+
+#### Aritmetika elemen, dan satu bug yang memakan 3×
+
+Jalur elemen paralel dulu menyalin **kedua** operand ke array baru dan menyalin hasilnya kembali,
+semata agar lambda bisa menangkapnya — span tidak bisa melintasi closure. Pada penjumlahan sejuta
+elemen itu tiga lintasan tambahan atas 8 MB masing-masing, untuk menghemat nol. Mem-pin buffernya
+dan menyerahkan pointer kepada worker menghapus semuanya:
+
+| | sebelum | sesudah | peningkatan |
+|---|---:|---:|---|
+| Penjumlahan elemen, 1 juta | 7,23 ms | 2,36 ms | **3,06×** |
+| Penjumlahan elemen, 10 juta | 82,33 ms | 27,62 ms | **2,98×** |
+
+Diukur dengan menjalankan kedua versi berselang-seling dalam satu proses dan mengambil yang terbaik
+dari lima belas — lihat *[catatan tentang mesin ini](#catatan-tentang-mesin-ini)*. Hasilnya identik
+bit demi bit.
+
+Operasi ini terhambat bandwidth memori, bukan aritmetika: angka yang penting adalah 2,9 → 10,2 GB/s
+yang dibeli perbaikan ini, dan itulah sebabnya register SIMD yang lebih lebar tidak akan menolong.
+Itu pula yang membuat aritmetika elemen kini melampaui NumPy di tabel di atas.
+
+`Unary` sama sekali tidak punya jalur paralel dan kini punya, yang membuat `Exp` dan `Log` pada
+array besar ikut berskala dengan jumlah core.
+
+#### Perkalian matriks
+
+Kernelnya kini menahan petak 4×vektor dari C di register sepanjang satu iris `k`, alih-alih memuat
+dan menyimpan ulang C di setiap langkah `k`. Mengiris `k` itulah yang menjaga penelusuran strided
+melalui B tetap di dalam cache; akumulasi register tanpa irisan justru *lebih lambat* pada 1024 ke
+atas — perlu diketahui sebelum ada yang mencoba separuh perubahannya saja.
+
+Diuji berselang-seling terhadap kernel sebelumnya, terbaik dari sekian ulangan: **1,7× pada 128**,
+tanpa perubahan pada 256, dan **1,05–1,4×** dari 512 ke atas. Bacaan jujurnya: ini kemenangan
+sederhana, bukan terobosan. Menutup sisa 3,4× terhadap NumPy memerlukan blocking tiga tingkat
+dengan packing seperti yang dipakai OpenBLAS, dan itu pekerjaan yang jauh lebih besar.
+
+Panelling kolom — memblok loop *j* — juga dicoba dan konsisten **lebih buruk** di setiap ukuran.
+Dicatat di sini agar tidak ada yang menghabiskan sore hari menemukannya kembali.
 
 ### Array, statistik, dataframe — Python unggul, tetapi tidak sampai orde besaran
 
 | Operasi | Gravicode.Science | Python | Rasio |
 |---|---:|---:|---|
-| Penjumlahan elemen, 1 juta | 15,25 ms | 4,80 ms | Python 3,2× |
-| Penjumlahan elemen, 10 juta | 97,03 ms | 47,21 ms | Python 2,1× |
+| **Penjumlahan elemen, 1 juta** | 2,52 ms | 4,80 ms | **.NET 1,9×** |
+| **Penjumlahan elemen, 10 juta** | 26,70 ms | 47,21 ms | **.NET 1,8×** |
 | Sparse matriks-vektor, 2000² @ 1% | 0,17 ms | 0,06 ms | Python 3,0× |
 | 1.000.000 deviat normal | 17,01 ms | 16,22 ms | seimbang |
 | Rata-rata + std atas 1 juta | 12,28 ms | 7,62 ms | Python 1,6× |
@@ -325,7 +404,7 @@ perbedaan algoritmis bertahan melewati jurang bahasa.
 | **Random forest fit, 50 pohon** | 1.906,19 ms | 2.584,07 ms | **.NET 1,4×** |
 | Random forest predict, 20rb baris | 134,54 ms | 98,20 ms | Python 1,4× |
 | k-means, k=5, 3 restart | 2.541,98 ms | 497,53 ms | Python 5,1× |
-| **PCA ke 5 komponen** | 375,40 ms | 5,92 ms | **Python 63,5×** |
+| PCA ke 5 komponen | 63,87 ms | 5,92 ms | Python 10,8× |
 | kNN predict, 2rb vs 5rb | 609,92 ms | 55,17 ms | Python 11,1× |
 
 Random forest adalah satu-satunya model di mana library ini lebih cepat, dan alasannya
@@ -361,14 +440,21 @@ lambat daripada loop skalar .NET, karena bentuk tervektorisasi harus memuat arra
 
 ### Rekapitulasi, dan artinya
 
-**.NET lebih cepat pada 9 pengukuran, Python pada 25, seimbang pada 3.**
+**.NET lebih cepat pada 12 pengukuran, Python pada 22, seimbang pada 3.**
 
 Namun jangan berhenti di rekap itu, karena pembagiannya tidak acak:
 
 - Di mana pun operasinya berujung pada **LAPACK, BLAS, atau Cython terkompilasi**, Python menang,
-  biasanya 5–15× dan kadang 60–140×.
+  kini konsisten 3–15×, bukan lagi 60–140× seperti biaya dekomposisi Jacobi dahulu.
 - Di mana pun operasinya bersifat **skalar, bercabang, atau sekuensial**, .NET menang, 2–40× dan
   sekali mencapai 132×.
+- Di mana pun operasinya **terhambat bandwidth memori** — aritmetika elemen — keduanya berdekatan,
+  dan .NET kini sedikit unggul.
+
+Dua hal menggerakkan angka-angka di v0.2. Penulisan ulang dekomposisi menghapus ujung ekstrem
+rentang pertama, sehingga tidak ada lagi di halaman ini yang terpaut lebih dari sekitar 15× dari
+tumpukan Python. Menghapus salinan dari jalur elemen kemudian membalik kedua barisnya dari
+*Python 2–3×* menjadi *.NET 1,8–1,9×*.
 
 Jadi ringkasan jujurnya: hari ini library ini bukan pengganti NumPy untuk aljabar linear dense, dan
 menambahkan interop BLAS/LAPACK adalah satu perubahan yang paling akan memperbaikinya. Library ini
@@ -376,10 +462,16 @@ sudah mengungguli ekosistem Python pada algoritma graf, MCMC, tokenisasi, dan be
 yang tersusun dari loop skalar ketat — sambil tetap berada dalam satu proses yang aman-tipe, mudah
 di-deploy, dan ringan dependensi.
 
-### Dua bug yang ditemukan lewat perbandingan ini
+### Tiga bug yang ditemukan lewat perbandingan ini
 
 Menjalankan dua ekosistem berdampingan memunculkan masalah yang tidak terlihat oleh benchmark
 .NET saja.
+
+**Jalur elemen paralel menyalin masukannya sendiri.** `RunBinaryContiguous` memanggil `ToArray()`
+pada kedua operand dan mengalokasikan array ketiga untuk hasilnya, karena `Span<T>` tidak bisa
+ditangkap lambda. Setiap `Add` besar karenanya memindahkan 24 MB yang tidak perlu. Petunjuknya
+adalah tertinggal 2–3× dari NumPy pada operasi yang isinya *hanya* penyalinan memori; perbaikannya
+adalah pointer `fixed`, dan itu membuat aritmetika elemen **3× lebih cepat** serta melampaui NumPy.
 
 **Pemisahan decision tree bersifat O(n²).** `FindBestSplit` membentuk `sorted[..k]` dan
 `sorted[k..]` pada setiap kandidat titik split lalu membangun ulang dictionary hitungan kelas dari
@@ -411,3 +503,4 @@ biasanya memang begitu.
 ---
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*
+

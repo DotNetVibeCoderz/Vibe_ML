@@ -247,16 +247,117 @@ public static class Decomposition
     }
 
     /// <summary>
+    /// Singular value decomposition <c>A = U diag(S) V^T</c>, singular values descending.
+    /// </summary>
+    /// <remarks>
+    /// Householder bidiagonalisation followed by an implicit shifted QR iteration
+    /// (Golub–Kahan–Reinsch). <see cref="SvdJacobi"/> computes the same factorisation by one-sided
+    /// Jacobi rotations; it is retained as the reference the tests compare against, and is one to
+    /// two orders of magnitude slower because it sweeps the whole matrix repeatedly instead of
+    /// reducing it once.
+    /// </remarks>
+    public static SvdResult Svd(NdArray a)
+    {
+        if (a.Rank != 2) throw new ArgumentException("Svd expects a rank 2 array.");
+
+        // The reduction wants at least as many rows as columns; otherwise work on the transpose
+        // and swap the factors back, since (A^T = U S V^T) implies (A = V S U^T).
+        if (a.Shape[0] < a.Shape[1])
+        {
+            var flipped = Svd(a.T.Copy());
+            return new SvdResult(flipped.V, flipped.SingularValues, flipped.U);
+        }
+
+        var rows = a.Shape[0];
+        var cols = a.Shape[1];
+
+        var work = a.ToArray();
+        var uFlat = new double[rows * cols];
+        var sFlat = new double[cols];
+        var vFlat = new double[cols * cols];
+
+        DecompositionKernels.GolubKahanSvd(work, rows, cols, uFlat, sFlat, vFlat);
+
+        return new SvdResult(new NdArray(uFlat, rows, cols), new NdArray(sFlat, cols),
+            new NdArray(vFlat, cols, cols));
+    }
+
+    /// <summary>
+    /// Singular values and the right factor <c>V</c>, skipping <c>U</c>.
+    /// </summary>
+    /// <remarks>
+    /// For a tall matrix, accumulating <c>U</c> is most of the work — and PCA, which needs the
+    /// component directions and their variances, never looks at it. On 20 000×20 this is the
+    /// difference between doing the useful work and doing twenty thousand rows of it pointlessly.
+    /// </remarks>
+    public static (NdArray SingularValues, NdArray V) SvdRightVectors(NdArray a)
+    {
+        if (a.Rank != 2) throw new ArgumentException("SvdRightVectors expects a rank 2 array.");
+
+        var rows = a.Shape[0];
+        var cols = a.Shape[1];
+
+        // A wide matrix has to be transposed for the reduction, and the right vectors of A are
+        // the left vectors of A^T — so there it is U that must be computed and V that is skipped.
+        if (rows < cols)
+        {
+            var t = a.T.Copy();
+            var uFlipped = new double[cols * rows];
+            var sFlipped = new double[rows];
+
+            DecompositionKernels.GolubKahanSvd(t.ToArray(), cols, rows, uFlipped, sFlipped,
+                [], wantU: true, wantV: false);
+
+            return (new NdArray(sFlipped, rows), new NdArray(uFlipped, cols, rows));
+        }
+
+        var sFlat = new double[cols];
+        var vFlat = new double[cols * cols];
+
+        DecompositionKernels.GolubKahanSvd(a.ToArray(), rows, cols, [], sFlat, vFlat,
+            wantU: false, wantV: true);
+
+        return (new NdArray(sFlat, cols), new NdArray(vFlat, cols, cols));
+    }
+
+    /// <summary>
+    /// The singular values alone, descending, skipping both factors.
+    /// </summary>
+    /// <remarks>
+    /// Rank, condition number and the nuclear norm all need only these. Since the singular values
+    /// of <c>A</c> and <c>A^T</c> are the same, a wide matrix is simply transposed.
+    /// </remarks>
+    public static NdArray SingularValues(NdArray a)
+    {
+        if (a.Rank != 2) throw new ArgumentException("SingularValues expects a rank 2 array.");
+
+        var tall = a.Shape[0] >= a.Shape[1] ? a : a.T.Copy();
+        var rows = tall.Shape[0];
+        var cols = tall.Shape[1];
+
+        var sFlat = new double[cols];
+        DecompositionKernels.GolubKahanSvd(tall.ToArray(), rows, cols, [], sFlat, [],
+            wantU: false, wantV: false);
+
+        return new NdArray(sFlat, cols);
+    }
+
+    /// <summary>
     /// Singular value decomposition by one-sided Jacobi rotations.
     /// </summary>
-    public static SvdResult Svd(NdArray a, int maxSweeps = 60, double tolerance = 1e-14)
+    /// <remarks>
+    /// Kept as the independent reference for <see cref="Svd"/>. Jacobi is easy to verify — it
+    /// orthogonalises column pairs until nothing changes — but it costs repeated sweeps over the
+    /// whole matrix, so it should not be used for real work.
+    /// </remarks>
+    public static SvdResult SvdJacobi(NdArray a, int maxSweeps = 60, double tolerance = 1e-14)
     {
         if (a.Rank != 2) throw new ArgumentException("Svd expects a rank 2 array.");
 
         // The algorithm wants at least as many rows as columns; otherwise work on the transpose.
         if (a.Shape[0] < a.Shape[1])
         {
-            var flipped = Svd(a.T.Copy(), maxSweeps, tolerance);
+            var flipped = SvdJacobi(a.T.Copy(), maxSweeps, tolerance);
             return new SvdResult(flipped.V, flipped.SingularValues, flipped.U);
         }
 
@@ -337,10 +438,58 @@ public static class Decomposition
     }
 
     /// <summary>
+    /// Eigenvalues and eigenvectors of a symmetric matrix, in descending eigenvalue order.
+    /// </summary>
+    /// <remarks>
+    /// Householder tridiagonalisation followed by an implicit QL iteration with Wilkinson shifts.
+    /// <see cref="SymmetricEigenJacobi"/> computes the same decomposition by cyclic Jacobi
+    /// rotations and is retained as the reference the tests compare against.
+    /// </remarks>
+    public static EigenResult SymmetricEigen(NdArray a)
+    {
+        LinAlg.RequireSquare(a, nameof(SymmetricEigen));
+        var n = a.Shape[0];
+
+        var z = a.ToArray();
+        var d = new double[n];
+        var e = new double[n];
+
+        DecompositionKernels.Tridiagonalize(z, d, e, n);
+        DecompositionKernels.TridiagonalQl(d, e, z, n);
+
+        // The QL iteration deflates blocks in whatever order they converge, so the values arrive
+        // unordered; the public contract is descending.
+        var order = Enumerable.Range(0, n).OrderByDescending(i => d[i]).ToArray();
+        var valuesOut = NdArray.Zeros(n);
+        var vectorsOut = NdArray.Zeros(n, n);
+
+        for (var rank = 0; rank < n; rank++)
+        {
+            var src = order[rank];
+            valuesOut.SetAt(rank, d[src]);
+
+            // An eigenvector is only defined up to sign. Fixing the largest-magnitude component
+            // positive makes repeated runs — and the two implementations — agree.
+            var maxAbs = 0.0;
+            var sign = 1.0;
+            for (var i = 0; i < n; i++)
+            {
+                var v = z[i * n + src];
+                if (Math.Abs(v) > maxAbs) { maxAbs = Math.Abs(v); sign = v >= 0 ? 1.0 : -1.0; }
+            }
+
+            for (var i = 0; i < n; i++) vectorsOut[i, rank] = z[i * n + src] * sign;
+        }
+
+        return new EigenResult(valuesOut, vectorsOut);
+    }
+
+    /// <summary>
     /// Eigenvalues and eigenvectors of a symmetric matrix by cyclic Jacobi rotations,
     /// returned in descending eigenvalue order.
     /// </summary>
-    public static EigenResult SymmetricEigen(NdArray a, int maxSweeps = 100, double tolerance = 1e-14)
+    /// <remarks>Kept as the independent reference for <see cref="SymmetricEigen"/>.</remarks>
+    public static EigenResult SymmetricEigenJacobi(NdArray a, int maxSweeps = 100, double tolerance = 1e-14)
     {
         LinAlg.RequireSquare(a, nameof(SymmetricEigen));
         var n = a.Shape[0];

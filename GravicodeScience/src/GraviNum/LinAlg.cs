@@ -136,10 +136,23 @@ public static class LinAlg
         var result = NdArray.Zeros(m, n);
         var cv = result.Buffer;
 
-        // Four rows of C are accumulated at once. Each pass over a row of B then feeds four
-        // independent FMA chains, which both hides the multiply latency and amortises the load
-        // of B across four uses - the single biggest win available without blocking for cache.
-        void ComputeRowBlock(int block)
+        // A 4-row by one-vector tile of C is held in registers across a slice of k, then added
+        // into memory once per slice. Two separate problems drive that shape, and fixing either
+        // one alone makes things worse:
+        //
+        //   Traffic. With the column loop innermost and k outside it, every element of C is
+        //   loaded and stored once per step of k - nine memory operations per four FMAs at
+        //   1024x1024. Accumulating in registers instead touches C once per k slice.
+        //
+        //   Locality. Walking k inside a fixed column means striding through B by a whole row
+        //   each step. Left unbounded that sweeps k*n bytes per tile and falls out of cache
+        //   entirely; slicing k keeps the live part of B to KC*n, which stays resident.
+        //
+        // Four rows also means one load of B feeds four independent FMA chains, which hides the
+        // multiply latency - a single-row kernel stalls on the dependency between iterations.
+        var slice = KSlice(k, n);
+
+        void ComputeRowBlock(int block, int p0, int pn)
         {
             var i0 = block * 4;
             var rows = Math.Min(4, m - i0);
@@ -149,61 +162,113 @@ public static class LinAlg
                 fixed (double* aPtr = av, bPtr = bv, cPtr = cv)
                 {
                     var width = Vector<double>.Count;
+                    var aBase = aPtr + aOff + (long)i0 * k + p0;
+                    var bBase = bPtr + bOff + (long)p0 * n;
+                    var c0 = cPtr + (long)i0 * n;
                     var vectorised = Vector.IsHardwareAccelerated && n >= width;
 
-                    for (var p = 0; p < k; p++)
+                    var j = 0;
+                    if (vectorised && rows == 4)
                     {
-                        var b0 = bPtr + bOff + (long)p * n;
-
-                        var a0 = rows > 0 ? aPtr[aOff + (long)(i0 + 0) * k + p] : 0.0;
-                        var a1 = rows > 1 ? aPtr[aOff + (long)(i0 + 1) * k + p] : 0.0;
-                        var a2 = rows > 2 ? aPtr[aOff + (long)(i0 + 2) * k + p] : 0.0;
-                        var a3 = rows > 3 ? aPtr[aOff + (long)(i0 + 3) * k + p] : 0.0;
-                        if (a0 == 0 && a1 == 0 && a2 == 0 && a3 == 0) continue;
-
-                        var c0 = cPtr + (long)(i0 + 0) * n;
-                        var c1 = c0 + n;
-                        var c2 = c1 + n;
-                        var c3 = c2 + n;
-
-                        var j = 0;
-                        if (vectorised)
+                        // The common case gets its own loop with no per-iteration row test.
+                        for (; j <= n - width; j += width)
                         {
-                            var v0 = new Vector<double>(a0);
-                            var v1 = new Vector<double>(a1);
-                            var v2 = new Vector<double>(a2);
-                            var v3 = new Vector<double>(a3);
+                            Vector<double> acc0 = default, acc1 = default, acc2 = default, acc3 = default;
+                            var bp = bBase + j;
 
-                            for (; j <= n - width; j += width)
+                            for (var p = 0; p < pn; p++, bp += n)
                             {
-                                var bVec = Vector.Load(b0 + j);
-                                if (rows > 0) Vector.Store(Vector.Load(c0 + j) + v0 * bVec, c0 + j);
-                                if (rows > 1) Vector.Store(Vector.Load(c1 + j) + v1 * bVec, c1 + j);
-                                if (rows > 2) Vector.Store(Vector.Load(c2 + j) + v2 * bVec, c2 + j);
-                                if (rows > 3) Vector.Store(Vector.Load(c3 + j) + v3 * bVec, c3 + j);
+                                var bVec = Vector.Load(bp);
+                                acc0 += new Vector<double>(aBase[p]) * bVec;
+                                acc1 += new Vector<double>(aBase[k + p]) * bVec;
+                                acc2 += new Vector<double>(aBase[2 * k + p]) * bVec;
+                                acc3 += new Vector<double>(aBase[3 * k + p]) * bVec;
                             }
+
+                            Vector.Store(Vector.Load(c0 + j) + acc0, c0 + j);
+                            Vector.Store(Vector.Load(c0 + n + j) + acc1, c0 + n + j);
+                            Vector.Store(Vector.Load(c0 + 2 * n + j) + acc2, c0 + 2 * n + j);
+                            Vector.Store(Vector.Load(c0 + 3 * n + j) + acc3, c0 + 3 * n + j);
+                        }
+                    }
+                    else if (vectorised)
+                    {
+                        // Ragged final block: same shape, guarded.
+                        for (; j <= n - width; j += width)
+                        {
+                            Vector<double> acc0 = default, acc1 = default, acc2 = default;
+                            var bp = bBase + j;
+
+                            for (var p = 0; p < pn; p++, bp += n)
+                            {
+                                var bVec = Vector.Load(bp);
+                                acc0 += new Vector<double>(aBase[p]) * bVec;
+                                if (rows > 1) acc1 += new Vector<double>(aBase[k + p]) * bVec;
+                                if (rows > 2) acc2 += new Vector<double>(aBase[2 * k + p]) * bVec;
+                            }
+
+                            Vector.Store(Vector.Load(c0 + j) + acc0, c0 + j);
+                            if (rows > 1) Vector.Store(Vector.Load(c0 + n + j) + acc1, c0 + n + j);
+                            if (rows > 2) Vector.Store(Vector.Load(c0 + 2 * n + j) + acc2, c0 + 2 * n + j);
+                        }
+                    }
+
+                    // Columns left over when n is not a multiple of the vector width.
+                    for (; j < n; j++)
+                    {
+                        double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                        var bp = bBase + j;
+
+                        for (var p = 0; p < pn; p++, bp += n)
+                        {
+                            var bValue = *bp;
+                            s0 += aBase[p] * bValue;
+                            if (rows > 1) s1 += aBase[k + p] * bValue;
+                            if (rows > 2) s2 += aBase[2 * k + p] * bValue;
+                            if (rows > 3) s3 += aBase[3 * k + p] * bValue;
                         }
 
-                        for (; j < n; j++)
-                        {
-                            var bValue = b0[j];
-                            if (rows > 0) c0[j] += a0 * bValue;
-                            if (rows > 1) c1[j] += a1 * bValue;
-                            if (rows > 2) c2[j] += a2 * bValue;
-                            if (rows > 3) c3[j] += a3 * bValue;
-                        }
+                        c0[j] += s0;
+                        if (rows > 1) c0[n + j] += s1;
+                        if (rows > 2) c0[2 * n + j] += s2;
+                        if (rows > 3) c0[3 * n + j] += s3;
                     }
                 }
             }
         }
 
         var blocks = (m + 3) / 4;
-        if (m >= ParallelRowThreshold || (long)m * n * k > 1_000_000)
-            Parallel.For(0, blocks, ComputeRowBlock);
-        else
-            for (var block = 0; block < blocks; block++) ComputeRowBlock(block);
+        var parallel = m >= ParallelRowThreshold || (long)m * n * k > 1_000_000;
+
+        for (var p0 = 0; p0 < k; p0 += slice)
+        {
+            var pn = Math.Min(slice, k - p0);
+            var start = p0;
+
+            if (parallel)
+                Parallel.For(0, blocks, block => ComputeRowBlock(block, start, pn));
+            else
+                for (var block = 0; block < blocks; block++) ComputeRowBlock(block, start, pn);
+        }
 
         return result;
+    }
+
+    /// <summary>
+    /// Rows of B processed per pass, sized so the live block stays in cache.
+    /// </summary>
+    /// <remarks>
+    /// The inner loop strides through B by a full row, so the block it touches is
+    /// <c>slice * n * 8</c> bytes. Holding that near 512 KB keeps it in L2 while leaving room for
+    /// the row block of A and the tile of C. A small <c>k</c> is left as one slice, since splitting
+    /// it would only add passes over C for no locality gain.
+    /// </remarks>
+    private static int KSlice(int k, int n)
+    {
+        const long target = 4 * 1024 * 1024;
+        if (k <= 8) return k;
+
+        return (int)Math.Clamp(target / Math.Max(1, (long)n * 8), 8, k);
     }
 
     /// <summary>Vectorised <c>y += alpha * x</c> over contiguous spans.</summary>
@@ -310,7 +375,7 @@ public static class LinAlg
     /// <summary>Numerical rank, counted as singular values above a relative tolerance.</summary>
     public static int MatrixRank(NdArray a, double tolerance = 1e-10)
     {
-        var s = Decomposition.Svd(a).SingularValues;
+        var s = Decomposition.SingularValues(a);
         if (s.Size == 0) return 0;
         var cutoff = Statistics.Max(s) * tolerance;
         var rank = 0;
@@ -321,7 +386,7 @@ public static class LinAlg
     /// <summary>Ratio of the largest to the smallest singular value.</summary>
     public static double ConditionNumber(NdArray a)
     {
-        var s = Decomposition.Svd(a).SingularValues;
+        var s = Decomposition.SingularValues(a);
         var min = Statistics.Min(s);
         return min == 0 ? double.PositiveInfinity : Statistics.Max(s) / min;
     }

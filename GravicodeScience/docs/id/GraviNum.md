@@ -128,6 +128,73 @@ lu.Solve(b);  qr.Solve(b);  svd.Reconstruct();
 `Cholesky` melempar exception bila masukannya bukan definit positif alih-alih mengembalikan NaN,
 sehingga sekaligus berfungsi sebagai pemeriksa definit positif.
 
+**Mintalah hanya faktor yang Anda perlukan.** SVD penuh menghabiskan sebagian besar waktunya
+mengakumulasi `U`, satu baris per baris masukan. Bila bukan itu yang Anda cari, katakan saja:
+
+```csharp
+var (values, v) = Decomposition.SvdRightVectors(m);  // melewati U — yang dibutuhkan PCA
+var s           = Decomposition.SingularValues(m);   // melewati keduanya — rank, condition number
+```
+
+Nilai singularnya identik sampai bit terakhir, apa pun pilihannya; rotasi yang menghasilkannya
+tetap berjalan. Pada matriks 20.000×20, melewati `U` berarti melewati sebagian besar waktu proses.
+
+**Tentang algoritmanya.** `Svd` mereduksi ke bentuk bidiagonal dengan refleksi Householder lalu
+menjalankan iterasi QR bergeser implisit (Golub–Kahan–Reinsch); `SymmetricEigen` melakukan
+tridiagonalisasi lalu iterasi QL implisit dengan pergeseran Wilkinson. `SvdJacobi` dan
+`SymmetricEigenJacobi` menghitung faktorisasi yang sama dengan merotasi pasangan kolom sampai tidak
+ada yang berubah — jauh lebih lambat, tetapi lewat jalan yang sama sekali berbeda menuju jawaban
+yang sama, dan justru itulah yang membuatnya berguna sebagai rujukan pembanding dalam pengujian.
+
+## Diferensiasi otomatis
+
+`Gravicode.Science.GraviNum.Autodiff` adalah tape mode-mundur (reverse-mode). Tulis komputasi
+majunya sekali, dan turunannya didapat dari satu kali backward pass — tanpa menurunkan backward
+pass dengan tangan.
+
+```csharp
+using Gravicode.Science.GraviNum.Autodiff;
+
+var w = Tensor.Parameter(NdArray.Zeros(2, 1));
+var b = Tensor.Parameter(NdArray.Zeros(1));
+
+var error = Tensor.Constant(x).MatMul(w) + b - Tensor.Constant(y);
+var loss  = (error * error).Mean();
+
+loss.Backward();
+w.Gradient;   // dLoss/dw, bentuknya sama dengan w
+b.Gradient;   // dijumlahkan atas batch, karena b tadi di-broadcast
+```
+
+`Parameter` mengakumulasi gradien; `Constant` menghentikannya. Operasi yang tersedia meliputi
+aritmetika, `Exp`, `Log`, `Sqrt`, `Pow`, `Tanh`, `Sigmoid`, `Relu`, `Abs`, `Softplus`, `Sum`,
+`Mean`, `LogSumExp`, `MatMul`, `Transpose`, dan `Reshape`. `LogSumExp` menggeser keluar nilai
+maksimumnya, sehingga tetap hidup pada masukan sekitar 1000 — tempat bentuk naif
+`log(sum(exp(x)))` mengembalikan tak hingga.
+
+**Periksa setiap gradien baru.** `GradientCheck` membandingkan tape dengan beda hingga terpusat,
+yang tidak berbagi kode apa pun dengannya:
+
+```csharp
+var result = GradientCheck.Check(t => (t.Sigmoid() * t.Tanh()).Log().Sum(), NdArray.FromValues([0.8, 1.4]));
+result.Passed(1e-6);   // bila false, dicetak entri mana yang berbeda dan sebesar apa
+```
+
+### Dua hal yang perlu diketahui
+
+**Gradien broadcast itu dijumlahkan.** Bias berbentuk `[3]` yang ditambahkan ke batch `[64, 3]`
+memengaruhi 64 keluaran, sehingga gradiennya adalah *jumlah* atas batch — bukan satu baris, bukan
+rata-ratanya. Ini cara paling umum sebuah backward pass tulisan tangan menjadi salah, dan gagalnya
+diam-diam: gradiennya meleset persis sebesar ukuran batch, dan modelnya tetap tampak terlatih.
+
+**Ini tape, bukan framework.** Tidak ada pengoptimal graf, tidak ada kernel tergabung, tidak ada
+penempatan perangkat. Tujuannya agar lapisan baru atau log-densitas baru cukup ditulis sekali,
+maju. Mode mundur berbiaya satu backward pass berapa pun jumlah parameternya, sementara beda hingga
+berbiaya `2d` evaluasi maju tambahan — tetapi tape mengalokasikan satu node per operasi, sehingga
+pada model *kecil* beda hingga justru benar-benar lebih cepat. Diukur pada log posterior sebuah
+model Bayesian, titik silangnya ada di sekitar 50 parameter. Di bawah itu, tape memberi Anda
+kebenaran dan kemudahan, bukan kecepatan.
+
 ## Bilangan acak
 
 `GraviRandom` adalah xoshiro256++ yang di-seed lewat SplitMix64: cepat, kokoh secara statistik, dan

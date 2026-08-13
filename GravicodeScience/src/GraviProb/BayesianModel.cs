@@ -1,5 +1,6 @@
 using System.Text;
 using Gravicode.Science.GraviNum;
+using Gravicode.Science.GraviNum.Autodiff;
 
 namespace Gravicode.Science.GraviProb;
 
@@ -15,49 +16,163 @@ namespace Gravicode.Science.GraviProb;
 public sealed class DistributionSpec
 {
     private readonly Func<IReadOnlyDictionary<string, double>, Distribution> _resolve;
+    private readonly Func<IReadOnlyDictionary<string, Tensor>, NdArray, Tensor>? _resolveTensor;
 
     private DistributionSpec(Func<IReadOnlyDictionary<string, double>, Distribution> resolve,
-        IReadOnlyList<string> dependencies)
+        IReadOnlyList<string> dependencies,
+        Func<IReadOnlyDictionary<string, Tensor>, NdArray, Tensor>? resolveTensor = null)
     {
         _resolve = resolve;
         Dependencies = dependencies;
+        _resolveTensor = resolveTensor;
     }
 
     /// <summary>Names of the variables this specification reads.</summary>
     public IReadOnlyList<string> Dependencies { get; }
 
+    /// <summary>Whether this likelihood can be differentiated with respect to its variables.</summary>
+    public bool IsDifferentiable => _resolveTensor is not null;
+
     /// <summary>Builds the concrete distribution for a set of parameter values.</summary>
     public Distribution Resolve(IReadOnlyDictionary<string, double> values) => _resolve(values);
 
+    /// <summary>
+    /// Builds the total log density of a whole dataset as one tape expression over the model's
+    /// variables.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The dataset goes in as a single array rather than one observation at a time, and that is a
+    /// performance decision, not a stylistic one. Per-observation terms would put a handful of
+    /// tape nodes on the graph for every row — thousands of allocations for every gradient, and a
+    /// gradient is evaluated at every leapfrog step of every iteration of every chain. Broadcasting
+    /// the scalar parameters against the data vector instead keeps the graph a fixed size whatever
+    /// the dataset, and each node's forward pass gets the vectorised <c>UFunc</c> kernels.
+    /// </para>
+    /// <para>
+    /// The observations are constants, so any <c>lgamma</c> or binomial coefficient they appear in
+    /// is precomputed; only the latent parameters carry a gradient.
+    /// </para>
+    /// </remarks>
+    public Tensor LogDensity(IReadOnlyDictionary<string, Tensor> values, NdArray data)
+        => _resolveTensor is null
+            ? throw new NotSupportedException(
+                "This likelihood has no differentiable form, so it cannot be used with gradient-based inference.")
+            : _resolveTensor(values, data);
+
     /// <summary>Wraps a fixed distribution.</summary>
-    public static DistributionSpec Constant(Distribution distribution) => new(_ => distribution, []);
+    public static DistributionSpec Constant(Distribution distribution)
+        => new(_ => distribution, [],
+            distribution.IsDifferentiable
+                ? (_, data) => distribution.LogDensity(Tensor.Constant(data)).Sum()
+                : null);
 
     /// <summary>Builds a specification from an arbitrary function of the model's variables.</summary>
+    /// <remarks>
+    /// A specification built this way has no differentiable form — the resolver is an opaque
+    /// function of doubles — so a model using it falls back to the gradient-free samplers. Use the
+    /// named factories below, or <see cref="FromTensor"/>, to keep gradients available.
+    /// </remarks>
     public static DistributionSpec From(Func<IReadOnlyDictionary<string, double>, Distribution> resolve,
         params string[] dependencies) => new(resolve, dependencies);
+
+    /// <summary>
+    /// Builds a specification that supplies both a concrete distribution and a differentiable
+    /// log density.
+    /// </summary>
+    /// <param name="resolve">Builds the concrete distribution for a set of parameter values.</param>
+    /// <param name="logDensity">
+    /// Builds the <em>total</em> log density of the whole dataset — the sum over rows — as one
+    /// tape expression.
+    /// </param>
+    /// <param name="dependencies">Names of the variables read.</param>
+    public static DistributionSpec FromTensor(
+        Func<IReadOnlyDictionary<string, double>, Distribution> resolve,
+        Func<IReadOnlyDictionary<string, Tensor>, NdArray, Tensor> logDensity,
+        params string[] dependencies) => new(resolve, dependencies, logDensity);
 
     /// <summary>A fixed distribution used as a specification.</summary>
     public static implicit operator DistributionSpec(Distribution distribution) => Constant(distribution);
 
     /// <summary>A binomial likelihood whose success probability is a named model variable.</summary>
     public static DistributionSpec Binomial(int trials, string probabilityVariable)
-        => From(values => new Binomial(trials, values[probabilityVariable]), probabilityVariable);
+        => FromTensor(
+            values => new Binomial(trials, values[probabilityVariable]),
+            (tensors, data) =>
+            {
+                // Sufficient statistics: the likelihood depends on the data only through the
+                // total number of successes and failures, so the whole dataset collapses to two
+                // numbers before the tape sees it.
+                double successes = 0, coefficient = 0;
+                for (var i = 0; i < data.Size; i++)
+                {
+                    var k = (int)data.At(i);
+                    successes += k;
+                    coefficient += MathUtil.LogBinomialCoefficient(trials, k);
+                }
+
+                var p = tensors[probabilityVariable];
+                return Tensor.Constant(coefficient)
+                       + Tensor.Constant(successes) * p.Log()
+                       + Tensor.Constant(trials * (double)data.Size - successes) * (Tensor.Constant(1.0) - p).Log();
+            },
+            probabilityVariable);
 
     /// <summary>A Bernoulli likelihood whose success probability is a named model variable.</summary>
     public static DistributionSpec Bernoulli(string probabilityVariable)
-        => From(values => new Bernoulli(values[probabilityVariable]), probabilityVariable);
+        => FromTensor(
+            values => new Bernoulli(values[probabilityVariable]),
+            (tensors, data) =>
+            {
+                var successes = Statistics.Sum(data);
+                var p = tensors[probabilityVariable];
+                return Tensor.Constant(successes) * p.Log()
+                       + Tensor.Constant(data.Size - successes) * (Tensor.Constant(1.0) - p).Log();
+            },
+            probabilityVariable);
 
     /// <summary>A normal likelihood whose mean and scale are named model variables.</summary>
     public static DistributionSpec Normal(string meanVariable, string scaleVariable)
-        => From(values => new Normal(values[meanVariable], values[scaleVariable]), meanVariable, scaleVariable);
+        => FromTensor(
+            values => new Normal(values[meanVariable], values[scaleVariable]),
+            (tensors, data) =>
+            {
+                var sigma = tensors[scaleVariable];
+                var z = (Tensor.Constant(data) - tensors[meanVariable]) / sigma;
+                return Tensor.Constant(-0.5 * data.Size * Math.Log(2 * Math.PI))
+                       - Tensor.Constant((double)data.Size) * sigma.Log()
+                       - Tensor.Constant(0.5) * (z * z).Sum();
+            },
+            meanVariable, scaleVariable);
 
     /// <summary>A normal likelihood with a fitted mean and a fixed scale.</summary>
     public static DistributionSpec Normal(string meanVariable, double scale)
-        => From(values => new Normal(values[meanVariable], scale), meanVariable);
+        => FromTensor(
+            values => new Normal(values[meanVariable], scale),
+            (tensors, data) =>
+            {
+                var z = (Tensor.Constant(data) - tensors[meanVariable]) / Tensor.Constant(scale);
+                return Tensor.Constant(data.Size * (-Math.Log(scale) - 0.5 * Math.Log(2 * Math.PI)))
+                       - Tensor.Constant(0.5) * (z * z).Sum();
+            },
+            meanVariable);
 
     /// <summary>A Poisson likelihood whose rate is a named model variable.</summary>
     public static DistributionSpec Poisson(string rateVariable)
-        => From(values => new Poisson(values[rateVariable]), rateVariable);
+        => FromTensor(
+            values => new Poisson(values[rateVariable]),
+            (tensors, data) =>
+            {
+                var total = Statistics.Sum(data);
+                var logFactorials = 0.0;
+                for (var i = 0; i < data.Size; i++) logFactorials += MathUtil.LogFactorial((int)data.At(i));
+
+                var rate = tensors[rateVariable];
+                return Tensor.Constant(total) * rate.Log()
+                       - Tensor.Constant((double)data.Size) * rate
+                       - Tensor.Constant(logFactorials);
+            },
+            rateVariable);
 }
 
 /// <summary>
@@ -153,6 +268,78 @@ public sealed class BayesianModel
         return total;
     }
 
+    /// <summary>
+    /// Whether every prior and likelihood in this model has a differentiable log density, and so
+    /// whether the gradient-based samplers can be used.
+    /// </summary>
+    public bool IsDifferentiable =>
+        _priors.All(p => p.Prior.IsDifferentiable) && _observations.All(o => o.Likelihood.IsDifferentiable);
+
+    /// <summary>
+    /// The log posterior and its gradient with respect to every latent variable, in
+    /// <see cref="ParameterNames"/> order.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One forward pass builds the whole joint density as a tape expression; one backward pass
+    /// then yields every partial derivative at once. That is the property Hamiltonian Monte Carlo
+    /// needs: central differences would cost two extra log-posterior evaluations per parameter per
+    /// leapfrog step, which for a model with a real dataset behind it is the entire budget.
+    /// </para>
+    /// <para>
+    /// Outside the support the density is <c>-inf</c> and the gradient is not defined; the
+    /// gradient comes back as zeros and callers are expected to reject on the density.
+    /// </para>
+    /// </remarks>
+    public (double LogDensity, double[] Gradient) LogPosteriorGradient(IReadOnlyDictionary<string, double> values)
+    {
+        if (!IsDifferentiable)
+            throw new NotSupportedException(
+                "This model contains a prior or likelihood with no differentiable log density. "
+                + "Use SampleMCMC or SampleGibbs instead.");
+
+        var names = ParameterNames;
+        var zeros = new double[names.Count];
+
+        // A point outside any prior's support has no usable gradient, and building the tape there
+        // would produce NaNs that propagate silently. Reject on the density instead.
+        var plainDensity = LogPosterior(values);
+        if (!double.IsFinite(plainDensity)) return (plainDensity, zeros);
+
+        var tensors = new Dictionary<string, Tensor>(StringComparer.Ordinal);
+        foreach (var name in names) tensors[name] = Tensor.Parameter(values[name]);
+
+        var total = LogPosteriorTensor(tensors);
+        total.Backward();
+
+        var gradient = new double[names.Count];
+        for (var i = 0; i < names.Count; i++)
+            gradient[i] = tensors[names[i]].Gradient?.At(0) ?? 0.0;
+
+        return (total.Item, gradient);
+    }
+
+    /// <summary>
+    /// The joint log density as a tape expression over tensor-valued parameters.
+    /// </summary>
+    /// <remarks>
+    /// Kept separate from <see cref="LogPosteriorGradient"/> so a caller can put its own
+    /// expression in front of the parameters — which is how the gradient-based samplers work in
+    /// unconstrained space: they feed in <c>x(z)</c> rather than <c>x</c>, and the tape carries the
+    /// chain rule through the transform instead of anyone deriving it by hand.
+    /// </remarks>
+    public Tensor LogPosteriorTensor(IReadOnlyDictionary<string, Tensor> values)
+    {
+        Tensor total = Tensor.Constant(0.0);
+
+        foreach (var (name, prior) in _priors) total += prior.LogDensity(values[name]);
+
+        foreach (var (_, likelihood, data) in _observations)
+            total += likelihood.LogDensity(values, NdArray.FromValues(data));
+
+        return total;
+    }
+
     /// <summary>Log of the prior alone, useful for diagnosing a badly specified model.</summary>
     public double LogPrior(IReadOnlyDictionary<string, double> values)
     {
@@ -194,6 +381,23 @@ public sealed class BayesianModel
     /// <summary>Runs component-wise Metropolis within Gibbs.</summary>
     public PosteriorTrace SampleGibbs(int iterations = 10_000, int chains = 4, int warmup = -1, int seed = 42)
         => Inference.MetropolisWithinGibbs(this, iterations, chains, warmup < 0 ? iterations / 2 : warmup, seed);
+
+    /// <summary>
+    /// Runs Hamiltonian Monte Carlo, which needs <see cref="IsDifferentiable"/>.
+    /// </summary>
+    public PosteriorTrace SampleHMC(int iterations = 2000, int chains = 4, int warmup = -1,
+        int leapfrogSteps = 20, int seed = 42)
+        => Inference.HamiltonianMonteCarlo(this, iterations, chains,
+            warmup < 0 ? iterations / 2 : warmup, leapfrogSteps, seed: seed);
+
+    /// <summary>
+    /// Runs the No-U-Turn Sampler, which needs <see cref="IsDifferentiable"/>.
+    /// </summary>
+    /// <remarks>This is the default worth reaching for when the model has gradients.</remarks>
+    public PosteriorTrace SampleNUTS(int iterations = 2000, int chains = 4, int warmup = -1,
+        int maxTreeDepth = 10, int seed = 42)
+        => Inference.NoUTurnSampler(this, iterations, chains,
+            warmup < 0 ? iterations / 2 : warmup, maxTreeDepth, seed: seed);
 
     /// <summary>Runs mean-field variational inference.</summary>
     public VariationalResult FitVariational(int iterations = 2000, double learningRate = 0.05,
