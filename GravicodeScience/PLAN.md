@@ -136,6 +136,36 @@ the parallelism had been dropped. And an early measurement showed a 192-cube tak
 longer than a 224-cube, which is impossible: tiered JIT had not yet recompiled the kernel, and two
 warm-up calls are not enough when promotion happens after about thirty.
 
+### The generic core — ✅ built, and it costs nothing
+
+`NdArray<T>` over `IFloatingPointIeee754<T>`, with `UFunc<T>` carrying the element-wise kernels and
+the register-blocked matrix product. One implementation serves both widths, because `Vector<T>` is
+itself generic.
+
+The prototype below said single precision was worth having. The question this had to answer was
+different and more important: **does genericising slow down the `double` path**, which is what all
+six libraries use today?
+
+| | `NdArray` | `NdArray<double>` | `NdArray<float>` | Generic overhead | Float gain |
+|---|---:|---:|---:|---:|---:|
+| element-wise add, 1M | 2.56 ms | 2.56 ms | 1.19 ms | 1.00× | **2.16×** |
+| element-wise add, 10M | 32.7 ms | 31.5 ms | 16.6 ms | 0.96× | **1.89×** |
+| 512-cube product | 15.1 ms | 13.7 ms | 7.80 ms | 0.91× | **1.75×** |
+| 1024-cube product | 89.0 ms | 92.6 ms | 47.1 ms | 1.04× | **1.96×** |
+
+**No.** The overhead column sits inside measurement noise. That is the result that makes the full
+migration viable — had the generic double path been even 20% slower, replacing `NdArray` with
+`NdArray<double>` would have been a regression for every existing user in exchange for a `float`
+path most of them would not use.
+
+**Deliberately additive.** The six libraries still speak `NdArray`; `NdArrayConvert` bridges at the
+boundary. Rewriting them so `NdArray` *is* `NdArray<double>` touches every file and all 559 tests,
+and is the one remaining large change — but it is now a decision with numbers rather than a hope.
+
+Two differences from the `double` `UFunc`, both deliberate: the generic kernels do not broadcast
+and say so; and `Sum` is pairwise, which matters far more in `float` — a naive running total over a
+million values of `0.1f` drifts visibly.
+
 ### Single precision — ✅ prototyped, and it is worth doing
 
 Following this file's own advice to prototype before committing. `Single.SingleKernels` has `float`
@@ -152,9 +182,9 @@ The two gains have different causes and correctly differ: twice the SIMD lanes h
 work, half the bytes helps bandwidth-bound work, and element-wise arithmetic — being purely
 bandwidth-bound — lands at a clean 2.1×. Accuracy cost on a 1000-cube product: **1.3e-6** relative.
 
-So the answer to "is the generic `NdArray<T>` rewrite worth it" is **yes**, and that rewrite is now
-a decision with numbers behind it rather than an assumption. It remains the largest single change
-here.
+So the answer to "is the generic `NdArray<T>` rewrite worth it" was **yes** — and that core is now
+built, above. `SingleKernels` stays as the hand-written baseline the generic version was measured
+against; the two agree, which is what makes the generic figures trustworthy.
 
 ### ONNX — ✅ weight import done
 
@@ -308,7 +338,18 @@ where a single machine runs out first.
 ## v0.4 — Breadth
 
 ### GraviNum
-Einstein summation, FFT, more `Slice` ergonomics, complex number support.
+Einstein summation, more `Slice` ergonomics, complex number support.
+
+**FFT — ✅ done.** `Signal.Fft` transforms **any length**: radix-2 Cooley-Tukey for powers of two,
+Bluestein's algorithm for everything else, so a prime length is still `O(n log n)`. That second
+path is the part worth having — padding to a power of two changes the spectrum, smearing each peak
+across neighbouring bins, so a library that padded silently would answer a question nobody asked.
+
+Also `ForwardReal` (the `n/2+1` distinct bins of a real signal), `FrequencyBins`, and an
+FFT-based `Convolve` that pads to `n + m - 1` so the result is linear rather than circular.
+
+Verified against **NumPy's `rfft`** — pocketfft, a separate implementation — to 5e-14 relative at
+lengths 64, 100, 101, 360 and 1531. At 4096 it beats the direct `O(n²)` DFT by 3,536×.
 
 ### GraviFrame
 Window functions with partitioning, `asof` joins for time series alignment, categorical column type
@@ -336,7 +377,7 @@ via WAIC and LOO.
 
 These are not versioned; they run alongside everything above.
 
-- **Test coverage.** 541 tests today. Every bug found gets a regression test — that is how the
+- **Test coverage.** 589 tests today. Every bug found gets a regression test — that is how the
   memory-mapped CSV page-padding bug and the directed-graph connectivity bug are now covered.
   Where a fast path replaces a simple one, the simple one stays as the reference it is checked
   against, as `SvdJacobi` and `SymmetricEigenJacobi` now do.

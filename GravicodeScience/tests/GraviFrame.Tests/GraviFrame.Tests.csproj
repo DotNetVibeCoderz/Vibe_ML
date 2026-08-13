@@ -8,6 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- A real ADO.NET provider for the SqlReader/SqlWriter tests. Test-only: GraviFrame binds
+         to System.Data.Common and takes no provider dependency of its own. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />

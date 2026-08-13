@@ -242,25 +242,52 @@ atas wilayah yang berisik. `PackedMatMul.Enabled = false` memaksa kernel sederha
 > JIT: ukuran-ukuran awal masih berjalan tanpa optimasi. Dua kali pemanasan tidak cukup; metode
 > panas baru dikompilasi ulang setelah sekitar tiga puluh panggilan.
 
-### Presisi tunggal — sebuah prototipe
+## Presisi tunggal, secara generik
 
-`Single.SingleKernels` berisi versi `float` dari dua kernel yang mendominasi waktu jalan. Ini
-**alat ukur, bukan API kedua**: membuat `NdArray` generik atas `INumber<T>` akan menyentuh keenam
-library, dan itu bukan perubahan yang layak dimulai tanpa tahu imbalannya.
+`NdArray<T>` memakai rancangan yang sama dengan `NdArray` — view atas buffer bersama — untuk tipe
+elemen floating-point IEEE apa pun. Satu implementasi melayani kedua lebar, karena `Vector<T>`
+sendiri generik dan terkompilasi menjadi empat lane untuk `double` dan delapan untuk `float`.
 
-| | double | float | |
-|---|---:|---:|---|
-| penjumlahan elemen, 1 juta | 2,24 ms | 1,07 ms | **2,09×** |
-| penjumlahan elemen, 10 juta | 24,9 ms | 11,7 ms | **2,13×** |
-| perkalian kubus 1024 | 94,9 ms | 52,2 ms | 1,82× |
+```csharp
+using Gravicode.Science.GraviNum.Generic;
 
-Kedua peningkatan itu berbeda penyebabnya, dan karena itu berbeda besarnya. `Vector<float>` menampung
-delapan lane melawan empat milik `Vector<double>`, yang menolong kerja compute-bound; dan setiap
-nilai berukuran separuh, yang menolong kerja bandwidth-bound. Aritmetika elemen bersifat
-bandwidth-bound dan mendarat rapi di 2,1×.
+var a = NdArrayConvert.ToSingle(features);     // menyalin, dan kehilangan presisi
+var b = NdArrayConvert.To<float>(weights);
 
-Biayanya: perkalian kubus 1000 menghasilkan galat relatif **1,3e-6** — float32 melakukan apa yang
-memang dilakukan float32, sekitar tujuh digit desimal melawan enam belas milik double.
+UFunc<float>.Dot(a, b);
+UFunc<float>.Add(a, b);
+NdArrayConvert.ToDouble(result);               // pelebaran kembali bersifat eksak
+```
+
+Dua pertanyaan harus dijawab sebelum ini layak dipertahankan, dan yang kedua lebih penting:
+
+| | `NdArray` | `NdArray<double>` | `NdArray<float>` | Overhead generik | Keuntungan float |
+|---|---:|---:|---:|---:|---:|
+| penjumlahan elemen, 1 juta | 2,56 ms | 2,56 ms | 1,19 ms | 1,00× | **2,16×** |
+| penjumlahan elemen, 10 juta | 32,7 ms | 31,5 ms | 16,6 ms | 0,96× | **1,89×** |
+| perkalian kubus 512 | 15,1 ms | 13,7 ms | 7,80 ms | 0,91× | **1,75×** |
+| perkalian kubus 1024 | 89,0 ms | 92,6 ms | 47,1 ms | 1,04× | **1,96×** |
+
+**Menjadikannya generik tidak berbiaya** — kolom overhead berada di dalam derau pengukuran, dan
+itulah yang membuat memigrasikan sisa library menjadi pilihan yang masuk akal, bukan pertukaran.
+Dan **float memang membayar**, sebesar 1,7–2,2×, karena dua alasan terpisah yang tersirat di kolom
+itu: dua kali lipat lane SIMD menolong kerja compute-bound, separuh byte menolong kerja
+bandwidth-bound.
+
+Biayanya adalah presisi. Perkalian kubus 1000 menghasilkan galat relatif **1,3e-6** — float32
+membawa sekitar tujuh digit signifikan melawan enam belas milik double.
+`NdArrayConvert.ComparisonTolerance<T>()` memberi ambang yang sesuai lebarnya, karena ambang yang
+ditulis untuk `double` diam-diam terlalu ketat bagi `float`.
+
+**Keenam library masih memakai `NdArray`.** Memigrasikannya sehingga menjadi `NdArray<double>`
+adalah perubahan tersendiri; yang ada di sini adalah intinya yang sudah terbukti, diperiksa
+terhadap jalur `double` elemen demi elemen. `Single.SingleKernels` tetap ada sebagai prototipe
+tulisan tangan yang menjadi pembanding versi generik ini.
+
+Dua perbedaan yang disengaja dari `UFunc` versi `double`: kernel generik **tidak** melakukan
+broadcast, dan menyatakannya alih-alih menebak bentuk; dan `Sum` bersifat pairwise, yang jauh lebih
+penting pada `float` — total berjalan yang naif atas sejuta nilai `0.1f` melenceng terlihat,
+sementara penjumlahan pairwise menjaga galatnya logaritmik terhadap jumlah elemen.
 
 ## Membaca bobot ONNX
 
@@ -284,6 +311,56 @@ secara diam-diam jauh lebih buruk daripada mengembalikan lebih sedikit angka.
 
 Diverifikasi terhadap berkas yang ditulis library `onnx` resmi Python, bukan terhadap fixture yang
 dibuat agar cocok dengan pembacanya.
+
+## Transformasi Fourier
+
+```csharp
+using Gravicode.Science.GraviNum.Signal;
+
+Fft.ForwardReal(signal);          // n/2+1 bin berbeda — spektrum sinyal riil bersifat simetris
+Fft.Magnitude(signal);            // magnitudonya saja
+Fft.FrequencyBins(n, sampleRate); // frekuensi yang diwakili tiap bin
+
+Fft.Forward(complex);  Fft.Inverse(complex);
+Fft.InverseReal(spectrum, length);
+Fft.Convolve(a, b);               // konvolusi linear, O(N log N)
+```
+
+**Panjang berapa pun bisa.** Pangkat dua memakai radix-2 Cooley-Tukey iteratif; selain itu memakai
+**algoritma Bluestein**, yang menyatakan ulang DFT sebagai konvolusi lalu menghitungnya dengan
+transformasi pangkat dua — tetap `O(n log n)`, bahkan untuk panjang prima.
+
+Ini lebih penting daripada kedengarannya. Kebanyakan FFT tulisan tangan hanya menangani pangkat dua
+dan menyerahkan zero-padding ke pemanggil, padahal padding bukan tindakan netral: ia mengubah
+spektrum, memburamkan setiap puncak ke bin-bin tetangganya. Menambal secara diam-diam berarti
+mengembalikan jawaban yang masuk akal untuk pertanyaan yang tidak pernah diajukan siapa pun.
+Lakukan padding kalau *Anda* memang menginginkannya, di kode Anda sendiri.
+
+| n | Jalur | Waktu | vs DFT langsung `O(n²)` |
+|---:|---|---:|---:|
+| 256 | radix-2 | 0,012 ms | 109× |
+| 257 | Bluestein | 0,105 ms | 12× |
+| 4096 | radix-2 | 0,094 ms | 3.536× |
+| 4099 | Bluestein | 1,67 ms | 206× |
+| 65536 | radix-2 | 2,02 ms | — |
+
+Bluestein berbiaya kira-kira satu orde besaran lebih mahal daripada radix-2 pada ukuran setara,
+karena ia menjalankan tiga transformasi atas array padded yang lebih besar. Tetap jauh lebih baik
+daripada alternatif kuadratik — dan bila Anda mengendalikan panjangnya, pangkat dua layak dipilih.
+
+Dua konvensi, dinyatakan karena keduanya arbitrer dan keduanya penting:
+
+- **Penskalaan `1/n` ada di transformasi balik**, bukan dibelah `1/√n` ke keduanya. Itu pilihan
+  NumPy; amplitudo sebuah spektrum berarti hal berbeda di bawah masing-masing konvensi.
+- **`Convolve` bersifat linear, bukan sirkular.** Kedua masukan di-pad ke `n + m - 1` lebih dulu;
+  tanpa itu ekor hasilnya membungkus ke depan dan merusak awalnya — bug klasik pada konvolusi
+  berbasis FFT.
+
+> Diverifikasi terhadap **`rfft` NumPy** (pocketfft, implementasi yang sepenuhnya terpisah) pada
+> panjang 64, 100, 101, 360, dan 1531 — cocok sampai **5e-14 relatif** atau lebih baik. Di dalam
+> suite pengujian, rujukannya adalah DFT langsung `O(n²)` ditambah bentuk-bentuk tertutup: sinyal
+> konstan menaruh seluruh energinya di bin nol, impuls memberi spektrum datar, dan nada murni pada
+> frekuensi bin yang tepat tidak bocor ke mana pun.
 
 ## Diferensiasi otomatis
 

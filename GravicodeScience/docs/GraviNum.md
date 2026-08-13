@@ -239,25 +239,51 @@ above the noisy region. `PackedMatMul.Enabled = false` forces the simple kernel.
 > first sizes were still running unoptimised. Two warm-up calls are not enough; a hot method is
 > recompiled after about thirty.
 
-### Single precision — a prototype
+## Single precision, generically
 
-`Single.SingleKernels` has `float` versions of the two kernels that dominate runtime. It is a
-**measurement tool, not a second API**: making `NdArray` generic over `INumber<T>` would touch all
-six libraries, and that is not a change worth starting without knowing the payoff.
+`NdArray<T>` is the same design as `NdArray` — a view over a shared buffer — over any IEEE
+floating-point element type. One implementation serves both widths, because `Vector<T>` is itself
+generic and compiles to four lanes for `double` and eight for `float`.
 
-| | double | float | |
-|---|---:|---:|---|
-| element-wise add, 1M | 2.24 ms | 1.07 ms | **2.09×** |
-| element-wise add, 10M | 24.9 ms | 11.7 ms | **2.13×** |
-| 1024-cube product | 94.9 ms | 52.2 ms | 1.82× |
+```csharp
+using Gravicode.Science.GraviNum.Generic;
 
-The two gains have different causes, which is why they differ. `Vector<float>` holds eight lanes
-against `Vector<double>`'s four, which helps compute-bound work; and every value is half the bytes,
-which helps bandwidth-bound work. Element-wise arithmetic is bandwidth-bound and lands at a clean
-2.1×.
+var a = NdArrayConvert.ToSingle(features);     // copies, and loses precision
+var b = NdArrayConvert.To<float>(weights);
 
-The cost: a 1000-cube product came out with a relative error of **1.3e-6**, which is float32 doing
-what float32 does — roughly seven decimal digits against double's sixteen.
+UFunc<float>.Dot(a, b);
+UFunc<float>.Add(a, b);
+NdArrayConvert.ToDouble(result);               // widening back is exact
+```
+
+Two questions had to be answered before this was worth keeping, and the second matters more:
+
+| | `NdArray` | `NdArray<double>` | `NdArray<float>` | Generic overhead | Float gain |
+|---|---:|---:|---:|---:|---:|
+| element-wise add, 1M | 2.56 ms | 2.56 ms | 1.19 ms | 1.00× | **2.16×** |
+| element-wise add, 10M | 32.7 ms | 31.5 ms | 16.6 ms | 0.96× | **1.89×** |
+| 512-cube product | 15.1 ms | 13.7 ms | 7.80 ms | 0.91× | **1.75×** |
+| 1024-cube product | 89.0 ms | 92.6 ms | 47.1 ms | 1.04× | **1.96×** |
+
+**Genericising costs nothing** — the overhead column sits inside measurement noise, which is what
+makes migrating the rest of the library a viable option rather than a trade. And **float pays**,
+by 1.7–2.2×, for the two separate reasons the columns hint at: twice the SIMD lanes helps
+compute-bound work, half the bytes helps bandwidth-bound work.
+
+The cost is precision. A 1000-cube product comes out with a relative error of **1.3e-6** — float32
+carrying about seven significant digits against double's sixteen. `NdArrayConvert.ComparisonTolerance<T>()`
+gives a threshold appropriate to the width, because one written for `double` silently over-asserts
+on `float`.
+
+**The six libraries still use `NdArray`.** Migrating them so that it becomes `NdArray<double>` is a
+separate change; what is here is the proven core, checked against the `double` path element by
+element. `Single.SingleKernels` remains as the original hand-written prototype the generic version
+was measured against.
+
+Two deliberate differences from the `double` `UFunc`: the generic kernels do **not** broadcast, and
+say so rather than guessing at a shape; and `Sum` is pairwise, which matters much more in `float` —
+a naive running total over a million values of `0.1f` drifts visibly, while pairwise summation
+keeps the error logarithmic in the count.
 
 ## Reading ONNX weights
 
@@ -280,6 +306,54 @@ guessed at** — returning wrong numbers silently is far worse than returning fe
 
 Verified against files written by the official Python `onnx` library, not against a fixture written
 to match the reader.
+
+## Fourier transforms
+
+```csharp
+using Gravicode.Science.GraviNum.Signal;
+
+Fft.ForwardReal(signal);          // n/2+1 distinct bins — a real spectrum is symmetric
+Fft.Magnitude(signal);            // just the magnitudes
+Fft.FrequencyBins(n, sampleRate); // what frequency each bin means
+
+Fft.Forward(complex);  Fft.Inverse(complex);
+Fft.InverseReal(spectrum, length);
+Fft.Convolve(a, b);               // linear convolution, O(N log N)
+```
+
+**Any length works.** A power of two uses iterative radix-2 Cooley-Tukey; everything else uses
+**Bluestein's algorithm**, which re-expresses the DFT as a convolution and evaluates that with a
+power-of-two transform — still `O(n log n)`, even for a prime length.
+
+That matters more than it sounds. Most hand-rolled FFTs handle only powers of two and leave the
+caller to zero-pad, but padding is not neutral: it changes the spectrum, smearing each peak across
+neighbouring bins. Silently padding would return a plausible answer to a question nobody asked.
+Pad when *you* want to, in your own code.
+
+| n | Path | Time | vs the direct `O(n²)` DFT |
+|---:|---|---:|---:|
+| 256 | radix-2 | 0.012 ms | 109× |
+| 257 | Bluestein | 0.105 ms | 12× |
+| 4096 | radix-2 | 0.094 ms | 3,536× |
+| 4099 | Bluestein | 1.67 ms | 206× |
+| 65536 | radix-2 | 2.02 ms | — |
+
+Bluestein costs roughly an order of magnitude more than radix-2 at a comparable size, because it
+runs three transforms of a larger padded array. It is still vastly better than the quadratic
+alternative — and if you control the length, a power of two is worth choosing.
+
+Two conventions, stated because both are arbitrary and both matter:
+
+- **The `1/n` scaling lives on the inverse**, not split as `1/√n` across both. That is NumPy's
+  choice; a spectrum's amplitudes mean different things under each.
+- **`Convolve` is linear, not circular.** Both inputs are padded to `n + m - 1` first, without
+  which the tail of the result wraps around and corrupts the start — the classic bug in an
+  FFT-based convolution.
+
+> Verified against **NumPy's `rfft`** (pocketfft, an entirely separate implementation) at lengths
+> 64, 100, 101, 360 and 1531 — agreement to **5e-14 relative** or better. In the test suite the
+> reference is a direct `O(n²)` DFT plus closed forms: a constant puts all its energy in bin zero,
+> an impulse has a flat spectrum, and a tone at an exact bin frequency leaks nowhere.
 
 ## Automatic differentiation
 

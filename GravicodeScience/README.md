@@ -4,12 +4,12 @@ A data science and AI ecosystem for **.NET 10** — six libraries that mirror th
 each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
-[![tests](https://img.shields.io/badge/tests-541%20passing-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-589%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
 | Library | Python analogue | Focus |
 |---|---|---|
-| [**GraviNum**](docs/GraviNum.md) | NumPy + autograd | N-dimensional arrays, linear algebra, autodiff, random, statistics |
+| [**GraviNum**](docs/GraviNum.md) | NumPy + autograd | N-dimensional arrays, linear algebra, autodiff, FFT, random, statistics |
 | [**GraviFrame**](docs/GraviFrame.md) | pandas | DataFrames, group-by, pivot, joins, time series |
 | [**GraviLearn**](docs/GraviLearn.md) | scikit-learn | Preprocessing, supervised & unsupervised ML, pipelines, metrics |
 | [**GraviText**](docs/GraviText.md) | HuggingFace Transformers | Tokenization, embeddings, transformers, NLP tasks |
@@ -54,7 +54,7 @@ samples/      six console apps, each printing real results
 notebooks/    six .NET Interactive notebooks with charts
 benchmarks/   six BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        541 tests
+tests/        589 tests
 tools/        ScienceAppGen — an IDE that builds apps from a prompt
 docs/         English, with Bahasa Indonesia in docs/id/
 ```

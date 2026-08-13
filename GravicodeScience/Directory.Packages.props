@@ -23,7 +23,9 @@
     <!-- Benchmarking -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
 
-    <!-- Testing -->
+    <!-- Testing. Sqlite is a test-only dependency: it gives SqlReader/SqlWriter a real ADO.NET
+         provider to run against, while GraviFrame itself binds only to System.Data.Common. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

@@ -14,6 +14,11 @@ public enum DataType
 
     /// <summary>Timestamps.</summary>
     DateTime,
+
+    /// <summary>
+    /// Text stored as integer codes into a fixed dictionary of categories; missing is code -1.
+    /// </summary>
+    Categorical,
 }
 
 /// <summary>

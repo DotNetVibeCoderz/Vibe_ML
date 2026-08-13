@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 541 passing, 0 failing
+**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 589 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -11,7 +11,7 @@ Roadmap: [PLAN.md](PLAN.md)
 | Area | Status | Notes |
 |---|---|---|
 | Solution and build | ✅ Complete | 24 projects, central package management, Release build clean |
-| GraviNum | ✅ Complete | 188 tests |
+| GraviNum | ✅ Complete | 236 tests |
 | GraviFrame | ✅ Complete | 56 tests |
 | GraviLearn | ✅ Complete | 76 tests |
 | GraviText | ✅ Complete | 88 tests |
@@ -28,7 +28,7 @@ Roadmap: [PLAN.md](PLAN.md)
 
 ## Libraries
 
-### GraviNum — 188 tests
+### GraviNum — 236 tests
 
 - [x] `NdArray` with shape, strides and offset; views for reshape, transpose, slice
 - [x] Slicing with index, range, step and reverse selectors
@@ -46,6 +46,9 @@ Roadmap: [PLAN.md](PLAN.md)
 - [x] Packed cache-blocked matrix product, for machines without a BLAS
 - [x] `Io.OnnxReader` — dependency-free ONNX weight import
 - [x] `Single.SingleKernels` — single-precision prototype for the two hot kernels
+- [x] `Generic.NdArray<T>` and `UFunc<T>` over `IFloatingPointIeee754<T>` — one implementation, both widths
+- [x] `NdArrayConvert` bridges the generic core to the `double` `NdArray` the six libraries use
+- [x] `Signal.Fft` — radix-2 and Bluestein, so any length is `O(n log n)`; real transform, frequency bins, FFT convolution
 - [x] Reverse-mode autodiff: `Tensor` tape, broadcasting-aware gradients, `GradientCheck`
 - [x] Graph-shaped tape ops: `SparseMatMul`, `Gather`, `SegmentSum`, `ConcatColumns`, `LeakyRelu`, masked `SoftmaxCrossEntropy`
 
@@ -203,6 +206,10 @@ Each is now covered by a regression test.
 | ONNX reader vs files written by the official Python library | exact | all 5 initializer types read correctly |
 | ONNX export vs Python onnxruntime | same predictions | 150/150 labels; 5.9e-07 on regression |
 | Single-precision 1000-cube product vs double | float32 accuracy | 1.3e-6 relative |
+| `NdArray<double>` kernels vs the non-generic `NdArray` | bit-identical | element-wise exact, product to 1e-9 |
+| Genericising the `double` path | no slowdown | 0.91–1.04×, inside measurement noise |
+| FFT vs NumPy `rfft` (pocketfft) | same spectrum | 5e-14 relative, at prime and composite lengths |
+| FFT vs the direct `O(n²)` DFT | same spectrum | agrees; 3,536× faster at n=4096 |
 | Coin posterior mean vs exact conjugate | 0.623762 | within 0.002 |
 | HMC and NUTS vs the same exact posterior | 0.623762 | within 0.01, mean and sd |
 | Autodiff gradients vs central differences | agreement to ~1e-6 | passes on 14 functions |
@@ -240,10 +247,10 @@ Each is now covered by a regression test.
 
 ## Next
 
-See [PLAN.md](PLAN.md). Every factorisation now has a native path when a LAPACK is present, and
-ONNX works in both directions. The nearest remaining item is the generic `NdArray<T>` rewrite,
-which the single-precision prototype now says is worth doing with numbers behind it — and which
-remains the largest single change on the roadmap.
+See [PLAN.md](PLAN.md). Every factorisation now has a native path when a LAPACK is present, ONNX
+works in both directions, and the generic `NdArray<T>` core is built and measured — genericising
+costs nothing, so migrating the six libraries onto it is now a scheduling decision rather than a
+gamble. That migration, and the v0.4 breadth items, are what remain.
 
 ---
 
