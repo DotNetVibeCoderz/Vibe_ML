@@ -1,0 +1,56 @@
+<Project>
+
+  <!--
+    Gravicode.Science - shared MSBuild settings for every project in the solution.
+    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>CS1591</WarningsNotAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
+  </PropertyGroup>
+
+  <!-- Hardware oriented defaults: the whole stack leans on SIMD + tiered PGO. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Optimize>true</Optimize>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <!-- NuGet metadata shared by the six shipping libraries (src/**). -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('$([System.IO.Path]::DirectorySeparatorChar)src$([System.IO.Path]::DirectorySeparatorChar)'))">
+    <IsPackable>true</IsPackable>
+    <PackageVersion>0.1.0</PackageVersion>
+    <Authors>Gravicode Studios</Authors>
+    <Company>Gravicode Studios</Company>
+    <Product>Gravicode.Science</Product>
+    <Copyright>Copyright (c) Gravicode Studios</Copyright>
+    <PackageProjectUrl>https://github.com/gravicode/Gravicode.Science</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/gravicode/Gravicode.Science</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>data-science;machine-learning;numerics;dotnet;simd;gpu;gravicode</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>Gravicode.Science - data science and AI ecosystem for .NET. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <!-- Samples, benchmarks and tests are never packed. -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'true'">
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

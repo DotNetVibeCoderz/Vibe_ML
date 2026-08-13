@@ -1,0 +1,13 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+artifacts/
+BenchmarkDotNet.Artifacts/
+TestResults/
+*.nupkg
+*.binlog
+.ipynb_checkpoints/
+datasets/**/*.large.csv

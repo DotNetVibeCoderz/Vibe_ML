@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.GraviText</RootNamespace>
+    <AssemblyName>Gravicode.Science.GraviText</AssemblyName>
+    <PackageId>Gravicode.Science.GraviText</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviNum\GraviNum.csproj" />
+    <!-- The task pipelines (sentiment, classification) train real classifiers rather than reimplementing them. -->
+    <ProjectReference Include="..\GraviLearn\GraviLearn.csproj" />
+  </ItemGroup>
+
+</Project>

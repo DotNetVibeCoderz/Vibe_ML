@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.GraviFrame</RootNamespace>
+    <AssemblyName>Gravicode.Science.GraviFrame</AssemblyName>
+    <PackageId>Gravicode.Science.GraviFrame</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Parquet.Net" />
+    <ProjectReference Include="..\GraviNum\GraviNum.csproj" />
+  </ItemGroup>
+
+</Project>

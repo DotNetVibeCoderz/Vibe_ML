@@ -1,0 +1,29 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- GPU backend (CUDA / OpenCL / CPU accelerator) -->
+    <PackageVersion Include="ILGPU" Version="1.5.3" />
+    <PackageVersion Include="ILGPU.Algorithms" Version="1.5.3" />
+
+    <!-- IO -->
+    <!-- 5.6.x keeps the DataColumn-based API; 6.x replaced it with a lower-level Memory<T> surface. -->
+    <PackageVersion Include="Parquet.Net" Version="5.6.1" />
+
+    <!-- Visualization hooks used by samples and notebooks -->
+    <PackageVersion Include="ScottPlot" Version="5.1.59" />
+
+    <!-- Benchmarking -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+
+    <!-- Testing -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+</Project>

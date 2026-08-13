@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>ScienceAppGen</RootNamespace>
+    <AssemblyName>ScienceAppGen</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <NoWarn>$(NoWarn);SKEXP0001;SKEXP0010;SKEXP0070;CS0618</NoWarn>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <AvaloniaResource Include="Themes\**" />
+    <EmbeddedResource Include="Templates\**" />
+    <None Update="app.config" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+
+    <!-- Semantic Kernel. The Google and Ollama connectors ship as alpha only; Anthropic has
+         no official connector at all, so Claude is served by a hand-written
+         IChatCompletionService in Services/AnthropicChatCompletionService.cs. -->
+    <PackageReference Include="Microsoft.SemanticKernel" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.AzureOpenAI" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.Google" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.Ollama" />
+
+    <PackageReference Include="System.Configuration.ConfigurationManager" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Generated projects reference these, and the assistant answers questions about them. -->
+    <ProjectReference Include="..\..\src\GraviNum\GraviNum.csproj" />
+    <ProjectReference Include="..\..\src\GraviFrame\GraviFrame.csproj" />
+    <ProjectReference Include="..\..\src\GraviLearn\GraviLearn.csproj" />
+  </ItemGroup>
+
+</Project>

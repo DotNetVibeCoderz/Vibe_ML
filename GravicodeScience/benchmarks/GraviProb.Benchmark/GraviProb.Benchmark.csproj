@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.Benchmarks.GraviProb</RootNamespace>
+    <AssemblyName>GraviProb.Benchmark</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <ProjectReference Include="..\..\src\GraviProb\GraviProb.csproj" />
+  </ItemGroup>
+
+</Project>

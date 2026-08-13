@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.GraviGraph</RootNamespace>
+    <AssemblyName>Gravicode.Science.GraviGraph</AssemblyName>
+    <PackageId>Gravicode.Science.GraviGraph</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviNum\GraviNum.csproj" />
+    <!-- DeepWalk and node2vec are random walks fed to skip-gram, so the Word2Vec trainer is reused. -->
+    <ProjectReference Include="..\GraviText\GraviText.csproj" />
+  </ItemGroup>
+
+</Project>

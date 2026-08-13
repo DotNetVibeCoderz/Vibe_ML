@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.Samples.GraviNum</RootNamespace>
+    <AssemblyName>GraviNum.Console</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Samples render the screenshots referenced by docs/. -->
+    <PackageReference Include="ScottPlot" />
+    <ProjectReference Include="..\..\src\GraviNum\GraviNum.csproj" />
+  </ItemGroup>
+
+</Project>
