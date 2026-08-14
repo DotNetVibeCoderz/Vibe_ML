@@ -588,7 +588,9 @@ public static class TemplateService
                     using Gravicode.Science.GraviLearn.Trees;
                     using Gravicode.Science.GraviNum;
 
-                    var data = Datasets.LoadIris();
+                    // Datasets.LoadIris() needs the repository's datasets/ folder, so a project
+                    // created elsewhere generates its data instead.
+                    var data = Datasets.MakeBlobs(samples: 400, features: 4, centers: 3, spread: 2.5, seed: 42);
                     var split = Selection.Split(data.Features, data.Target, testSize: 0.3, seed: 42, stratify: true);
 
                     var model = new RandomForestClassifier(nTrees: 100, seed: 42);
@@ -1065,7 +1067,7 @@ public static class TemplateService
                             "var plot = new ScottPlot.Plot();\n",
                             "plot.Add.Bars(centres, counts.Select(c => (double)c).ToArray());\n",
                             "plot.Title(\"Sample distribution\");\n",
-                            "plot.GetImageHtml(800, 450)"
+                            "plot.GetPngHtml(800, 450)"
                           ]
                         }
                       ],
@@ -1091,6 +1093,378 @@ public static class TemplateService
                     ```bash
                     dotnet build Gravicode.Science.sln -c Release
                     ```
+                    """,
+            }),
+
+        // ------------------------------------------------------------ arrow interchange
+        new ProjectTemplate(
+            "arrow",
+            "Arrow interchange",
+            "Data science",
+            "Exchange dataframes with pandas and pyarrow, and aggregate files larger than memory.",
+            ["GraviNum", "GraviFrame"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviFrame;
+                    using Gravicode.Science.GraviFrame.Io;
+                    using Gravicode.Science.GraviNum;
+
+                    Console.WriteLine(GraviInfo.Banner("$name$"));
+
+                    var frame = new DataFrame(
+                    [
+                        new TextSeries("symbol", ["BBCA", "TLKM", "ASII", null]),
+                        new NumericSeries("close", [9250.0, 3120.0, double.NaN, 4410.0]),
+                        new BooleanSeries("halted", [false, false, true, null]),
+                        new DateTimeSeries("stamp",
+                            [new DateTime(2024, 1, 2), new DateTime(2024, 1, 3), new DateTime(2024, 1, 4), null]),
+                    ]);
+
+                    ArrowFile.Write(frame, "quotes.arrow");
+                    var back = ArrowFile.Read("quotes.arrow");
+
+                    Console.WriteLine(back);
+                    Console.WriteLine(string.Join(", ", back.ColumnNames.Select(n => $"{n}={back[n].DataType}")));
+                    Console.WriteLine($"missing values survived: {back["close"].IsMissing(2)}");
+
+                    // Read it from Python without a CSV parse and without re-inferring types:
+                    //   import pyarrow as pa
+                    //   pa.ipc.open_file("quotes.arrow").read_all().to_pandas()
+
+                    // ------------------------------------------------------------------
+                    // Out of core: the same queries over a file too big to load.
+
+                    // 20,000 quotes written out, then read back 500 at a time. Stand in your
+                    // own file here - nothing below cares how large it is.
+                    var rng = new GraviRandom(42);
+                    string[] tickers = ["BBCA", "TLKM", "ASII", "BBRI"];
+
+                    var symbols = new string[20_000];
+                    var prices = new double[20_000];
+                    var volumes = new double[20_000];
+                    for (var i = 0; i < 20_000; i++)
+                    {
+                        symbols[i] = tickers[i % tickers.Length];
+                        prices[i] = 1000 + (i % tickers.Length) * 2000 + rng.Normal() * 150;
+                        volumes[i] = Math.Abs(rng.Normal() * 1e6);
+                    }
+
+                    CsvWriter.Write(new DataFrame(
+                    [
+                        new TextSeries("symbol", symbols),
+                        new NumericSeries("close", prices),
+                        new NumericSeries("volume", volumes),
+                    ]), "quotes.csv");
+
+                    var chunked = ChunkedFrame.FromCsv("quotes.csv", chunkRows: 500);
+                    Console.WriteLine($"{Streaming.CountRows(chunked)} rows, 500 at a time");
+
+                    // One pass and constant memory. Variance comes from Welford's method rather
+                    // than E[x^2] - E[x]^2, which subtracts two nearly equal large numbers and
+                    // can return a negative variance.
+                    foreach (var (name, stats) in Streaming.Describe(chunked, ["close", "volume"]))
+                        Console.WriteLine($"  {name,-7} n={stats.Count} mean={stats.Mean,10:F2} sd={stats.StandardDeviation,10:F2}");
+
+                    // GroupBy memory is proportional to DISTINCT GROUPS, not rows - so on an
+                    // unfamiliar key, count them first. That number is the difference between a
+                    // query that runs and one that runs out of memory.
+                    Console.WriteLine($"{Streaming.CountGroups(chunked, ["symbol"])} distinct groups");
+                    Console.WriteLine(Streaming.GroupBy(chunked, ["symbol"], ("close", "mean"), ("volume", "sum")));
+
+                    // Chunk size is a memory knob, not a parameter of the answer - column types
+                    // are pinned from one sample rather than inferred per chunk.
+                    foreach (var size in new[] { 64, 500, 8_000 })
+                        Console.WriteLine($"  chunkRows={size,6} -> mean close " +
+                            $"{Streaming.Describe(ChunkedFrame.FromCsv("quotes.csv", chunkRows: size), ["close"])["close"].Mean:F9}");
+
+                    // Two passes and disk space equal to the input. That is the trade, and it is
+                    // what lets a sort exceed memory - do not reach for it when the data fits.
+                    Streaming.SortToFile(chunked, "close", "by-close.csv", descending: true);
+                    Console.WriteLine(DataFrame.ReadCsv("by-close.csv").Head(5));
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Arrow interchange and out-of-core aggregation with GraviFrame.
+
+                    `ArrowFile` carries types and missing values across a language boundary, so
+                    pandas reads the output directly. It is verified in both directions against
+                    pyarrow rather than by round-tripping through itself, which for an interchange
+                    format would prove nothing.
+
+                    `ChunkedFrame` reads a block at a time and `Streaming` aggregates over the
+                    blocks. Chunk size is a memory knob, not a parameter of the answer.
+
+                    ```bash
+                    dotnet run
+                    ```
+
+                    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil
+                    """,
+            }),
+
+        // ------------------------------------------------------------ sparse text
+        new ProjectTemplate(
+            "sparse-text",
+            "Sparse text classification",
+            "Machine learning",
+            "Train a linear classifier on a bag-of-words matrix without densifying it.",
+            ["GraviNum", "GraviFrame", "GraviLearn", "GraviText"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "GraviLearn", "GraviText"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviLearn.Linear;
+                    using Gravicode.Science.GraviNum;
+                    using Gravicode.Science.GraviText.Vectorization;
+
+                    Console.WriteLine(GraviInfo.Banner("$name$"));
+
+                    string[] documents =
+                    [
+                        "layanan cepat dan ramah, sangat memuaskan",
+                        "produk bagus sekali, akan beli lagi",
+                        "pengiriman tepat waktu dan barang rapi",
+                        "kualitas mantap, harga sepadan",
+                        "barang rusak saat sampai, kecewa berat",
+                        "pengiriman lambat dan tidak ada kabar",
+                        "kualitas buruk, tidak sesuai deskripsi",
+                        "pelayanan mengecewakan, tidak akan kembali",
+                    ];
+
+                    var labels = NdArray.FromValues([1, 1, 1, 1, 0, 0, 0, 0]);
+
+                    // A bag-of-words matrix is around 1% non-zero. The dense copy is almost
+                    // entirely zeros that cost the same to store and multiply as any other
+                    // number - the memory wall is the reason for this path, not the speed.
+                    var vectoriser = new TfidfVectorizer(new VectorizerOptions { MaxFeatures = 5_000 });
+                    var x = vectoriser.FitTransformSparse(documents);
+
+                    var density = 100.0 * x.NonZeroCount / ((double)x.Rows * x.Columns);
+                    Console.WriteLine($"{x.Rows} documents x {x.Columns} terms, {density:F2}% non-zero");
+
+                    // L2 is not optional on separable data: without it the maximum likelihood
+                    // sits at infinity, the weights grow forever and the fit never converges.
+                    var model = new SparseLogisticRegression(
+                        learningRate: 1.0, maxIterations: 500, l2Penalty: 0.01).Fit(x, labels);
+
+                    Console.WriteLine($"accuracy {model.Score(x, labels):P2} after {model.IterationsRun} iterations");
+                    Console.WriteLine();
+
+                    // The practical reason to keep a linear model on text: a coefficient reads
+                    // directly as "this word moves the decision this far", which no tree
+                    // ensemble or transformer offers.
+                    Console.WriteLine("Terms pushing towards the positive class:");
+                    foreach (var (feature, weight) in model.TopFeatures(8))
+                        Console.WriteLine($"  {vectoriser.Vocabulary[feature],-16}{weight,8:F4}");
+
+                    Console.WriteLine();
+                    Console.WriteLine("Scoring new reviews:");
+                    string[] fresh = ["barang bagus dan pengiriman cepat", "produk rusak dan pelayanan buruk"];
+                    // One binary problem means ONE column of probabilities, not two: the
+                    // second is 1 - the first and is not stored.
+                    var scores = model.PredictProbabilities(vectoriser.TransformSparse(fresh));
+                    for (var i = 0; i < fresh.Length; i++)
+                        Console.WriteLine($"  {scores[i, 0]:P1} positive  '{fresh[i]}'");
+
+                    Console.WriteLine();
+                    Console.WriteLine(GraviInfo.Attribution);
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Sparse text classification with GraviText and GraviLearn.
+
+                    `TfidfVectorizer.FitTransformSparse` returns a CSR matrix and
+                    `SparseLogisticRegression` trains on it directly. It is the same model as the
+                    dense path rather than an approximation, so the comparison worth making is
+                    between coefficients — accuracy would agree even if the weights had drifted.
+
+                    The weight vector stays dense, so this bounds the *feature* count, not the
+                    number of documents.
+
+                    ```bash
+                    dotnet run
+                    ```
+
+                    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil
+                    """,
+            }),
+
+        // ------------------------------------------------------------ distributed
+        new ProjectTemplate(
+            "distributed",
+            "Distributed training",
+            "Machine learning",
+            "Split training across workers, and average gradients the way that stays correct.",
+            ["GraviNum", "GraviFrame", "GraviLearn"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "GraviLearn"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviLearn;
+                    using Gravicode.Science.GraviLearn.Distributed;
+                    using Gravicode.Science.GraviLearn.ModelSelection;
+                    using Gravicode.Science.GraviNum;
+
+                    Console.WriteLine(GraviInfo.Banner("$name$"));
+
+                    // MakeBlobs generates its data, so this runs anywhere. Datasets.LoadIris()
+                    // needs the repository's datasets/ folder and will not resolve outside it.
+                    var data = Datasets.MakeBlobs(samples: 2000, features: 8, centers: 3, seed: 42);
+                    var split = Selection.Split(data.Features, data.Target, testSize: 0.3, seed: 42);
+
+                    // Partition spreads the remainder rather than dumping it on the last worker,
+                    // so shards differ by one whenever the count does not divide.
+                    foreach (var shard in DataParallel.Partition(items: split.TrainX.Shape[0], workers: 4))
+                        Console.WriteLine($"  {shard,-14} n={shard.Count}");
+                    Console.WriteLine();
+
+                    // Bit-identical to single-process training, not merely equivalent: tree t is
+                    // seeded from seed + t * 7919, a function of its global index alone, so a
+                    // shard boundary cannot change the answer.
+                    var distributed = new DistributedForest(nTrees: 200, maxDepth: 12, seed: 42)
+                        .Fit(split.TrainX, split.TrainY, workers: 4);
+                    var single = new DistributedForest(nTrees: 200, maxDepth: 12, seed: 42)
+                        .Fit(split.TrainX, split.TrainY, workers: 1);
+
+                    var many = distributed.Predict(split.TestX);
+                    var one = single.Predict(split.TestX);
+                    var identical = true;
+                    for (var i = 0; i < many.Size; i++) identical &= many.At(i) == one.At(i);
+
+                    Console.WriteLine($"4 workers accuracy : {distributed.Score(split.TestX, split.TestY):P2}");
+                    Console.WriteLine($"1 worker  accuracy : {single.Score(split.TestX, split.TestY):P2}");
+                    Console.WriteLine($"bit-identical      : {identical}");
+                    Console.WriteLine();
+
+                    // The pieces, for a hand-written loop. Gradients are WEIGHTED by sample
+                    // count: a plain average of per-worker means equals the global mean only for
+                    // equal shards, and unweighted the model trains to something slightly wrong
+                    // that no shape or convergence check would catch.
+                    using var transport = new InProcessTransport(workerCount: 4);
+                    var server = new ParameterServer(transport);
+
+                    for (var worker = 0; worker < 4; worker++)
+                        server.Contribute(worker, NdArray.FromValues([worker + 1.0, worker + 2.0]),
+                            sampleCount: 10 * (worker + 1));
+
+                    var averaged = server.Aggregate();
+                    Console.WriteLine($"aggregate: [{averaged.At(0):F6}, {averaged.At(1):F6}]");
+
+                    // FileTransport is the same interface over a shared directory: no broker, no
+                    // ports, and it crosses machines. Workers write then rename, so a collector
+                    // cannot read a half-written payload.
+                    //   using var files = new FileTransport("/shared/exchange", workerCount: 8);
+
+                    Console.WriteLine();
+                    Console.WriteLine(GraviInfo.Attribution);
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Data-parallel training with GraviLearn.
+
+                    `DistributedForest` splits the *computation*, not the memory: every worker
+                    fits on the whole training set, which is the right direction for a forest
+                    where the trees are the expensive part.
+
+                    Two details are correctness requirements rather than refinements. Gradients
+                    are weighted by sample count, because `Partition` produces uneven shards.
+                    And transports collect in worker order rather than arrival order, because
+                    floating-point addition is not associative and arrival order would make the
+                    answer depend on the scheduler.
+
+                    ```bash
+                    dotnet run
+                    ```
+
+                    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil
+                    """,
+            }),
+
+        // ------------------------------------------------------------ pretrained weights
+        new ProjectTemplate(
+            "pretrained",
+            "Pretrained transformer",
+            "Natural language",
+            "Load an exported BERT checkpoint into a TransformerModel and encode text with it.",
+            ["GraviNum", "GraviFrame", "GraviLearn", "GraviText"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "GraviLearn", "GraviText"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.GraviNum;
+                    using Gravicode.Science.GraviText.Transformers;
+
+                    Console.WriteLine(GraviInfo.Banner("$name$"));
+
+                    // No weights ship with Gravicode.Science - licensing and size keep a real
+                    // checkpoint out of the repository - so export your own first:
+                    //
+                    //   from transformers import AutoModel
+                    //   import torch
+                    //   torch.onnx.export(AutoModel.from_pretrained("bert-base-uncased"),
+                    //                     torch.zeros(1, 8, dtype=torch.long),
+                    //                     "bert-base-uncased.onnx",
+                    //                     input_names=["input_ids"], opset_version=13)
+
+                    const string checkpoint = "bert-base-uncased.onnx";
+
+                    if (!File.Exists(checkpoint))
+                    {
+                        Console.WriteLine($"Export {checkpoint} first - see the comment above.");
+                        return;
+                    }
+
+                    // Names are a convention and the file is the only authority on which one it
+                    // follows, so look before loading. A tensor of shape [768, 768] could be a
+                    // query, key or output projection, and nothing but the name says which.
+                    foreach (var (name, shape) in TransformerCheckpoint.Inspect(checkpoint).Take(6))
+                        Console.WriteLine($"  {name,-58} [{string.Join(", ", shape)}]");
+                    Console.WriteLine();
+
+                    var model = new TransformerModel("bert-base", vocabularySize: 30522);
+                    var report = TransformerCheckpoint.Load(model, checkpoint);
+
+                    Console.WriteLine(report);
+                    Console.WriteLine($"HasPretrainedWeights = {model.HasPretrainedWeights}");
+
+                    // A partial load never sets that flag, whichever mode was used: a model with
+                    // three of twelve layers loaded produces output that is neither the
+                    // checkpoint's nor a random model's, and nothing downstream could tell.
+
+                    // A different naming convention is usually the whole adaptation:
+                    //   TransformerCheckpoint.Load(model, path, CheckpointNames.Reprefixed("roberta."));
+                    //   TransformerCheckpoint.Load(model, path, CheckpointNames.Unprefixed);
+
+                    var hidden = model.Forward([101, 7592, 2088, 102]);
+                    Console.WriteLine($"{hidden.Shape[0]} x {hidden.Shape[1]} hidden states");
+
+                    Console.WriteLine();
+                    Console.WriteLine(GraviInfo.Attribution);
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    Loading pretrained transformer weights with GraviText.
+
+                    `TransformerCheckpoint.Load` fills every parameter — embeddings, both layer
+                    norms, all four attention projections and both feed-forward layers. The
+                    older `LoadOnnxWeights` filled only the embedding tables, which is enough to
+                    look up a word vector and not enough to run the model.
+
+                    Three things it refuses rather than absorbs: a wrong transpose (checked
+                    against the non-square feed-forward weight, because a 768×768 projection
+                    accepts either reading), a partial checkpoint, and a mismatched architecture.
+
+                    ```bash
+                    dotnet run
+                    ```
+
+                    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil
                     """,
             }),
     ];

@@ -451,6 +451,84 @@ awalan alih-alih menyimpan key dan value token yang sudah diproses. Cache KV mem
 merupakan optimasi paling berharga untuk pembangkit sungguhan; ia ditinggalkan karena melipatduakan
 keadaan yang harus dipegang pembaca, dan ukuran yang dijalankan di sini tidak memerlukannya.
 
+## Memuat checkpoint terlatih
+
+`TransformerCheckpoint.Load` mengisi **setiap** parameter sebuah `TransformerModel` dari checkpoint
+ONNX: penyematan, layer norm penyematan, dan per lapisan keempat proyeksi perhatian, kedua lapisan
+feed-forward, serta kedua layer norm.
+
+```csharp
+var model = new TransformerModel("bert-base", vocabularySize: 30522);
+var report = TransformerCheckpoint.Load(model, "bert-base-uncased.onnx");
+
+Console.WriteLine(report);            // loaded 196, missing 0, unused 3
+Console.WriteLine(model.HasPretrainedWeights);
+```
+
+Ini menutup celah yang lebih buruk daripada tampaknya. `LoadOnnxWeights` sudah ada dan memuat
+*tabel* penyematan — cukup untuk mencari vektor kata, dan tidak cukup untuk menjalankan modelnya.
+Setiap bobot perhatian dan feed-forward tetap terinisialisasi acak, sehingga model yang melaporkan
+`HasPretrainedWeights == true` tetap menghasilkan derau berbentuk kalimat.
+
+Diverifikasi terhadap **implementasi NumPy yang independen** untuk enkoder yang sama, dengan
+kesesuaian sampai **2,6e-07** — presisi float32, yang memang seharusnya diberikan oleh initializer
+float32 yang dilebarkan ke float64. Itu memeriksa seluruh tumpukan sekaligus: penyematan, kedua
+layer norm, keempat proyeksi, koneksi residual, GELU, dan softmax perhatian. Pemuatan yang *nyaris*
+benar tidak akan cocok sama sekali. Lihat `tools/verify/checkpoint_interop.py`.
+
+### Nama adalah data, bukan hasil penyimpulan
+
+Tensor berbentuk [768, 768] bisa berupa proyeksi query, key, atau output, dan tidak ada yang
+menyatakannya selain namanya. Karena itu pemetaannya eksplisit:
+
+```csharp
+TransformerCheckpoint.Inspect("model.onnx");           // apa isi berkas ini sebenarnya?
+
+CheckpointNames.HuggingFaceBert                        // bert.encoder.layer.{0}.attention.self.query.weight
+CheckpointNames.Reprefixed("roberta.")                 // tata letak sama, nama model berbeda
+CheckpointNames.Unprefixed                             // encoder.layer.{0}....
+```
+
+Jalankan `Inspect` lebih dulu pada berkas yang belum dikenal. Nama adalah konvensi, dan berkas itu
+sendiri satu-satunya otoritas atas konvensi mana yang diikutinya.
+
+### Tiga hal yang ditolak, bukan diserap diam-diam
+
+**Transpos yang salah.** `nn.Linear` milik PyTorch menyimpan bobotnya sebagai
+(out_features, in_features) dan menghitung `x Wᵀ`; `DenseLayer` menyimpan (inputs, outputs) dan
+menghitung `x W`. Proyeksi perhatian BERT berukuran 768×768 — persegi, sehingga kedua pembacaan
+konsisten dan kesalahannya termuat diam-diam serta menghasilkan omong kosong yang percaya diri.
+Bobot feed-forward berukuran 768×3072 dan tidak persegi, jadi orientasinya diperiksa terhadap
+*itu* sebelum apa pun ditulis.
+
+**Checkpoint sebagian.** Mode ketat melempar kesalahan; mode longgar memuat dan melaporkan persis
+apa yang hilang. Bagaimanapun juga `HasPretrainedWeights` tetap bernilai false, karena model dengan
+tiga dari dua belas lapisan termuat menghasilkan keluaran yang bukan milik checkpoint-nya maupun
+milik model acak, dan tidak ada yang di hilir bisa membedakannya.
+
+**Arsitektur yang tidak cocok.** Bentuknya diperiksa, bukan dipercaya begitu saja, sehingga
+checkpoint untuk model yang lebih lebar gagal alih-alih memuat kolom-kolom pertamanya dan tampak
+baik-baik saja.
+
+### Yang tidak disediakan
+
+**Tidak ada bobot yang disertakan dalam repositori ini.** Lisensi dan ukuran membuat checkpoint
+sungguhan tidak bisa disertakan, sehingga pemuatnya diverifikasi terhadap checkpoint sintetis dan
+Anda membawa ekspor Anda sendiri:
+
+```python
+from transformers import AutoModel
+import torch
+
+model = AutoModel.from_pretrained("bert-base-uncased")
+torch.onnx.export(model, torch.zeros(1, 8, dtype=torch.long), "bert-base-uncased.onnx",
+                  input_names=["input_ids"], opset_version=13)
+```
+
+Bagian tokenizer-nya sudah tersedia — `BpeTokenizer.Load` dan `UnigramTokenizer.Load` membaca format
+yang dipakai tokenizer terpublikasi, dan `WordPieceTokenizer` menerima `Vocabulary` yang dimuat dari
+`vocab.txt`.
+
 ---
 
 ## Visualisasi

@@ -114,9 +114,9 @@ ditemukan dengan menjalankannya terhadap endpoint sungguhan, bukan dengan membac
 
 ## Template
 
-**File → New Project** menawarkan lima belas template. Semuanya build dan berjalan apa adanya —
-klaim itu diperiksa dengan membangkitkan setiap template lalu mem-build-nya, bukan sekadar
-dinyatakan.
+**File → New Project** menawarkan sembilan belas template. Semuanya build *dan berjalan* apa
+adanya — klaim itu diperiksa dengan membangkitkan setiap template, mem-build-nya, lalu
+menjalankannya, bukan sekadar dinyatakan.
 
 | Template | Menghasilkan |
 |---|---|
@@ -135,10 +135,20 @@ dinyatakan.
 | `tokenizer` | Melatih tokenizer BPE dan bergaya SentencePiece pada korpus Anda sendiri |
 | `ner` | Penanda entitas berbasis CRF yang dilatih dari anotasi format CoNLL |
 | `forecasting` | Penyaringan Kalman, pemulusan, dan peramalan dengan ketidakpastian yang jujur |
+| `arrow` | Pertukaran Arrow IPC dengan pandas, dan agregasi luar-memori atas CSV berpotongan |
+| `sparse-text` | TF-IDF ke matriks CSR, lalu pengklasifikasi linear yang dilatih tanpa memadatkannya |
+| `distributed` | Pemecahan shard, perataan gradien berbobot, dan forest terdistribusi identik bit |
+| `pretrained` | Memuat checkpoint BERT hasil ekspor ke dalam `TransformerModel` |
 
-Lima template yang ditambahkan pada v0.4 masuk ke kategori yang sudah ada — *Machine learning*,
-*Natural language*, dan *Statistics* — sehingga pemilih mengelompokkannya menurut fungsinya, bukan
-menurut kapan template itu ditulis.
+Lima template yang ditambahkan pada v0.4 dan empat pada v0.5 masuk ke kategori yang sudah ada —
+*Data science*, *Machine learning*, dan *Natural language* — sehingga pemilih mengelompokkannya
+menurut fungsinya, bukan menurut kapan template itu ditulis.
+
+Dua di antaranya membangkitkan datanya sendiri (`distributed` membuat blob, `arrow` menulis 20.000
+baris lebih dulu sebelum membacanya kembali per potongan), karena template yang membutuhkan folder
+`datasets/` milik repositori akan gagal begitu dibuat di tempat lain. `pretrained` adalah
+pengecualian dan menyatakannya: tidak ada bobot yang disertakan dalam repositori ini, jadi ia
+mencetak perintah `torch.onnx.export` yang perlu dijalankan lebih dulu lalu berhenti, bukan gagal.
 
 Template disimpan di dalam kode, bukan sebagai berkas lepas, sehingga tidak mungkin hilang dari
 salinan terpasang dan nama proyek disubstitusi dengan benar, bukan lewat cari-dan-ganti. Berkas

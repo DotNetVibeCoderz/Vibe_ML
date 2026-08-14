@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Gravicode.Science.GraviFrame;
 using Gravicode.Science.GraviLearn.Decomposition;
 using Gravicode.Science.GraviNum;
+using Gravicode.Science.GraviNum.Io;
 using Gravicode.Science.GraviText.Embeddings;
 using Gravicode.Science.GraviText.Linguistics;
 using Gravicode.Science.GraviText.Tasks;
@@ -409,12 +410,203 @@ Console.WriteLine("  The weights are random, so the tokens are meaningless - wha
 Console.WriteLine("  that the sampling machinery works, not that the model has anything to say.");
 Console.WriteLine();
 
+// ---------------------------------------------------------------- v0.5: checkpoints
+Section("15. Loading a pretrained checkpoint");
+
+// No weights ship with this repository - licensing and size keep a real checkpoint out - so a
+// small one is written here in PyTorch's (out, in) orientation and then loaded back.
+var checkpointConfig = new TransformerConfig(
+    VocabularySize: 40, HiddenSize: 16, Layers: 2, Heads: 2,
+    IntermediateSize: 32, MaxPositions: 24);
+
+var checkpointDirectory = Directory.CreateTempSubdirectory("gravitext-checkpoint");
+try
+{
+    var checkpointPath = Path.Combine(checkpointDirectory.FullName, "tiny-bert.onnx");
+    WriteCheckpoint(checkpointPath, checkpointConfig, skipLayer: -1);
+
+    Console.WriteLine("  Run Inspect first on an unfamiliar file - names are a convention, and the file");
+    Console.WriteLine("  is the only authority on which one it follows:");
+    var contents = TransformerCheckpoint.Inspect(checkpointPath);
+    Console.WriteLine($"    {contents.Count} tensors, for example");
+    foreach (var (name, shape) in contents.Take(4))
+        Console.WriteLine($"      {name,-58} [{string.Join(", ", shape)}]");
+    Console.WriteLine();
+
+    var restored = new TransformerModel(checkpointConfig);
+    Console.WriteLine($"  before loading: HasPretrainedWeights = {restored.HasPretrainedWeights}");
+
+    var report = TransformerCheckpoint.Load(restored, checkpointPath);
+    Console.WriteLine($"  {report}");
+    Console.WriteLine($"  after loading : HasPretrainedWeights = {restored.HasPretrainedWeights}");
+    Console.WriteLine("  Every parameter, not just the embeddings: LoadOnnxWeights filled the embedding");
+    Console.WriteLine("  tables only, which is enough to look up a word vector and not enough to run the");
+    Console.WriteLine("  model - so the attention and feed-forward weights stayed random and the model");
+    Console.WriteLine("  reported itself pretrained while producing noise shaped like a sentence.");
+    Console.WriteLine();
+
+    var states = restored.Forward([3, 9, 14, 2]);
+    Console.WriteLine($"  running 4 token ids gives {states.Shape[0]} x {states.Shape[1]} hidden states, " +
+                      $"first three of position 0: [{states[0, 0]:F6}, {states[0, 1]:F6}, {states[0, 2]:F6}]");
+    Console.WriteLine("  The end-to-end check is not in this sample: tools/verify/checkpoint_interop.py");
+    Console.WriteLine("  runs the same encoder in NumPy and agrees to 2.6e-07, which is float32 precision.");
+    Console.WriteLine("  A load that is only nearly right agrees on nothing.");
+    Console.WriteLine();
+
+    Console.WriteLine("  Three things it refuses rather than absorbs:");
+
+    var wrongWay = new TransformerModel(checkpointConfig);
+    try
+    {
+        TransformerCheckpoint.Load(wrongWay, checkpointPath,
+            CheckpointNames.HuggingFaceBert with { Transposed = false });
+    }
+    catch (InvalidDataException error)
+    {
+        Console.WriteLine($"    wrong transpose  -> {Trim(error.Message)}");
+    }
+
+    Console.WriteLine("      PyTorch stores (out, in) and computes x W^T; DenseLayer stores (in, out).");
+    Console.WriteLine("      A 768x768 attention projection is square, so both readings are consistent and");
+    Console.WriteLine("      the mistake loads silently. The check is made against the non-square");
+    Console.WriteLine($"      feed-forward weight ({checkpointConfig.IntermediateSize}x{checkpointConfig.HiddenSize} here) before anything is written.");
+
+    var partialPath = Path.Combine(checkpointDirectory.FullName, "partial.onnx");
+    WriteCheckpoint(partialPath, checkpointConfig, skipLayer: 1);
+    var partialModel = new TransformerModel(checkpointConfig);
+    try
+    {
+        TransformerCheckpoint.Load(partialModel, partialPath);
+    }
+    catch (InvalidDataException error)
+    {
+        Console.WriteLine($"    partial export   -> {Trim(error.Message)}");
+    }
+
+    var lenient = new TransformerModel(checkpointConfig);
+    var partialReport = TransformerCheckpoint.Load(lenient, partialPath, strict: false);
+    Console.WriteLine($"      lenient mode loads and names the gap: {partialReport.Missing.Count} missing, " +
+                      $"HasPretrainedWeights stays {lenient.HasPretrainedWeights}");
+    Console.WriteLine($"      first missing: {partialReport.Missing[0]}");
+
+    var wider = new TransformerConfig(
+        VocabularySize: 40, HiddenSize: 32, Layers: 2, Heads: 2,
+        IntermediateSize: 64, MaxPositions: 24);
+    try
+    {
+        TransformerCheckpoint.Load(new TransformerModel(wider), checkpointPath);
+    }
+    catch (InvalidDataException error)
+    {
+        Console.WriteLine($"    wider model      -> {Trim(error.Message)}");
+    }
+    Console.WriteLine("      Shapes are checked rather than trusted, so a checkpoint for a different");
+    Console.WriteLine("      architecture fails instead of loading its first columns and looking fine.");
+    Console.WriteLine();
+
+    Console.WriteLine("  Bring your own export - the tokenizer half is already in place:");
+    Console.WriteLine("    torch.onnx.export(AutoModel.from_pretrained(\"bert-base-uncased\"), ...)");
+    Console.WriteLine("    TransformerCheckpoint.Load(model, \"bert-base-uncased.onnx\");");
+    Console.WriteLine("    CheckpointNames.Reprefixed(\"roberta.\")   // same layout, different model name");
+}
+finally { checkpointDirectory.Delete(recursive: true); }
+Console.WriteLine();
+
 Console.WriteLine();
 Console.WriteLine(GraviInfo.Attribution);
 return;
 
 static void Section(string title)
     => Console.WriteLine($"--- {title} " + new string('-', Math.Max(0, 60 - title.Length)));
+
+/// <summary>Keeps a thrown message to one readable line, with temp paths shortened to a filename.</summary>
+static string Trim(string message)
+{
+    var line = System.Text.RegularExpressions.Regex.Replace(
+        message.ReplaceLineEndings(" ").Trim(),
+        @"'[^']*[\\/]([^'\\/]+)'", "'$1'");
+
+    return line.Length <= 96 ? line : line[..96] + "...";
+}
+
+/// <summary>
+/// Writes a checkpoint for <paramref name="config"/> in PyTorch's (out, in) orientation.
+/// </summary>
+/// <param name="skipLayer">Omit every tensor of this layer, to stand in for a partial export.</param>
+/// <remarks>
+/// The layer norms are written as scale 1 / shift 0 rather than as noise, because a norm scaled by
+/// a random small number produces hidden states that are numerically fine and semantically empty,
+/// and the sample would then be showing a load that worked on output that says nothing.
+/// </remarks>
+static void WriteCheckpoint(string path, TransformerConfig config, int skipLayer)
+{
+    var builder = new OnnxGraphBuilder("input", config.HiddenSize);
+    var rng = new GraviRandom(7);
+
+    NdArray Noise(int rows, int columns)
+    {
+        var array = NdArray.Zeros(rows, columns);
+        for (var i = 0; i < array.Size; i++) array.SetAt(i, rng.Normal() * 0.05);
+        return array;
+    }
+
+    NdArray Constant(int size, double value)
+    {
+        var array = NdArray.Zeros(size);
+        for (var i = 0; i < size; i++) array.SetAt(i, value);
+        return array;
+    }
+
+    NdArray Bias(int size)
+    {
+        var array = NdArray.Zeros(size);
+        for (var i = 0; i < size; i++) array.SetAt(i, rng.Normal() * 0.01);
+        return array;
+    }
+
+    builder.AddInitializer("bert.embeddings.word_embeddings.weight",
+        Noise(config.VocabularySize, config.HiddenSize));
+    builder.AddInitializer("bert.embeddings.position_embeddings.weight",
+        Noise(config.MaxPositions, config.HiddenSize));
+    builder.AddInitializer("bert.embeddings.LayerNorm.weight", Constant(config.HiddenSize, 1.0));
+    builder.AddInitializer("bert.embeddings.LayerNorm.bias", Constant(config.HiddenSize, 0.0));
+
+    for (var layer = 0; layer < config.Layers; layer++)
+    {
+        if (layer == skipLayer) continue;
+
+        var prefix = $"bert.encoder.layer.{layer}";
+
+        foreach (var part in new[]
+        {
+            "attention.self.query", "attention.self.key",
+            "attention.self.value", "attention.output.dense",
+        })
+        {
+            builder.AddInitializer($"{prefix}.{part}.weight", Noise(config.HiddenSize, config.HiddenSize));
+            builder.AddInitializer($"{prefix}.{part}.bias", Bias(config.HiddenSize));
+        }
+
+        builder.AddInitializer($"{prefix}.attention.output.LayerNorm.weight", Constant(config.HiddenSize, 1.0));
+        builder.AddInitializer($"{prefix}.attention.output.LayerNorm.bias", Constant(config.HiddenSize, 0.0));
+
+        // PyTorch stores (out, in), so the expansion is (intermediate, hidden) and the
+        // contraction is (hidden, intermediate) - the other way round from DenseLayer.
+        builder.AddInitializer($"{prefix}.intermediate.dense.weight",
+            Noise(config.IntermediateSize, config.HiddenSize));
+        builder.AddInitializer($"{prefix}.intermediate.dense.bias", Bias(config.IntermediateSize));
+
+        builder.AddInitializer($"{prefix}.output.dense.weight",
+            Noise(config.HiddenSize, config.IntermediateSize));
+        builder.AddInitializer($"{prefix}.output.dense.bias", Bias(config.HiddenSize));
+
+        builder.AddInitializer($"{prefix}.output.LayerNorm.weight", Constant(config.HiddenSize, 1.0));
+        builder.AddInitializer($"{prefix}.output.LayerNorm.bias", Constant(config.HiddenSize, 0.0));
+    }
+
+    builder.AddNode("Identity", ["input"], "output");
+    builder.Save(path, "output", config.HiddenSize);
+}
 
 static string? Resolve(string relative)
 {

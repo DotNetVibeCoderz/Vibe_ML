@@ -360,6 +360,103 @@ satu-satunya bagian workbook yang bisa benar-benar besar. Rumus tidak dievaluasi
 menghasilkan nilai tersimpannya, yang memang itulah yang dicatat berkas dan hampir selalu yang
 diinginkan pemanggil.
 
+## Pertukaran Arrow
+
+`ArrowFile` membaca dan menulis format berkas Arrow IPC, sehingga sebuah frame bisa diserahkan ke
+pandas, Polars, atau Spark lalu diambil kembali.
+
+```csharp
+ArrowFile.Write(frame, "data.arrow");
+var back = ArrowFile.Read("data.arrow");
+```
+
+```python
+import pyarrow as pa, pyarrow.ipc as ipc
+
+with pa.memory_map("data.arrow", "r") as source:
+    table = ipc.open_file(source).read_all()
+```
+
+Diverifikasi dua arah terhadap pyarrow — setiap lebar dan tanda bilangan bulat, keempat satuan
+timestamp, nilai kosong, pembedaan string-kosong-versus-null, teks multi-byte, dan perjalanan
+bolak-balik lewat pandas. Jalankan `python tools/verify/arrow_interop.py` setelah setiap perubahan.
+
+Arrow adalah **tata letak memori** sebelum ia menjadi format berkas, dan itulah intinya: satu kolom
+adalah bitmap validitas ditambah buffer nilai, kontigu dan tanpa penanda tipe, sehingga pembaca bisa
+menunjuk padanya alih-alih mengurainya. Tiga konsekuensi yang perlu diketahui:
+
+- **Validitas berupa bitmap, bukan nilai sentinel.** Satu bit per nilai, 1 berarti ada. `NaN` pada
+  `NumericSeries` berarti hilang, jadi ia menjadi bit yang dikosongkan dan isi numerik slot itu tidak
+  relevan.
+- **String berupa offset ditambah satu blob.** Buffer offset `int32` berisi `n + 1` entri dan satu
+  buffer data. Panjang baris `i` adalah `offsets[i+1] - offsets[i]`; tidak ada panjang per nilai.
+- **Setiap buffer dipadatkan ke kelipatan 8 byte.** Salah di sini menghasilkan berkas yang diterima
+  pembaca ini dan ditolak pyarrow.
+
+Metadatanya FlatBuffers, bukan Protobuf, sehingga `Io/FlatBuffers.cs` adalah enkoder dan dekoder
+kecil yang ditulis untuk itu. Pelajaran yang paling mahal: **tabel FlatBuffers harus dimulai pada
+kelipatan 4 byte**, karena ia diawali soffset `int32`. Tabel yang bidang terakhirnya `short` akan
+berakhir meleset dua byte — semua offset tetap teratasi, pembacaan manual tetap berhasil, dan
+verifier Arrow menolak berkasnya tanpa mengatakan apa pun tentang sebabnya.
+
+**Cakupan**, dinyatakan alih-alih disiratkan: satu record batch per berkas, tanpa array
+dictionary-encoded di jalur transmisi, tanpa kompresi, tanpa tipe bersarang. `CategoricalSeries`
+ditulis sebagai string yang telah diekspansi, karena dictionary batch adalah tipe pesan tersendiri
+yang pembukuannya mudah salah dengan cara yang termuat sebagai nilai keliru secara diam-diam.
+Pembacaannya juga bukan zero-copy — buffer didekode menjadi array `Series`, bukan ditunjuk.
+
+## Frame di luar memori
+
+`DataFrame` menyimpan setiap kolom sebagai array, sehingga sebuah frame dibatasi RAM. `ChunkedFrame`
+mengangkat batas itu dengan tidak pernah memateri‑alisasi lebih dari satu bongkah.
+
+```csharp
+var chunked = ChunkedFrame.FromCsv("huge.csv", chunkRows: 100_000);
+
+Streaming.CountRows(chunked);
+Streaming.Describe(chunked, ["amount"]);
+Streaming.GroupBy(chunked, ["region"], ("amount", "sum"), ("amount", "mean"));
+Streaming.FilterToFile(chunked, (chunk, row) => chunk.Numeric("amount")[row] > 100, "big.csv");
+Streaming.SortToFile(chunked, "amount", "sorted.csv");
+```
+
+Ini **bukan mesin kueri malas**: tanpa pengoptimasi, tanpa predicate pushdown, tanpa rencana
+eksekusi. Frame terbongkah adalah `IEnumerable<DataFrame>` dan operasinya adalah lintasan tunggal
+yang ditulis tangan. Itu menjaga model biayanya tetap jelas, yang di sini lebih penting daripada
+kepintaran — alasan memakainya adalah karena datanya tidak muat, dan materialisasi tak terduga
+meniadakan seluruh tujuannya.
+
+Tiga hal yang perlu diketahui sebelum memakainya:
+
+**Tipe kolom disimpulkan sekali dari sampel lalu dipatok untuk setiap bongkah.** Menyimpulkan per
+bongkah lebih sederhana dan merupakan jebakan: kolom yang terbaca numerik di awal dan berubah
+tekstual kemudian akan kembali dengan tipe berbeda di bongkah berbeda, sehingga kueri yang sama
+memberi jawaban berbeda pada ukuran bongkah berbeda. Ukuran bongkah adalah tombol memori, bukan
+bagian dari pertanyaan. Berikan `ColumnTypes` eksplisit bila skemanya diketahui.
+
+**Memori `GroupBy` sebanding dengan jumlah grup berbeda, bukan dengan ukuran masukan.**
+Mengelompokkan semiliar baris menurut negara itu sepele; menurut id pengguna tidak, karena tabel
+akumulatornya lalu menyimpan semiliar entri. `Streaming.CountGroups` ada supaya batas itu bisa
+diperiksa sebelum kuerinya dijalankan.
+
+**Median ditolak, bukan disediakan.** Ia memerlukan nilainya, sehingga versi mengalirnya akan
+menyimpan semuanya dan hanya tampak seperti mengalir. Sum, mean, min, max, dan count semuanya dapat
+dihitung dari akumulator berukuran tetap; varians memakai metode Welford, karena rumus buku
+`E[x²] − E[x]²` mengurangkan dua bilangan besar yang nyaris sama dan bisa mengembalikan varians
+negatif.
+
+`SortToFile` adalah pengurutan gabung eksternal dua fase klasik: urutkan tiap bongkah menjadi satu
+*run*, lalu gabungkan dengan berulang kali mengambil kepala terkecil, sehingga penggabungannya
+menyimpan satu baris per run, bukan satu per baris. Ia memerlukan ruang diska kira-kira sebesar
+masukannya dan melakukan dua lintasan penuh, jadi jauh lebih lambat daripada pengurutan dalam memori
+dan tidak seharusnya dipakai ketika datanya muat. Nilai hilang diurutkan paling akhir pada kedua
+arah — hilang itu tidak ada, bukan ekstrem.
+
+Satu sisi tajam: keluarannya CSV, sehingga frame **berkolom tunggal** yang nilainya hilang akan
+menulis baris kosong, dan pembaca CSV tidak dapat membedakannya dari padding. Barisnya ada di berkas
+dan terurut benar; perjalanan bolak-baliknya yang kehilangan mereka. Dengan dua kolom atau lebih,
+barisnya membawa pembatas dan selamat.
+
 ---
 
 ## Visualisasi
@@ -368,6 +465,12 @@ Dihasilkan oleh `samples/GraviFrame.Console`; `notebooks/GraviFrame.Notebook.ipy
 grafik volatilitas bergulir yang dibangun dengan fungsi window v0.4.
 
 ![Deret harga dengan rata-rata bergulir di atasnya](../screenshots/graviframe_trend.png)
+
+![Rata-rata tarif dan tingkat keselamatan per kelas dan jenis kelamin, diagregasi per 64 baris](../screenshots/graviframe_streaming.png)
+
+Grafik kedua adalah jalur luar-memori v0.5: setiap angka di dalamnya dihitung oleh
+`Streaming.GroupBy` 64 baris sekali jalan, dan hasilnya sesuai dengan `GroupBy` dalam memori sampai
+1,6e-14. Ukuran potongan adalah tombol memori, bukan parameter dari jawabannya.
 
 ---
 

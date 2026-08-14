@@ -225,7 +225,7 @@ anything is written.
 **Still open**: the reader remains a weight reader, not a runtime — it cannot execute an arbitrary
 ONNX graph. The `IDataView` adapters for ML.NET are untouched.
 
-### Arrow — deferred to v0.5
+### Arrow — done in v0.5
 Zero-copy interchange with pandas, Polars and Spark via the Arrow memory format. `DataFrame` is
 already columnar, so this is mostly a matter of matching buffer layouts.
 
@@ -233,7 +233,7 @@ already columnar, so this is mostly a matter of matching buffer layouts.
 
 ## v0.3 — Scale
 
-### Out-of-core dataframes — deferred to v0.5
+### Out-of-core dataframes — done in v0.5
 `MemoryMappedArray` handles arrays larger than RAM; `DataFrame` does not yet. The plan is chunked
 columns with a streaming group-by and sort, so a frame can exceed memory the way the array already
 can.
@@ -329,7 +329,7 @@ produce pretrained weights — see *Non-goals*. A model trained here learns from
 given, and for a small labelled set TF-IDF plus a linear model remains the better baseline. What
 changed is that the architecture is trainable at all.
 
-### Distributed training — deferred to v0.5
+### Distributed training — done in v0.5 (forests; GNNs still open)
 Data-parallel training across processes for the tree ensembles and GNNs, which are the two places
 where a single machine runs out first.
 
@@ -486,62 +486,222 @@ v0.4 finished the breadth work, and three items from earlier milestones are stil
 carried here rather than left orphaned in a version that is otherwise complete, because each one is
 a real piece of work and none of them was dropped for a reason.
 
-### Migrating the six libraries onto `NdArray<T>`
+### Migrating the six libraries onto `NdArray<T>` — not started, and the estimate was wrong
 
-The generic core is built and measured: genericising the `double` path costs **0.91–1.04×**, which
-is inside noise. That was the gamble, and it did not cost anything, so migrating is now a scheduling
-decision rather than a risk.
+This was described as "a scheduling decision rather than a risk". Measuring it says otherwise, and
+the correction matters more than the original claim did.
 
-What it buys is a single-precision path for the whole stack rather than for two hand-written
-kernels. What it costs is a public API change across six libraries, which is why it waits for a
-minor version and gets release notes.
+**Surface coverage is 22%, not near-complete.** Across `NdArray`, `LinAlg`, `Decomposition`,
+`Statistics` and `UFunc` the `double` path exposes 153 public members; `NdArray<T>` and `UFunc<T>`
+expose 35, of which 33 overlap. Missing from the generic side: every decomposition, every statistic,
+broadcasting, concatenation, slicing helpers, and even the arithmetic operators — `NdArray<T>` has
+no `operator +`. So the migration is not "change the type parameter"; it is reimplementing most of
+GraviNum generically first.
+
+**The performance claim was measured on the wrong sample.** Re-measured, interleaved in one process,
+best-of-25 after a 50-call warm-up:
+
+| operation | n | double | generic | ratio |
+|---|---:|---:|---:|---|
+| `Add` | 100k | 0.244 ms | 0.211 ms | **0.86×** |
+| `Add` | 1M | 2.019 ms | 2.034 ms | **1.01×** |
+| `Exp` | 100k | 0.361 ms | 0.436 ms | **1.21×** |
+| `Exp` | 1M | 1.906 ms | 2.232 ms | **1.17×** |
+
+Simple element-wise work is free, sometimes faster. **Transcendentals are consistently 17–21%
+slower** — `T.Exp` goes through the generic math interface and does not inline the way `Math.Exp`
+does. The original "0.91–1.04×, inside noise" came from the arithmetic kernels alone; it is not a
+statement about the whole surface, and `Exp`/`Log` are hot in exactly the places that matter
+(softmax, logistic loss, every likelihood in GraviProb).
+
+**Scale.** 1,846 `NdArray` references across the six libraries — GraviLearn 624, GraviProb 223,
+GraviGraph 164, GraviText 115, GraviFrame 19, and 701 inside GraviNum itself.
+
+So the honest ordering is: grow `NdArray<T>` to parity with the `double` path first, decide what to
+do about the transcendental gap, and only then migrate callers. Attempting the migration against a
+22% surface would mean writing both paths at once, and the half-migrated state would be worse than
+either end of it. This is not deferred for lack of time; it is deferred because the preceding work
+has not been done.
 
 `Single.SingleKernels` stays regardless — it is the hand-written baseline the generic version was
 measured against, and deleting the comparand would make the next measurement meaningless.
 
-### Arrow interchange — carried from v0.2
+### Arrow interchange — ✅ done
 
-Zero-copy exchange with pandas, Polars and Spark. `DataFrame` is already columnar and
-`CategoricalSeries` now matches Arrow's dictionary-encoded layout, so the remaining work is buffer
-layout and the schema metadata rather than a restructure.
+`ArrowFile.Read`/`Write` handle the Arrow IPC file format, verified **in both directions against
+pyarrow**: 21 checks in `tools/verify/arrow_interop.py` covering every integer width and sign, all
+four timestamp units, null handling, the empty-string-versus-null distinction, multi-byte text, and
+a round trip through pandas.
 
-The honest reason this has not happened yet is that it is only worth doing properly. A converter
-that copies every buffer is not interchange, it is an import path with extra steps, and the whole
-argument for Arrow is that the copy does not happen.
+Arrow's metadata is FlatBuffers rather than Protobuf, so none of the ONNX writer's machinery
+transferred and `Io/FlatBuffers.cs` is a small encoder and decoder written for it. Three things cost
+real time and are now documented where they bite:
 
-### Out-of-core dataframes — carried from v0.3
+- **A FlatBuffers table must start 4-byte aligned**, because it begins with an `int32` soffset. A
+  table whose last field was a `short` finishes two bytes out. Every offset still resolves, every
+  structural decode by hand still succeeds, and Arrow's verifier rejects the file with nothing to
+  say about why. This was the expensive one.
+- **`Finish` aligns the whole buffer to the largest element written**, not to 4. Missing that
+  leaves an 8-byte-struct buffer 4-aligned.
+- **An empty vector is not an absent one.** Arrow's C++ reader walks `field->children()` without a
+  null check, so a `Field` that omits the vector fails verification.
 
-`MemoryMappedArray` handles arrays larger than RAM; `DataFrame` does not. The plan is chunked
-columns with a streaming group-by and sort.
+Not done, and stated rather than implied: one record batch per file, no dictionary-encoded arrays on
+the wire, no compression, no nested types. A `CategoricalSeries` is written as its expanded strings
+— dictionary batches are a separate message type whose bookkeeping is easy to get wrong in a way
+that loads with silently wrong values.
 
-The v0.4 window functions and as-of join are both single-pass over sorted input and are natural
-candidates to stream. The categorical column type helps here too: a chunked frame wants its
-dictionary held once for the whole column rather than per chunk.
+The reads are also not zero-copy: buffers are decoded into `Series` arrays rather than pointed at.
+Genuine zero-copy needs `NdArray` to be constructible over borrowed memory, which is the
+`NdArray<T>` migration below.
 
-### Distributed training — carried from v0.3
+### Out-of-core dataframes — ✅ done
 
-Data-parallel training across processes for the tree ensembles and the GNNs, which are the two
-places a single machine runs out first. The v0.4 neighbourhood sampler is the piece that makes
-distributed GNN training coherent — it already produces bounded, independent per-batch computation
-graphs, which is exactly the unit a worker process needs.
+`ChunkedFrame` reads a source in bounded pieces; `Streaming` provides the single-pass operations
+over it — `GroupBy`, `Describe`, `Filter`, `FilterToFile` and `SortToFile`. Each is pinned against
+the in-memory implementation on data small enough for both, because a streaming aggregate that
+disagrees with `GroupedDataFrame` is wrong whatever it does on data only one of them can handle.
 
-### Pretrained weights
+What this is **not** is a lazy query engine: no optimiser, no predicate pushdown, no plan. A chunked
+frame is an `IEnumerable<DataFrame>` and the operations are hand-written passes. That keeps the cost
+model obvious, which matters more here than cleverness — the reason to reach for this is that the
+data does not fit, and a surprise materialisation defeats the whole point.
 
-The oldest un-met promise in the project, and stated as a non-claim since v0.1: `TransformerModel`
-runs a correct forward pass over randomly initialised weights, so its output is structurally right
-and semantically meaningless. `Io.OnnxReader` can now import weights, so the remaining work is a
-loader that maps a published checkpoint's tensor names onto the model's parameters, plus the
-matching tokenizer vocabulary.
+Three decisions worth recording:
 
-`BpeTokenizer.Load` and `UnigramTokenizer.Load` were built with this in mind — they read the
-formats a published tokenizer actually ships in.
+- **Column types are inferred once from a sample and pinned for every chunk.** Inferring per chunk
+  is simpler and is a trap: a column that parses as numeric early and turns textual later comes back
+  with different types in different chunks, so the same query gives different answers at different
+  chunk sizes. The chunk size is a memory knob, not part of the question.
+- **`GroupBy`'s memory is proportional to the number of distinct groups, not the input.** That is
+  the whole trick and the whole limitation. `CountGroups` exists so the ceiling can be checked
+  before the query is run.
+- **Median is refused rather than offered.** It needs the values, so a streaming version would keep
+  them all and only look like it was streaming.
 
-### Sparse and quantised paths
+`SortToFile` is the classic two-phase external merge sort — sort each chunk into a run, then merge
+by repeatedly taking the smallest head, so the merge holds one row per run. It needs disk roughly
+equal to the input and makes two full passes, so it should not be reached for when the data fits.
 
-`SparseMatrix` exists in CSR with SpMV and SpMM but nothing above `GraviNum` uses it. A GCN on a
-large graph spends most of its time in a dense product against an adjacency matrix that is almost
-entirely zero, which is the clearest place to start. Quantisation is speculative until there is a
-pretrained model to quantise.
+### Distributed training — ✅ the coordination layer is done
+
+`GraviLearn.Distributed` provides the parts that are the same whatever is being trained:
+`DataParallel.Partition`, `DataParallel.AverageGradients`, a `ParameterServer` for synchronous
+rounds, and two transports behind one interface.
+
+**`DistributedForest` is bit-identical to single-process training.** Not "equivalent" —
+identical. `RandomForestClassifier` seeds tree `t` from `seed + t * 7919`, a function of the global
+index alone, so a worker handed trees 40–79 grows exactly the trees a single process would have
+grown at those positions. Tested across 1, 2, 3, 5, 8 and 24 workers, comparing predicted
+*probabilities* rather than labels, because equal labels could survive a small difference and equal
+probabilities could not.
+
+**`FileTransport` genuinely crosses a process boundary**, verified by spawning real worker
+processes rather than threads — `tools/verify/DistributedInterop`. With 2, 4 and 7 workers (the
+last giving deliberately uneven shards of 143×6 + 142), the aggregate matches the single-process
+answer to ~1e-17, which is the few ulps that regrouping the additions costs. The in-process tests
+could never have established this: threads share a heap, so a non-atomic handoff would still look
+correct.
+
+Two decisions that are correctness conditions rather than polish, both pinned by tests:
+
+- **Gradients are weighted by sample count, not averaged plainly.** A plain average of per-worker
+  means equals the global mean only when every shard is the same size, and `Partition` produces
+  uneven shards whenever the count does not divide. Unweighted, the small shards are silently
+  over-weighted and the model trains to something slightly wrong that no shape or convergence check
+  would catch.
+- **Results are collected in worker order, not arrival order.** Floating-point addition is not
+  associative, so summing as results arrive makes the answer depend on scheduling and two runs of
+  the same job differ in the last bits.
+
+The transport is deliberately the least clever thing that works: a worker writes its payload and
+renames it into place, the collector polls for finished names. No broker, no ports, no protocol —
+and it runs across machines sharing a filesystem. The rename is what makes it safe, since writing
+directly to the final name lets a collector read a half-written file.
+
+**Not done: distributed GNN training.** The pieces are in place — the v0.4 neighbourhood sampler
+produces bounded independent per-batch computation graphs, which is exactly a worker's unit of work,
+and `ParameterServer` averages what comes back. What is missing is the loop that drives them, and
+adding it without a multi-machine setup to test against would be writing code that has never run in
+the configuration it exists for.
+
+### Pretrained weights — ✅ the loader is done
+
+`TransformerCheckpoint.Load` fills **every** parameter from an ONNX checkpoint: embeddings, the
+embedding layer norm, and per layer the four attention projections, both feed-forward layers and
+both layer norms.
+
+This closes a gap that was worse than it looked. `LoadOnnxWeights` already existed and loaded the
+embedding *tables* — enough to look up a word vector, and not enough to run the model. Every
+attention and feed-forward weight stayed randomly initialised, so a model that reported
+`HasPretrainedWeights == true` still produced noise shaped like a sentence.
+
+**Verified against an independent NumPy implementation of the same encoder**, agreeing to
+**2.6e-07** — float32 precision, which is what float32 initializers widened to float64 should give.
+That checks the whole stack at once: embeddings, both layer norms, all four projections, the
+residuals, GELU and the attention softmax. A load that is *nearly* right agrees on nothing.
+See `tools/verify/checkpoint_interop.py`.
+
+Three things the design has to refuse rather than absorb, each pinned by a test:
+
+- **A wrong transpose.** PyTorch's `nn.Linear` stores (out, in) and `DenseLayer` stores (in, out).
+  A BERT attention projection is 768×768 — square, so both readings are consistent and the mistake
+  loads silently. The feed-forward weight is 768×3072 and is not, so that is what the orientation
+  is checked against before anything is written.
+- **A partial checkpoint.** Strict mode throws; lenient mode loads and reports exactly what is
+  missing. Either way `HasPretrainedWeights` stays false, because a model with three of twelve
+  layers loaded produces output that is neither the checkpoint's nor a random model's, and nothing
+  downstream could tell.
+- **A mismatched architecture.** Shapes are checked rather than trusted.
+
+Naming is data, not inference: `CheckpointNames` carries the templates, with `HuggingFaceBert`,
+`Unprefixed` and `Reprefixed` covering the common conventions, and `Inspect` lists what a file
+actually holds.
+
+What remains is not code: **no weights are shipped**. Licensing and size keep a real checkpoint out
+of the repository, so the loader is verified against a synthetic one and a user brings their own
+export. The tokenizer half is already in place — `BpeTokenizer.Load` and `UnigramTokenizer.Load`
+read the formats published tokenizers ship in.
+
+### Sparse paths — ✅ done, and the premise was half wrong
+
+The claim here was that "nothing above `GraviNum` uses `SparseMatrix`". That was wrong, and I wrote
+it: `GraviGraph`, `GraviText` and the autodiff tape all used it already, and the GCN had been
+propagating through sparse SpMM since v0.3. Measured on Cora at 64 features:
+
+| | time | vs dense |
+|---|---:|---|
+| sparse SpMM | 0.30 ms | **93.6×** |
+| dense GEMM | 28.15 ms | — |
+
+Identical to 1e-10. So the graph side needed nothing.
+
+The real gap was one layer up: **no `GraviLearn` model could train on a sparse matrix**, and
+`TfidfVectorizer` had no sparse output at all — only `CountVectorizer` did. That is the memory wall
+for text, because a realistic vocabulary densifies into something that does not fit.
+
+`SparseLogisticRegression` now trains directly on CSR, and `TfidfVectorizer.TransformSparse` feeds
+it. On 4,000 documents over an 8,000-word vocabulary at 0.37% density:
+
+| | value |
+|---|---|
+| matrix, dense | 244.1 MB |
+| matrix, CSR | 1.4 MB (**176×**) |
+| fit, dense | 12,802 ms |
+| fit, sparse | 67 ms (**191×**) |
+| accuracy | 99.52% either way |
+| largest coefficient difference | 6.9e-18 |
+
+The same model, not an approximation — which is the claim worth making, because a sparse optimiser
+that reached a *different* answer would be a different algorithm rather than a faster one.
+
+Two things the implementation had to get right and which are pinned by tests. The L2 penalty is
+applied to the accumulated gradient rather than by decaying every weight each step: decaying is
+`O(features)` per update and puts the dense cost straight back in. And the weight vector stays
+dense, so this bounds the **feature count**, not the document count — 30,000 doubles is nothing,
+but it is worth knowing which axis is free.
+
+Quantisation stays speculative until there is a pretrained model to quantise.
 
 ---
 

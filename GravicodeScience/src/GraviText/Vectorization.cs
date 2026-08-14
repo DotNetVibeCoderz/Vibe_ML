@@ -208,8 +208,59 @@ public sealed class TfidfVectorizer(VectorizerOptions? options = null, bool subl
         return result;
     }
 
+    /// <summary>
+    /// Encodes documents as a sparse TF-IDF matrix.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same numbers as <see cref="Transform"/>, in CSR. For text this is not a micro-optimisation:
+    /// a 30,000-word vocabulary is around 0.1% non-zero, so the dense form spends a thousand times
+    /// the memory storing zeros. It is what makes a realistic vocabulary trainable at all — see
+    /// <c>SparseLogisticRegression</c>, which consumes this directly.
+    /// </para>
+    /// <para>
+    /// Normalisation is computed over the row's non-zeros, which is the same value the dense path
+    /// gets: the zeros contribute nothing to a Euclidean norm.
+    /// </para>
+    /// </remarks>
+    public SparseMatrix TransformSparse(IReadOnlyList<string> documents)
+    {
+        var counts = _counts.TransformSparse(documents);
+        var triplets = new List<(int Row, int Column, double Value)>(counts.NonZeroCount);
+
+        for (var i = 0; i < counts.Rows; i++)
+        {
+            var row = new List<(int Column, double Value)>();
+
+            foreach (var (column, tf) in counts.Row(i))
+            {
+                if (tf == 0) continue;
+                // Sublinear scaling stops a term repeated 100 times counting 100x a single mention.
+                row.Add((column, (sublinearTf ? 1.0 + Math.Log(tf) : tf) * _idf[column]));
+            }
+
+            if (normalize)
+            {
+                var norm = Math.Sqrt(row.Sum(e => e.Value * e.Value));
+                if (norm >= 1e-12)
+                    for (var k = 0; k < row.Count; k++) row[k] = (row[k].Column, row[k].Value / norm);
+            }
+
+            foreach (var (column, value) in row) triplets.Add((i, column, value));
+        }
+
+        return SparseMatrix.FromTriplets(documents.Count, _counts.FeatureCount, triplets);
+    }
+
     /// <summary>Fits and transforms in one call.</summary>
     public NdArray FitTransform(IReadOnlyList<string> documents) { Fit(documents); return Transform(documents); }
+
+    /// <summary>Fits and transforms to a sparse matrix in one call.</summary>
+    public SparseMatrix FitTransformSparse(IReadOnlyList<string> documents)
+    {
+        Fit(documents);
+        return TransformSparse(documents);
+    }
 
     /// <summary>The highest-weighted terms of one encoded document.</summary>
     public IReadOnlyList<(string Term, double Weight)> TopTerms(NdArray matrix, int row, int count = 10)

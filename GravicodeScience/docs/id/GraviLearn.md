@@ -451,11 +451,114 @@ Biayanya O(n²) dalam memori dan waktu — matriks jarak berpasangan dimateriali
 memakai space tree, yang mulai menguntungkan di atas beberapa ribu titik dan berhenti membantu di
 dimensi tinggi.
 
+## Pelatihan jarang
+
+`SparseLogisticRegression` berlatih langsung pada matriks CSR, tanpa memadatkannya.
+
+```csharp
+var vectoriser = new TfidfVectorizer(new VectorizerOptions { MaxFeatures = 30_000 });
+var x = vectoriser.FitTransformSparse(documents);
+
+var model = new SparseLogisticRegression(learningRate: 1.0, maxIterations: 200).Fit(x, y);
+
+model.Score(x, y);
+model.TopFeatures(20);        // koefisien terbaca langsung sebagai "kata ini menggeser keputusan sejauh ini"
+```
+
+Alasan keberadaannya adalah dinding memori, bukan kecepatan. Matriks bag-of-words atas kosakata
+30.000 kata sekitar 0,1% tak-nol; setelah dipadatkan, 50.000 dokumen menjadi sekitar 12 GB
+bilangan `double`, hampir seluruhnya nol yang biayanya sama untuk disimpan dan dikalikan seperti
+angka lain.
+
+Diukur pada 4.000 dokumen atas kosakata 8.000 kata dengan kerapatan 0,37%:
+
+| | nilai |
+|---|---|
+| matriks, padat | 244,1 MB |
+| matriks, CSR | 1,4 MB (**176×**) |
+| pencocokan, padat | 12.802 ms |
+| pencocokan, jarang | 67 ms (**191×**) |
+| akurasi | 99,52% pada keduanya |
+| selisih koefisien terbesar | 6,9e-18 |
+
+**Model yang sama, bukan hampiran.** Itulah klaim yang layak dibuat: pengoptimasi jarang yang
+mencapai jawaban berbeda akan menjadi algoritma yang berbeda, bukan yang lebih cepat — sehingga
+pengujiannya membandingkan vektor koefisien, bukan akurasi, yang akan cocok bahkan bila bobotnya
+sudah melenceng.
+
+Dua detail implementasi yang merupakan syarat kebenaran:
+
+- **Penalti L2 diterapkan pada gradien terakumulasi**, bukan dengan meluruhkan setiap bobot pada
+  tiap langkah. Peluruhan adalah yang dilakukan implementasi padat dan berbiaya `O(fitur)` per
+  pembaruan, yang akan mengembalikan biaya padat itu secara utuh.
+- **Vektor bobot tetap padat**, sehingga ini membatasi *jumlah fitur*, bukan jumlah dokumen. 30.000
+  bilangan `double` bukan apa-apa, tetapi ada baiknya tahu sumbu mana yang bebas.
+
+Satu perilaku yang tampak seperti bug dan bukan: pada data yang **terpisahkan**, pencocokan tanpa
+penalti tidak pernah konvergen. Maksimum likelihood-nya berada di tak-hingga — bobotnya selalu bisa
+tumbuh sedikit lagi dan memangkas sedikit lagi dari loss-nya — sehingga uji toleransi tidak pernah
+terpicu dan pencocokannya berjalan sampai batas iterasi. Suku L2 membuat fungsi tujuannya konveks
+tegas dengan optimum berhingga, dan ia konvergen.
+
+Sisi grafnya sudah jarang sejak awal. `Graph.ToSparseAdjacency` memberi masukan ke
+`GnnMath.Propagate`, dan pada Cora dengan 64 fitur itu 0,30 ms melawan 28,15 ms padat — **93,6×**,
+identik sampai 1e-10.
+
+## Pelatihan terdistribusi
+
+`GraviLearn.Distributed` menyediakan bagian-bagian yang sama apa pun yang sedang dilatih.
+
+```csharp
+var forest = new DistributedForest(nTrees: 500, maxDepth: 12, seed: 42).Fit(x, y, workers: 8);
+
+// Atau potongannya, untuk loop buatan sendiri:
+var shards = DataParallel.Partition(items: 1000, workers: 8);
+var mean = DataParallel.AverageGradients(perWorkerGradients, sampleCounts);
+
+using var transport = new FileTransport("/shared/exchange", workerCount: 8);
+var server = new ParameterServer(transport);
+server.Contribute(worker, gradient, sampleCount);
+var averaged = server.Aggregate();
+```
+
+**`DistributedForest` identik bit demi bit dengan pelatihan proses tunggal.** Bukan setara —
+identik. Setiap pohon dalam random forest saling bebas, dan pohon `t` dibenihi dari
+`seed + t * 7919`, sebuah fungsi dari indeks globalnya saja. Jadi worker yang diberi pohon 40–79
+menumbuhkan persis pohon yang akan ditumbuhkan satu proses pada posisi itu, dan batas shard tidak
+dapat mengubah jawaban.
+
+Ia membagi **komputasinya**, bukan memorinya: setiap worker mencocokkan pada seluruh data latih. Itu
+arah yang benar untuk forest, di mana pohon-pohonnya adalah bagian yang mahal dan datanya biasanya
+muat.
+
+`FileTransport` sungguh-sungguh melintasi batas proses — diverifikasi dengan memunculkan proses
+worker sungguhan, bukan thread (`tools/verify/DistributedInterop`). Ia sengaja dibuat sesederhana
+mungkin: worker menulis payload-nya lalu mengganti namanya ke tempatnya, pengumpul memeriksa
+nama-nama yang sudah jadi. Tanpa broker, tanpa port, tanpa protokol, dan ia berjalan lintas mesin
+yang berbagi sistem berkas. Penggantian nama itulah yang membuatnya aman, karena menulis langsung ke
+nama akhirnya membiarkan pengumpul membaca berkas yang tertulis separuh.
+
+Dua hal yang merupakan syarat kebenaran, bukan pemolesan:
+
+- **Gradien ditimbang menurut jumlah sampel, bukan dirata-ratakan begitu saja.** Rata-rata biasa
+  dari rerata per worker sama dengan rerata global hanya bila setiap shard berukuran sama, dan
+  `Partition` menghasilkan shard tak rata setiap kali jumlahnya tidak habis dibagi. Tanpa
+  pembobotan, shard kecil diam-diam terlalu diberi bobot dan model berlatih ke sesuatu yang sedikit
+  keliru, yang tidak akan tertangkap pemeriksaan bentuk maupun konvergensi.
+- **Hasil dikumpulkan menurut urutan worker, bukan urutan kedatangan.** Penjumlahan titik-mengambang
+  tidak asosiatif, sehingga menjumlahkan sesuai kedatangan membuat jawabannya bergantung pada
+  penjadwalan, dan dua kali jalan pekerjaan yang sama berbeda pada bit-bit terakhirnya.
+
+**Belum diimplementasikan: pelatihan GNN terdistribusi.** Potongannya sudah ada — pengambil sampel
+ketetanggaan menghasilkan graf komputasi per batch yang terbatas dan saling bebas, yang persis
+merupakan satuan kerja sebuah worker, dan `ParameterServer` merata-ratakan apa yang kembali — tetapi
+loop yang menggerakkannya belum ditulis.
+
 ---
 
 ## Visualisasi
 
-Ketiganya dihasilkan oleh `samples/GraviLearn.Console` dan direproduksi oleh
+Keempatnya dihasilkan oleh `samples/GraviLearn.Console` dan direproduksi oleh
 `notebooks/GraviLearn.Notebook.ipynb`.
 
 ![Matriks kebingungan](../screenshots/gravilearn_confusion.png)
@@ -470,6 +573,13 @@ dari itu — dan regresi isotonik menariknya ke garis tanpa menyentuh peringkatn
 
 Dua klaster rapat yang berdekatan dan satu klaster menyebar yang jauh. Tidak ada satu pun nilai
 `eps` DBSCAN yang memisahkan ketiganya; HDBSCAN sama sekali tidak memerlukan ambang.
+
+![Pelatihan jarang digambarkan sebagai faktor penyusutan dan faktor percepatan](../screenshots/gravilearn_sparse.png)
+
+Digambarkan sebagai rasio, bukan sebagai MB dan ms mentah, karena kedua besaran itu tidak berbagi
+satuan dan membentang tiga orde besaran: pada satu sumbu linear yang lebih kecil lenyap, dan pada
+sumbu logaritmik panjang sebuah batang berhenti bermakna. Keduanya adalah model yang sama —
+koefisiennya sesuai sampai 3,5e-18.
 
 ---
 

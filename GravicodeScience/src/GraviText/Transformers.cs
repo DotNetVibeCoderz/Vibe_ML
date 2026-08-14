@@ -413,6 +413,47 @@ public sealed class TransformerModel
     /// <summary>The attention weights of the last forward pass, per layer and head.</summary>
     public IReadOnlyList<NdArray[]> AttentionMaps => _layers.Select(l => l.Attention.LastAttention).ToList();
 
+    /// <summary>The encoder blocks, in order.</summary>
+    /// <remarks>
+    /// Exposed so a checkpoint loader can write into them — see <see cref="TransformerCheckpoint"/>.
+    /// The blocks are mutable by design: loading weights is exactly the act of replacing them.
+    /// </remarks>
+    public IReadOnlyList<TransformerEncoderLayer> Layers => _layers;
+
+    /// <summary>Replaces the token embedding table.</summary>
+    public void ReplaceTokenEmbeddings(NdArray embeddings)
+    {
+        ArgumentNullException.ThrowIfNull(embeddings);
+
+        if (embeddings.Rank != 2 || embeddings.Shape[1] != Config.HiddenSize)
+            throw new ArgumentException(
+                $"Token embeddings must be (vocabulary, {Config.HiddenSize}).", nameof(embeddings));
+
+        TokenEmbeddings = embeddings;
+    }
+
+    /// <summary>Replaces the position embedding table.</summary>
+    public void ReplacePositionEmbeddings(NdArray embeddings)
+    {
+        ArgumentNullException.ThrowIfNull(embeddings);
+
+        if (embeddings.Rank != 2 || embeddings.Shape[1] != Config.HiddenSize)
+            throw new ArgumentException(
+                $"Position embeddings must be (positions, {Config.HiddenSize}).", nameof(embeddings));
+
+        PositionEmbeddings = embeddings;
+    }
+
+    /// <summary>
+    /// Records that every parameter now came from a checkpoint.
+    /// </summary>
+    /// <remarks>
+    /// Only called when a load was complete. A partially loaded model is not pretrained in any
+    /// useful sense — its output is neither the checkpoint's nor a random model's — so the flag
+    /// stays false and <see cref="HasPretrainedWeights"/> keeps telling the truth.
+    /// </remarks>
+    public void MarkPretrained() => HasPretrainedWeights = true;
+
     /// <summary>
     /// Loads embedding weights from a JSON file produced by <see cref="SaveWeights"/> or an
     /// export script, and marks the model as pretrained.

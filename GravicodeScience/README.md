@@ -4,7 +4,7 @@ A data science and AI ecosystem for **.NET 10** — six libraries that mirror th
 each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
-[![tests](https://img.shields.io/badge/tests-962%20passing-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-1049%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
 | Library | Python analogue | Focus |
@@ -54,7 +54,7 @@ samples/      six console apps, each printing real results
 notebooks/    six .NET Interactive notebooks with charts
 benchmarks/   six BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        962 tests
+tests/        1,049 tests
 tools/        ScienceAppGen — an IDE that builds apps from a prompt
 docs/         English, with Bahasa Indonesia in docs/id/
 ```

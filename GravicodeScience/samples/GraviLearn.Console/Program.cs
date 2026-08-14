@@ -11,6 +11,7 @@ using Gravicode.Science.GraviNum;
 using Gravicode.Science.GraviLearn.Explain;
 using Gravicode.Science.GraviLearn.Resampling;
 using Gravicode.Science.GraviLearn.Anomaly;
+using Gravicode.Science.GraviLearn.Distributed;
 
 Console.WriteLine(GraviInfo.Banner("GraviLearn"));
 var screenshots = ResolveScreenshotDirectory();
@@ -193,7 +194,7 @@ plot.SavePng(confusionPath, 900, 750);
 Console.WriteLine($"  saved {confusionPath}");
 
 // ---------------------------------------------------------------- v0.4: explanations
-Section("10. Permutation importance and Shapley values");
+Section("11. Permutation importance and Shapley values");
 
 var irisData = Datasets.LoadIris();
 var explainSplit = Selection.Split(irisData.Features, irisData.Target, testSize: 0.3, seed: 42, stratify: true);
@@ -236,7 +237,7 @@ Console.WriteLine($"    contributions sum to the prediction: {attribution.Predic
 Console.WriteLine();
 
 // ---------------------------------------------------------------- v0.4: calibration
-Section("11. Calibration");
+Section("12. Calibration");
 
 // Well-ranked but badly scaled scores: the ordering is perfect, the numbers are not.
 var calibrationRng = new GraviRandom(41);
@@ -288,7 +289,7 @@ Console.WriteLine($"  saved {reliabilityPath}");
 Console.WriteLine();
 
 // ---------------------------------------------------------------- v0.4: imbalance
-Section("12. Imbalanced data");
+Section("13. Imbalanced data");
 
 var imbalanceRng = new GraviRandom(7);
 var skewedX = NdArray.Zeros(400, 2);
@@ -320,7 +321,7 @@ Console.WriteLine("  sides of the split and the score comes back optimistic.");
 Console.WriteLine();
 
 // ---------------------------------------------------------------- v0.4: anomaly
-Section("13. One-class SVM");
+Section("14. One-class SVM");
 
 var normalRng = new GraviRandom(11);
 var normal = NdArray.Zeros(300, 2);
@@ -346,7 +347,7 @@ Console.WriteLine("  zero the score saturates at -rho, so 'very far' and 'extrem
 Console.WriteLine();
 
 // ---------------------------------------------------------------- v0.4: HDBSCAN
-Section("14. HDBSCAN against a DBSCAN eps sweep");
+Section("15. HDBSCAN against a DBSCAN eps sweep");
 
 // Two tight clusters close together, one diffuse cluster far away: no single eps works.
 var densityRng = new GraviRandom(5);
@@ -399,6 +400,195 @@ clusterPlot.Title("GraviLearn - HDBSCAN on clusters of differing density");
 clusterPlot.ShowLegend();
 clusterPlot.SavePng(clusterPath, 800, 600);
 Console.WriteLine($"  saved {clusterPath}");
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.5: sparse training
+Section("16. Sparse training on a bag-of-words matrix");
+
+// A document/term matrix the shape a real one has: wide vocabulary, a handful of words per
+// document, and a label that depends on two marker terms.
+const int documents = 1500, vocabulary = 3000;
+var textRng = new GraviRandom(17);
+var triplets = new List<(int Row, int Column, double Value)>(documents * 30);
+var labels = NdArray.Zeros(documents);
+
+for (var d = 0; d < documents; d++)
+{
+    var positive = d % 2 == 0;
+    labels.SetAt(d, positive ? 1 : 0);
+
+    for (var w = 0; w < 30; w++)
+        triplets.Add((d, (int)(textRng.NextDouble() * vocabulary), 1.0));
+
+    // The two marker terms: term 0 for the positive class, term 1 for the negative.
+    triplets.Add((d, positive ? 0 : 1, 3.0));
+}
+
+var sparseX = SparseMatrix.FromTriplets(documents, vocabulary, triplets);
+var density = 100.0 * sparseX.NonZeroCount / ((double)documents * vocabulary);
+
+Console.WriteLine($"  {documents} documents x {vocabulary} terms, {sparseX.NonZeroCount} non-zeros ({density:F2}% dense)");
+Console.WriteLine($"    dense storage : {documents * (long)vocabulary * 8 / (1024.0 * 1024.0),8:F1} MB");
+Console.WriteLine($"    CSR storage   : {(sparseX.NonZeroCount * 12L + documents * 4L) / (1024.0 * 1024.0),8:F1} MB");
+Console.WriteLine("  The memory wall is why this exists. The speed is a consequence, not the point.");
+Console.WriteLine();
+
+var sparseWatch = Stopwatch.StartNew();
+var sparseModel = new SparseLogisticRegression(learningRate: 1.0, maxIterations: 200).Fit(sparseX, labels);
+sparseWatch.Stop();
+
+var denseX = sparseX.ToDense();
+var denseModel = new LogisticRegression(learningRate: 1.0, maxIterations: 200);
+var denseWatch = Stopwatch.StartNew();
+denseModel.Fit(denseX, labels);
+denseWatch.Stop();
+
+Console.WriteLine($"  sparse fit : {sparseWatch.Elapsed.TotalMilliseconds,9:F0} ms, accuracy {sparseModel.Score(sparseX, labels):P2}");
+Console.WriteLine($"  dense fit  : {denseWatch.Elapsed.TotalMilliseconds,9:F0} ms, accuracy {denseModel.Score(denseX, labels):P2}");
+Console.WriteLine($"  speed-up   : {denseWatch.Elapsed.TotalMilliseconds / sparseWatch.Elapsed.TotalMilliseconds,9:F0}x");
+
+var sparseCoefficients = sparseModel.Coefficients;
+var denseCoefficients = denseModel.Coefficients;
+var coefficientGap = 0.0;
+for (var j = 0; j < vocabulary; j++)
+    coefficientGap = Math.Max(coefficientGap, Math.Abs(sparseCoefficients[0, j] - denseCoefficients.At(j)));
+
+Console.WriteLine($"  largest coefficient difference: {coefficientGap:E2}");
+Console.WriteLine("  Coefficients, not accuracy - accuracy would agree even if the weights had drifted,");
+Console.WriteLine("  and 'the same model, faster' is the only claim worth making here.");
+Console.WriteLine();
+
+Console.WriteLine("  The terms it leans on hardest - a coefficient reads directly as 'this word moves");
+Console.WriteLine("  the decision this far', which no tree ensemble or transformer offers:");
+foreach (var (feature, weight) in sparseModel.TopFeatures(3))
+    Console.WriteLine($"    term {feature,5}  weight {weight,8:F4}");
+Console.WriteLine($"    term {1,5}  weight {sparseCoefficients[0, 1],8:F4}   <- the negative marker, " +
+                  "which TopFeatures sorts to the other end");
+Console.WriteLine();
+
+var sparseChartPath = Path.Combine(screenshots, "gravilearn_sparse.png");
+
+var denseMb = documents * (long)vocabulary * 8 / (1024.0 * 1024.0);
+var sparseMb = (sparseX.NonZeroCount * 12L + documents * 4L) / (1024.0 * 1024.0);
+var shrink = denseMb / sparseMb;
+var speedUp = denseWatch.Elapsed.TotalMilliseconds / sparseWatch.Elapsed.TotalMilliseconds;
+
+// Plotted as ratios rather than as raw MB and ms. Those two quantities span three orders of
+// magnitude and share no unit, so on one linear axis the smaller vanishes and on a log axis a
+// bar's length stops meaning anything. A ratio is one unit and reads honestly on a plain axis.
+var sparsePlot = new ScottPlot.Plot();
+var ratioBars = sparsePlot.Add.Bars(new[] { 0.0, 1.0 }, new[] { shrink, speedUp });
+ratioBars.LegendText = "sparse advantage (x)";
+
+sparsePlot.Add.Text($"{denseMb:F0} MB -> {sparseMb:F1} MB", 0.0, shrink + Math.Max(shrink, speedUp) * 0.04);
+sparsePlot.Add.Text($"{denseWatch.Elapsed.TotalMilliseconds:F0} ms -> {sparseWatch.Elapsed.TotalMilliseconds:F0} ms",
+    1.0, speedUp + Math.Max(shrink, speedUp) * 0.04);
+
+sparsePlot.Axes.Bottom.SetTicks(new[] { 0.0, 1.0 }, new[] { "smaller", "faster" });
+sparsePlot.Axes.SetLimitsY(0, Math.Max(shrink, speedUp) * 1.25);
+sparsePlot.YLabel("times better than the dense path");
+sparsePlot.Title($"GraviLearn - identical logistic model, {documents}x{vocabulary} at {density:F1}% dense");
+sparsePlot.SavePng(sparseChartPath, 800, 550);
+Console.WriteLine($"  saved {sparseChartPath}");
+Console.WriteLine();
+
+Console.WriteLine("  One behaviour that looks like a bug and is not: on separable data an unpenalised");
+Console.WriteLine("  fit never converges - the maximum likelihood sits at infinity, so the weights can");
+Console.WriteLine("  always grow a little further and shave a little more off the loss.");
+foreach (var penalty in new[] { 0.0, 0.01 })
+{
+    var probe = new SparseLogisticRegression(learningRate: 1.0, maxIterations: 500, l2Penalty: penalty)
+        .Fit(sparseX, labels);
+    Console.WriteLine($"    L2 = {penalty,-5} -> stopped after {probe.IterationsRun,3} of 500 iterations" +
+                      (probe.IterationsRun >= 500 ? "  (ran to the cap)" : "  (converged)"));
+}
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.5: distributed
+Section("17. Distributed training");
+
+Console.WriteLine("  Partition spreads the remainder rather than dumping it on the last worker,");
+Console.WriteLine("  so 1000 rows over 7 workers gives shards that differ by one:");
+foreach (var shard in DataParallel.Partition(items: 1000, workers: 7))
+    Console.WriteLine($"    {shard,-14} n={shard.Count}");
+Console.WriteLine();
+
+// Why the weighting matters, shown rather than asserted. Shards are unequal whenever the
+// data comes from separate files rather than from one array that Partition can divide, and
+// per-row gradients differ across them because real data is not shuffled.
+var globalValues = NdArray.Zeros(1000);
+var valueRng = new GraviRandom(3);
+for (var i = 0; i < 1000; i++) globalValues.SetAt(i, i / 100.0 + valueRng.Normal() * 0.5);
+
+var uneven = new[] { new Shard(0, 900), new Shard(900, 100) };
+var perWorker = new List<NdArray>();
+var counts = new List<int>();
+foreach (var shard in uneven)
+{
+    var total = 0.0;
+    for (var i = shard.Start; i < shard.End; i++) total += globalValues.At(i);
+    perWorker.Add(NdArray.FromValues([total / shard.Count]));
+    counts.Add(shard.Count);
+}
+
+var globalMean = 0.0;
+for (var i = 0; i < 1000; i++) globalMean += globalValues.At(i);
+globalMean /= 1000;
+
+var weighted = DataParallel.AverageGradients(perWorker, counts).At(0);
+var unweighted = perWorker.Sum(g => g.At(0)) / perWorker.Count;
+
+Console.WriteLine($"  two shards of {counts[0]} and {counts[1]} rows, with gradients " +
+                  $"{perWorker[0].At(0):F4} and {perWorker[1].At(0):F4}");
+Console.WriteLine($"    gradient over all 1000 rows : {globalMean,9:F6}");
+Console.WriteLine($"    weighted by shard size      : {weighted,9:F6}  (off by {Math.Abs(weighted - globalMean):E2})");
+Console.WriteLine($"    plain average of the workers: {unweighted,9:F6}  (off by {Math.Abs(unweighted - globalMean):E2})");
+Console.WriteLine("  A plain average equals the global one only for equal shards. Unweighted, the model");
+Console.WriteLine("  trains to something slightly wrong that no shape or convergence check would catch.");
+Console.WriteLine();
+
+using (var transport = new InProcessTransport(workerCount: 4))
+{
+    var server = new ParameterServer(transport);
+    for (var worker = 0; worker < 4; worker++)
+        server.Contribute(worker, NdArray.FromValues([worker + 1.0, (worker + 1.0) * 2]), sampleCount: 10 * (worker + 1));
+
+    var aggregated = server.Aggregate();
+    Console.WriteLine($"  ParameterServer round {server.Round - 1} aggregate: " +
+                      $"[{aggregated.At(0):F6}, {aggregated.At(1):F6}]");
+    Console.WriteLine("  Collected in worker order, not arrival order: floating-point addition is not");
+    Console.WriteLine("  associative, so arrival order would make the answer depend on the scheduler.");
+}
+Console.WriteLine();
+
+Console.WriteLine("  FileTransport is the same interface over a shared directory - no broker, no ports,");
+Console.WriteLine("  and it crosses machines. Workers write then rename, so a collector cannot read a");
+Console.WriteLine("  half-written payload. tools/verify/DistributedInterop spawns real processes for it.");
+Console.WriteLine();
+
+var forestWatch = Stopwatch.StartNew();
+var distributed = new DistributedForest(nTrees: 120, maxDepth: 10, seed: 42).Fit(split.TrainX, split.TrainY, workers: 4);
+forestWatch.Stop();
+
+var singleWatch = Stopwatch.StartNew();
+var single = new DistributedForest(nTrees: 120, maxDepth: 10, seed: 42).Fit(split.TrainX, split.TrainY, workers: 1);
+singleWatch.Stop();
+
+var distributedPredictions = distributed.Predict(split.TestX);
+var singlePredictions = single.Predict(split.TestX);
+var identical = true;
+for (var i = 0; i < distributedPredictions.Size; i++)
+    identical &= distributedPredictions.At(i) == singlePredictions.At(i);
+
+Console.WriteLine($"  4 workers : {forestWatch.Elapsed.TotalMilliseconds,7:F0} ms, accuracy {distributed.Score(split.TestX, split.TestY):P2}");
+Console.WriteLine($"  1 worker  : {singleWatch.Elapsed.TotalMilliseconds,7:F0} ms, accuracy {single.Score(split.TestX, split.TestY):P2}");
+Console.WriteLine($"  bit-identical predictions: {identical}");
+Console.WriteLine("  Not equivalent - identical. Tree t is seeded from seed + t * 7919, a function of");
+Console.WriteLine("  its global index alone, so a shard boundary cannot change the answer.");
+Console.WriteLine("  Iris is 105 training rows, so the coordination costs more than the trees do and");
+Console.WriteLine("  the parallel run loses. That is the honest reading of those two timings: what is");
+Console.WriteLine("  being demonstrated here is the identity, not a speed-up.");
+Console.WriteLine("  It splits the computation, not the memory: every worker fits on the whole set.");
 Console.WriteLine();
 
 Console.WriteLine();

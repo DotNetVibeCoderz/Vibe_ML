@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 962 passing, 0 failing
+**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 1,049 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -12,17 +12,17 @@ Roadmap: [PLAN.md](PLAN.md)
 |---|---|---|
 | Solution and build | ✅ Complete | 24 projects, central package management, Release build clean |
 | GraviNum | ✅ Complete | 301 tests |
-| GraviFrame | ✅ Complete | 122 tests |
-| GraviLearn | ✅ Complete | 146 tests |
-| GraviText | ✅ Complete | 157 tests |
+| GraviFrame | ✅ Complete | 165 tests |
+| GraviLearn | ✅ Complete | 176 tests |
+| GraviText | ✅ Complete | 171 tests |
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
-| Sample apps | ✅ Complete | 6 apps, all run end to end, all covering v0.4 |
-| Notebooks | ✅ Complete | 6 notebooks, cells compile-checked, 16 inline charts |
+| Sample apps | ✅ Complete | 6 apps, all run end to end, all covering v0.5 |
+| Notebooks | ✅ Complete | 6 notebooks, cells compile-checked, 18 inline charts |
 | Benchmarks | ✅ Complete | 6 suites; GraviNum measured and published |
 | Datasets | ✅ Complete | 4 real, 4 generated |
 | Documentation | ✅ Complete | 10 pages × 2 languages, with a visualisation gallery per library |
-| Screenshots | ✅ Complete | 11 rendered by the samples, plus 6 of ScienceAppGen |
+| Screenshots | ✅ Complete | 13 rendered by the samples, plus 6 of ScienceAppGen |
 
 ---
 
@@ -71,7 +71,7 @@ a shifted QR/QL iteration: symmetric eigen **2,740 → 116 ms** (23.6×) and SVD
 it never reads. `SvdJacobi` and `SymmetricEigenJacobi` stay as the reference the tests check
 against — two unrelated routes to the same factorisation.
 
-### GraviFrame — 122 tests
+### GraviFrame — 165 tests
 
 - [x] Typed columns: numeric, text, boolean, timestamp
 - [x] CSV reader with type inference, quoting, configurable missing tokens
@@ -90,8 +90,11 @@ against — two unrelated routes to the same factorisation.
 - [x] **v0.4** `CategoricalSeries` with dictionary encoding, ordered categories, one-hot
 - [x] **v0.4** SQL reader and writer over `System.Data.Common` — any ADO.NET provider, no dependency
 - [x] **v0.4** `.xlsx` reader and writer with no spreadsheet library
+- [x] **v0.5** Arrow IPC read and write, verified both ways against pyarrow
+- [x] **v0.5** A FlatBuffers encoder and decoder, written for Arrow's metadata
+- [x] **v0.5** `ChunkedFrame` and `Streaming`: out-of-core group-by, describe, filter, external sort
 
-### GraviLearn — 146 tests
+### GraviLearn — 176 tests
 
 - [x] Scalers: standard, min-max, robust, normalizer
 - [x] Imputation, label and one-hot encoding, polynomial features
@@ -114,8 +117,11 @@ against — two unrelated routes to the same factorisation.
 - [x] **v0.4** Over-sampling, under-sampling, SMOTE, class weights
 - [x] **v0.4** One-class SVM by SMO, checked against the nu-property
 - [x] **v0.4** HDBSCAN, demonstrated against a DBSCAN eps sweep that cannot match it
+- [x] **v0.5** `SparseLogisticRegression` — trains on CSR, 191x faster and 176x smaller, same model
+- [x] **v0.5** `GraviLearn.Distributed` — partitioning, weighted gradient averaging, two transports
+- [x] **v0.5** `DistributedForest` — bit-identical to single-process training
 
-### GraviText — 157 tests
+### GraviText — 171 tests
 
 - [x] Whitespace, regex, character and WordPiece tokenizers; sentence splitter
 - [x] WordPiece vocabulary training
@@ -136,6 +142,8 @@ against — two unrelated routes to the same factorisation.
 - [x] **v0.4** Linear-chain CRF, pinned against brute-force enumeration
 - [x] **v0.4** Trained NER — 97.9% entity F1 held out, generalises to unseen names
 - [x] **v0.4** Decoder stack with causal masking and greedy/top-k/nucleus sampling
+- [x] **v0.5** `TransformerCheckpoint` — loads every parameter, verified against NumPy to 2.6e-07
+- [x] **v0.5** `TfidfVectorizer.TransformSparse` — sparse output to match `CountVectorizer`
 
 ⚠️ **No pretrained weights.** Documented at the top of [GraviText.md](docs/GraviText.md) and printed
 by the sample at runtime. The architecture can now be *trained* on your own labelled text via
@@ -280,15 +288,20 @@ Each is now covered by a regression test.
 
 ## Next
 
-See [PLAN.md](PLAN.md). **v0.4 is complete** — every breadth item across all six libraries is
-implemented, tested and documented in both languages, and the suite grew from 589 to 962 tests.
+See [PLAN.md](PLAN.md). **v0.4 is complete**, and **five of six v0.5 items are done**: Arrow
+interchange, out-of-core dataframes, sparse training paths, the pretrained-weight loader, and the
+distributed-training coordination layer. The suite grew from 962 to 1,049 tests.
 
-What remains is collected in **v0.5 — Consolidation**: migrating the six libraries onto the generic
-`NdArray<T>` core (measured at 0.91–1.04×, so the risk is gone and only the API change remains),
-plus three items carried forward that were never dropped for a reason — Arrow interchange,
-out-of-core dataframes, and distributed training. Loading pretrained transformer weights is the
-oldest un-met promise and is now mostly a name-mapping problem, since `OnnxReader` imports weights
-and the new tokenizers read the formats published models ship in.
+Three of those were verified against something outside this repository rather than against
+themselves — Arrow both ways against pyarrow, the checkpoint loader against an independent NumPy
+encoder, and cross-process aggregation against real spawned worker processes.
+
+**The `NdArray<T>` migration is not started, and the earlier estimate for it was wrong.** It was
+described as a scheduling decision; measuring says the generic surface covers 22% of the `double`
+path, `NdArray<T>` has no arithmetic operators, and transcendentals run 17–21% slower generically.
+PLAN.md now carries the measurements. Two smaller pieces are also still open: distributed GNN
+training (the parts exist, the driving loop does not) and shipping actual pretrained weights, which
+licensing and size keep out of the repository.
 
 ---
 

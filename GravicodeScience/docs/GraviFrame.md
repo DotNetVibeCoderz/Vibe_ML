@@ -353,6 +353,100 @@ The worksheet is streamed with `XmlReader` rather than loaded as a document, sin
 of a workbook that can be genuinely large. Formulas are not evaluated; a formula cell yields its
 cached result, which is what the file records and almost always what the caller wanted.
 
+## Arrow interchange
+
+`ArrowFile` reads and writes the Arrow IPC file format, so a frame can be handed to pandas, Polars
+or Spark and taken back.
+
+```csharp
+ArrowFile.Write(frame, "data.arrow");
+var back = ArrowFile.Read("data.arrow");
+```
+
+```python
+import pyarrow as pa, pyarrow.ipc as ipc
+
+with pa.memory_map("data.arrow", "r") as source:
+    table = ipc.open_file(source).read_all()
+```
+
+Verified in both directions against pyarrow — every integer width and sign, all four timestamp
+units, nulls, the empty-string-versus-null distinction, multi-byte text, and a round trip through
+pandas. Run `python tools/verify/arrow_interop.py` after any change.
+
+Arrow is a **memory layout** before it is a file format, and that is the point: a column is a
+validity bitmap plus a values buffer, contiguous and untagged, so a reader can point at it rather
+than parse it. Three consequences worth knowing:
+
+- **Validity is a bitmap, not a sentinel.** One bit per value, 1 meaning present. A `NaN` in a
+  `NumericSeries` means missing, so it becomes a cleared bit and the slot's numeric content is
+  irrelevant.
+- **Strings are offsets plus one blob.** An `int32` offsets buffer of `n + 1` entries and a single
+  data buffer. The length of row `i` is `offsets[i+1] - offsets[i]`; no per-value length is stored.
+- **Every buffer is padded to 8 bytes.** Getting this wrong produces a file this reader accepts and
+  pyarrow rejects.
+
+The metadata is FlatBuffers rather than Protobuf, so `Io/FlatBuffers.cs` is a small encoder and
+decoder written for it. The expensive lesson: **a FlatBuffers table must start 4-byte aligned**,
+because it begins with an `int32` soffset. A table whose last field was a `short` finishes two bytes
+out — every offset still resolves, a hand decode still succeeds, and Arrow's verifier rejects the
+file saying nothing about why.
+
+**Scope**, stated rather than implied: one record batch per file, no dictionary-encoded arrays on
+the wire, no compression, no nested types. A `CategoricalSeries` is written as its expanded strings,
+because dictionary batches are a separate message type whose bookkeeping is easy to get wrong in a
+way that loads with silently wrong values. Reads are not zero-copy either — buffers are decoded into
+`Series` arrays rather than pointed at.
+
+## Out-of-core frames
+
+`DataFrame` holds every column as an array, so a frame is capped by RAM. `ChunkedFrame` lifts that
+cap by never materialising more than one chunk.
+
+```csharp
+var chunked = ChunkedFrame.FromCsv("huge.csv", chunkRows: 100_000);
+
+Streaming.CountRows(chunked);
+Streaming.Describe(chunked, ["amount"]);
+Streaming.GroupBy(chunked, ["region"], ("amount", "sum"), ("amount", "mean"));
+Streaming.FilterToFile(chunked, (chunk, row) => chunk.Numeric("amount")[row] > 100, "big.csv");
+Streaming.SortToFile(chunked, "amount", "sorted.csv");
+```
+
+This is **not a lazy query engine**: no optimiser, no predicate pushdown, no plan. A chunked frame
+is an `IEnumerable<DataFrame>` and the operations are hand-written single passes. That keeps the
+cost model obvious, which matters more here than cleverness — the reason to reach for this is that
+the data does not fit, and a surprise materialisation defeats the whole point.
+
+Three things to know before using it:
+
+**Column types are inferred once from a sample and pinned for every chunk.** Inferring per chunk is
+simpler and is a trap: a column that parses as numeric early and turns textual later would come back
+with different types in different chunks, so the same query would give different answers at
+different chunk sizes. The chunk size is a memory knob, not part of the question. Pass explicit
+`ColumnTypes` when the schema is known.
+
+**`GroupBy`'s memory is proportional to the number of distinct groups, not the input.** Grouping a
+billion rows by country is trivial; grouping them by user id is not, because the accumulator table
+then holds a billion entries. `Streaming.CountGroups` exists so that ceiling can be checked before
+the query runs.
+
+**Median is refused rather than offered.** It needs the values, so a streaming version would keep
+them all and only look like it was streaming. Sum, mean, min, max and count are all computable from
+a fixed-size accumulator; variance uses Welford's method, because the textbook
+`E[x²] − E[x]²` subtracts two nearly equal large numbers and can return a negative variance.
+
+`SortToFile` is the classic two-phase external merge sort: sort each chunk into a run, then merge by
+repeatedly taking the smallest head, so the merge holds one row per run rather than one per row. It
+needs disk roughly equal to the input and makes two full passes, so it is much slower than an
+in-memory sort and should not be reached for when the data fits. Missing values sort last in both
+directions — missing is absent, not extreme.
+
+One sharp edge: the output is CSV, so a **single-column** frame whose values are missing writes
+blank lines, and a CSV reader cannot tell those from padding. The rows are in the file and correctly
+ordered; the round trip is what loses them. With two or more columns the lines carry delimiters and
+survive.
+
 ---
 
 ## Visualisations
@@ -361,6 +455,12 @@ Rendered by `samples/GraviFrame.Console`; `notebooks/GraviFrame.Notebook.ipynb` 
 volatility chart built with the v0.4 window functions.
 
 ![A price series with a rolling mean overlaid](screenshots/graviframe_trend.png)
+
+![Mean fare and survival rate per class and sex, aggregated in 64-row chunks](screenshots/graviframe_streaming.png)
+
+The second chart is the v0.5 out-of-core path: every number in it was computed by
+`Streaming.GroupBy` over 64 rows at a time, and it agrees with the in-memory `GroupBy` to 1.6e-14.
+Chunk size is a memory knob, not a parameter of the answer.
 
 ---
 

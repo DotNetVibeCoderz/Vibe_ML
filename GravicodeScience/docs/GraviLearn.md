@@ -446,11 +446,108 @@ Cost is O(n²) in memory and time — the pairwise distance matrix is materialis
 use a space tree, which pays off above a few thousand points and stops helping in high dimensions
 anyway.
 
+## Sparse training
+
+`SparseLogisticRegression` trains directly on a CSR matrix, without densifying it.
+
+```csharp
+var vectoriser = new TfidfVectorizer(new VectorizerOptions { MaxFeatures = 30_000 });
+var x = vectoriser.FitTransformSparse(documents);
+
+var model = new SparseLogisticRegression(learningRate: 1.0, maxIterations: 200).Fit(x, y);
+
+model.Score(x, y);
+model.TopFeatures(20);        // a coefficient reads directly as "this word moves the decision this far"
+```
+
+The reason it exists is a memory wall, not a speed one. A bag-of-words matrix over a 30,000-word
+vocabulary is around 0.1% non-zero; densified, 50,000 documents is about 12 GB of doubles, almost
+all of them zeros that cost the same to store and multiply as anything else.
+
+Measured on 4,000 documents over an 8,000-word vocabulary at 0.37% density:
+
+| | value |
+|---|---|
+| matrix, dense | 244.1 MB |
+| matrix, CSR | 1.4 MB (**176×**) |
+| fit, dense | 12,802 ms |
+| fit, sparse | 67 ms (**191×**) |
+| accuracy | 99.52% either way |
+| largest coefficient difference | 6.9e-18 |
+
+**The same model, not an approximation.** That is the claim worth making: a sparse optimiser that
+reached a different answer would be a different algorithm rather than a faster one, so the tests
+compare coefficient vectors rather than accuracies, which would agree even if the weights had
+drifted.
+
+Two implementation details that are correctness conditions:
+
+- **The L2 penalty is applied to the accumulated gradient**, not by decaying every weight each step.
+  Decaying is what a dense implementation does and is `O(features)` per update, which would put the
+  dense cost straight back in.
+- **The weight vector stays dense**, so this bounds the *feature count*, not the document count.
+  30,000 doubles is nothing, but it is worth knowing which axis is free.
+
+One behaviour that looks like a bug and is not: on **separable** data an unpenalised fit never
+converges. Its maximum likelihood is at infinity — the weights can always grow a little more and
+shave a little more off the loss — so a tolerance test never fires and the fit runs to the iteration
+cap. An L2 term makes the objective strictly convex with a finite optimum, and it converges.
+
+The graph side was already sparse. `Graph.ToSparseAdjacency` feeds `GnnMath.Propagate`, and on Cora
+at 64 features that is 0.30 ms against 28.15 ms dense — **93.6×**, identical to 1e-10.
+
+## Distributed training
+
+`GraviLearn.Distributed` provides the parts that are the same whatever is being trained.
+
+```csharp
+var forest = new DistributedForest(nTrees: 500, maxDepth: 12, seed: 42).Fit(x, y, workers: 8);
+
+// Or the pieces, for a custom loop:
+var shards = DataParallel.Partition(items: 1000, workers: 8);
+var mean = DataParallel.AverageGradients(perWorkerGradients, sampleCounts);
+
+using var transport = new FileTransport("/shared/exchange", workerCount: 8);
+var server = new ParameterServer(transport);
+server.Contribute(worker, gradient, sampleCount);
+var averaged = server.Aggregate();
+```
+
+**`DistributedForest` is bit-identical to single-process training.** Not equivalent — identical.
+Every tree in a random forest is independent, and tree `t` is seeded from `seed + t * 7919`, a
+function of the global index alone. So a worker handed trees 40–79 grows exactly the trees a single
+process would have grown at those positions, and a shard boundary cannot change an answer.
+
+It shards the **compute**, not the memory: every worker fits on the whole training set. That is the
+right way round for forests, where the trees are the expensive part and the dataset usually fits.
+
+`FileTransport` genuinely crosses a process boundary — verified by spawning real worker processes,
+not threads (`tools/verify/DistributedInterop`). It is deliberately the least clever thing that
+works: a worker writes its payload and renames it into place, the collector polls for finished
+names. No broker, no ports, no protocol, and it runs across machines sharing a filesystem. The
+rename is what makes it safe, since writing directly to the final name lets a collector read a
+half-written file.
+
+Two things that are correctness conditions rather than polish:
+
+- **Gradients are weighted by sample count, not averaged plainly.** A plain average of per-worker
+  means equals the global mean only when every shard is the same size, and `Partition` produces
+  uneven shards whenever the count does not divide. Unweighted, the small shards are silently
+  over-weighted and the model trains to something slightly wrong that no shape or convergence check
+  would catch.
+- **Results are collected in worker order, not arrival order.** Floating-point addition is not
+  associative, so summing as results arrive makes the answer depend on scheduling and two runs of
+  the same job differ in the last bits.
+
+**Not implemented: distributed GNN training.** The pieces are there — the neighbourhood sampler
+produces bounded independent per-batch computation graphs, which is exactly a worker's unit of work,
+and `ParameterServer` averages what comes back — but the loop that drives them is not written.
+
 ---
 
 ## Visualisations
 
-All three are rendered by `samples/GraviLearn.Console` and reproduced by
+All four are rendered by `samples/GraviLearn.Console` and reproduced by
 `notebooks/GraviLearn.Notebook.ipynb`.
 
 ![A confusion matrix](screenshots/gravilearn_confusion.png)
@@ -465,6 +562,12 @@ and isotonic regression pulls it onto the line without touching the ranking.
 
 Two tight clusters close together and one diffuse cluster far away. No single DBSCAN `eps` separates
 all three; HDBSCAN needs no threshold at all.
+
+![Sparse training plotted as a shrink factor and a speed-up factor](screenshots/gravilearn_sparse.png)
+
+Plotted as ratios rather than as raw MB and ms, because those two quantities share no unit and span
+three orders of magnitude: on one linear axis the smaller vanishes, and on a log axis a bar's length
+stops meaning anything. Both models are the same model — their coefficients agree to 3.5e-18.
 
 ---
 

@@ -285,6 +285,146 @@ Console.WriteLine("  Values go through parameters, never string concatenation - 
 Console.WriteLine("  injection impossible, and column types come from the provider rather than inference.");
 Console.WriteLine();
 
+// ---------------------------------------------------------------- v0.5: Arrow
+Section("14. Arrow IPC interchange");
+
+var arrowScratch = Directory.CreateTempSubdirectory("graviframe-arrow");
+try
+{
+    var mixed = new DataFrame(
+    [
+        new TextSeries("symbol", ["BBCA", "TLKM", "ASII", null]),
+        new NumericSeries("close", [9250.0, 3120.0, double.NaN, 4410.0]),
+        new BooleanSeries("halted", [false, false, true, null]),
+        new DateTimeSeries("stamp",
+        [
+            new DateTime(2024, 1, 2), new DateTime(2024, 1, 3),
+            new DateTime(2024, 1, 4), null,
+        ]),
+    ]);
+
+    var arrowPath = Path.Combine(arrowScratch.FullName, "quotes.arrow");
+    ArrowFile.Write(mixed, arrowPath);
+    var arrowBack = ArrowFile.Read(arrowPath);
+
+    Console.WriteLine($"  wrote {new FileInfo(arrowPath).Length} bytes of Arrow IPC");
+    Console.WriteLine(arrowBack.ToString());
+    Console.WriteLine($"  types survived: " + string.Join(", ",
+        arrowBack.ColumnNames.Select(n => $"{n}={arrowBack[n].DataType}")));
+    Console.WriteLine($"  and so did every missing value: " +
+        $"symbol[3]={arrowBack["symbol"].IsMissing(3)}, close[2]={arrowBack["close"].IsMissing(2)}, " +
+        $"halted[3]={arrowBack["halted"].IsMissing(3)}, stamp[3]={arrowBack["stamp"].IsMissing(3)}");
+    Console.WriteLine();
+
+    Console.WriteLine("  This is the point of Arrow, and it is not the round trip:");
+    Console.WriteLine("    import pyarrow as pa");
+    Console.WriteLine("    pa.ipc.open_file('quotes.arrow').read_all().to_pandas()");
+    Console.WriteLine("  A round trip through one implementation proves nothing about an interchange");
+    Console.WriteLine("  format - it agrees with itself by construction. tools/verify/arrow_interop.py");
+    Console.WriteLine("  runs 21 checks in both directions against pyarrow instead.");
+    Console.WriteLine();
+
+    // Size, against the CSV it replaces.
+    var arrowTitanic = Path.Combine(arrowScratch.FullName, "titanic.arrow");
+    ArrowFile.Write(clean, arrowTitanic);
+    Console.WriteLine($"  titanic.csv   : {new FileInfo(Path.Combine(datasets, "titanic.csv")).Length / 1024.0,7:F1} KB");
+    Console.WriteLine($"  titanic.arrow : {new FileInfo(arrowTitanic).Length / 1024.0,7:F1} KB  " +
+                      "(uncompressed - Arrow trades size for zero-copy reads)");
+}
+finally { arrowScratch.Delete(recursive: true); }
+Console.WriteLine();
+
+// ---------------------------------------------------------------- v0.5: out of core
+Section("15. Out-of-core: bigger than memory");
+
+var chunked = ChunkedFrame.FromCsv(Path.Combine(datasets, "titanic.csv"), chunkRows: 64);
+Console.WriteLine($"  reading titanic.csv 64 rows at a time -> {Streaming.CountRows(chunked)} rows counted,");
+Console.WriteLine("  and at no point was more than 64 rows of it in memory.");
+Console.WriteLine();
+
+Console.WriteLine("  Summary statistics in one pass, constant memory (Welford, not E[x]-E[x]^2):");
+var described = Streaming.Describe(chunked, ["fare", "age"]);
+foreach (var (name, stats) in described.OrderBy(p => p.Key, StringComparer.Ordinal))
+    Console.WriteLine($"    {name,-6} n={stats.Count,4}  mean={stats.Mean,8:F3}  sd={stats.StandardDeviation,8:F3}  " +
+                      $"min={stats.Min,7:F2}  max={stats.Max,8:F2}");
+Console.WriteLine();
+
+Console.WriteLine("  Check the key's cardinality before grouping - that number is the memory bound:");
+Console.WriteLine($"    distinct (pclass, sex) groups = {Streaming.CountGroups(chunked, ["pclass", "sex"])}");
+
+var streamedGroups = Streaming.GroupBy(chunked, ["pclass", "sex"], ("fare", "mean"), ("survived", "mean"));
+Console.WriteLine(streamedGroups.SortBy([("pclass", true), ("sex", true)]).ToString(12));
+
+var inMemory = clean.GroupBy("pclass", "sex").AggregateMany([("fare", "mean"), ("survived", "mean")])
+    .SortBy([("pclass", true), ("sex", true)]);
+var streamedFares = streamedGroups.SortBy([("pclass", true), ("sex", true)]).Numeric("fare_mean");
+var memoryFares = inMemory.Numeric("fare_mean");
+var worst = 0.0;
+for (var i = 0; i < memoryFares.Length; i++)
+    worst = Math.Max(worst, Math.Abs(streamedFares[i] - memoryFares[i]));
+Console.WriteLine($"  largest disagreement with the in-memory GroupBy: {worst:E2}");
+Console.WriteLine();
+
+Console.WriteLine("  Chunk size is a memory knob, not a parameter of the answer:");
+foreach (var rows in new[] { 8, 64, 512, 4096 })
+{
+    var probe = ChunkedFrame.FromCsv(Path.Combine(datasets, "titanic.csv"), chunkRows: rows);
+    var fare = Streaming.Describe(probe, ["fare"])["fare"];
+    Console.WriteLine($"    chunkRows = {rows,5} -> mean fare {fare.Mean:F9}, sd {fare.StandardDeviation:F9}");
+}
+Console.WriteLine("  That holds because ChunkedFrame pins its column types from one sample. Inferring");
+Console.WriteLine("  per chunk would let a column parse numeric early and textual later, and the same");
+Console.WriteLine("  query would answer differently at different chunk sizes.");
+Console.WriteLine();
+
+var streamChartPath = Path.Combine(screenshots, "graviframe_streaming.png");
+var streamPlot = new ScottPlot.Plot();
+var ordered = streamedGroups.SortBy([("pclass", true), ("sex", true)]);
+var orderedFares = ordered.Numeric("fare_mean");
+var orderedSurvival = ordered.Numeric("survived_mean");
+var groupLabels = new string[ordered.RowCount];
+for (var i = 0; i < ordered.RowCount; i++)
+    groupLabels[i] = $"{ordered["pclass"].GetValue(i)} {ordered["sex"].GetValue(i)}";
+
+var fareBars = streamPlot.Add.Bars(
+    Enumerable.Range(0, ordered.RowCount).Select(i => (double)i).ToArray(),
+    Enumerable.Range(0, ordered.RowCount).Select(i => orderedFares[i]).ToArray());
+fareBars.LegendText = "mean fare";
+
+var survivalLine = streamPlot.Add.Scatter(
+    Enumerable.Range(0, ordered.RowCount).Select(i => (double)i).ToArray(),
+    Enumerable.Range(0, ordered.RowCount).Select(i => orderedSurvival[i] * 100).ToArray());
+survivalLine.LegendText = "survival rate (%)";
+survivalLine.MarkerSize = 9;
+
+streamPlot.Axes.Bottom.SetTicks(
+    Enumerable.Range(0, ordered.RowCount).Select(i => (double)i).ToArray(), groupLabels);
+streamPlot.Title("GraviFrame - streamed group-by, 64 rows in memory at a time");
+streamPlot.XLabel("class and sex");
+streamPlot.ShowLegend();
+streamPlot.SavePng(streamChartPath, 900, 550);
+Console.WriteLine($"  saved {streamChartPath}");
+Console.WriteLine();
+
+var sortScratch = Directory.CreateTempSubdirectory("graviframe-sort");
+try
+{
+    var sorted = Path.Combine(sortScratch.FullName, "by-fare.csv");
+    var written = Streaming.SortToFile(chunked, "fare", sorted, descending: true);
+    var head = DataFrame.ReadCsv(sorted).Head(5);
+
+    Console.WriteLine($"  External merge sort by fare: {written} rows through 64-row runs, top five:");
+    Console.WriteLine(head.SelectColumns("fare", "pclass", "sex", "survived").ToString());
+    Console.WriteLine("  Two passes and disk space equal to the input - that is the trade, and it is");
+    Console.WriteLine("  what lets a sort exceed memory. Do not reach for it when the data fits.");
+
+    var wealthy = Path.Combine(sortScratch.FullName, "first-class.csv");
+    var kept = Streaming.FilterToFile(chunked, (chunk, row) => chunk.Numeric("fare")[row] > 100.0, wealthy);
+    Console.WriteLine($"  FilterToFile kept {kept} rows over 100 fare without holding either end in memory.");
+}
+finally { sortScratch.Delete(recursive: true); }
+Console.WriteLine();
+
 Console.WriteLine();
 Console.WriteLine(GraviInfo.Attribution);
 return;

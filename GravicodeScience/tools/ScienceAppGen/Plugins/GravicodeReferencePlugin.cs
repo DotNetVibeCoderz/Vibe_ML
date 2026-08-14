@@ -179,6 +179,33 @@ public sealed class GravicodeReferencePlugin
               ExcelReader.SheetNames(path)
               ExcelWriter.Write(frame, path, sheetName: "Sheet1")
               Handles absent cells (gaps, not blanks), date serials, and the 1900 leap-year bug.
+
+            Io.ArrowFile (v0.5) - Apache Arrow IPC, read and write, no package dependency
+              ArrowFile.Write(frame, path)   ArrowFile.Write(frame, stream)
+              ArrowFile.Read(path)           ArrowFile.Read(stream)
+              Carries types and missing values across the boundary, so pyarrow/pandas read it
+              directly. Verified BOTH WAYS against pyarrow - a round trip proves nothing here.
+              Uncompressed: it trades file size for zero-copy reads.
+
+            ChunkedFrame + Streaming (v0.5) - datasets larger than memory
+              ChunkedFrame.FromCsv(path, chunkRows: 100_000, options)
+              ChunkedFrame.FromFrame(frame, chunkRows)   .FromChunks(source, columns)
+                .Chunks (IEnumerable<DataFrame>)  .ChunkRows  .ColumnNames
+              Streaming.CountRows(source)
+              Streaming.CountGroups(source, keys)          CALL THIS FIRST
+              Streaming.GroupBy(source, keys, ("fare", "mean"), ("x", "sum"))
+                sum, mean, min, max, count only. Median is refused - it cannot be done in
+                bounded memory, and a version that kept every value would only look streaming.
+              Streaming.Describe(source, columns) -> Count, Mean, StandardDeviation, Min, Max
+              Streaming.Filter(source, (chunk, row) => ...)     bounded by what SURVIVES
+              Streaming.FilterToFile(source, predicate, path)   bounded regardless
+              Streaming.SortToFile(source, column, path, descending, temporaryDirectory)
+              GroupBy memory is proportional to DISTINCT GROUPS, not rows: grouping a billion
+              rows by country is trivial, grouping them by user id is not.
+              Chunk size is a memory knob, not a parameter of the answer - column types are
+              pinned from one sample rather than inferred per chunk.
+              SortToFile writes CSV, so a SINGLE-column frame with missing values writes blank
+              lines that a CSV reader cannot tell from padding. Two or more columns survive.
             """,
 
         ["GraviLearn"] = """
@@ -274,6 +301,38 @@ public sealed class GravicodeReferencePlugin
                 .FitPredict(x)
               Use it wherever a single DBSCAN eps cannot fit clusters of differing density.
               O(n^2) memory - a few thousand points is the practical ceiling.
+
+            Linear.SparseLogisticRegression (v0.5) - trains on CSR without densifying
+              new SparseLogisticRegression(learningRate: 1.0, maxIterations: 200,
+                                           l2Penalty: 0.0, tolerance: 1e-7)
+                .Fit(SparseMatrix x, NdArray y)   returns itself, so it chains
+                .Predict(x) .PredictProbabilities(x) .Score(x, y)
+                .Coefficients (rows = binary problems) .Intercepts .TopFeatures(count, problem)
+                .IterationsRun .FinalLoss .Classes .FeatureCount
+              Pair with TfidfVectorizer.FitTransformSparse / TransformSparse (GraviText).
+              Same model as the dense path, not an approximation - compare COEFFICIENTS.
+              Its weight vector is dense, so it bounds the FEATURE count, not the row count.
+              On SEPARABLE data an unpenalised fit never converges: the MLE is at infinity.
+              That is not a bug - add L2 to get a finite optimum.
+
+            Distributed (v0.5) - namespace Gravicode.Science.GraviLearn.Distributed
+              DataParallel.Partition(items, workers) -> Shard(Start, Count, End, Indices)
+              DataParallel.AverageGradients(gradients, sampleCounts)   WEIGHTED, always
+              DataParallel.Encode(NdArray) / Decode(byte[])
+              IWorkerTransport: Publish(round, worker, payload), Collect(round), WorkerCount
+                new InProcessTransport(workerCount)
+                new FileTransport(directory, workerCount, timeout)   crosses machines
+              new ParameterServer(transport).Contribute(worker, gradient, sampleCount)
+                .Aggregate() .Round .Transport
+              new DistributedForest(nTrees, maxDepth, seed).Fit(x, y, workers)
+                .Predict(x) .PredictProbabilities(x) .Score(x, y) .Trees .TreeCount
+              DistributedForest is BIT-IDENTICAL to single-process: tree t is seeded from
+              seed + t * 7919, a function of its global index alone.
+              A plain average of per-worker gradients equals the global one ONLY for equal
+              shards, and Partition produces uneven ones whenever the count does not divide.
+              Transports collect in WORKER order, not arrival order - float addition is not
+              associative, so arrival order would make the answer depend on the scheduler.
+              It splits computation, not memory: every worker fits on the whole training set.
             """,
 
         ["GraviText"] = """
@@ -357,6 +416,26 @@ public sealed class GravicodeReferencePlugin
                 SamplingOptions.Greedy, SamplingOptions.Nucleus
               CausalSelfAttention / TransformerDecoderLayer are the building blocks.
               Forward-only, like TransformerModel. Generation is quadratic (no KV cache).
+
+            TransformerCheckpoint (v0.5) - loads EVERY parameter, not just the embeddings
+              TransformerCheckpoint.Inspect(path) -> (Name, Shape)[]   RUN THIS FIRST
+              TransformerCheckpoint.Load(model, path, names, strict: true) -> CheckpointReport
+                CheckpointReport(.Loaded .Missing .Unused .IsComplete)
+              CheckpointNames.HuggingFaceBert    bert.encoder.layer.{0}.attention.self.query.weight
+              CheckpointNames.Unprefixed         encoder.layer.{0}....
+              CheckpointNames.Reprefixed("roberta.")
+              CheckpointNames has a Transposed flag: PyTorch nn.Linear stores (out, in) and
+              computes x W^T, DenseLayer stores (in, out). Checked against the NON-SQUARE
+              feed-forward weight, because a 768x768 projection accepts either reading.
+              A PARTIAL load never sets HasPretrainedWeights, whatever strict mode was used.
+              No weights ship with this repository. Export your own with torch.onnx.export.
+              TransformerModel also exposes .Layers, .ReplaceTokenEmbeddings,
+              .ReplacePositionEmbeddings and .MarkPretrained for a hand-rolled loader.
+
+            Vectorization (v0.5) - sparse output
+              new TfidfVectorizer(options).FitTransformSparse(documents) -> SparseMatrix
+                .TransformSparse(documents)
+              Feed it straight to GraviLearn's SparseLogisticRegression.
             """,
 
         ["GraviGraph"] = """
@@ -564,7 +643,8 @@ public sealed class GravicodeReferencePlugin
     public string GravicodeExample(
         [Description("Task: classification, regression, clustering, dataframe, timeseries, " +
                      "sentiment, graph, bayesian, explainability, anomaly, tokenizer, ner, " +
-                     "forecasting, gaussianprocess, windowfunctions or heterogeneousgraph.")]
+                     "forecasting, gaussianprocess, windowfunctions, heterogeneousgraph, " +
+                     "arrow, outofcore, sparse, distributed or pretrained.")]
         string task)
     {
         var key = task.ToLowerInvariant();
@@ -913,9 +993,145 @@ public sealed class GravicodeReferencePlugin
                 Console.WriteLine($"user -> [{string.Join(", ", output["user"].Shape.ToArray())}]");
                 """,
 
+            "arrow" => """
+                using Gravicode.Science.GraviFrame;
+                using Gravicode.Science.GraviFrame.Io;
+
+                var frame = new DataFrame(
+                [
+                    new TextSeries("symbol", ["BBCA", "TLKM", null]),
+                    new NumericSeries("close", [9250.0, 3120.0, double.NaN]),
+                    new BooleanSeries("halted", [false, true, null]),
+                ]);
+
+                ArrowFile.Write(frame, "quotes.arrow");
+                var back = ArrowFile.Read("quotes.arrow");
+
+                // Types and missing values cross the boundary intact, which is the point -
+                // pyarrow reads this file directly, no CSV parsing and no type re-inference.
+                Console.WriteLine(back);
+                Console.WriteLine(string.Join(", ", back.ColumnNames.Select(n => $"{n}={back[n].DataType}")));
+                Console.WriteLine($"missing preserved: {back["close"].IsMissing(2)}");
+
+                // On the Python side:
+                //   import pyarrow as pa
+                //   pa.ipc.open_file("quotes.arrow").read_all().to_pandas()
+                """,
+
+            "outofcore" => """
+                using Gravicode.Science.GraviFrame;
+
+                // Reads the file a block at a time - at no point is more than chunkRows in memory.
+                var chunked = ChunkedFrame.FromCsv("titanic.csv", chunkRows: 50_000);
+
+                Console.WriteLine($"{Streaming.CountRows(chunked)} rows");
+
+                // GroupBy memory is proportional to DISTINCT GROUPS, not rows, so check the
+                // key's cardinality first: that number is the difference between a query that
+                // runs and one that does not.
+                Console.WriteLine($"{Streaming.CountGroups(chunked, ["pclass", "sex"])} groups");
+
+                var summary = Streaming.GroupBy(chunked, ["pclass", "sex"],
+                    ("fare", "mean"), ("survived", "mean"));
+                Console.WriteLine(summary.SortBy([("pclass", true), ("sex", true)]).ToString(12));
+
+                // One pass, constant memory, Welford's variance rather than E[x^2] - E[x]^2.
+                foreach (var (name, stats) in Streaming.Describe(chunked, ["fare", "age"]))
+                    Console.WriteLine($"{name}: n={stats.Count} mean={stats.Mean:F3} sd={stats.StandardDeviation:F3}");
+
+                // External merge sort: two passes and disk space equal to the input. That is
+                // the trade, and it is what lets a sort exceed memory.
+                Streaming.SortToFile(chunked, "fare", "by-fare.csv", descending: true);
+                Streaming.FilterToFile(chunked, (chunk, row) => chunk.Numeric("fare")[row] > 100, "rich.csv");
+                """,
+
+            "sparse" => """
+                using Gravicode.Science.GraviLearn.Linear;
+                using Gravicode.Science.GraviNum;
+                using Gravicode.Science.GraviText.Vectorization;
+
+                // A bag-of-words matrix is around 1% non-zero. The dense copy is almost entirely
+                // zeros that cost the same to store and multiply as any other number - the memory
+                // wall is why this exists, and the speed is a consequence.
+                var vectoriser = new TfidfVectorizer(new VectorizerOptions { MaxFeatures = 30_000 });
+                var x = vectoriser.FitTransformSparse(documents);
+
+                var model = new SparseLogisticRegression(learningRate: 1.0, maxIterations: 200, l2Penalty: 0.01)
+                    .Fit(x, labels);
+
+                Console.WriteLine($"accuracy {model.Score(x, labels):P2} after {model.IterationsRun} iterations");
+
+                // The practical reason to keep a linear model on text: a coefficient reads
+                // directly as "this word moves the decision this far".
+                foreach (var (feature, weight) in model.TopFeatures(15))
+                    Console.WriteLine($"{vectoriser.Vocabulary[feature],-20} {weight,8:F4}");
+
+                // Without L2 on separable data this never converges - the MLE is at infinity.
+                """,
+
+            "distributed" => """
+                using Gravicode.Science.GraviLearn.Distributed;
+                using Gravicode.Science.GraviNum;
+
+                // Bit-identical to single-process training, not merely equivalent: tree t is
+                // seeded from seed + t * 7919, a function of its global index alone, so a shard
+                // boundary cannot change the answer.
+                var forest = new DistributedForest(nTrees: 500, maxDepth: 12, seed: 42)
+                    .Fit(x, y, workers: 8);
+
+                Console.WriteLine($"accuracy {forest.Score(xTest, yTest):P2}");
+
+                // Or the pieces, for a hand-written loop:
+                var shards = DataParallel.Partition(items: x.Shape[0], workers: 8);
+
+                using var transport = new InProcessTransport(workerCount: 8);
+                var server = new ParameterServer(transport);
+
+                foreach (var shard in shards)
+                    server.Contribute(worker, GradientOver(shard), sampleCount: shard.Count);
+
+                // WEIGHTED by sample count. A plain average equals the global gradient only for
+                // equal shards, and Partition produces uneven ones whenever the count does not
+                // divide - unweighted, the model trains to something slightly wrong that no
+                // shape or convergence check would catch.
+                var averaged = server.Aggregate();
+
+                // FileTransport is the same interface over a shared directory: no broker, no
+                // ports, and it crosses machines. Workers write then rename, so a collector
+                // cannot read a half-written payload.
+                """,
+
+            "pretrained" => """
+                using Gravicode.Science.GraviText.Transformers;
+
+                // Names are a convention and the file is the only authority on which one it
+                // follows, so look before loading.
+                foreach (var (name, shape) in TransformerCheckpoint.Inspect("bert-base-uncased.onnx").Take(5))
+                    Console.WriteLine($"{name} [{string.Join(", ", shape)}]");
+
+                var model = new TransformerModel("bert-base", vocabularySize: 30522);
+                var report = TransformerCheckpoint.Load(model, "bert-base-uncased.onnx");
+
+                Console.WriteLine(report);                        // loaded 196, missing 0, unused 3
+                Console.WriteLine(model.HasPretrainedWeights);
+
+                // A different naming convention is usually the whole adaptation:
+                //   CheckpointNames.Reprefixed("roberta.")
+                //   CheckpointNames.Unprefixed
+
+                // No weights ship with this repository. Export your own:
+                //   from transformers import AutoModel
+                //   import torch
+                //   torch.onnx.export(AutoModel.from_pretrained("bert-base-uncased"),
+                //                     torch.zeros(1, 8, dtype=torch.long),
+                //                     "bert-base-uncased.onnx",
+                //                     input_names=["input_ids"], opset_version=13)
+                """,
+
             _ => "Unknown task. Try: classification, regression, clustering, dataframe, " +
                  "explainability, anomaly, tokenizer, ner, forecasting, gaussianprocess, " +
-                 "windowfunctions, heterogeneousgraph, " +
+                 "windowfunctions, heterogeneousgraph, arrow, outofcore, sparse, distributed, " +
+                 "pretrained, " +
                  "timeseries, sentiment, graph, bayesian.",
         };
     }

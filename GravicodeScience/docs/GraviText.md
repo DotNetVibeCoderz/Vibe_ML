@@ -440,6 +440,81 @@ caching the keys and values of tokens already processed. A KV cache makes this l
 single most valuable optimisation for a real generator; it is left out because it doubles the state a
 reader has to hold, and the shapes this runs at do not need it.
 
+## Loading a pretrained checkpoint
+
+`TransformerCheckpoint.Load` fills **every** parameter of a `TransformerModel` from an ONNX
+checkpoint: embeddings, the embedding layer norm, and per layer the four attention projections,
+both feed-forward layers and both layer norms.
+
+```csharp
+var model = new TransformerModel("bert-base", vocabularySize: 30522);
+var report = TransformerCheckpoint.Load(model, "bert-base-uncased.onnx");
+
+Console.WriteLine(report);            // loaded 196, missing 0, unused 3
+Console.WriteLine(model.HasPretrainedWeights);
+```
+
+This closes a gap that was worse than it looked. `LoadOnnxWeights` already existed and loaded the
+embedding *tables* — enough to look up a word vector, and not enough to run the model. Every
+attention and feed-forward weight stayed randomly initialised, so a model reporting
+`HasPretrainedWeights == true` still produced noise shaped like a sentence.
+
+Verified against an **independent NumPy implementation** of the same encoder, agreeing to **2.6e-07**
+— float32 precision, which is what float32 initializers widened to float64 should give. That checks
+the whole stack at once: embeddings, both layer norms, all four projections, the residuals, GELU and
+the attention softmax. A load that is *nearly* right agrees on nothing. See
+`tools/verify/checkpoint_interop.py`.
+
+### Names are data, not inference
+
+A tensor of shape [768, 768] could be a query, key or output projection, and nothing but the name
+says which. So the mapping is explicit:
+
+```csharp
+TransformerCheckpoint.Inspect("model.onnx");           // what does this file actually hold?
+
+CheckpointNames.HuggingFaceBert                        // bert.encoder.layer.{0}.attention.self.query.weight
+CheckpointNames.Reprefixed("roberta.")                 // same layout, different model name
+CheckpointNames.Unprefixed                             // encoder.layer.{0}....
+```
+
+Run `Inspect` first on an unfamiliar file. Names are a convention and the file is the only authority
+on which one it follows.
+
+### Three things it refuses rather than absorbs
+
+**A wrong transpose.** PyTorch's `nn.Linear` stores its weight as (out_features, in_features) and
+computes `x Wᵀ`; `DenseLayer` stores (inputs, outputs) and computes `x W`. A BERT attention
+projection is 768×768 — square, so both readings are consistent and the mistake loads silently and
+produces confident nonsense. The feed-forward weight is 768×3072 and is not square, so the
+orientation is checked against *that* before anything is written.
+
+**A partial checkpoint.** Strict mode throws; lenient mode loads and reports exactly what is
+missing. Either way `HasPretrainedWeights` stays false, because a model with three of twelve layers
+loaded produces output that is neither the checkpoint's nor a random model's, and nothing downstream
+could tell.
+
+**A mismatched architecture.** Shapes are checked rather than trusted, so a checkpoint for a wider
+model fails instead of loading its first columns and looking fine.
+
+### What is not provided
+
+**No weights ship with this repository.** Licensing and size keep a real checkpoint out, so the
+loader is verified against a synthetic one and you bring your own export:
+
+```python
+from transformers import AutoModel
+import torch
+
+model = AutoModel.from_pretrained("bert-base-uncased")
+torch.onnx.export(model, torch.zeros(1, 8, dtype=torch.long), "bert-base-uncased.onnx",
+                  input_names=["input_ids"], opset_version=13)
+```
+
+The tokenizer half is already in place — `BpeTokenizer.Load` and `UnigramTokenizer.Load` read the
+formats published tokenizers ship in, and `WordPieceTokenizer` takes a `Vocabulary` loaded from a
+`vocab.txt`.
+
 ---
 
 ## Visualisations

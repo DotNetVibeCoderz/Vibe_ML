@@ -112,8 +112,8 @@ This was found by running against a real endpoint, not by reading documentation.
 
 ## Templates
 
-**File → New Project** offers fifteen templates. All of them build and run as written — that
-claim is checked by generating every one and building it, not asserted.
+**File → New Project** offers nineteen templates. All of them build *and run* as written — that
+claim is checked by generating every one, building it and executing it, not asserted.
 
 | Template | Produces |
 |---|---|
@@ -132,10 +132,20 @@ claim is checked by generating every one and building it, not asserted.
 | `tokenizer` | Trains BPE and SentencePiece-style tokenizers on your own corpus |
 | `ner` | A CRF-backed entity tagger trained on CoNLL-format annotations |
 | `forecasting` | Kalman filtering, smoothing and forecasting with honest uncertainty |
+| `arrow` | Arrow IPC exchange with pandas, and out-of-core aggregation over a chunked CSV |
+| `sparse-text` | TF-IDF to a CSR matrix, then a linear classifier trained without densifying it |
+| `distributed` | Sharding, weighted gradient averaging and a bit-identical distributed forest |
+| `pretrained` | Loading an exported BERT checkpoint into a `TransformerModel` |
 
-The five added in v0.4 join the categories that already existed — *Machine learning*, *Natural
-language* and *Statistics* — so the picker groups them by what they do rather than by when they
-were written.
+The five added in v0.4 and the four added in v0.5 join the categories that already existed —
+*Data science*, *Machine learning* and *Natural language* — so the picker groups them by what they
+do rather than by when they were written.
+
+Two of them generate their own data (`distributed` builds blobs, `arrow` writes 20,000 rows out
+before reading them back in chunks) because a template that needs the repository's `datasets/`
+folder throws the moment it is created anywhere else. `pretrained` is the exception and says so:
+no weights ship with this repository, so it prints the `torch.onnx.export` call to run first and
+exits rather than failing.
 
 Templates are held in code rather than as loose files, so one cannot go missing from an installed
 copy and the project name is substituted properly rather than by find-and-replace. The generated
