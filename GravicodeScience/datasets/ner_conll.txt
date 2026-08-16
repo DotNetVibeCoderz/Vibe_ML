@@ -1,0 +1,3028 @@
+# Annotated named-entity corpus for GraviText. CoNLL column format:
+# one token and its BIO tag per line, a blank line between sentences.
+# Entity types: PER (person), LOC (location), ORG (organisation).
+# Dibuat oleh Gravicode Studios dipimpin oleh Kang Fadhil
+
+Tim	O
+dari	O
+Bogor	B-LOC
+mengunjungi	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Tim	O
+dari	O
+Bogor	B-LOC
+mengunjungi	O
+Bukalapak	B-ORG
+.	O
+
+Bukit	B-ORG
+Asam	I-ORG
+membuka	O
+kantor	O
+di	O
+Palembang	B-LOC
+.	O
+
+Pertamina	B-ORG
+dan	O
+Telkom	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Tim	O
+dari	O
+Medan	B-LOC
+mengunjungi	O
+Pertamina	B-ORG
+.	O
+
+Rina	B-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Tim	O
+dari	O
+Palembang	B-LOC
+mengunjungi	O
+Pertamina	B-ORG
+.	O
+
+Gravicode	B-ORG
+dan	O
+Telkom	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Putri	B-PER
+Pratama	I-PER
+tinggal	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Kantor	O
+Bukit	B-ORG
+Asam	I-ORG
+berada	O
+di	O
+Malang	B-LOC
+.	O
+
+Produk	O
+Bukalapak	B-ORG
+sangat	O
+populer	O
+.	O
+
+Maya	B-PER
+Rahayu	I-PER
+lahir	O
+di	O
+Bandung	B-LOC
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Jakarta	B-LOC
+kemarin	O
+.	O
+
+Tim	O
+dari	O
+Palembang	B-LOC
+mengunjungi	O
+Tokopedia	B-ORG
+.	O
+
+Budi	B-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Kantor	O
+Bukalapak	B-ORG
+berada	O
+di	O
+Bogor	B-LOC
+.	O
+
+Yusuf	B-PER
+Wijaya	I-PER
+dan	O
+Maya	B-PER
+Setiawan	I-PER
+bertemu	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Fadhil	B-PER
+tinggal	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Menurut	O
+Rina	B-PER
+,	O
+Bukit	B-ORG
+Asam	I-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Bayu	B-PER
+memimpin	O
+tim	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Agus	B-PER
+bekerja	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Kantor	O
+Telkom	B-ORG
+berada	O
+di	O
+Medan	B-LOC
+.	O
+
+Kantor	O
+Gravicode	B-ORG
+berada	O
+di	O
+Makassar	B-LOC
+.	O
+
+Andi	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Menurut	O
+Fadhil	B-PER
+,	O
+Gravicode	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Tim	O
+dari	O
+Denpasar	B-LOC
+mengunjungi	O
+Pertamina	B-ORG
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Bogor	B-LOC
+kemarin	O
+.	O
+
+Menurut	O
+Agus	B-PER
+Santoso	I-PER
+,	O
+Traveloka	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Makassar	B-LOC
+kemarin	O
+.	O
+
+Agus	B-PER
+Pratama	I-PER
+bekerja	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Produk	O
+Tokopedia	B-ORG
+sangat	O
+populer	O
+.	O
+
+Bayu	B-PER
+Wijaya	I-PER
+tinggal	O
+di	O
+Bandung	B-LOC
+.	O
+
+Bukalapak	B-ORG
+membuka	O
+kantor	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Nadia	B-PER
+Nugroho	I-PER
+dan	O
+Bayu	B-PER
+bertemu	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Yusuf	B-PER
+Kusuma	I-PER
+bekerja	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Gojek	B-ORG
+dan	O
+Gojek	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Bukit	B-ORG
+Asam	I-ORG
+dan	O
+Pertamina	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Produk	O
+Traveloka	B-ORG
+sangat	O
+populer	O
+.	O
+
+Pertamina	B-ORG
+membuka	O
+kantor	O
+di	O
+Medan	B-LOC
+.	O
+
+Menurut	O
+Putri	B-PER
+,	O
+Bukalapak	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Bukalapak	B-ORG
+membuka	O
+kantor	O
+di	O
+Palembang	B-LOC
+.	O
+
+Nadia	B-PER
+memimpin	O
+tim	O
+di	O
+Telkom	B-ORG
+.	O
+
+Siti	B-PER
+Pratama	I-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Menurut	O
+Bayu	B-PER
+,	O
+Tokopedia	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Nadia	B-PER
+memimpin	O
+tim	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Budi	B-PER
+dan	O
+Sari	B-PER
+Wijaya	I-PER
+bertemu	O
+di	O
+Medan	B-LOC
+.	O
+
+Menurut	O
+Agus	B-PER
+,	O
+Gravicode	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Rizki	B-PER
+Kusuma	I-PER
+bekerja	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Lestari	B-PER
+Santoso	I-PER
+tinggal	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Kantor	O
+Pertamina	B-ORG
+berada	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Kantor	O
+Pertamina	B-ORG
+berada	O
+di	O
+Malang	B-LOC
+.	O
+
+Sari	B-PER
+tinggal	O
+di	O
+Semarang	B-LOC
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Medan	B-LOC
+.	O
+
+Budi	B-PER
+Rahayu	I-PER
+tinggal	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Kantor	O
+Pertamina	B-ORG
+berada	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Lestari	B-PER
+bekerja	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Bali	B-LOC
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Hendra	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Kantor	O
+Telkom	B-ORG
+berada	O
+di	O
+Palembang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Jakarta	B-LOC
+mengunjungi	O
+Traveloka	B-ORG
+.	O
+
+Sari	B-PER
+Pratama	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Traveloka	B-ORG
+dan	O
+Traveloka	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Siti	B-PER
+Hartono	I-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Semarang	B-LOC
+.	O
+
+Yusuf	B-PER
+memimpin	O
+tim	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Tim	O
+dari	O
+Denpasar	B-LOC
+mengunjungi	O
+Telkom	B-ORG
+.	O
+
+Fadhil	B-PER
+lahir	O
+di	O
+Medan	B-LOC
+.	O
+
+Telkom	B-ORG
+dan	O
+Bukit	B-ORG
+Asam	I-ORG
+bekerja	O
+sama	O
+.	O
+
+Siti	B-PER
+Rahayu	I-PER
+tinggal	O
+di	O
+Malang	B-LOC
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Denpasar	B-LOC
+kemarin	O
+.	O
+
+Lestari	B-PER
+dan	O
+Nadia	B-PER
+Kusuma	I-PER
+bertemu	O
+di	O
+Bogor	B-LOC
+.	O
+
+Gojek	B-ORG
+membuka	O
+kantor	O
+di	O
+Palembang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Denpasar	B-LOC
+mengunjungi	O
+Bukalapak	B-ORG
+.	O
+
+Kantor	O
+Traveloka	B-ORG
+berada	O
+di	O
+Palembang	B-LOC
+.	O
+
+Indah	B-PER
+Kusuma	I-PER
+dan	O
+Bayu	B-PER
+bertemu	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Gojek	B-ORG
+dan	O
+Bukalapak	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Pertamina	B-ORG
+membuka	O
+kantor	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Kantor	O
+Gravicode	B-ORG
+berada	O
+di	O
+Bali	B-LOC
+.	O
+
+Joko	B-PER
+bekerja	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Joko	B-PER
+bekerja	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Sari	B-PER
+memimpin	O
+tim	O
+di	O
+Gojek	B-ORG
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Malang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Semarang	B-LOC
+mengunjungi	O
+Telkom	B-ORG
+.	O
+
+Produk	O
+Gravicode	B-ORG
+sangat	O
+populer	O
+.	O
+
+Rina	B-PER
+dan	O
+Joko	B-PER
+bertemu	O
+di	O
+Malang	B-LOC
+.	O
+
+Kantor	O
+Tokopedia	B-ORG
+berada	O
+di	O
+Palembang	B-LOC
+.	O
+
+Fadhil	B-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Menurut	O
+Rina	B-PER
+,	O
+Telkom	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Tim	O
+dari	O
+Jakarta	B-LOC
+mengunjungi	O
+Gojek	B-ORG
+.	O
+
+Agus	B-PER
+bekerja	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Fadhil	B-PER
+Rahayu	I-PER
+dan	O
+Rina	B-PER
+bertemu	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Menurut	O
+Lestari	B-PER
+Santoso	I-PER
+,	O
+Traveloka	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Bayu	B-PER
+Santoso	I-PER
+bekerja	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Tim	O
+dari	O
+Yogyakarta	B-LOC
+mengunjungi	O
+Gravicode	B-ORG
+.	O
+
+Tono	B-PER
+memimpin	O
+tim	O
+di	O
+Gojek	B-ORG
+.	O
+
+Tim	O
+dari	O
+Semarang	B-LOC
+mengunjungi	O
+Bukalapak	B-ORG
+.	O
+
+Siti	B-PER
+bekerja	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Menurut	O
+Budi	B-PER
+,	O
+Tokopedia	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Hendra	B-PER
+lahir	O
+di	O
+Medan	B-LOC
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Bandung	B-LOC
+.	O
+
+Kantor	O
+Telkom	B-ORG
+berada	O
+di	O
+Bandung	B-LOC
+.	O
+
+Tim	O
+dari	O
+Semarang	B-LOC
+mengunjungi	O
+Traveloka	B-ORG
+.	O
+
+Fadhil	B-PER
+Kusuma	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Indah	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Wati	B-PER
+Nugroho	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Surabaya	B-LOC
+kemarin	O
+.	O
+
+Tim	O
+dari	O
+Surabaya	B-LOC
+mengunjungi	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Tim	O
+dari	O
+Malang	B-LOC
+mengunjungi	O
+Telkom	B-ORG
+.	O
+
+Tono	B-PER
+Hartono	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Produk	O
+Pertamina	B-ORG
+sangat	O
+populer	O
+.	O
+
+Wati	B-PER
+lahir	O
+di	O
+Medan	B-LOC
+.	O
+
+Nadia	B-PER
+dan	O
+Andi	B-PER
+Hartono	I-PER
+bertemu	O
+di	O
+Malang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Yogyakarta	B-LOC
+mengunjungi	O
+Traveloka	B-ORG
+.	O
+
+Fadhil	B-PER
+Setiawan	I-PER
+lahir	O
+di	O
+Bandung	B-LOC
+.	O
+
+Tono	B-PER
+lahir	O
+di	O
+Makassar	B-LOC
+.	O
+
+Yusuf	B-PER
+lahir	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Tim	O
+dari	O
+Jakarta	B-LOC
+mengunjungi	O
+Pertamina	B-ORG
+.	O
+
+Rizki	B-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Joko	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Menurut	O
+Andi	B-PER
+,	O
+Gojek	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Nadia	B-PER
+Pratama	I-PER
+bekerja	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Gravicode	B-ORG
+membuka	O
+kantor	O
+di	O
+Bandung	B-LOC
+.	O
+
+Menurut	O
+Fadhil	B-PER
+Hartono	I-PER
+,	O
+Gojek	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Menurut	O
+Siti	B-PER
+,	O
+Bukit	B-ORG
+Asam	I-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Nadia	B-PER
+bekerja	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Bogor	B-LOC
+.	O
+
+Indah	B-PER
+Santoso	I-PER
+memimpin	O
+tim	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Wati	B-PER
+Santoso	I-PER
+lahir	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Palembang	B-LOC
+.	O
+
+Dewi	B-PER
+Nugroho	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Menurut	O
+Agus	B-PER
+,	O
+Telkom	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Bukalapak	B-ORG
+membuka	O
+kantor	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Indah	B-PER
+Setiawan	I-PER
+dan	O
+Andi	B-PER
+bertemu	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Fadhil	B-PER
+memimpin	O
+tim	O
+di	O
+Telkom	B-ORG
+.	O
+
+Menurut	O
+Lestari	B-PER
+,	O
+Gojek	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Hendra	B-PER
+bekerja	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Siti	B-PER
+Pratama	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Nadia	B-PER
+tinggal	O
+di	O
+Bogor	B-LOC
+.	O
+
+Menurut	O
+Agus	B-PER
+Santoso	I-PER
+,	O
+Pertamina	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Siti	B-PER
+dan	O
+Andi	B-PER
+bertemu	O
+di	O
+Palembang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Jakarta	B-LOC
+mengunjungi	O
+Telkom	B-ORG
+.	O
+
+Kantor	O
+Traveloka	B-ORG
+berada	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Indah	B-PER
+memimpin	O
+tim	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Gojek	B-ORG
+dan	O
+Gravicode	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Bali	B-LOC
+kemarin	O
+.	O
+
+Dewi	B-PER
+tinggal	O
+di	O
+Makassar	B-LOC
+.	O
+
+Tim	O
+dari	O
+Semarang	B-LOC
+mengunjungi	O
+Gojek	B-ORG
+.	O
+
+Nadia	B-PER
+memimpin	O
+tim	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Fadhil	B-PER
+bekerja	O
+di	O
+Gojek	B-ORG
+.	O
+
+Bayu	B-PER
+bekerja	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Dewi	B-PER
+dan	O
+Bayu	B-PER
+bertemu	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Kantor	O
+Gojek	B-ORG
+berada	O
+di	O
+Makassar	B-LOC
+.	O
+
+Agus	B-PER
+Santoso	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Maya	B-PER
+bekerja	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Lestari	B-PER
+Pratama	I-PER
+bekerja	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Maya	B-PER
+dan	O
+Bayu	B-PER
+Santoso	I-PER
+bertemu	O
+di	O
+Bogor	B-LOC
+.	O
+
+Sari	B-PER
+Kusuma	I-PER
+bekerja	O
+di	O
+Telkom	B-ORG
+.	O
+
+Yusuf	B-PER
+Pratama	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Putri	B-PER
+bekerja	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Tim	O
+dari	O
+Makassar	B-LOC
+mengunjungi	O
+Gravicode	B-ORG
+.	O
+
+Bayu	B-PER
+Pratama	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Joko	B-PER
+Nugroho	I-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Siti	B-PER
+lahir	O
+di	O
+Palembang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Palembang	B-LOC
+mengunjungi	O
+Telkom	B-ORG
+.	O
+
+Rina	B-PER
+lahir	O
+di	O
+Makassar	B-LOC
+.	O
+
+Traveloka	B-ORG
+membuka	O
+kantor	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Bukit	B-ORG
+Asam	I-ORG
+membuka	O
+kantor	O
+di	O
+Bogor	B-LOC
+.	O
+
+Gravicode	B-ORG
+dan	O
+Traveloka	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Tim	O
+dari	O
+Makassar	B-LOC
+mengunjungi	O
+Tokopedia	B-ORG
+.	O
+
+Maya	B-PER
+Nugroho	I-PER
+lahir	O
+di	O
+Bogor	B-LOC
+.	O
+
+Joko	B-PER
+dan	O
+Maya	B-PER
+bertemu	O
+di	O
+Palembang	B-LOC
+.	O
+
+Putri	B-PER
+Pratama	I-PER
+dan	O
+Indah	B-PER
+bertemu	O
+di	O
+Palembang	B-LOC
+.	O
+
+Hendra	B-PER
+Setiawan	I-PER
+memimpin	O
+tim	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Gojek	B-ORG
+dan	O
+Telkom	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Putri	B-PER
+dan	O
+Siti	B-PER
+Rahayu	I-PER
+bertemu	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Telkom	B-ORG
+dan	O
+Gravicode	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Traveloka	B-ORG
+dan	O
+Bukit	B-ORG
+Asam	I-ORG
+bekerja	O
+sama	O
+.	O
+
+Rina	B-PER
+Nugroho	I-PER
+bekerja	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Andi	B-PER
+Setiawan	I-PER
+bekerja	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Tokopedia	B-ORG
+dan	O
+Traveloka	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Kantor	O
+Pertamina	B-ORG
+berada	O
+di	O
+Medan	B-LOC
+.	O
+
+Menurut	O
+Tono	B-PER
+,	O
+Tokopedia	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Lestari	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Yusuf	B-PER
+Kusuma	I-PER
+dan	O
+Putri	B-PER
+bertemu	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Bandung	B-LOC
+kemarin	O
+.	O
+
+Indah	B-PER
+Pratama	I-PER
+tinggal	O
+di	O
+Malang	B-LOC
+.	O
+
+Wati	B-PER
+Hartono	I-PER
+tinggal	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Dewi	B-PER
+Kusuma	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Semarang	B-LOC
+kemarin	O
+.	O
+
+Tim	O
+dari	O
+Denpasar	B-LOC
+mengunjungi	O
+Gojek	B-ORG
+.	O
+
+Menurut	O
+Sari	B-PER
+Santoso	I-PER
+,	O
+Telkom	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Nadia	B-PER
+Kusuma	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Lestari	B-PER
+memimpin	O
+tim	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Malang	B-LOC
+kemarin	O
+.	O
+
+Kantor	O
+Tokopedia	B-ORG
+berada	O
+di	O
+Bogor	B-LOC
+.	O
+
+Dewi	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Yusuf	B-PER
+memimpin	O
+tim	O
+di	O
+Telkom	B-ORG
+.	O
+
+Yusuf	B-PER
+Rahayu	I-PER
+lahir	O
+di	O
+Palembang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Medan	B-LOC
+mengunjungi	O
+Gravicode	B-ORG
+.	O
+
+Nadia	B-PER
+Wijaya	I-PER
+bekerja	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Tim	O
+dari	O
+Bali	B-LOC
+mengunjungi	O
+Gojek	B-ORG
+.	O
+
+Putri	B-PER
+dan	O
+Hendra	B-PER
+Nugroho	I-PER
+bertemu	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Tokopedia	B-ORG
+dan	O
+Bukit	B-ORG
+Asam	I-ORG
+bekerja	O
+sama	O
+.	O
+
+Maya	B-PER
+lahir	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Kantor	O
+Bukalapak	B-ORG
+berada	O
+di	O
+Makassar	B-LOC
+.	O
+
+Menurut	O
+Lestari	B-PER
+Pratama	I-PER
+,	O
+Gojek	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Traveloka	B-ORG
+dan	O
+Bukalapak	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Kantor	O
+Traveloka	B-ORG
+berada	O
+di	O
+Bogor	B-LOC
+.	O
+
+Pertamina	B-ORG
+membuka	O
+kantor	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Maya	B-PER
+bekerja	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Menurut	O
+Wati	B-PER
+,	O
+Pertamina	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Tokopedia	B-ORG
+dan	O
+Gravicode	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Maya	B-PER
+bekerja	O
+di	O
+Telkom	B-ORG
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Palembang	B-LOC
+kemarin	O
+.	O
+
+Telkom	B-ORG
+membuka	O
+kantor	O
+di	O
+Bali	B-LOC
+.	O
+
+Menurut	O
+Sari	B-PER
+,	O
+Gojek	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Kantor	O
+Gojek	B-ORG
+berada	O
+di	O
+Palembang	B-LOC
+.	O
+
+Bukit	B-ORG
+Asam	I-ORG
+membuka	O
+kantor	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Budi	B-PER
+lahir	O
+di	O
+Bali	B-LOC
+.	O
+
+Budi	B-PER
+Rahayu	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Tono	B-PER
+lahir	O
+di	O
+Semarang	B-LOC
+.	O
+
+Indah	B-PER
+Santoso	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Menurut	O
+Bayu	B-PER
+,	O
+Pertamina	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Joko	B-PER
+memimpin	O
+tim	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Tim	O
+dari	O
+Medan	B-LOC
+mengunjungi	O
+Telkom	B-ORG
+.	O
+
+Dewi	B-PER
+dan	O
+Rizki	B-PER
+bertemu	O
+di	O
+Bandung	B-LOC
+.	O
+
+Bukit	B-ORG
+Asam	I-ORG
+dan	O
+Gravicode	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Kantor	O
+Telkom	B-ORG
+berada	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Gojek	B-ORG
+membuka	O
+kantor	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Bukalapak	B-ORG
+dan	O
+Bukit	B-ORG
+Asam	I-ORG
+bekerja	O
+sama	O
+.	O
+
+Tokopedia	B-ORG
+membuka	O
+kantor	O
+di	O
+Makassar	B-LOC
+.	O
+
+Tokopedia	B-ORG
+membuka	O
+kantor	O
+di	O
+Palembang	B-LOC
+.	O
+
+Wati	B-PER
+lahir	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Tim	O
+dari	O
+Makassar	B-LOC
+mengunjungi	O
+Gojek	B-ORG
+.	O
+
+Sari	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Andi	B-PER
+Setiawan	I-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Putri	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Lestari	B-PER
+tinggal	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Hendra	B-PER
+Santoso	I-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Pertamina	B-ORG
+membuka	O
+kantor	O
+di	O
+Bandung	B-LOC
+.	O
+
+Menurut	O
+Andi	B-PER
+,	O
+Pertamina	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Nadia	B-PER
+Wijaya	I-PER
+bekerja	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Yusuf	B-PER
+bekerja	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Indah	B-PER
+tinggal	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Agus	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Tono	B-PER
+tinggal	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Tokopedia	B-ORG
+membuka	O
+kantor	O
+di	O
+Semarang	B-LOC
+.	O
+
+Wati	B-PER
+Hartono	I-PER
+dan	O
+Budi	B-PER
+bertemu	O
+di	O
+Semarang	B-LOC
+.	O
+
+Siti	B-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Sari	B-PER
+tinggal	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Rizki	B-PER
+dan	O
+Agus	B-PER
+bertemu	O
+di	O
+Malang	B-LOC
+.	O
+
+Maya	B-PER
+memimpin	O
+tim	O
+di	O
+Gojek	B-ORG
+.	O
+
+Budi	B-PER
+Hartono	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Menurut	O
+Siti	B-PER
+Nugroho	I-PER
+,	O
+Tokopedia	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Hendra	B-PER
+dan	O
+Bayu	B-PER
+Wijaya	I-PER
+bertemu	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Telkom	B-ORG
+membuka	O
+kantor	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Bukalapak	B-ORG
+membuka	O
+kantor	O
+di	O
+Makassar	B-LOC
+.	O
+
+Yusuf	B-PER
+tinggal	O
+di	O
+Bali	B-LOC
+.	O
+
+Rina	B-PER
+Santoso	I-PER
+bekerja	O
+di	O
+Telkom	B-ORG
+.	O
+
+Budi	B-PER
+Nugroho	I-PER
+memimpin	O
+tim	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Agus	B-PER
+Santoso	I-PER
+lahir	O
+di	O
+Bali	B-LOC
+.	O
+
+Indah	B-PER
+memimpin	O
+tim	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Rapat	O
+itu	O
+diadakan	O
+di	O
+Makassar	B-LOC
+.	O
+
+Hendra	B-PER
+Kusuma	I-PER
+lahir	O
+di	O
+Semarang	B-LOC
+.	O
+
+Siti	B-PER
+dan	O
+Agus	B-PER
+bertemu	O
+di	O
+Bogor	B-LOC
+.	O
+
+Kantor	O
+Tokopedia	B-ORG
+berada	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Pertamina	B-ORG
+dan	O
+Tokopedia	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Maya	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Nadia	B-PER
+Santoso	I-PER
+lahir	O
+di	O
+Malang	B-LOC
+.	O
+
+Agus	B-PER
+lahir	O
+di	O
+Malang	B-LOC
+.	O
+
+Agus	B-PER
+tinggal	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Traveloka	B-ORG
+dan	O
+Gojek	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Kantor	O
+Telkom	B-ORG
+berada	O
+di	O
+Semarang	B-LOC
+.	O
+
+Siti	B-PER
+dan	O
+Andi	B-PER
+bertemu	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Telkom	B-ORG
+dan	O
+Tokopedia	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Gojek	B-ORG
+membuka	O
+kantor	O
+di	O
+Malang	B-LOC
+.	O
+
+Telkom	B-ORG
+membuka	O
+kantor	O
+di	O
+Bandung	B-LOC
+.	O
+
+Lestari	B-PER
+dan	O
+Yusuf	B-PER
+Nugroho	I-PER
+bertemu	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Telkom	B-ORG
+membuka	O
+kantor	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Andi	B-PER
+Hartono	I-PER
+tinggal	O
+di	O
+Palembang	B-LOC
+.	O
+
+Gravicode	B-ORG
+dan	O
+Pertamina	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Menurut	O
+Rina	B-PER
+Santoso	I-PER
+,	O
+Traveloka	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Dewi	B-PER
+bekerja	O
+di	O
+Gojek	B-ORG
+.	O
+
+Putri	B-PER
+Nugroho	I-PER
+lahir	O
+di	O
+Bandung	B-LOC
+.	O
+
+Sari	B-PER
+Wijaya	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Traveloka	B-ORG
+dan	O
+Tokopedia	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Tim	O
+dari	O
+Denpasar	B-LOC
+mengunjungi	O
+Traveloka	B-ORG
+.	O
+
+Tono	B-PER
+bekerja	O
+di	O
+Gojek	B-ORG
+.	O
+
+Indah	B-PER
+lahir	O
+di	O
+Bandung	B-LOC
+.	O
+
+Kantor	O
+Gravicode	B-ORG
+berada	O
+di	O
+Medan	B-LOC
+.	O
+
+Nadia	B-PER
+memimpin	O
+tim	O
+di	O
+Gojek	B-ORG
+.	O
+
+Yusuf	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Rizki	B-PER
+Kusuma	I-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Siti	B-PER
+tinggal	O
+di	O
+Bogor	B-LOC
+.	O
+
+Menurut	O
+Bayu	B-PER
+,	O
+Bukalapak	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Lestari	B-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Pertamina	B-ORG
+dan	O
+Bukalapak	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Budi	B-PER
+memimpin	O
+tim	O
+di	O
+Telkom	B-ORG
+.	O
+
+Siti	B-PER
+lahir	O
+di	O
+Bogor	B-LOC
+.	O
+
+Maya	B-PER
+Pratama	I-PER
+dan	O
+Budi	B-PER
+Rahayu	I-PER
+bertemu	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Gojek	B-ORG
+membuka	O
+kantor	O
+di	O
+Bali	B-LOC
+.	O
+
+Bukalapak	B-ORG
+dan	O
+Gravicode	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Hendra	B-PER
+Hartono	I-PER
+dan	O
+Andi	B-PER
+Rahayu	I-PER
+bertemu	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Menurut	O
+Rina	B-PER
+Kusuma	I-PER
+,	O
+Gojek	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Produk	O
+Gojek	B-ORG
+sangat	O
+populer	O
+.	O
+
+Tim	O
+dari	O
+Bandung	B-LOC
+mengunjungi	O
+Pertamina	B-ORG
+.	O
+
+Putri	B-PER
+Kusuma	I-PER
+lahir	O
+di	O
+Bandung	B-LOC
+.	O
+
+Hendra	B-PER
+dan	O
+Joko	B-PER
+bertemu	O
+di	O
+Makassar	B-LOC
+.	O
+
+Kantor	O
+Bukit	B-ORG
+Asam	I-ORG
+berada	O
+di	O
+Makassar	B-LOC
+.	O
+
+Maya	B-PER
+Wijaya	I-PER
+bekerja	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Putri	B-PER
+Hartono	I-PER
+dan	O
+Lestari	B-PER
+bertemu	O
+di	O
+Palembang	B-LOC
+.	O
+
+Yusuf	B-PER
+lahir	O
+di	O
+Bogor	B-LOC
+.	O
+
+Menurut	O
+Dewi	B-PER
+,	O
+Bukalapak	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Budi	B-PER
+Rahayu	I-PER
+dan	O
+Rizki	B-PER
+bertemu	O
+di	O
+Bogor	B-LOC
+.	O
+
+Rina	B-PER
+bekerja	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Tokopedia	B-ORG
+dan	O
+Tokopedia	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Budi	B-PER
+memimpin	O
+tim	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Agus	B-PER
+dan	O
+Joko	B-PER
+Pratama	I-PER
+bertemu	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Rina	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Bukit	B-ORG
+Asam	I-ORG
+dan	O
+Traveloka	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Sari	B-PER
+tinggal	O
+di	O
+Bandung	B-LOC
+.	O
+
+Telkom	B-ORG
+membuka	O
+kantor	O
+di	O
+Bogor	B-LOC
+.	O
+
+Kantor	O
+Bukit	B-ORG
+Asam	I-ORG
+berada	O
+di	O
+Bandung	B-LOC
+.	O
+
+Tono	B-PER
+Santoso	I-PER
+lahir	O
+di	O
+Malang	B-LOC
+.	O
+
+Siti	B-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Putri	B-PER
+lahir	O
+di	O
+Medan	B-LOC
+.	O
+
+Produk	O
+Bukit	B-ORG
+Asam	I-ORG
+sangat	O
+populer	O
+.	O
+
+Nadia	B-PER
+Pratama	I-PER
+dan	O
+Dewi	B-PER
+bertemu	O
+di	O
+Semarang	B-LOC
+.	O
+
+Gravicode	B-ORG
+membuka	O
+kantor	O
+di	O
+Malang	B-LOC
+.	O
+
+Tim	O
+dari	O
+Makassar	B-LOC
+mengunjungi	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Dewi	B-PER
+Kusuma	I-PER
+bekerja	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Rina	B-PER
+Nugroho	I-PER
+tinggal	O
+di	O
+Malang	B-LOC
+.	O
+
+Yusuf	B-PER
+Rahayu	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Tono	B-PER
+bekerja	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Dewi	B-PER
+Rahayu	I-PER
+memimpin	O
+tim	O
+di	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Rizki	B-PER
+Nugroho	I-PER
+tinggal	O
+di	O
+Bali	B-LOC
+.	O
+
+Menurut	O
+Rina	B-PER
+,	O
+Pertamina	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Tim	O
+dari	O
+Malang	B-LOC
+mengunjungi	O
+Pertamina	B-ORG
+.	O
+
+Tono	B-PER
+Santoso	I-PER
+tinggal	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Sari	B-PER
+memimpin	O
+tim	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Nadia	B-PER
+bekerja	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Wati	B-PER
+Kusuma	I-PER
+dan	O
+Budi	B-PER
+Kusuma	I-PER
+bertemu	O
+di	O
+Semarang	B-LOC
+.	O
+
+Nadia	B-PER
+Kusuma	I-PER
+dan	O
+Bayu	B-PER
+Pratama	I-PER
+bertemu	O
+di	O
+Bali	B-LOC
+.	O
+
+Rina	B-PER
+Kusuma	I-PER
+memimpin	O
+tim	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Kantor	O
+Bukalapak	B-ORG
+berada	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Menurut	O
+Maya	B-PER
+,	O
+Bukit	B-ORG
+Asam	I-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Menurut	O
+Indah	B-PER
+,	O
+Telkom	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Lestari	B-PER
+tinggal	O
+di	O
+Medan	B-LOC
+.	O
+
+Agus	B-PER
+Hartono	I-PER
+lahir	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Kantor	O
+Gravicode	B-ORG
+berada	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Bukalapak	B-ORG
+membuka	O
+kantor	O
+di	O
+Bali	B-LOC
+.	O
+
+Produk	O
+Telkom	B-ORG
+sangat	O
+populer	O
+.	O
+
+Bayu	B-PER
+tinggal	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Bayu	B-PER
+bekerja	O
+di	O
+Gojek	B-ORG
+.	O
+
+Tono	B-PER
+dan	O
+Maya	B-PER
+bertemu	O
+di	O
+Makassar	B-LOC
+.	O
+
+Tono	B-PER
+Santoso	I-PER
+tinggal	O
+di	O
+Bandung	B-LOC
+.	O
+
+Menurut	O
+Indah	B-PER
+Rahayu	I-PER
+,	O
+Pertamina	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Joko	B-PER
+lahir	O
+di	O
+Semarang	B-LOC
+.	O
+
+Bukalapak	B-ORG
+membuka	O
+kantor	O
+di	O
+Medan	B-LOC
+.	O
+
+Bayu	B-PER
+lahir	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Lestari	B-PER
+memimpin	O
+tim	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Lestari	B-PER
+Kusuma	I-PER
+bekerja	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Sari	B-PER
+tinggal	O
+di	O
+Malang	B-LOC
+.	O
+
+Maya	B-PER
+tinggal	O
+di	O
+Palembang	B-LOC
+.	O
+
+Siti	B-PER
+lahir	O
+di	O
+Semarang	B-LOC
+.	O
+
+Menurut	O
+Joko	B-PER
+,	O
+Telkom	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Bayu	B-PER
+Rahayu	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Hendra	B-PER
+tinggal	O
+di	O
+Medan	B-LOC
+.	O
+
+Tim	O
+dari	O
+Bali	B-LOC
+mengunjungi	O
+Tokopedia	B-ORG
+.	O
+
+Menurut	O
+Bayu	B-PER
+Kusuma	I-PER
+,	O
+Bukit	B-ORG
+Asam	I-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Putri	B-PER
+Wijaya	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Sari	B-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Fadhil	B-PER
+dan	O
+Siti	B-PER
+bertemu	O
+di	O
+Semarang	B-LOC
+.	O
+
+Joko	B-PER
+bekerja	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Yusuf	B-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Rina	B-PER
+Nugroho	I-PER
+dan	O
+Lestari	B-PER
+Hartono	I-PER
+bertemu	O
+di	O
+Medan	B-LOC
+.	O
+
+Lestari	B-PER
+memimpin	O
+tim	O
+di	O
+Gravicode	B-ORG
+.	O
+
+Bukalapak	B-ORG
+dan	O
+Telkom	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Rizki	B-PER
+Rahayu	I-PER
+bekerja	O
+di	O
+Traveloka	B-ORG
+.	O
+
+Andi	B-PER
+Hartono	I-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Tim	O
+dari	O
+Semarang	B-LOC
+mengunjungi	O
+Bukit	B-ORG
+Asam	I-ORG
+.	O
+
+Agus	B-PER
+Hartono	I-PER
+tinggal	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Putri	B-PER
+dan	O
+Wati	B-PER
+bertemu	O
+di	O
+Makassar	B-LOC
+.	O
+
+Sari	B-PER
+Wijaya	I-PER
+tinggal	O
+di	O
+Malang	B-LOC
+.	O
+
+Fadhil	B-PER
+Nugroho	I-PER
+dan	O
+Agus	B-PER
+bertemu	O
+di	O
+Bali	B-LOC
+.	O
+
+Agus	B-PER
+memimpin	O
+tim	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Wati	B-PER
+Rahayu	I-PER
+memimpin	O
+tim	O
+di	O
+Bukalapak	B-ORG
+.	O
+
+Saya	O
+pergi	O
+ke	O
+Yogyakarta	B-LOC
+kemarin	O
+.	O
+
+Kantor	O
+Gojek	B-ORG
+berada	O
+di	O
+Bali	B-LOC
+.	O
+
+Pertamina	B-ORG
+membuka	O
+kantor	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Sari	B-PER
+lahir	O
+di	O
+Bandung	B-LOC
+.	O
+
+Bayu	B-PER
+Setiawan	I-PER
+tinggal	O
+di	O
+Medan	B-LOC
+.	O
+
+Hendra	B-PER
+Santoso	I-PER
+dan	O
+Agus	B-PER
+Santoso	I-PER
+bertemu	O
+di	O
+Malang	B-LOC
+.	O
+
+Andi	B-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Agus	B-PER
+Setiawan	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Tokopedia	B-ORG
+dan	O
+Bukalapak	B-ORG
+bekerja	O
+sama	O
+.	O
+
+Andi	B-PER
+tinggal	O
+di	O
+Medan	B-LOC
+.	O
+
+Bayu	B-PER
+Setiawan	I-PER
+memimpin	O
+tim	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Siti	B-PER
+Pratama	I-PER
+tinggal	O
+di	O
+Yogyakarta	B-LOC
+.	O
+
+Wati	B-PER
+Wijaya	I-PER
+dan	O
+Fadhil	B-PER
+Rahayu	I-PER
+bertemu	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Menurut	O
+Nadia	B-PER
+Setiawan	I-PER
+,	O
+Pertamina	B-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Andi	B-PER
+Rahayu	I-PER
+lahir	O
+di	O
+Surabaya	B-LOC
+.	O
+
+Joko	B-PER
+lahir	O
+di	O
+Denpasar	B-LOC
+.	O
+
+Hendra	B-PER
+Pratama	I-PER
+memimpin	O
+tim	O
+di	O
+Tokopedia	B-ORG
+.	O
+
+Budi	B-PER
+Rahayu	I-PER
+dan	O
+Wati	B-PER
+Hartono	I-PER
+bertemu	O
+di	O
+Bogor	B-LOC
+.	O
+
+Fadhil	B-PER
+Hartono	I-PER
+tinggal	O
+di	O
+Palembang	B-LOC
+.	O
+
+Hendra	B-PER
+Rahayu	I-PER
+bekerja	O
+di	O
+Pertamina	B-ORG
+.	O
+
+Indah	B-PER
+Rahayu	I-PER
+menulis	O
+laporan	O
+itu	O
+.	O
+
+Wati	B-PER
+Setiawan	I-PER
+tinggal	O
+di	O
+Bogor	B-LOC
+.	O
+
+Nadia	B-PER
+Hartono	I-PER
+tinggal	O
+di	O
+Medan	B-LOC
+.	O
+
+Menurut	O
+Putri	B-PER
+,	O
+Bukit	B-ORG
+Asam	I-ORG
+tumbuh	O
+pesat	O
+.	O
+
+Telkom	B-ORG
+membuka	O
+kantor	O
+di	O
+Palembang	B-LOC
+.	O
+
+Fadhil	B-PER
+Hartono	I-PER
+bekerja	O
+di	O
+Telkom	B-ORG
+.	O
+
+Agus	B-PER
+lahir	O
+di	O
+Jakarta	B-LOC
+.	O
+
+Kantor	O
+Gravicode	B-ORG
+berada	O
+di	O
+Bogor	B-LOC
+.	O
+
+Sari	B-PER
+dan	O
+Wati	B-PER
+Wijaya	I-PER
+bertemu	O
+di	O
+Denpasar	B-LOC
+.	O

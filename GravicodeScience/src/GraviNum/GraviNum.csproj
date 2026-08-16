@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.GraviNum</RootNamespace>
+    <AssemblyName>Gravicode.Science.GraviNum</AssemblyName>
+    <PackageId>Gravicode.Science.GraviNum</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ILGPU" />
+    <PackageReference Include="ILGPU.Algorithms" />
+  </ItemGroup>
+
+</Project>

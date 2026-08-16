@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.GraviLearn</RootNamespace>
+    <AssemblyName>Gravicode.Science.GraviLearn</AssemblyName>
+    <PackageId>Gravicode.Science.GraviLearn</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviNum\GraviNum.csproj" />
+    <ProjectReference Include="..\GraviFrame\GraviFrame.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,122 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScienceAppGen.ViewModels"
+             x:Class="ScienceAppGen.Views.ChatView"
+             x:DataType="vm:ChatViewModel">
+
+  <Border Background="{DynamicResource PanelGround}"
+          BorderBrush="{DynamicResource BorderSoft}" BorderThickness="1,0,0,0">
+    <Grid RowDefinitions="Auto,*,Auto,Auto">
+
+      <!-- ============================================ header + model picker -->
+      <Border Grid.Row="0" Padding="12,8" BorderBrush="{DynamicResource BorderSoft}"
+              BorderThickness="0,0,0,1">
+        <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
+
+          <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+              <!-- Jack's mark: the assistant band from the spectrum. -->
+              <Border Width="3" Height="15" CornerRadius="2" Background="{DynamicResource Spec6}"
+                      VerticalAlignment="Center" />
+              <TextBlock Text="JACK" Classes="panelHeader" />
+              <TextBlock Text="THE CODE BENDER" Classes="panelHeader"
+                         Foreground="{DynamicResource TextFaintBrush}" />
+            </StackPanel>
+
+            <Button Grid.Column="2" Classes="icon" Content="⌫" Click="OnClearThread"
+                    ToolTip.Tip="Clear conversation" FontSize="12" />
+          </Grid>
+
+          <ComboBox Grid.Row="1" Classes="field" HorizontalAlignment="Stretch"
+                    ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}"
+                    ToolTip.Tip="Model used for the next message" />
+        </Grid>
+      </Border>
+
+      <!-- ============================================ transcript -->
+      <ScrollViewer Name="Transcript" Grid.Row="1" Padding="12,10">
+        <ItemsControl ItemsSource="{Binding Messages}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Margin="0,0,0,14" Padding="11,9" CornerRadius="{DynamicResource RadiusMedium}"
+                      Background="{DynamicResource RaisedGround}">
+                <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+
+                  <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+                    <Border Width="3" Height="12" CornerRadius="2" VerticalAlignment="Center"
+                            Background="{DynamicResource AccentBrush}" />
+                    <TextBlock Text="{Binding Speaker}" Classes="panelHeader" />
+                    <TextBlock Text="{Binding Time}" Classes="caption"
+                               Foreground="{DynamicResource TextFaintBrush}" FontSize="10" />
+                  </StackPanel>
+
+                  <SelectableTextBlock Grid.Row="1" Text="{Binding Display}" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource FontSmall}"
+                                       Foreground="{DynamicResource TextBaseBrush}"
+                                       LineHeight="19" />
+
+                  <TextBlock Grid.Row="2" Classes="caption" FontSize="10"
+                             Text="{Binding AttachmentSummary, StringFormat='📎 {0}'}"
+                             IsVisible="{Binding HasAttachments}" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+
+      <!-- ============================================ status + attachments -->
+      <StackPanel Grid.Row="2" Margin="12,0,12,6" Spacing="6">
+        <TextBlock Classes="caption" Text="{Binding StatusText}" FontSize="11"
+                   Foreground="{DynamicResource AccentBrush}"
+                   IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+        <ItemsControl ItemsSource="{Binding PendingAttachments}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Background="{DynamicResource RaisedGround}" CornerRadius="{DynamicResource RadiusSmall}"
+                      Padding="7,3" Margin="0,0,5,5">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="📎" FontSize="10" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding}" Classes="caption" FontSize="10"
+                             MaxWidth="150" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  <Button Classes="icon" Content="✕" Width="14" Height="14" FontSize="8"
+                          Click="OnRemoveAttachment" Tag="{Binding}" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <!-- ============================================ composer -->
+      <Border Grid.Row="3" Padding="12,10" BorderBrush="{DynamicResource BorderSoft}"
+              BorderThickness="0,1,0,0">
+        <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
+
+          <TextBox Name="Composer" Grid.Row="0" Classes="field"
+                   Text="{Binding Composer}"
+                   Watermark="Ask Jack to build something…"
+                   AcceptsReturn="True" TextWrapping="Wrap"
+                   MinHeight="72" MaxHeight="190"
+                   VerticalContentAlignment="Top"
+                   KeyDown="OnComposerKeyDown" />
+
+          <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto">
+            <Button Grid.Column="0" Classes="ghost" Content="Attach image" Click="OnAttach" />
+            <Button Grid.Column="2" Classes="primary" Click="OnSend"
+                    IsEnabled="{Binding CanSend}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Send" VerticalAlignment="Center" />
+                <TextBlock Text="Ctrl+↵" FontSize="10" Opacity="0.65" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</UserControl>

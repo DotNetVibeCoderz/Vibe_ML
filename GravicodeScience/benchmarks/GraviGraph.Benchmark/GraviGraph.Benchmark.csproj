@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.Benchmarks.GraviGraph</RootNamespace>
+    <AssemblyName>GraviGraph.Benchmark</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <ProjectReference Include="..\..\src\GraviGraph\GraviGraph.csproj" />
+  </ItemGroup>
+
+</Project>

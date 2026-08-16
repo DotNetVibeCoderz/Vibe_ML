@@ -1,0 +1,357 @@
+{
+  "Stack": "python",
+  "Runtime": "Python 3.12.10",
+  "Processors": 8,
+  "SimdWidth": 0,
+  "TimestampUtc": "2026-08-13T08:08:21.074957+00:00",
+  "Versions": {
+    "numpy": "2.4.4",
+    "pandas": "3.0.3",
+    "scipy": "1.17.1",
+    "networkx": "3.6.1"
+  },
+  "Results": [
+    {
+      "Id": "matmul_256",
+      "Library": "NumPy",
+      "Operation": "256x256 matrix product",
+      "MedianMs": 0.40689995512366295,
+      "MinMs": 0.3657999914139509,
+      "MaxMs": 0.4284000024199486,
+      "Repeats": 7
+    },
+    {
+      "Id": "matmul_512",
+      "Library": "NumPy",
+      "Operation": "512x512 matrix product",
+      "MedianMs": 3.0666999518871307,
+      "MinMs": 2.7836000081151724,
+      "MaxMs": 4.948199959471822,
+      "Repeats": 7
+    },
+    {
+      "Id": "matmul_1024",
+      "Library": "NumPy",
+      "Operation": "1024x1024 matrix product",
+      "MedianMs": 27.757400064729154,
+      "MinMs": 25.107000023126602,
+      "MaxMs": 36.53809998650104,
+      "Repeats": 7
+    },
+    {
+      "Id": "elementwise_add_1000000",
+      "Library": "NumPy",
+      "Operation": "element-wise add, 1,000,000 elements",
+      "MedianMs": 4.804999916814268,
+      "MinMs": 4.613999975845218,
+      "MaxMs": 5.537200020626187,
+      "Repeats": 7
+    },
+    {
+      "Id": "elementwise_add_10000000",
+      "Library": "NumPy",
+      "Operation": "element-wise add, 10,000,000 elements",
+      "MedianMs": 47.20689996611327,
+      "MinMs": 43.9439999172464,
+      "MaxMs": 48.24270005337894,
+      "Repeats": 7
+    },
+    {
+      "Id": "lu_256",
+      "Library": "SciPy",
+      "Operation": "LU factorisation, 256x256",
+      "MedianMs": 3.2825000816956162,
+      "MinMs": 3.186300047673285,
+      "MaxMs": 3.5294999834150076,
+      "Repeats": 7
+    },
+    {
+      "Id": "qr_256",
+      "Library": "NumPy",
+      "Operation": "QR factorisation, 256x256",
+      "MedianMs": 10.356100043281913,
+      "MinMs": 9.921299992129207,
+      "MaxMs": 12.268400052562356,
+      "Repeats": 7
+    },
+    {
+      "Id": "cholesky_256",
+      "Library": "NumPy",
+      "Operation": "Cholesky factorisation, 256x256",
+      "MedianMs": 1.2272000312805176,
+      "MinMs": 1.1588999768719077,
+      "MaxMs": 1.3195000356063247,
+      "Repeats": 7
+    },
+    {
+      "Id": "svd_256",
+      "Library": "NumPy",
+      "Operation": "SVD, 256x256",
+      "MedianMs": 27.113899937830865,
+      "MinMs": 27.011399972252548,
+      "MaxMs": 28.364700032398105,
+      "Repeats": 3
+    },
+    {
+      "Id": "eigh_256",
+      "Library": "NumPy",
+      "Operation": "symmetric eigen, 256x256",
+      "MedianMs": 19.744199933484197,
+      "MinMs": 18.268899992108345,
+      "MaxMs": 19.99130006879568,
+      "Repeats": 3
+    },
+    {
+      "Id": "solve_256",
+      "Library": "NumPy",
+      "Operation": "solve Ax=b, 256x256",
+      "MedianMs": 6.176199996843934,
+      "MinMs": 5.347999976947904,
+      "MaxMs": 10.569700039923191,
+      "Repeats": 7
+    },
+    {
+      "Id": "inverse_256",
+      "Library": "NumPy",
+      "Operation": "matrix inverse, 256x256",
+      "MedianMs": 9.896399918943644,
+      "MinMs": 7.833799929358065,
+      "MaxMs": 11.260599945671856,
+      "Repeats": 7
+    },
+    {
+      "Id": "sparse_matvec_2000",
+      "Library": "SciPy",
+      "Operation": "sparse matrix-vector, 2000x2000 @ 1%",
+      "MedianMs": 0.05579995922744274,
+      "MinMs": 0.05449994932860136,
+      "MaxMs": 0.062700011767447,
+      "Repeats": 7
+    },
+    {
+      "Id": "dense_matvec_2000",
+      "Library": "NumPy",
+      "Operation": "dense matrix-vector, 2000x2000",
+      "MedianMs": 1.9717999966815114,
+      "MinMs": 1.8823000136762857,
+      "MaxMs": 2.0326999947428703,
+      "Repeats": 7
+    },
+    {
+      "Id": "random_normal_1m",
+      "Library": "NumPy",
+      "Operation": "1,000,000 normal deviates",
+      "MedianMs": 16.217299969866872,
+      "MinMs": 15.530899981968105,
+      "MaxMs": 17.21610000822693,
+      "Repeats": 7
+    },
+    {
+      "Id": "statistics_1m",
+      "Library": "NumPy",
+      "Operation": "mean + std over 1,000,000",
+      "MedianMs": 7.6249000849202275,
+      "MinMs": 7.470299955457449,
+      "MaxMs": 9.122799965552986,
+      "Repeats": 7
+    },
+    {
+      "Id": "csv_read_200k",
+      "Library": "pandas",
+      "Operation": "read 200,000-row CSV",
+      "MedianMs": 135.88429999072105,
+      "MinMs": 135.60879998840392,
+      "MaxMs": 137.5016999663785,
+      "Repeats": 3
+    },
+    {
+      "Id": "groupby_mean_200k",
+      "Library": "pandas",
+      "Operation": "group-by mean, 500 groups",
+      "MedianMs": 5.859000026248395,
+      "MinMs": 5.659600021317601,
+      "MaxMs": 6.094300071708858,
+      "Repeats": 7
+    },
+    {
+      "Id": "groupby_composite_200k",
+      "Library": "pandas",
+      "Operation": "group-by two keys",
+      "MedianMs": 31.04280005209148,
+      "MinMs": 30.737899942323565,
+      "MaxMs": 31.91949997562915,
+      "Repeats": 7
+    },
+    {
+      "Id": "sort_200k",
+      "Library": "pandas",
+      "Operation": "sort by a numeric column",
+      "MedianMs": 27.241699979640543,
+      "MinMs": 25.07770003285259,
+      "MaxMs": 27.610299992375076,
+      "Repeats": 3
+    },
+    {
+      "Id": "rolling_mean_200k",
+      "Library": "pandas",
+      "Operation": "rolling mean, window 30",
+      "MedianMs": 8.825500030070543,
+      "MinMs": 8.806400001049042,
+      "MaxMs": 9.4941999996081,
+      "Repeats": 7
+    },
+    {
+      "Id": "filter_200k",
+      "Library": "pandas",
+      "Operation": "filter a numeric column",
+      "MedianMs": 6.056000012904406,
+      "MinMs": 5.983599927276373,
+      "MaxMs": 6.25390000641346,
+      "Repeats": 7
+    },
+    {
+      "Id": "describe_200k",
+      "Library": "pandas",
+      "Operation": "describe all numeric columns",
+      "MedianMs": 35.421599983237684,
+      "MinMs": 31.4055000199005,
+      "MaxMs": 36.40729992184788,
+      "Repeats": 3
+    },
+    {
+      "Id": "logistic_fit_20k",
+      "Library": "scikit-learn",
+      "Operation": "logistic regression, 20k x 20, 100 iterations",
+      "MedianMs": 31.156899989582598,
+      "MinMs": 30.894300085492432,
+      "MaxMs": 33.60299998894334,
+      "Repeats": 3
+    },
+    {
+      "Id": "randomforest_fit_20k",
+      "Library": "scikit-learn",
+      "Operation": "random forest fit, 50 trees, depth 8",
+      "MedianMs": 2584.0662999544293,
+      "MinMs": 2505.762999993749,
+      "MaxMs": 2913.2688000099733,
+      "Repeats": 3
+    },
+    {
+      "Id": "randomforest_predict_20k",
+      "Library": "scikit-learn",
+      "Operation": "random forest predict, 20k rows",
+      "MedianMs": 98.20389992091805,
+      "MinMs": 93.37620006408542,
+      "MaxMs": 98.28190004918724,
+      "Repeats": 3
+    },
+    {
+      "Id": "kmeans_20k",
+      "Library": "scikit-learn",
+      "Operation": "k-means, k=5, 3 restarts",
+      "MedianMs": 497.52580001950264,
+      "MinMs": 466.14759997464716,
+      "MaxMs": 520.5732999602333,
+      "Repeats": 3
+    },
+    {
+      "Id": "pca_20k",
+      "Library": "scikit-learn",
+      "Operation": "PCA to 5 components, 20k x 20",
+      "MedianMs": 5.91609999537468,
+      "MinMs": 4.028799943625927,
+      "MaxMs": 8.28230008482933,
+      "Repeats": 3
+    },
+    {
+      "Id": "knn_predict_2k",
+      "Library": "scikit-learn",
+      "Operation": "kNN predict, 2k queries against 5k points",
+      "MedianMs": 55.172900087200105,
+      "MinMs": 46.19530006311834,
+      "MaxMs": 56.252799928188324,
+      "Repeats": 3
+    },
+    {
+      "Id": "tfidf_20k",
+      "Library": "scikit-learn",
+      "Operation": "TF-IDF fit+transform, 20k documents",
+      "MedianMs": 691.7457000818104,
+      "MinMs": 690.6191000016406,
+      "MaxMs": 741.764499922283,
+      "Repeats": 3
+    },
+    {
+      "Id": "tokenize_20k",
+      "Library": "Python re",
+      "Operation": "regex tokenize 20k documents",
+      "MedianMs": 359.59689994342625,
+      "MinMs": 359.1820999281481,
+      "MaxMs": 377.81730003189296,
+      "Repeats": 3
+    },
+    {
+      "Id": "pagerank_50k",
+      "Library": "NetworkX",
+      "Operation": "PageRank, 50k nodes",
+      "MedianMs": 313.0152999656275,
+      "MinMs": 295.6682000076398,
+      "MaxMs": 398.90819997526705,
+      "Repeats": 3
+    },
+    {
+      "Id": "bfs_50k",
+      "Library": "NetworkX",
+      "Operation": "breadth-first search, 50k nodes",
+      "MedianMs": 376.6338999848813,
+      "MinMs": 358.0435999901965,
+      "MaxMs": 376.81579997297376,
+      "Repeats": 3
+    },
+    {
+      "Id": "components_50k",
+      "Library": "NetworkX",
+      "Operation": "connected components, 50k nodes",
+      "MedianMs": 38.59899996314198,
+      "MinMs": 35.827500047162175,
+      "MaxMs": 39.34089990798384,
+      "Repeats": 3
+    },
+    {
+      "Id": "dijkstra_50k",
+      "Library": "NetworkX",
+      "Operation": "Dijkstra from one source, 50k nodes",
+      "MedianMs": 180.4182999767363,
+      "MinMs": 179.33830001857132,
+      "MaxMs": 184.67879993841052,
+      "Repeats": 3
+    },
+    {
+      "Id": "mcmc_4x5000",
+      "Library": "NumPy",
+      "Operation": "Metropolis-Hastings, 4 chains x 5000 draws",
+      "MedianMs": 279.1788999456912,
+      "MinMs": 275.8087000111118,
+      "MaxMs": 288.7252999935299,
+      "Repeats": 3
+    },
+    {
+      "Id": "logpdf_1m",
+      "Library": "Python loop",
+      "Operation": "1,000,000 normal log densities",
+      "MedianMs": 275.67280002404004,
+      "MinMs": 265.25880000554025,
+      "MaxMs": 279.94280005805194,
+      "Repeats": 3
+    },
+    {
+      "Id": "logpdf_1m_vectorised",
+      "Library": "NumPy",
+      "Operation": "1,000,000 normal log densities (vectorised)",
+      "MedianMs": 12.168999994173646,
+      "MinMs": 11.158499983139336,
+      "MaxMs": 12.329599936492741,
+      "Repeats": 7
+    }
+  ]
+}

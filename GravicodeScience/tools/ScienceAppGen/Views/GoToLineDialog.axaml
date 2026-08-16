@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ScienceAppGen.Views.GoToLineDialog"
+        Title="Go to line"
+        Width="340" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        Background="{DynamicResource AppGround}"
+        FontFamily="{DynamicResource UiFont}">
+
+  <StackPanel Margin="20" Spacing="14">
+    <TextBlock Text="Go to line" FontSize="{DynamicResource FontLarge}"
+               Foreground="{DynamicResource TextHighBrush}" />
+
+    <TextBox Name="LineBox" Classes="field" Watermark="Line number" KeyDown="OnKeyDown" />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Classes="ghost" Content="Cancel" Click="OnCancel" />
+      <Button Classes="primary" Content="Go" Click="OnGo" />
+    </StackPanel>
+  </StackPanel>
+</Window>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.Comparison</RootNamespace>
+    <AssemblyName>Gravicode.Science.Comparison</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\GraviNum\GraviNum.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviFrame\GraviFrame.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviLearn\GraviLearn.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviText\GraviText.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviGraph\GraviGraph.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviProb\GraviProb.csproj" />
+  </ItemGroup>
+
+</Project>

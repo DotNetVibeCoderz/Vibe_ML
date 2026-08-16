@@ -1,0 +1,171 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    ScienceAppGen design tokens.
+
+    The idea behind the palette: this is an instrument, not a chat app. The ground is a deep
+    blue-black like an oscilloscope bezel, the interactive accent is instrument cyan, and the
+    six spectral colours are a *semantic* system, not decoration - one band per Gravicode
+    library, reused for log severity and for the working indicator. A prompt goes in, a full
+    application comes out; the spectrum is that refraction made visible.
+  -->
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <!-- ============================================================ DARK (default) -->
+    <ResourceDictionary x:Key="Dark">
+
+      <!-- Ground and surfaces -->
+      <Color x:Key="Ink900">#0E1116</Color>
+      <Color x:Key="Ink800">#151A21</Color>
+      <Color x:Key="Ink700">#1C232C</Color>
+      <Color x:Key="Ink650">#222B36</Color>
+      <Color x:Key="Ink600">#2B3644</Color>
+      <Color x:Key="Ink500">#3A4757</Color>
+
+      <!-- Text -->
+      <Color x:Key="TextHigh">#E8EEF6</Color>
+      <Color x:Key="TextBase">#C4CEDA</Color>
+      <Color x:Key="TextMuted">#7D8A9C</Color>
+      <Color x:Key="TextFaint">#586475</Color>
+
+      <!-- Instrument cyan: the one interactive accent -->
+      <Color x:Key="Accent">#3FA9C9</Color>
+      <Color x:Key="AccentBright">#5CC4E2</Color>
+      <Color x:Key="AccentDim">#1F5566</Color>
+
+      <SolidColorBrush x:Key="AppGround" Color="{DynamicResource Ink900}" />
+      <SolidColorBrush x:Key="PanelGround" Color="{DynamicResource Ink800}" />
+      <SolidColorBrush x:Key="RaisedGround" Color="{DynamicResource Ink700}" />
+      <SolidColorBrush x:Key="HoverGround" Color="{DynamicResource Ink650}" />
+      <SolidColorBrush x:Key="SelectedGround" Color="#1B3A46" />
+      <SolidColorBrush x:Key="BorderSoft" Color="{DynamicResource Ink600}" />
+      <SolidColorBrush x:Key="BorderStrong" Color="{DynamicResource Ink500}" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="{DynamicResource TextHigh}" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="{DynamicResource TextBase}" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="{DynamicResource TextMuted}" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="{DynamicResource TextFaint}" />
+      <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource Accent}" />
+      <SolidColorBrush x:Key="AccentBrightBrush" Color="{DynamicResource AccentBright}" />
+      <SolidColorBrush x:Key="AccentDimBrush" Color="{DynamicResource AccentDim}" />
+
+      <SolidColorBrush x:Key="EditorGround" Color="#11161C" />
+      <SolidColorBrush x:Key="EditorGutter" Color="#7D8A9C" />
+      <SolidColorBrush x:Key="EditorCurrentLine" Color="#19222B" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#2A5567" />
+
+      <!-- Code palette: the six library wavelengths, lifted for the dark editor ground.
+           Every colour here clears 4.5:1 against #11161C; the structural ones clear 7:1. -->
+      <Color x:Key="CodeComment">#7C8EA1</Color>      <!-- slate, italic          -->
+      <Color x:Key="CodeKeyword">#9B9BEA</Color>      <!-- violet   ← GraviProb    -->
+      <Color x:Key="CodeType">#62BEDC</Color>         <!-- cyan     ← GraviGraph   -->
+      <Color x:Key="CodeMethod">#E6D06A</Color>       <!-- yellow   ← GraviLearn   -->
+      <Color x:Key="CodeString">#74C99A</Color>       <!-- green    ← GraviText    -->
+      <Color x:Key="CodeNumber">#EBA05C</Color>       <!-- orange   ← GraviFrame   -->
+      <Color x:Key="CodeMeta">#EC7378</Color>         <!-- red      ← GraviNum     -->
+      <Color x:Key="CodePunctuation">#97A4B4</Color>
+
+    </ResourceDictionary>
+
+    <!-- ============================================================ LIGHT -->
+    <ResourceDictionary x:Key="Light">
+
+      <Color x:Key="Ink900">#F7F9FC</Color>
+      <Color x:Key="Ink800">#FFFFFF</Color>
+      <Color x:Key="Ink700">#F1F4F9</Color>
+      <Color x:Key="Ink650">#E7ECF3</Color>
+      <Color x:Key="Ink600">#D7DEE8</Color>
+      <Color x:Key="Ink500">#B9C4D2</Color>
+
+      <Color x:Key="TextHigh">#0E1116</Color>
+      <Color x:Key="TextBase">#2B3644</Color>
+      <Color x:Key="TextMuted">#5D6B7C</Color>
+      <Color x:Key="TextFaint">#8B98A8</Color>
+
+      <Color x:Key="Accent">#1E7E9C</Color>
+      <Color x:Key="AccentBright">#2A9CBF</Color>
+      <Color x:Key="AccentDim">#CBE6EF</Color>
+
+      <SolidColorBrush x:Key="AppGround" Color="{DynamicResource Ink900}" />
+      <SolidColorBrush x:Key="PanelGround" Color="{DynamicResource Ink800}" />
+      <SolidColorBrush x:Key="RaisedGround" Color="{DynamicResource Ink700}" />
+      <SolidColorBrush x:Key="HoverGround" Color="{DynamicResource Ink650}" />
+      <SolidColorBrush x:Key="SelectedGround" Color="#D6ECF4" />
+      <SolidColorBrush x:Key="BorderSoft" Color="{DynamicResource Ink600}" />
+      <SolidColorBrush x:Key="BorderStrong" Color="{DynamicResource Ink500}" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="{DynamicResource TextHigh}" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="{DynamicResource TextBase}" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="{DynamicResource TextMuted}" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="{DynamicResource TextFaint}" />
+      <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource Accent}" />
+      <SolidColorBrush x:Key="AccentBrightBrush" Color="{DynamicResource AccentBright}" />
+      <SolidColorBrush x:Key="AccentDimBrush" Color="{DynamicResource AccentDim}" />
+
+      <SolidColorBrush x:Key="EditorGround" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="EditorGutter" Color="#8B98A8" />
+      <SolidColorBrush x:Key="EditorCurrentLine" Color="#EFF4FA" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#BFE0EC" />
+
+      <!-- The same six wavelengths, deepened for white. Same hue order, same meaning;
+           every colour clears 4.5:1 against #FFFFFF. -->
+      <Color x:Key="CodeComment">#5F7183</Color>
+      <Color x:Key="CodeKeyword">#5A45B8</Color>
+      <Color x:Key="CodeType">#0E6E8C</Color>
+      <Color x:Key="CodeMethod">#7E610F</Color>
+      <Color x:Key="CodeString">#1E7A45</Color>
+      <Color x:Key="CodeNumber">#A6520B</Color>
+      <Color x:Key="CodeMeta">#B3272C</Color>
+      <Color x:Key="CodePunctuation">#47535F</Color>
+
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+
+  <!-- ================================================================ SPECTRUM
+       One band per library, in wavelength order. Reused for log severity so the
+       colour always means the same thing wherever it appears.
+  -->
+  <SolidColorBrush x:Key="Spec1" Color="#E0555A" />  <!-- GraviNum   / error   -->
+  <SolidColorBrush x:Key="Spec2" Color="#E08A3C" />  <!-- GraviFrame / warning -->
+  <SolidColorBrush x:Key="Spec3" Color="#D9C04A" />  <!-- GraviLearn / build   -->
+  <SolidColorBrush x:Key="Spec4" Color="#56B87F" />  <!-- GraviText  / success -->
+  <SolidColorBrush x:Key="Spec5" Color="#3FA9C9" />  <!-- GraviGraph / info    -->
+  <SolidColorBrush x:Key="Spec6" Color="#7B7BD6" />  <!-- GraviProb  / assistant -->
+
+  <LinearGradientBrush x:Key="SpectrumRule" StartPoint="0%,0%" EndPoint="100%,0%">
+    <GradientStop Offset="0.00" Color="#E0555A" />
+    <GradientStop Offset="0.20" Color="#E08A3C" />
+    <GradientStop Offset="0.40" Color="#D9C04A" />
+    <GradientStop Offset="0.60" Color="#56B87F" />
+    <GradientStop Offset="0.80" Color="#3FA9C9" />
+    <GradientStop Offset="1.00" Color="#7B7BD6" />
+  </LinearGradientBrush>
+
+  <!-- ================================================================ TYPE
+       The instrument feel comes from treatment - wide tracking on small uppercase
+       labels, tabular figures in the status bar - rather than an exotic typeface,
+       because a desktop app cannot assume a font is installed.
+  -->
+  <FontFamily x:Key="UiFont">avares://Avalonia.Fonts.Inter/Assets#Inter, Segoe UI Variable Text, Segoe UI, sans-serif</FontFamily>
+  <FontFamily x:Key="MonoFont">Cascadia Mono, Cascadia Code, Consolas, Menlo, monospace</FontFamily>
+
+  <x:Double x:Key="FontMicro">10.5</x:Double>
+  <x:Double x:Key="FontSmall">12</x:Double>
+  <x:Double x:Key="FontBase">13</x:Double>
+  <x:Double x:Key="FontMedium">14</x:Double>
+  <x:Double x:Key="FontLarge">17</x:Double>
+  <x:Double x:Key="FontDisplay">22</x:Double>
+
+  <!-- ================================================================ METRICS -->
+  <x:Double x:Key="TitleBarHeight">34</x:Double>
+  <x:Double x:Key="ToolBarHeight">42</x:Double>
+  <x:Double x:Key="StatusBarHeight">26</x:Double>
+  <x:Double x:Key="PanelHeaderHeight">30</x:Double>
+  <CornerRadius x:Key="RadiusSmall">4</CornerRadius>
+  <CornerRadius x:Key="RadiusMedium">7</CornerRadius>
+  <CornerRadius x:Key="RadiusLarge">10</CornerRadius>
+  <Thickness x:Key="PanelPadding">12</Thickness>
+
+</ResourceDictionary>

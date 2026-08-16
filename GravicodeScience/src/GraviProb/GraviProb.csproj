@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.GraviProb</RootNamespace>
+    <AssemblyName>Gravicode.Science.GraviProb</AssemblyName>
+    <PackageId>Gravicode.Science.GraviProb</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviNum\GraviNum.csproj" />
+  </ItemGroup>
+
+</Project>
