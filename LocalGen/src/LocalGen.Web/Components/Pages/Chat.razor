@@ -1,0 +1,225 @@
+@page "/"
+@inject LocalGenClient Client
+@inject IJSRuntime Js
+@implements IDisposable
+
+<PageTitle>LocalGen — Chat</PageTitle>
+
+<div class="chat">
+
+    <div class="chat-header">
+        <select @bind="_model" style="max-width: 24rem;">
+            @if (_models.Count == 0)
+            {
+                <option value="">No models installed</option>
+            }
+            @foreach (var model in _models)
+            {
+                <option value="@model.Id">@model.Id</option>
+            }
+        </select>
+
+        <button class="ghost" @onclick="RefreshModelsAsync">Refresh</button>
+        <button class="ghost" @onclick="Clear" disabled="@(_turns.Count == 0)">Clear</button>
+
+        <div class="row" style="margin-left: auto; gap: 0.9rem;">
+            <label class="mono muted" style="display:flex; align-items:center; gap:0.4rem;">
+                temp
+                <input type="range" min="0" max="2" step="0.05" @bind="_temperature" @bind:event="oninput"
+                       style="width: 92px;" />
+                <span class="mono">@_temperature.ToString("0.00")</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="chat-log" id="chat-log">
+        @if (_turns.Count == 0)
+        {
+            <div class="sample-prompts">
+                <p class="eyebrow">Try one of these</p>
+                @foreach (var prompt in SamplePrompts)
+                {
+                    <button @onclick="() => _input = prompt">@prompt</button>
+                }
+            </div>
+        }
+
+        @foreach (var turn in _turns)
+        {
+            <div class="turn @turn.Kind">@turn.Text</div>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="error-banner" style="margin: 0 1.25rem;">@_error</div>
+    }
+
+    <div class="chat-composer">
+        <textarea @bind="_input" @bind:event="oninput" @onkeydown="OnKeyDownAsync"
+                  placeholder="Ask something. Enter sends, Shift+Enter adds a line."
+                  disabled="@_busy"></textarea>
+
+        @if (_busy)
+        {
+            <button class="danger" @onclick="Stop">Stop</button>
+        }
+        else
+        {
+            <button class="primary" @onclick="SendAsync" disabled="@(string.IsNullOrWhiteSpace(_input))">Send</button>
+        }
+    </div>
+</div>
+
+@code {
+    private sealed record Turn(string Kind, string Text)
+    {
+        public string Text { get; set; } = Text;
+    }
+
+    private static readonly string[] SamplePrompts =
+    [
+        "Explain what quantization does to a model, in one paragraph.",
+        "Write a C# record that models an invoice line item.",
+        "Summarise the trade-off between a 7B and a 13B model on 8 GB of VRAM.",
+        "Draft a commit message for a change that adds streaming support."
+    ];
+
+    private readonly List<Turn> _turns = [];
+    private IReadOnlyList<LocalGen.Core.Protocol.ModelData> _models = [];
+
+    private CancellationTokenSource? _generation;
+    private string _model = string.Empty;
+    private string _input = string.Empty;
+    private string _error = string.Empty;
+    private double _temperature = 0.7;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await RefreshModelsAsync();
+
+    private async Task RefreshModelsAsync()
+    {
+        _error = string.Empty;
+
+        try
+        {
+            _models = await Client.ListModelsAsync();
+
+            if (string.IsNullOrEmpty(_model))
+            {
+                _model = _models.FirstOrDefault()?.Id ?? string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not reach LocalGen: {ex.Message}";
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        // Enter sends; Shift+Enter is a newline, which is what people expect from a chat box.
+        if (e.Key == "Enter" && !e.ShiftKey && !_busy)
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (_busy || string.IsNullOrWhiteSpace(_input))
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_model))
+        {
+            _error = "Choose a model first. If the list is empty, download one from the Models page.";
+            return;
+        }
+
+        var prompt = _input.Trim();
+
+        _input = string.Empty;
+        _error = string.Empty;
+        _busy = true;
+        _generation = new CancellationTokenSource();
+
+        _turns.Add(new Turn("user", prompt));
+
+        var reply = new Turn("assistant", string.Empty);
+        _turns.Add(reply);
+
+        await ScrollAsync();
+
+        try
+        {
+            var request = new LocalGen.Core.Protocol.ChatCompletionRequest
+            {
+                Model = _model,
+                Temperature = (float)_temperature,
+                Messages = [.. BuildHistory()]
+            };
+
+            await foreach (var chunk in Client.StreamChatAsync(request, _generation.Token))
+            {
+                var delta = chunk.Choices.FirstOrDefault()?.Delta?.Content;
+
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    reply.Text += delta;
+                    StateHasChanged();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            reply.Text += "\n\n[stopped]";
+        }
+        catch (Exception ex)
+        {
+            _turns.Add(new Turn("error", ex.Message));
+        }
+        finally
+        {
+            _busy = false;
+            await ScrollAsync();
+        }
+    }
+
+    /// <summary>Replays the visible transcript, skipping error turns the model should not see.</summary>
+    private IEnumerable<LocalGen.Core.Protocol.OpenAiMessage> BuildHistory() =>
+        _turns
+            .Where(static turn => turn.Kind is "user" or "assistant" && !string.IsNullOrEmpty(turn.Text))
+            .Select(static turn => new LocalGen.Core.Protocol.OpenAiMessage
+            {
+                Role = turn.Kind,
+                Content = System.Text.Json.JsonSerializer.SerializeToElement(turn.Text)
+            });
+
+    private void Stop() => _generation?.Cancel();
+
+    private void Clear()
+    {
+        _turns.Clear();
+        _error = string.Empty;
+    }
+
+    private async Task ScrollAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("localgenScrollToEnd", "chat-log");
+        }
+        catch (JSException)
+        {
+            // Scrolling is cosmetic; a failed interop call must not break the turn.
+        }
+    }
+
+    public void Dispose()
+    {
+        _generation?.Cancel();
+        _generation?.Dispose();
+    }
+}

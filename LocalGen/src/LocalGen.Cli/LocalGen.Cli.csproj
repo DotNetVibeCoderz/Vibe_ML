@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Description>LocalGen command line interface.</Description>
+    <AssemblyName>localgen</AssemblyName>
+    <RootNamespace>LocalGen.Cli</RootNamespace>
+
+    <!-- Installable as a global tool: dotnet tool install -g LocalGen.Cli -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>localgen</ToolCommandName>
+    <PackageId>LocalGen.Cli</PackageId>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" />
+    <PackageReference Include="Spectre.Console.Cli" />
+    <PackageReference Include="Spectre.Console.Json" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalGen.Core\LocalGen.Core.csproj" />
+    <ProjectReference Include="..\LocalGen.Runtime\LocalGen.Runtime.csproj" />
+    <ProjectReference Include="..\LocalGen.Sdk\LocalGen.Sdk.csproj" />
+    <ProjectReference Include="..\LocalGen.Server\LocalGen.Server.csproj" />
+    <ProjectReference Include="..\LocalGen.Engines.LlamaSharp\LocalGen.Engines.LlamaSharp.csproj" />
+  </ItemGroup>
+
+</Project>

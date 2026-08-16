@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>
+      Retrieval-augmented generation for LocalGen: document ingestion, chunking and vector search
+      over SQLite, Qdrant, Chroma, Azure AI Search or an in-memory index.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.SqliteVec" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.Qdrant" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.AzureAISearch" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.InMemory" />
+    <PackageReference Include="Microsoft.SemanticKernel" />
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="AngleSharp" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalGen.Core\LocalGen.Core.csproj" />
+    <ProjectReference Include="..\LocalGen.Runtime\LocalGen.Runtime.csproj" />
+  </ItemGroup>
+
+</Project>

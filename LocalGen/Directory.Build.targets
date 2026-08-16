@@ -1,0 +1,38 @@
+<Project>
+
+  <!--
+    The CUDA backend package ships every ggml module except ggml-cpu.dll, yet its ggml.dll imports
+    from it. Loading the CUDA build therefore fails with "the specified module could not be found"
+    unless a CPU module sits in the same folder, and LLamaSharp's response to that failure is to
+    fall back to the CPU build — so the only symptom is that inference is quietly slow.
+
+    The CPU package puts ggml-cpu.dll under avx2/, so it is copied across wherever a CUDA folder
+    was produced. This lives here rather than in the backend project because the copy has to land
+    in the *application's* output, and every executable that references the engine produces its own.
+  -->
+  <Target Name="LocalGenCopyCpuBackendIntoCudaFolder" AfterTargets="Build">
+
+    <ItemGroup>
+      <LocalGenCudaModule Include="$(OutputPath)runtimes\**\native\cuda*\ggml.dll" />
+    </ItemGroup>
+
+    <Copy SourceFiles="$(OutputPath)runtimes\win-x64\native\avx2\ggml-cpu.dll"
+          DestinationFolder="%(LocalGenCudaModule.RootDir)%(LocalGenCudaModule.Directory)"
+          Condition="'@(LocalGenCudaModule)' != '' and Exists('$(OutputPath)runtimes\win-x64\native\avx2\ggml-cpu.dll')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- The same applies to a published output, which is assembled separately from the build one. -->
+  <Target Name="LocalGenCopyCpuBackendIntoPublishedCudaFolder" AfterTargets="Publish">
+
+    <ItemGroup>
+      <LocalGenPublishedCudaModule Include="$(PublishDir)runtimes\**\native\cuda*\ggml.dll" />
+    </ItemGroup>
+
+    <Copy SourceFiles="$(PublishDir)runtimes\win-x64\native\avx2\ggml-cpu.dll"
+          DestinationFolder="%(LocalGenPublishedCudaModule.RootDir)%(LocalGenPublishedCudaModule.Directory)"
+          Condition="'@(LocalGenPublishedCudaModule)' != '' and Exists('$(PublishDir)runtimes\win-x64\native\avx2\ggml-cpu.dll')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

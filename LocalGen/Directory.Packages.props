@@ -1,0 +1,93 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Microsoft.Extensions">
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.Abstractions" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Label="AI / Semantic Kernel">
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.9.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Abstractions" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Core" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.SqliteVec" Version="1.74.0-preview" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Qdrant" Version="1.74.0-preview" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.AzureAISearch" Version="1.74.0-preview" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.InMemory" Version="1.74.0-preview" />
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Inference backends">
+    <PackageVersion Include="LLamaSharp" Version="0.27.0" />
+    <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
+    <PackageVersion Include="LLamaSharp.Backend.Cuda12" Version="0.27.0" />
+    <PackageVersion Include="LLamaSharp.semantic-kernel" Version="0.27.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.15.2" />
+    <PackageVersion Include="Microsoft.AI.Foundry.Local" Version="1.2.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Web / Server">
+    <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="9.0.6" />
+    <PackageVersion Include="System.Text.Json" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Desktop / UI">
+    <PackageVersion Include="Avalonia" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Diagnostics" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.ReactiveUI" Version="11.3.9" />
+    <PackageVersion Include="Avalonia.Headless" Version="11.3.20" />
+    <PackageVersion Include="Avalonia.Headless.XUnit" Version="11.3.20" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="CLI">
+    <PackageVersion Include="Spectre.Console" Version="0.55.0" />
+    <PackageVersion Include="Spectre.Console.Cli" Version="0.55.0" />
+    <PackageVersion Include="Spectre.Console.Json" Version="0.55.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Document processing">
+    <PackageVersion Include="Markdig" Version="1.3.2" />
+    <PackageVersion Include="PdfPig" Version="0.1.11" />
+    <PackageVersion Include="AngleSharp" Version="1.7.1" />
+    <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
+  </ItemGroup>
+
+  <!--
+    The SQLite vector connector pulls in a build of the native SQLite library that carries a
+    published advisory. Pinned forward within the same 2.1 line, which is the patched release
+    the surrounding managed packages are built against.
+  -->
+  <ItemGroup Label="Transitive security pins">
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="FluentAssertions" Version="7.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

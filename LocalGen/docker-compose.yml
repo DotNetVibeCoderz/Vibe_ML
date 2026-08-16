@@ -1,0 +1,88 @@
+# LocalGen with a Qdrant vector store and the Blazor web UI.
+#
+#   docker compose up -d
+#   docker compose --profile gpu up -d      # NVIDIA, needs the container toolkit
+
+services:
+  localgen:
+    build:
+      context: .
+      args:
+        LLAMA_BACKEND: cpu
+    image: localgen:latest
+    container_name: localgen
+    ports:
+      - "11434:11434"
+    volumes:
+      # Named volume so pulled models survive a rebuild.
+      - localgen-data:/data
+    environment:
+      LocalGen__Server__Host: 0.0.0.0
+      LocalGen__Server__Port: "11434"
+      # Set a key whenever this is reachable beyond a private network.
+      LocalGen__Server__ApiKey: "${LOCALGEN_API_KEY:-}"
+      LocalGen__Runtime__PreloadModel: "${LOCALGEN_PRELOAD:-}"
+      LocalGen__Rag__Provider: qdrant
+      LocalGen__Rag__ConnectionString: http://qdrant:6334
+      # Code execution runs arbitrary code; off by default for a networked deployment.
+      LocalGen__Tools__CodeExecution: "false"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  localgen-gpu:
+    profiles: ["gpu"]
+    build:
+      context: .
+      args:
+        LLAMA_BACKEND: cuda12
+    image: localgen:cuda
+    container_name: localgen-gpu
+    ports:
+      - "11434:11434"
+    volumes:
+      - localgen-data:/data
+    environment:
+      LocalGen__Server__Host: 0.0.0.0
+      LocalGen__Engine__Device: Cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: localgen-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: src/LocalGen.Web/Dockerfile
+    image: localgen-web:latest
+    container_name: localgen-web
+    ports:
+      - "8080:8080"
+    environment:
+      LocalGen__Endpoint: http://localgen:11434
+      LocalGen__ApiKey: "${LOCALGEN_API_KEY:-}"
+      ASPNETCORE_HTTP_PORTS: "8080"
+    depends_on:
+      - localgen
+    restart: unless-stopped
+
+volumes:
+  localgen-data:
+  qdrant-data:

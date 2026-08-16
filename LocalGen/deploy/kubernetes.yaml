@@ -1,0 +1,190 @@
+# LocalGen on Kubernetes.
+#
+#   kubectl create namespace localgen
+#   kubectl -n localgen create secret generic localgen-secrets --from-literal=api-key="$(openssl rand -hex 24)"
+#   kubectl -n localgen apply -f deploy/kubernetes.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: localgen-config
+  namespace: localgen
+data:
+  LocalGen__Server__Host: "0.0.0.0"
+  LocalGen__Server__Port: "11434"
+  LocalGen__Server__MaxLoadedModels: "1"
+  LocalGen__Engine__Default: "LlamaSharp"
+  LocalGen__Engine__Device: "Auto"
+  # Code execution runs arbitrary code inside the pod. Keep it off for a shared deployment.
+  LocalGen__Tools__CodeExecution: "false"
+  LocalGen__Tools__AllowDependencyInstall: "false"
+---
+# Models are gigabytes and take minutes to download, so they live on a volume rather than being
+# re-fetched on every pod start.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: localgen-models
+  namespace: localgen
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localgen
+  namespace: localgen
+  labels: { app: localgen }
+spec:
+  # Generation is serialised per model and the model volume is ReadWriteOnce, so this scales by
+  # adding nodes with their own volumes rather than by adding replicas here.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: localgen }
+  template:
+    metadata:
+      labels: { app: localgen }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: localgen
+          image: localgen:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 11434
+          envFrom:
+            - configMapRef:
+                name: localgen-config
+          env:
+            - name: LOCALGEN_HOME
+              value: /data
+            - name: LocalGen__Server__ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: localgen-secrets
+                  key: api-key
+          volumeMounts:
+            - name: models
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              cpu: "8"
+              # Must exceed the model size plus its KV cache, or the pod is OOM-killed mid-load.
+              memory: 16Gi
+              # Uncomment for a GPU node pool, and use the CUDA image.
+              # nvidia.com/gpu: 1
+          startupProbe:
+            httpGet: { path: /api/health, port: http }
+            # Generous: a cold start may load a multi-gigabyte model from disk.
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: localgen-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: localgen
+  namespace: localgen
+spec:
+  type: ClusterIP
+  selector: { app: localgen }
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+---
+# Only the web UI may reach the inference service; nothing else in the cluster needs to.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: localgen-ingress
+  namespace: localgen
+spec:
+  podSelector:
+    matchLabels: { app: localgen }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: localgen-web }
+      ports:
+        - protocol: TCP
+          port: 11434
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localgen-web
+  namespace: localgen
+  labels: { app: localgen-web }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: localgen-web }
+  template:
+    metadata:
+      labels: { app: localgen-web }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: web
+          image: localgen-web:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LocalGen__Endpoint
+              value: http://localgen:11434
+            - name: LocalGen__ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: localgen-secrets
+                  key: api-key
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: localgen-web
+  namespace: localgen
+spec:
+  type: ClusterIP
+  selector: { app: localgen-web }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -1,0 +1,50 @@
+## .NET
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+artifacts/
+TestResults/
+*.trx
+*.coverage
+*.nupkg
+*.snupkg
+
+## Rider / VS / VS Code
+.idea/
+.vs/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+## Node (VSCode extension)
+node_modules/
+*.vsix
+out/
+
+## LocalGen runtime data — models are large, never commit
+models/
+*.gguf
+*.safetensors
+*.onnx
+*.onnx.data
+data/
+logs/
+*.localgen.db
+*.localgen.db-*
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Secrets
+appsettings.Local.json
+appsettings.*.Local.json
+.env

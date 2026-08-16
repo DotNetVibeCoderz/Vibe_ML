@@ -1,0 +1,230 @@
+{
+  "name": "localgen",
+  "displayName": "LocalGen",
+  "description": "Manage local models and use them from the editor, without sending code anywhere.",
+  "version": "0.1.0",
+  "publisher": "gravicode",
+  "license": "MIT",
+  "author": "Gravicode Studios",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gravicode/LocalGen.git",
+    "directory": "tools/vscode-localgen"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "llm",
+    "local",
+    "offline",
+    "openai"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localgen",
+          "title": "LocalGen",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "localgen": [
+        {
+          "id": "localgen.models",
+          "name": "Models",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "localgen.models",
+        "contents": "No LocalGen server is running.\n[Start the server](command:localgen.startServer)\n\nOr set the address if it runs elsewhere.\n[Open settings](command:localgen.openSettings)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "localgen.refreshModels",
+        "title": "Refresh models",
+        "category": "LocalGen",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "localgen.pullModel",
+        "title": "Pull a model…",
+        "category": "LocalGen",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "localgen.loadModel",
+        "title": "Load into memory",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.unloadModel",
+        "title": "Unload from memory",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.deleteModel",
+        "title": "Delete model",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.setDefaultModel",
+        "title": "Use as the default model",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.startServer",
+        "title": "Start the server",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.openChat",
+        "title": "Open chat",
+        "category": "LocalGen",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "localgen.explainSelection",
+        "title": "Explain this code",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.documentSelection",
+        "title": "Write a doc comment for this",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.explainProblem",
+        "title": "Explain the error at the cursor",
+        "category": "LocalGen"
+      },
+      {
+        "command": "localgen.openSettings",
+        "title": "Open LocalGen settings",
+        "category": "LocalGen"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "localgen.pullModel",
+          "when": "view == localgen.models",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localgen.openChat",
+          "when": "view == localgen.models",
+          "group": "navigation@2"
+        },
+        {
+          "command": "localgen.refreshModels",
+          "when": "view == localgen.models",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "localgen.loadModel",
+          "when": "view == localgen.models && viewItem == model-unloaded",
+          "group": "1_state@1"
+        },
+        {
+          "command": "localgen.unloadModel",
+          "when": "view == localgen.models && viewItem == model-loaded",
+          "group": "1_state@1"
+        },
+        {
+          "command": "localgen.setDefaultModel",
+          "when": "view == localgen.models && viewItem =~ /^model-/",
+          "group": "1_state@2"
+        },
+        {
+          "command": "localgen.deleteModel",
+          "when": "view == localgen.models && viewItem =~ /^model-/",
+          "group": "9_danger@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "localgen.explainSelection",
+          "when": "editorHasSelection",
+          "group": "localgen@1"
+        },
+        {
+          "command": "localgen.documentSelection",
+          "when": "editorHasSelection",
+          "group": "localgen@2"
+        },
+        {
+          "command": "localgen.explainProblem",
+          "group": "localgen@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "LocalGen",
+      "properties": {
+        "localgen.endpoint": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434",
+          "description": "Address of the LocalGen server."
+        },
+        "localgen.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token, when the server requires one."
+        },
+        "localgen.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model used by the editor commands. Empty means the first installed model."
+        },
+        "localgen.temperature": {
+          "type": "number",
+          "default": 0.3,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature for the editor commands. Low values suit code."
+        },
+        "localgen.maxTokens": {
+          "type": "number",
+          "default": 1024,
+          "description": "Maximum tokens the editor commands generate."
+        },
+        "localgen.refreshInterval": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "description": "Seconds between model list refreshes. Zero disables polling."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.0"
+  }
+}

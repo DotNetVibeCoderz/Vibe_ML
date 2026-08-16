@@ -1,0 +1,174 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:LocalGen.Desktop.ViewModels"
+             xmlns:models="using:LocalGen.Core.Models"
+             mc:Ignorable="d"
+             x:Class="LocalGen.Desktop.Views.ApiTestView"
+             x:DataType="vm:ApiTestViewModel">
+
+  <Grid ColumnDefinitions="288,*">
+
+    <!-- ═════════════  Endpoint catalogue  ═════════════ -->
+    <Border Grid.Column="0"
+            Background="{DynamicResource SurfaceSunken}"
+            BorderBrush="{DynamicResource Edge}" BorderThickness="0,0,1,0">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="16,16,16,10" Spacing="4">
+          <TextBlock Classes="eyebrow" Text="ENDPOINTS" />
+          <TextBlock Classes="mono muted" TextWrapping="Wrap"
+                     Text="Every example runs as it stands against the selected model." />
+        </StackPanel>
+
+        <ListBox ItemsSource="{Binding Endpoints}"
+                 SelectedItem="{Binding SelectedEndpoint}"
+                 Background="Transparent" BorderThickness="0"
+                 Padding="8,0,8,12">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:ApiEndpoint">
+              <StackPanel Spacing="2" Margin="0,4">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                  <!-- The method carries the colour: reading is safe, writing is not. -->
+                  <Border Classes="chip" Padding="5,1"
+                          BorderBrush="{Binding Method, Converter={x:Static vm:Converters.MethodBorder}}">
+                    <TextBlock Text="{Binding Method}"
+                               Foreground="{Binding Method, Converter={x:Static vm:Converters.MethodForeground}}" />
+                  </Border>
+                  <TextBlock Text="{Binding Title}" VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <TextBlock Classes="mono muted" Text="{Binding Path}"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- ═════════════  Request and response  ═════════════ -->
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*">
+
+      <!-- Heading -->
+      <StackPanel Grid.Row="0" Margin="24,24,24,0" Spacing="6">
+        <TextBlock Classes="eyebrow" Text="API TEST" />
+        <TextBlock Classes="display" Text="{Binding SelectedEndpoint.Title}" />
+        <TextBlock Classes="secondary" Text="{Binding SelectedEndpoint.Description}"
+                   TextWrapping="Wrap" MaxWidth="720" HorizontalAlignment="Left" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+          <Border Classes="chip" IsVisible="{Binding SelectedEndpoint.Streams}"
+                  Background="{DynamicResource SignalWash}"
+                  BorderBrush="{DynamicResource SignalDim}">
+            <TextBlock Text="server-sent events" Foreground="{DynamicResource Signal}" />
+          </Border>
+          <Border Classes="chip" IsVisible="{Binding SelectedEndpoint.Uploads}"
+                  Background="{DynamicResource SignalWash}"
+                  BorderBrush="{DynamicResource SignalDim}">
+            <TextBlock Text="multipart upload" Foreground="{DynamicResource Signal}" />
+          </Border>
+          <Border Classes="chip">
+            <TextBlock Text="{Binding SelectedEndpoint.Parameters, StringFormat='params: {0}'}" />
+          </Border>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- Request -->
+      <StackPanel Grid.Row="1" Margin="24,18,24,0" Spacing="10">
+
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+          <ComboBox Grid.Column="0" ItemsSource="{Binding Methods}" SelectedItem="{Binding Method}"
+                    MinWidth="96" />
+          <TextBox Grid.Column="1" Text="{Binding Url}" FontFamily="{DynamicResource FontMono}"
+                   FontSize="{DynamicResource TextSmall}" />
+          <Button Grid.Column="2" Classes="primary" Content="Send" MinWidth="80"
+                  Command="{Binding SendCommand}" IsVisible="{Binding !IsSending}" />
+          <Button Grid.Column="2" Classes="danger" Content="Cancel" MinWidth="80"
+                  Command="{Binding CancelCommand}" IsVisible="{Binding IsSending}" />
+          <Button Grid.Column="3" Classes="ghost" Content="Copy as curl"
+                  ToolTip.Tip="Copy this request as a curl command"
+                  Command="{Binding CopyAsCurlCommand}" />
+        </Grid>
+
+        <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="10">
+          <TextBlock Grid.Column="0" Classes="mono muted" Text="Model" VerticalAlignment="Center" />
+          <ComboBox Grid.Column="1" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}"
+                    HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ModelDescriptor">
+                <TextBlock Classes="mono" Text="{Binding Id}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+
+          <TextBlock Grid.Column="2" Classes="mono muted" Text="API key" VerticalAlignment="Center" />
+          <TextBox Grid.Column="3" Text="{Binding ApiKey}" PasswordChar="•"
+                   Watermark="only when the server requires one" />
+        </Grid>
+
+        <!-- Upload picker, for the multipart endpoint. -->
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10"
+              IsVisible="{Binding SelectedEndpoint.Uploads}">
+          <TextBlock Grid.Column="0" Classes="mono muted" Text="File" VerticalAlignment="Center" />
+          <TextBox Grid.Column="1" Text="{Binding UploadPath}" IsReadOnly="True"
+                   Watermark="no file chosen" FontFamily="{DynamicResource FontMono}"
+                   FontSize="{DynamicResource TextSmall}" />
+          <Button Grid.Column="2" Content="Choose…" Command="{Binding PickUploadCommand}" />
+        </Grid>
+
+        <TextBlock Classes="mono" Foreground="{DynamicResource Alert}"
+                   Text="{Binding ErrorMessage}" TextWrapping="Wrap"
+                   IsVisible="{Binding ErrorMessage, Converter={x:Static vm:Converters.IsNotEmpty}}" />
+      </StackPanel>
+
+      <!-- Body and response, side by side -->
+      <Grid Grid.Row="2" ColumnDefinitions="*,*" Margin="24,14,24,24" ColumnSpacing="14">
+
+        <Border Grid.Column="0" Classes="panel" Padding="0"
+                IsVisible="{Binding SelectedEndpoint.HasBody}">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Top" Classes="eyebrow" Text="REQUEST BODY"
+                       Margin="16,14,16,8" />
+            <TextBox Text="{Binding RequestBody}" AcceptsReturn="True" TextWrapping="NoWrap"
+                     FontFamily="{DynamicResource FontMono}" FontSize="{DynamicResource TextSmall}"
+                     Background="{DynamicResource SurfaceSunken}" BorderThickness="0"
+                     Margin="0,0,0,0" Padding="16,0,16,16"
+                     VerticalAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
+          </DockPanel>
+        </Border>
+
+        <Border Grid.Column="1" Classes="panel" Padding="0">
+          <DockPanel>
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Margin="16,14,16,8">
+              <TextBlock Grid.Column="0" Classes="eyebrow" Text="RESPONSE" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Classes="mono" Margin="10,0,0,0"
+                         Text="{Binding ResponseStatus}"
+                         Foreground="{Binding ResponseFailed, Converter={x:Static vm:Converters.StatusForeground}}"
+                         VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Classes="mono muted" Text="{Binding ResponseMeta}"
+                         VerticalAlignment="Center" />
+            </Grid>
+
+            <Border Background="{DynamicResource SurfaceSunken}" CornerRadius="0,0,5,5">
+              <Panel>
+                <TextBlock Classes="mono muted" Text="Send the request to see the response here."
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           IsVisible="{Binding !ResponseBody.Length}" />
+
+                <ScrollViewer Padding="16,0,16,16"
+                              HorizontalScrollBarVisibility="Auto"
+                              IsVisible="{Binding ResponseBody.Length}">
+                  <SelectableTextBlock Classes="mono" Text="{Binding ResponseBody}"
+                                       TextWrapping="NoWrap" />
+                </ScrollViewer>
+              </Panel>
+            </Border>
+          </DockPanel>
+        </Border>
+      </Grid>
+    </Grid>
+  </Grid>
+</UserControl>

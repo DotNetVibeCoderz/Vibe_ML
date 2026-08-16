@@ -1,0 +1,6 @@
+<Project>
+  <!--
+    Stops the repository's own build settings — central package management in particular — from
+    reaching template content. A generated project has to stand on its own wherever it is created.
+  -->
+</Project>

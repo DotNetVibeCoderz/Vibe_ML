@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Gravicode Studios",
+  "classifications": [ "Console", "AI", "LocalGen" ],
+  "identity": "LocalGen.Console.CSharp",
+  "name": "LocalGen console client",
+  "shortName": "localgen-console",
+  "description": "A console application that streams chat completions from a local model through LocalGen.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "LocalGenConsole",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "datatype": "choice",
+      "choices": [ { "choice": "net10.0", "description": ".NET 10" } ],
+      "defaultValue": "net10.0",
+      "replaces": "net10.0"
+    },
+    "Endpoint": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "http://127.0.0.1:11434",
+      "replaces": "LOCALGEN_ENDPOINT_PLACEHOLDER",
+      "description": "Address of the LocalGen server."
+    },
+    "Model": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "qwen2.5-7b-instruct:q4_k_m",
+      "replaces": "LOCALGEN_MODEL_PLACEHOLDER",
+      "description": "Model the application talks to by default."
+    },
+    "SdkVersion": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "0.1.0",
+      "replaces": "LOCALGEN_SDK_VERSION",
+      "description": "Version of the LocalGen.Sdk package to reference."
+    }
+  },
+  "primaryOutputs": [ { "path": "LocalGenConsole.csproj" } ],
+  "postActions": [
+    {
+      "description": "Restore NuGet packages",
+      "manualInstructions": [ { "text": "Run 'dotnet restore'" } ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ]
+}

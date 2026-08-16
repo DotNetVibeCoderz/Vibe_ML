@@ -1,0 +1,254 @@
+@page "/analytics"
+@inject LocalGenClient Client
+@implements IDisposable
+
+<PageTitle>LocalGen — Analytics</PageTitle>
+
+@*
+    Charts are drawn as inline SVG rather than pulled from a charting library: the shapes needed
+    here are a line and a bar, and an offline-first product should not depend on a CDN.
+*@
+
+<div class="page stack">
+
+    <div class="row" style="justify-content: space-between;">
+        <div>
+            <p class="eyebrow">Analytics</p>
+            <h1 class="display">Usage and performance</h1>
+        </div>
+        <button class="ghost" @onclick="RefreshAsync">Refresh</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="error-banner">@_error</div>
+    }
+
+    <div class="grid-tiles">
+        <div class="tile">
+            <p class="eyebrow">Requests</p>
+            <p class="readout">@_totalRequests.ToString("N0")</p>
+            <p class="mono muted">@_failedRequests failed</p>
+        </div>
+        <div class="tile">
+            <p class="eyebrow">Tokens generated</p>
+            <p class="readout">@_completionTokens.ToString("N0")</p>
+            <p class="mono muted">@_promptTokens.ToString("N0") prompt</p>
+        </div>
+        <div class="tile">
+            <p class="eyebrow">Throughput</p>
+            <p class="readout">@(_averageThroughput > 0 ? $"{_averageThroughput:N1} tok/s" : "—")</p>
+        </div>
+        <div class="tile">
+            <p class="eyebrow">Time to first token</p>
+            <p class="readout">@(_averageLatency > 0 ? $"{_averageLatency:N0} ms" : "—")</p>
+        </div>
+    </div>
+
+    <div class="grid-two">
+        <div class="panel">
+            <h2 class="heading">Throughput over recent requests</h2>
+            @if (_throughput.Count > 1)
+            {
+                @RenderTrace(_throughput, "var(--data)")
+            }
+            else
+            {
+                <p class="mono muted" style="margin-top: 0.8rem;">Not enough requests yet to plot a trace.</p>
+            }
+        </div>
+
+        <div class="panel">
+            <h2 class="heading">Time to first token</h2>
+            @if (_latency.Count > 1)
+            {
+                @RenderTrace(_latency, "var(--signal)")
+            }
+            else
+            {
+                <p class="mono muted" style="margin-top: 0.8rem;">Not enough requests yet to plot a trace.</p>
+            }
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2 class="heading" style="margin-bottom: 0.9rem;">Requests by model</h2>
+
+        @if (_usage.Count == 0)
+        {
+            <p class="mono muted">Nothing recorded yet. Send a message from the Chat page and this fills in.</p>
+        }
+        else
+        {
+            @foreach (var row in _usage)
+            {
+                <div style="margin-bottom: 0.7rem;">
+                    <div class="row" style="justify-content: space-between;">
+                        <span class="mono">@row.Key</span>
+                        <span class="mono">@row.Value.ToString("N0")</span>
+                    </div>
+                    <div class="meter signal">
+                        <span style="width: @(Share(row.Value).ToString("0.##"))%"></span>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cancellation = new();
+    private PeriodicTimer? _timer;
+
+    private List<double> _throughput = [];
+    private List<double> _latency = [];
+    private List<KeyValuePair<string, long>> _usage = [];
+
+    private int _totalRequests;
+    private int _failedRequests;
+    private long _promptTokens;
+    private long _completionTokens;
+    private double _averageThroughput;
+    private double _averageLatency;
+    private string _error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(_cancellation.Token))
+            {
+                await RefreshAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            var metrics = await Client.Admin.GetMetricsAsync(_cancellation.Token);
+
+            if (metrics.TryGetProperty("summary", out var summary))
+            {
+                _totalRequests = ReadInt(summary, "total_requests");
+                _failedRequests = ReadInt(summary, "failed_requests");
+                _promptTokens = ReadLong(summary, "total_prompt_tokens");
+                _completionTokens = ReadLong(summary, "total_completion_tokens");
+                _averageThroughput = ReadDouble(summary, "average_tokens_per_second");
+
+                if (summary.TryGetProperty("average_time_to_first_token", out var ttft) &&
+                    TimeSpan.TryParse(ttft.GetString(), out var latency))
+                {
+                    _averageLatency = latency.TotalMilliseconds;
+                }
+
+                _usage = summary.TryGetProperty("model_usage", out var usage) &&
+                         usage.ValueKind == System.Text.Json.JsonValueKind.Object
+                    ? [.. usage.EnumerateObject()
+                        .Select(p => new KeyValuePair<string, long>(p.Name, p.Value.GetInt64()))
+                        .OrderByDescending(p => p.Value)]
+                    : [];
+            }
+
+            if (metrics.TryGetProperty("recent_inference", out var recent) &&
+                recent.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                var samples = recent.EnumerateArray().ToList();
+
+                _throughput = [.. samples
+                    .Where(s => ReadDouble(s, "tokens_per_second") > 0)
+                    .Select(s => ReadDouble(s, "tokens_per_second"))
+                    .TakeLast(60)];
+
+                _latency = [.. samples
+                    .Select(s => s.TryGetProperty("time_to_first_token", out var t) &&
+                                 TimeSpan.TryParse(t.GetString(), out var span)
+                        ? span.TotalMilliseconds
+                        : 0)
+                    .Where(value => value > 0)
+                    .TakeLast(60)];
+            }
+
+            _error = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not read metrics: {ex.Message}";
+        }
+    }
+
+    /// <summary>Draws a normalised polyline. Fixed viewBox, so it scales with the panel.</summary>
+    private RenderFragment RenderTrace(List<double> values, string stroke) => builder =>
+    {
+        const int width = 300;
+        const int height = 70;
+
+        var max = values.Max();
+        var min = values.Min();
+        var range = max - min;
+
+        if (range < double.Epsilon)
+        {
+            range = max > 0 ? max : 1;
+            min = 0;
+        }
+
+        var step = (double)width / (values.Count - 1);
+
+        var points = string.Join(' ', values.Select((value, index) =>
+        {
+            var y = height - (value - min) / range * (height - 6) - 3;
+            return $"{index * step:0.##},{y:0.##}";
+        }));
+
+        builder.AddMarkupContent(0,
+            $"""
+             <svg viewBox="0 0 {width} {height}" preserveAspectRatio="none"
+                  style="width:100%; height:96px; margin-top:0.8rem;" role="img"
+                  aria-label="Trace of the last {values.Count} readings, from {min:N1} to {max:N1}.">
+               <polyline points="{points}" fill="none" stroke="{stroke}"
+                         stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"
+                         vector-effect="non-scaling-stroke" />
+             </svg>
+             <div class="row" style="justify-content: space-between;">
+               <span class="mono muted">{min:N1}</span>
+               <span class="mono muted">{max:N1}</span>
+             </div>
+             """);
+    };
+
+    private double Share(long value)
+    {
+        var total = Math.Max(_usage.Sum(pair => pair.Value), 1);
+        return value * 100.0 / total;
+    }
+
+    private static int ReadInt(System.Text.Json.JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.TryGetInt32(out var parsed) ? parsed : 0;
+
+    private static long ReadLong(System.Text.Json.JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.TryGetInt64(out var parsed) ? parsed : 0;
+
+    private static double ReadDouble(System.Text.Json.JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.TryGetDouble(out var parsed) ? parsed : 0;
+
+    public void Dispose()
+    {
+        _cancellation.Cancel();
+        _timer?.Dispose();
+        _cancellation.Dispose();
+    }
+}

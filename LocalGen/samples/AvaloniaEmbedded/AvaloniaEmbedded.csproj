@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>AvaloniaEmbedded</RootNamespace>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      No LocalGen.Sdk here: this sample loads models in-process rather than talking to a server,
+      so it references the runtime and a backend directly.
+    -->
+    <ProjectReference Include="..\..\src\LocalGen.Runtime\LocalGen.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\LocalGen.Engines.LlamaSharp\LocalGen.Engines.LlamaSharp.csproj" />
+  </ItemGroup>
+
+</Project>

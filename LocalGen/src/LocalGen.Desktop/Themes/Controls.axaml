@@ -1,0 +1,271 @@
+<!--
+  Control styling. The palette does the talking, so controls stay flat and quiet: shallow radii,
+  hairline edges, and no shadows except on genuinely floating surfaces. The one place colour is
+  spent is the primary action and the running-state indicator.
+-->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ─────────────────────────────  Text roles  ───────────────────────────── -->
+
+  <Style Selector="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource FontBody}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextBody}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style Selector="TextBlock.display">
+    <Setter Property="FontSize" Value="{DynamicResource TextDisplay}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <!-- Tightened tracking is what makes the display size read as designed rather than scaled up. -->
+    <Setter Property="LetterSpacing" Value="-0.8" />
+  </Style>
+
+  <Style Selector="TextBlock.title">
+    <Setter Property="FontSize" Value="{DynamicResource TextTitle}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="-0.3" />
+  </Style>
+
+  <Style Selector="TextBlock.heading">
+    <Setter Property="FontSize" Value="{DynamicResource TextHeading}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="TextBlock.muted">
+    <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+  </Style>
+
+  <Style Selector="TextBlock.secondary">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+  </Style>
+
+  <!-- Section eyebrow: names the panel's function, in the machine's voice. -->
+  <Style Selector="TextBlock.eyebrow">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextMicro}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+    <Setter Property="LetterSpacing" Value="1.4" />
+  </Style>
+
+  <!-- Anything the machine measures. -->
+  <Style Selector="TextBlock.mono">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextSmall}" />
+  </Style>
+
+  <Style Selector="TextBlock.readout">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextTitle}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource Data}" />
+  </Style>
+
+  <!-- ─────────────────────────────  Buttons  ───────────────────────────── -->
+
+  <Style Selector="Button">
+    <Setter Property="FontFamily" Value="{DynamicResource FontBody}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextBody}" />
+    <Setter Property="Padding" Value="{DynamicResource PadDefault}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSmall}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceOverlay}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Edge}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="Button:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource EdgeStrong}" />
+  </Style>
+
+  <Style Selector="Button:disabled">
+    <Setter Property="Opacity" Value="0.4" />
+  </Style>
+
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="{DynamicResource Signal}" />
+    <Setter Property="Foreground" Value="#12151A" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Signal}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Signal}" />
+    <Setter Property="Foreground" Value="#12151A" />
+    <Setter Property="Opacity" Value="0.88" />
+  </Style>
+
+  <Style Selector="Button.danger">
+    <Setter Property="Foreground" Value="{DynamicResource Alert}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Alert}" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Button.ghost">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+  </Style>
+
+  <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceOverlay}" />
+  </Style>
+
+  <!-- ─────────────────────────────  Navigation rail  ───────────────────────────── -->
+
+  <Style Selector="ListBox.rail">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="8" />
+  </Style>
+
+  <Style Selector="ListBox.rail ListBoxItem">
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSmall}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="ListBox.rail ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SignalWash}" />
+  </Style>
+
+  <Style Selector="ListBox.rail ListBoxItem:selected">
+    <Setter Property="Foreground" Value="{DynamicResource Signal}" />
+  </Style>
+
+  <Style Selector="ListBox.rail ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SurfaceOverlay}" />
+  </Style>
+
+  <!-- ─────────────────────────────  Panels  ───────────────────────────── -->
+
+  <Style Selector="Border.panel">
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Edge}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusMedium}" />
+    <Setter Property="Padding" Value="{DynamicResource PadPanel}" />
+  </Style>
+
+  <Style Selector="Border.tile">
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Edge}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusMedium}" />
+    <Setter Property="Padding" Value="16,14" />
+  </Style>
+
+  <!-- A chip carries one measured fact: quantization, device, format. -->
+  <Style Selector="Border.chip">
+    <Setter Property="Background" Value="{DynamicResource SurfaceOverlay}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Edge}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSmall}" />
+    <Setter Property="Padding" Value="7,3" />
+  </Style>
+
+  <Style Selector="Border.chip > TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextMicro}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+  </Style>
+
+  <!-- ─────────────────────────────  Inputs  ───────────────────────────── -->
+
+  <Style Selector="TextBox">
+    <Setter Property="FontFamily" Value="{DynamicResource FontBody}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextBody}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSunken}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Edge}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSmall}" />
+    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="CaretBrush" Value="{DynamicResource Signal}" />
+  </Style>
+
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="BorderBrush" Value="{DynamicResource Signal}" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="FontFamily" Value="{DynamicResource FontBody}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextBody}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceSunken}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Edge}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSmall}" />
+    <Setter Property="Padding" Value="10,7" />
+  </Style>
+
+  <Style Selector="CheckBox">
+    <Setter Property="FontFamily" Value="{DynamicResource FontBody}" />
+    <Setter Property="FontSize" Value="{DynamicResource TextBody}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+  </Style>
+
+  <Style Selector="Slider">
+    <Setter Property="Foreground" Value="{DynamicResource Signal}" />
+  </Style>
+
+  <!-- ─────────────────────────────  Instrument pieces  ───────────────────────────── -->
+
+  <!--
+    The status LED. It is the only element that animates continuously, and only while the service
+    is actually generating — a light that pulses when nothing is happening would be decoration.
+  -->
+  <Style Selector="Ellipse.led">
+    <Setter Property="Width" Value="7" />
+    <Setter Property="Height" Value="7" />
+    <Setter Property="Fill" Value="{DynamicResource TextMuted}" />
+  </Style>
+
+  <Style Selector="Ellipse.led.running">
+    <Setter Property="Fill" Value="{DynamicResource Success}" />
+  </Style>
+
+  <Style Selector="Ellipse.led.busy">
+    <Setter Property="Fill" Value="{DynamicResource Signal}" />
+  </Style>
+
+  <Style Selector="Ellipse.led.busy">
+    <Style.Animations>
+      <Animation Duration="0:0:1.1" IterationCount="INFINITE" PlaybackDirection="Alternate">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="1" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="0.25" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <Style Selector="Ellipse.led.stopped">
+    <Setter Property="Fill" Value="{DynamicResource TextMuted}" />
+  </Style>
+
+  <Style Selector="Ellipse.led.faulted">
+    <Setter Property="Fill" Value="{DynamicResource Alert}" />
+  </Style>
+
+  <!-- Horizontal rule used to separate instrument groups. -->
+  <Style Selector="Border.rule">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource Edge}" />
+    <Setter Property="Margin" Value="0,12" />
+  </Style>
+
+  <!-- ─────────────────────────────  Scrolling  ───────────────────────────── -->
+
+  <Style Selector="ScrollViewer">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+</Styles>

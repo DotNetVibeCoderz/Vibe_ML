@@ -1,0 +1,27 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <NoWarn>$(NoWarn);SKEXP0001;SKEXP0010;SKEXP0020;SKEXP0040;SKEXP0050;SKEXP0060;SKEXP0070;SKEXP0110;MEVD9000;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!-- Product identity -->
+  <PropertyGroup>
+    <Product>LocalGen</Product>
+    <Company>Gravicode Studios</Company>
+    <Authors>Gravicode Studios</Authors>
+    <Copyright>Copyright © Gravicode Studios. Led by Kang Fadhil.</Copyright>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <PackageProjectUrl>https://github.com/gravicode/LocalGen</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/gravicode/LocalGen</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>ai;llm;inference;local;openai;semantic-kernel;gguf;onnx</PackageTags>
+  </PropertyGroup>
+
+</Project>

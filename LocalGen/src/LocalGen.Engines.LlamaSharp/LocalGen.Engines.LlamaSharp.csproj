@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>llama.cpp inference backend for LocalGen, via LLamaSharp.</Description>
+
+    <!--
+      Native backend selection. The CUDA and Vulkan packages are hundreds of megabytes, so the
+      CPU backend is the default and GPU support is opt-in:
+        dotnet build -p:LlamaBackend=cuda12
+      Accepted values: cpu, cuda11, cuda12, vulkan, all.
+    -->
+    <LlamaBackend Condition="'$(LlamaBackend)' == ''">cpu</LlamaBackend>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LLamaSharp" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <!--
+    The CPU backend comes along with CUDA as well as on its own: the CUDA build's ggml.dll imports
+    from ggml-cpu.dll, which the CUDA package does not ship. It is also what runs the layers that
+    are not offloaded when a model does not fit in VRAM.
+  -->
+  <ItemGroup Condition="'$(LlamaBackend)' != 'vulkan'">
+    <PackageReference Include="LLamaSharp.Backend.Cpu" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(LlamaBackend)' == 'cuda12' or '$(LlamaBackend)' == 'all'">
+    <PackageReference Include="LLamaSharp.Backend.Cuda12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalGen.Core\LocalGen.Core.csproj" />
+  </ItemGroup>
+
+</Project>

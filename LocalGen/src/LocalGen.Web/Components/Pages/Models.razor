@@ -1,0 +1,222 @@
+@page "/models"
+@inject LocalGenClient Client
+
+<PageTitle>LocalGen — Models</PageTitle>
+
+<div class="page stack">
+
+    <div>
+        <p class="eyebrow">Model browser</p>
+        <h1 class="display">Weights on this machine</h1>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="error-banner">@_error</div>
+    }
+
+    <div class="grid-tiles">
+        <div class="tile">
+            <p class="eyebrow">Installed</p>
+            <p class="readout">@_models.Count</p>
+        </div>
+        <div class="tile">
+            <p class="eyebrow">On disk</p>
+            <p class="readout">@FormatBytes(_models.Sum(m => m.SizeBytes))</p>
+        </div>
+        <div class="tile">
+            <p class="eyebrow">Loaded now</p>
+            <p class="readout">@_loaded.Count</p>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="row" style="justify-content: space-between; margin-bottom: 0.9rem;">
+            <h2 class="heading">Installed models</h2>
+            <button class="ghost" @onclick="RefreshAsync">Refresh</button>
+        </div>
+
+        @if (_models.Count == 0)
+        {
+            <p class="secondary">No models installed.</p>
+            <p class="mono muted">
+                Download one with the CLI — <span style="color: var(--data);">localgen pull huggingface:bartowski/Qwen2.5-7B-Instruct-GGUF</span>
+                — or from the Models screen in Admin Control.
+            </p>
+        }
+        else
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Quantization</th>
+                        <th style="text-align:right">Size</th>
+                        <th style="text-align:right">Context</th>
+                        <th>Capabilities</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var model in _models)
+                    {
+                        <tr>
+                            <td class="mono">@model.Id</td>
+                            <td class="mono">@model.Quantization.Name</td>
+                            <td class="num">@FormatBytes(model.SizeBytes)</td>
+                            <td class="num">@model.ContextLength.ToString("N0")</td>
+                            <td>
+                                @foreach (var capability in model.Capabilities)
+                                {
+                                    <span class="chip">@capability</span>
+                                }
+                            </td>
+                            <td style="text-align:right">
+                                @if (_loaded.Contains(model.Id))
+                                {
+                                    <button class="ghost" @onclick="() => UnloadAsync(model.Id)">Unload</button>
+                                }
+                                else
+                                {
+                                    <button class="ghost" @onclick="() => LoadAsync(model.Id)">Load</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="panel">
+        <h2 class="heading" style="margin-bottom: 0.9rem;">Find models</h2>
+
+        <div class="row">
+            <input @bind="_query" @bind:event="oninput" @onkeydown="OnSearchKeyAsync"
+                   placeholder="qwen, llama, mistral, gemma…" />
+            <button class="primary" @onclick="SearchAsync" disabled="@_searching">Search</button>
+        </div>
+
+        @if (_searching)
+        {
+            <p class="mono muted" style="margin-top: 0.8rem;">Searching Hugging Face…</p>
+        }
+        else if (_results.Count > 0)
+        {
+            <table style="margin-top: 0.8rem;">
+                <thead>
+                    <tr>
+                        <th>Repository</th>
+                        <th style="text-align:right">Downloads</th>
+                        <th style="text-align:right">Likes</th>
+                        <th>Pull with</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in _results)
+                    {
+                        <tr>
+                            <td class="mono">@entry.Name</td>
+                            <td class="num">@entry.Downloads.ToString("N0")</td>
+                            <td class="num">@entry.Likes.ToString("N0")</td>
+                            <td class="mono" style="color: var(--data);">localgen pull @entry.Reference</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<LocalGen.Core.Models.ModelDescriptor> _models = [];
+    private IReadOnlyList<LocalGen.Core.Models.CatalogEntry> _results = [];
+    private HashSet<string> _loaded = new(StringComparer.OrdinalIgnoreCase);
+
+    private string _query = string.Empty;
+    private string _error = string.Empty;
+    private bool _searching;
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _error = string.Empty;
+
+        try
+        {
+            _models = await Client.Admin.ListModelsAsync();
+
+            var status = await Client.Admin.GetStatusAsync();
+            _loaded = status.LoadedModels.Select(m => m.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not reach LocalGen: {ex.Message}";
+        }
+    }
+
+    private async Task OnSearchKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_query))
+        {
+            return;
+        }
+
+        _searching = true;
+        _error = string.Empty;
+
+        try
+        {
+            _results = await Client.Admin.SearchCatalogAsync(_query, 25);
+
+            if (_results.Count == 0)
+            {
+                _error = $"Nothing matched “{_query}”. The server may be in offline mode.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private async Task LoadAsync(string id)
+    {
+        try
+        {
+            await Client.Admin.LoadModelAsync(id);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task UnloadAsync(string id)
+    {
+        await Client.Admin.UnloadModelAsync(id);
+        await RefreshAsync();
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        <= 0 => "—",
+        < 1024L * 1024 => $"{bytes / 1024.0:N0} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):N0} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):N2} GB"
+    };
+}

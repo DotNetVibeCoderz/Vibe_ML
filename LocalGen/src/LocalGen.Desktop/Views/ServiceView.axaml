@@ -1,0 +1,158 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:LocalGen.Desktop.ViewModels"
+             xmlns:diag="using:LocalGen.Runtime.Diagnostics"
+             xmlns:sess="using:LocalGen.Runtime.Sessions"
+             mc:Ignorable="d"
+             x:Class="LocalGen.Desktop.Views.ServiceView"
+             x:DataType="vm:ServiceViewModel">
+
+  <Grid RowDefinitions="Auto,*" Margin="24">
+
+    <StackPanel Grid.Row="0" Spacing="18">
+
+      <StackPanel Spacing="4">
+        <TextBlock Classes="eyebrow" Text="WEB SERVICE" />
+        <TextBlock Classes="display" Text="Serve models over HTTP" />
+        <TextBlock Classes="secondary"
+                   Text="Applications that already speak the OpenAI API can point at LocalGen by changing only their base URL."
+                   MaxWidth="640" HorizontalAlignment="Left" />
+      </StackPanel>
+
+      <!-- Control panel -->
+      <Border Classes="panel">
+        <Grid ColumnDefinitions="*,Auto">
+
+          <StackPanel Grid.Column="0" Spacing="14">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <Ellipse Classes="led"
+                       Classes.running="{Binding State, Converter={x:Static vm:Converters.EqualsRunning}}"
+                       Classes.faulted="{Binding State, Converter={x:Static vm:Converters.EqualsFaulted}}"
+                       Classes.stopped="{Binding State, Converter={x:Static vm:Converters.EqualsStopped}}"
+                       VerticalAlignment="Center" />
+              <TextBlock Classes="title" Text="{Binding State}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="20" RowSpacing="7">
+              <TextBlock Grid.Row="0" Grid.Column="0" Classes="eyebrow" Text="LISTENING ON" VerticalAlignment="Center" />
+              <SelectableTextBlock Grid.Row="0" Grid.Column="1" Classes="mono" Text="{Binding Address}" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Classes="eyebrow" Text="OPENAI BASE URL" VerticalAlignment="Center" />
+              <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="{Binding OpenAiEndpoint}"
+                                   Foreground="{DynamicResource Data}" />
+
+              <TextBlock Grid.Row="2" Grid.Column="0" Classes="eyebrow" Text="DATA" VerticalAlignment="Center" />
+              <SelectableTextBlock Grid.Row="2" Grid.Column="1" Classes="mono muted" Text="{Binding DataDirectory}" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Border Classes="chip" IsVisible="{Binding RequiresApiKey}">
+                <TextBlock Text="API key required" />
+              </Border>
+              <Border Classes="chip" IsVisible="{Binding IsOffline}">
+                <TextBlock Text="offline mode" />
+              </Border>
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+            <Button Classes="primary" Content="Start service"
+                    Command="{Binding StartCommand}"
+                    IsVisible="{Binding CanStart}" />
+            <Button Content="Restart"
+                    Command="{Binding RestartCommand}"
+                    IsVisible="{Binding IsRunning}" />
+            <Button Classes="danger" Content="Stop"
+                    Command="{Binding StopCommand}"
+                    IsVisible="{Binding IsRunning}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <TextBlock Classes="mono" Foreground="{DynamicResource Alert}"
+                 Text="{Binding ErrorMessage}"
+                 IsVisible="{Binding ErrorMessage, Converter={x:Static vm:Converters.IsNotEmpty}}" />
+
+      <!-- Resident models -->
+      <Border Classes="panel" IsVisible="{Binding LoadedModels.Count}">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Classes="heading" Text="Models in memory" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="ghost" Content="Unload all"
+                    Command="{Binding UnloadAllCommand}" />
+          </Grid>
+
+          <ItemsControl ItemsSource="{Binding LoadedModels}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="sess:LoadedModel">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,4">
+                  <TextBlock Grid.Column="0" Classes="mono" Text="{Binding ModelId}" VerticalAlignment="Center" />
+                  <Border Grid.Column="1" Classes="chip" Margin="8,0">
+                    <TextBlock Text="{Binding Session.Engine}" />
+                  </Border>
+                  <Border Grid.Column="2" Classes="chip" Margin="0,0,8,0">
+                    <TextBlock Text="{Binding Session.Device}" />
+                  </Border>
+                  <TextBlock Grid.Column="3" Classes="mono muted"
+                             Text="{Binding Session.ContextSize, StringFormat='ctx {0:N0}'}"
+                             VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+    </StackPanel>
+
+    <!-- Log -->
+    <Border Grid.Row="1" Classes="panel" Margin="0,18,0,0" Padding="0">
+      <Grid RowDefinitions="Auto,*">
+
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="20,16,20,12">
+          <TextBlock Grid.Column="0" Classes="heading" Text="Log" VerticalAlignment="Center" />
+
+          <ComboBox Grid.Column="1" Width="130" Margin="0,0,8,0"
+                    ItemsSource="{Binding LogLevels}"
+                    SelectedItem="{Binding MinimumLevel}" />
+
+          <Button Grid.Column="2" Classes="ghost" Content="Clear" Command="{Binding ClearLogCommand}" />
+        </Grid>
+
+        <Border Grid.Row="1" Background="{DynamicResource SurfaceSunken}"
+                CornerRadius="0,0,5,5">
+
+          <!-- An empty log is a state worth naming, not a blank rectangle. -->
+          <Panel>
+            <StackPanel IsVisible="{Binding !LogEntries.Count}"
+                        VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6">
+              <TextBlock Classes="secondary" Text="Nothing logged yet."
+                         HorizontalAlignment="Center" />
+              <TextBlock Classes="mono muted" Text="Start the service to see requests as they arrive."
+                         HorizontalAlignment="Center" />
+            </StackPanel>
+
+            <ScrollViewer Padding="20,12" IsVisible="{Binding LogEntries.Count}">
+              <ItemsControl ItemsSource="{Binding LogEntries}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="diag:LogEntry">
+                    <Grid ColumnDefinitions="66,74,*" Margin="0,1">
+                      <TextBlock Grid.Column="0" Classes="mono muted"
+                                 Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss}'}" />
+                      <TextBlock Grid.Column="1" Classes="mono muted"
+                                 Text="{Binding Category}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Grid.Column="2" Classes="mono"
+                                 Text="{Binding Message}" TextWrapping="Wrap" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Panel>
+        </Border>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

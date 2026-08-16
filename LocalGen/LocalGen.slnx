@@ -1,0 +1,27 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/AgentWithTools/AgentWithTools.csproj" />
+    <Project Path="samples/AvaloniaEmbedded/AvaloniaEmbedded.csproj" />
+    <Project Path="samples/ConsoleChat/ConsoleChat.csproj" />
+    <Project Path="samples/DocumentQA/DocumentQA.csproj" />
+    <Project Path="samples/WpfChat/WpfChat.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/LocalGen.Cli/LocalGen.Cli.csproj" />
+    <Project Path="src/LocalGen.Core/LocalGen.Core.csproj" />
+    <Project Path="src/LocalGen.Desktop/LocalGen.Desktop.csproj" />
+    <Project Path="src/LocalGen.Engines.FoundryLocal/LocalGen.Engines.FoundryLocal.csproj" />
+    <Project Path="src/LocalGen.Engines.LlamaSharp/LocalGen.Engines.LlamaSharp.csproj" />
+    <Project Path="src/LocalGen.Engines.Onnx/LocalGen.Engines.Onnx.csproj" />
+    <Project Path="src/LocalGen.Kernel/LocalGen.Kernel.csproj" />
+    <Project Path="src/LocalGen.Rag/LocalGen.Rag.csproj" />
+    <Project Path="src/LocalGen.Runtime/LocalGen.Runtime.csproj" />
+    <Project Path="src/LocalGen.Sdk/LocalGen.Sdk.csproj" />
+    <Project Path="src/LocalGen.Server/LocalGen.Server.csproj" />
+    <Project Path="src/LocalGen.Web/LocalGen.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LocalGen.Core.Tests/LocalGen.Core.Tests.csproj" />
+    <Project Path="tests/LocalGen.Desktop.Tests/LocalGen.Desktop.Tests.csproj" />
+  </Folder>
+</Solution>
