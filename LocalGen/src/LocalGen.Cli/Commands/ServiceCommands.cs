@@ -215,6 +215,17 @@ public sealed class EnginesCommand : AsyncCommand<GlobalSettings>
             }
 
             body.AddRow("[grey]Devices[/]", string.Join(", ", engine.Devices));
+
+            if (engine.Accelerators.Count > 0)
+            {
+                // The count is the number that matters: a tensor split has somewhere to go only
+                // when the backend registered more than one GPU.
+                var gpus = string.Join(", ", engine.Accelerators.Select(Markup.Escape));
+                body.AddRow(
+                    "[grey]GPUs[/]",
+                    engine.Accelerators.Count > 1 ? $"{gpus} [cyan](splittable)[/]" : gpus);
+            }
+
             body.AddRow("[grey]Formats[/]", string.Join(", ", engine.Formats));
             body.AddRow("[grey]Grammar[/]", engine.SupportsGrammar ? "yes" : "no");
             body.AddRow("[grey]Embeddings[/]", engine.SupportsEmbeddings ? "yes" : "no");

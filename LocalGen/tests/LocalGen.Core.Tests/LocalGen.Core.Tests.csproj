@@ -10,12 +10,22 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="FluentAssertions" />
+    <!--
+      The document fixtures are authored at run time rather than committed: a .docx checked into
+      the repository is an opaque blob that nobody can review in a diff, and these are small
+      enough to build in the test that needs them.
+    -->
+    <PackageReference Include="DocumentFormat.OpenXml" />
+    <PackageReference Include="ClosedXML" />
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\LocalGen.Core\LocalGen.Core.csproj" />
     <ProjectReference Include="..\..\src\LocalGen.Runtime\LocalGen.Runtime.csproj" />
     <ProjectReference Include="..\..\src\LocalGen.Rag\LocalGen.Rag.csproj" />
+    <ProjectReference Include="..\..\src\LocalGen.Kernel\LocalGen.Kernel.csproj" />
   </ItemGroup>
 
 </Project>

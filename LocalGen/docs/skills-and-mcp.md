@@ -166,3 +166,60 @@ Connections are long-lived, since a stdio server is a child process, and are tor
 disconnect.
 
 In offline mode, HTTP servers are refused; stdio servers still work, because they are local.
+
+---
+
+## Agent teams
+
+One agent with tools is `LocalGenAgent`. Several agents on one task is `AgentTeam`, which decides
+which agent runs when. A member is declared rather than built:
+
+```csharp
+AgentDefinition[] roster =
+[
+    new() { Name = "Researcher", Description = "Lists the concrete facts a topic involves.",
+            Instructions = "You list facts. 4-6 bullet points, no preamble." },
+    new() { Name = "Writer",     Description = "Turns notes into one finished paragraph.",
+            Instructions = "You write final copy. Exactly one paragraph of plain prose.",
+            Tools = ToolSelection.None }
+];
+
+var team = await AgentTeam.CreateAsync(kernelFactory, "qwen2.5-7b-instruct:q4_k_m", roster);
+```
+
+Tools default to **none** per member: an agent that only summarises should not also be able to
+execute code because a teammate needed to. A member may also name its own `Model`, so a small fast
+model can draft and a larger one can review.
+
+### Three patterns
+
+| Pattern | Who decides what runs | Use it when |
+| --- | --- | --- |
+| `RunSequentialAsync` | You do — a fixed pipeline | The work has stages: research, then critique, then write |
+| `RunConcurrentAsync` | You do — everyone answers, a reducer merges | You want several angles on one question |
+| `RunHandoffAsync` | The coordinator does, by calling members as tools | The route depends on the request |
+
+Each streams `OrchestrationEvent`s carrying the agent they belong to, so a UI can show which
+member is speaking and wrap each one's tool calls exactly as it does for a single agent.
+
+### Choosing between them
+
+The difference that matters on a local model is how much is left to its judgement.
+
+Sequential and concurrent decide the routing in your code, so a 1.5B model runs them as reliably
+as a 70B one. Handoff models a delegation as an ordinary tool call — which is what makes it work
+without a new protocol — but that means a coordinator is only as good as the model's function
+calling. In testing, a 1.5B coordinator delegated correctly to a single specialist and did not
+reliably route among three. If your coordinator ignores its team, either give it a bigger model or
+use a deterministic pattern.
+
+Concurrent teams also want `Engine.BatchedInference` switched on. Without it the members queue
+behind one another on the same weights and the fan-out buys nothing but tidier code.
+
+`samples/MultiAgentTeam` runs all three against a local model:
+
+```bash
+dotnet run --project samples/MultiAgentTeam -- sequential
+dotnet run --project samples/MultiAgentTeam -- concurrent
+dotnet run --project samples/MultiAgentTeam -- handoff
+```

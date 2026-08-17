@@ -25,11 +25,14 @@ public sealed class FileDialogService : IFileDialogService
         MimeTypes = ["image/*"]
     };
 
+    // Kept in step with what DocumentExtractor can read: a format missing here is one the user
+    // cannot pick even though attaching it would have worked.
     private static readonly FilePickerFileType Documents = new("Documents and code")
     {
         Patterns =
         [
-            "*.pdf", "*.md", "*.markdown", "*.txt", "*.log", "*.csv", "*.json", "*.xml",
+            "*.pdf", "*.docx", "*.xlsx", "*.pptx", "*.epub", "*.rtf",
+            "*.md", "*.markdown", "*.txt", "*.log", "*.csv", "*.tsv", "*.json", "*.xml",
             "*.yaml", "*.yml", "*.html", "*.htm",
             "*.cs", "*.py", "*.js", "*.ts", "*.go", "*.rs", "*.java", "*.kt", "*.sql", "*.sh", "*.ps1"
         ]

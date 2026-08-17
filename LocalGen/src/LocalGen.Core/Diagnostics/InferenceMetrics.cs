@@ -24,6 +24,12 @@ public sealed record InferenceSample
 
     public bool Failed { get; init; }
 
+    /// <summary>
+    /// Name of the API key the request was billed to. Empty when the server has no keys
+    /// configured, or when the caller is in-process rather than over HTTP.
+    /// </summary>
+    public string Tenant { get; init; } = string.Empty;
+
     /// <summary>Generation throughput, excluding prompt processing.</summary>
     public double TokensPerSecond
     {
@@ -107,12 +113,19 @@ public sealed class InferenceMetrics : IDisposable
 
     public void Record(InferenceSample sample)
     {
+        // Every tag here is drawn from a bounded set — installed models, compiled-in engines,
+        // configured key names — so the exported series cannot fan out with traffic.
         var tags = new TagList
         {
             { "model", sample.Model },
             { "engine", sample.Engine },
             { "status", sample.Failed ? "error" : "ok" }
         };
+
+        if (sample.Tenant.Length > 0)
+        {
+            tags.Add("tenant", sample.Tenant);
+        }
 
         _requests.Add(1, tags);
         _promptTokens.Add(sample.PromptTokens, tags);

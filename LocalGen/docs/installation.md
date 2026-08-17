@@ -1,5 +1,23 @@
 # Installation
 
+## From an installer
+
+The quickest route, and the only one that needs nothing installed beforehand — the packages carry
+the .NET runtime with them:
+
+| Platform | Package |
+| --- | --- |
+| Windows 10/11 x64 | `LocalGen-<version>-win-x64.msi` |
+| macOS 12+ | `LocalGen-<version>-osx-arm64.pkg` or `-x64` |
+| Debian, Ubuntu | `localgen_<version>_amd64.deb` |
+| Other Linux | `localgen-<version>-linux-x64.tar.gz` |
+
+Take the `-cuda12` variant for an NVIDIA GPU; it is larger by the size of the CUDA runtime.
+
+Everything below is for building from source, which is what you want if you are working on
+LocalGen rather than using it. [Installers](installers.md) covers how the packages are built,
+signed and released.
+
 ## Prerequisites
 
 - **.NET 10 SDK** — [download](https://dotnet.microsoft.com/download)

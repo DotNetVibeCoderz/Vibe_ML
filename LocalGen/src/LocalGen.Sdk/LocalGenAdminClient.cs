@@ -215,6 +215,9 @@ public sealed record EngineDto
 
     public IReadOnlyList<string> Devices { get; init; } = [];
 
+    /// <summary>The individual GPUs this backend registered, in tensor-split order.</summary>
+    public IReadOnlyList<string> Accelerators { get; init; } = [];
+
     public IReadOnlyList<string> Formats { get; init; } = [];
 
     public bool SupportsGrammar { get; init; }

@@ -152,6 +152,24 @@ public static class ModelfileParser
             sb.Append("PARAMETER device ").AppendLine(modelfile.LoadOptions.Device.ToString().ToLowerInvariant());
         }
 
+        // The multi-GPU settings render too, so `localgen show --modelfile` on a model created
+        // from a Modelfile gives back something that would load the same way.
+        if (modelfile.LoadOptions.TensorSplit.Count > 0)
+        {
+            sb.Append("PARAMETER tensor_split ")
+              .AppendLine(string.Join(
+                  ", ",
+                  modelfile.LoadOptions.TensorSplit.Select(v => v.ToString("0.###", CultureInfo.InvariantCulture))));
+        }
+
+        if (modelfile.LoadOptions.SplitMode != GpuSplitMode.Auto)
+        {
+            sb.Append("PARAMETER split_mode ")
+              .AppendLine(modelfile.LoadOptions.SplitMode.ToString().ToLowerInvariant());
+        }
+
+        AppendParameter(sb, "main_gpu", modelfile.LoadOptions.MainGpu);
+
         if (modelfile.IsEmbedding)
         {
             sb.AppendLine("EMBEDDING true");
@@ -273,6 +291,8 @@ public static class ModelfileParser
                     .Select(x => ParseFloat(x, key, lineNumber))
                     .ToList();
                 break;
+            case "split_mode": load.SplitMode = ParseSplitMode(arg, lineNumber); break;
+            case "main_gpu": load.MainGpu = ParseInt(arg, key, lineNumber); break;
 
             default:
                 extras[key] = arg;
@@ -298,6 +318,12 @@ public static class ModelfileParser
         Enum.TryParse<DeviceKind>(value, ignoreCase: true, out var device)
             ? device
             : throw new ModelfileException($"unknown device '{value}'", lineNumber);
+
+    private static GpuSplitMode ParseSplitMode(string value, int lineNumber) =>
+        Enum.TryParse<GpuSplitMode>(value, ignoreCase: true, out var mode)
+            ? mode
+            : throw new ModelfileException(
+                $"unknown split_mode '{value}'; expected auto, none, layer or row", lineNumber);
 
     private static float ParseFloat(string value, string key, int lineNumber) =>
         float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
@@ -378,6 +404,8 @@ public static class ModelfileParser
         public bool UseMemoryLock;
         public DeviceKind Device = DeviceKind.Auto;
         public IReadOnlyList<float> TensorSplit = [];
+        public GpuSplitMode SplitMode = GpuSplitMode.Auto;
+        public int? MainGpu;
 
         public ModelLoadOptions Build(bool embedding) => new()
         {
@@ -389,6 +417,8 @@ public static class ModelfileParser
             UseMemoryLock = UseMemoryLock,
             Device = Device,
             TensorSplit = TensorSplit,
+            SplitMode = SplitMode,
+            MainGpu = MainGpu,
             EmbeddingMode = embedding
         };
     }

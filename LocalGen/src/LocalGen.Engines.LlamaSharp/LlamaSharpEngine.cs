@@ -48,7 +48,7 @@ public sealed class LlamaSharpEngine : IInferenceEngine
             SupportsEmbeddings = true,
             SupportsGrammar = true,
             SupportsToolCalling = true,
-            SupportsVision = false,
+            SupportsVision = true,
             SupportsMultiGpu = true,
             Formats = [ModelFormat.Gguf],
             Devices = [DeviceKind.Auto, DeviceKind.Cpu, DeviceKind.Cuda, DeviceKind.Vulkan, DeviceKind.Metal]
@@ -84,23 +84,24 @@ public sealed class LlamaSharpEngine : IInferenceEngine
             // The accelerators come from the registered ggml devices, not from the system-info
             // banner: current llama.cpp builds report only CPU feature flags there, so a machine
             // with a working CUDA backend still shows a banner that mentions no GPU at all.
-            var accelerators = ReadAcceleratorNames();
+            var accelerators = ReadAccelerators();
+            var acceleratorNames = accelerators.Select(static a => a.Name).ToList();
 
             var devices = new List<DeviceKind> { DeviceKind.Cpu };
 
             if (NativeApi.llama_supports_gpu_offload())
             {
-                if (accelerators.Any(static name => name.Contains("CUDA", StringComparison.OrdinalIgnoreCase)))
+                if (acceleratorNames.Any(static name => name.Contains("CUDA", StringComparison.OrdinalIgnoreCase)))
                 {
                     devices.Add(DeviceKind.Cuda);
                 }
 
-                if (accelerators.Any(static name => name.Contains("Vulkan", StringComparison.OrdinalIgnoreCase)))
+                if (acceleratorNames.Any(static name => name.Contains("Vulkan", StringComparison.OrdinalIgnoreCase)))
                 {
                     devices.Add(DeviceKind.Vulkan);
                 }
 
-                if (accelerators.Any(static name => name.Contains("Metal", StringComparison.OrdinalIgnoreCase)))
+                if (acceleratorNames.Any(static name => name.Contains("Metal", StringComparison.OrdinalIgnoreCase)))
                 {
                     devices.Add(DeviceKind.Metal);
                 }
@@ -114,15 +115,23 @@ public sealed class LlamaSharpEngine : IInferenceEngine
             // The device list is more useful in the UI than the CPU banner alone.
             if (accelerators.Count > 0)
             {
-                systemInfo = $"{string.Join(", ", accelerators)} | {systemInfo}";
+                systemInfo = $"{string.Join(", ", acceleratorNames)} | {systemInfo}";
             }
 
             _logger.LogInformation("LlamaSharp backend ready. Devices: {Devices}", string.Join(", ", devices));
+
+            if (accelerators.Count > 1)
+            {
+                _logger.LogInformation(
+                    "{Count} accelerators registered ({Names}); tensor splitting is available.",
+                    accelerators.Count, string.Join(", ", acceleratorNames));
+            }
 
             return new EngineAvailability
             {
                 IsAvailable = true,
                 AvailableDevices = devices,
+                Accelerators = accelerators,
                 Version = systemInfo.Split('\n').FirstOrDefault()?.Trim() ?? "llama.cpp"
             };
         }
@@ -145,16 +154,19 @@ public sealed class LlamaSharpEngine : IInferenceEngine
     }
 
     /// <summary>
-    /// Names the accelerator devices ggml registered — <c>CUDA0</c>, <c>Vulkan0</c> and so on.
+    /// Lists the accelerator devices ggml registered — <c>CUDA0</c>, <c>Vulkan0</c> and so on.
     /// </summary>
     /// <remarks>
-    /// This is the authoritative source for what the loaded native library can actually use. Each
-    /// device is identified by its buffer type name, which is the only device string LLamaSharp
-    /// surfaces. The CPU device is filtered out so the caller is left with accelerators alone.
+    /// This is the authoritative source for what the loaded native library can actually use, and
+    /// its length is what decides whether a tensor split is meaningful: a two-card machine whose
+    /// second GPU is masked by <c>CUDA_VISIBLE_DEVICES</c>, or whose driver only bound one, shows
+    /// one device here and the split has nowhere to go. Each device is identified by its buffer
+    /// type name, which is the only device string LLamaSharp surfaces. The CPU device is filtered
+    /// out so the caller is left with accelerators alone.
     /// </remarks>
-    private List<string> ReadAcceleratorNames()
+    private List<AcceleratorDevice> ReadAccelerators()
     {
-        var names = new List<string>();
+        var accelerators = new List<AcceleratorDevice>();
 
         try
         {
@@ -184,7 +196,13 @@ public sealed class LlamaSharpEngine : IInferenceEngine
                 if (!string.IsNullOrWhiteSpace(name) &&
                     !name.StartsWith("CPU", StringComparison.OrdinalIgnoreCase))
                 {
-                    names.Add(name);
+                    // The index is the accelerator's position among accelerators, not among all
+                    // ggml devices: that is what llama.cpp's tensor split addresses.
+                    accelerators.Add(new AcceleratorDevice
+                    {
+                        Index = accelerators.Count,
+                        Name = name
+                    });
                 }
             }
         }
@@ -194,7 +212,7 @@ public sealed class LlamaSharpEngine : IInferenceEngine
             _logger.LogDebug(ex, "ggml device enumeration is unavailable in this native build.");
         }
 
-        return names;
+        return accelerators;
     }
 
     public bool CanServe(ModelDescriptor model) =>
@@ -219,7 +237,7 @@ public sealed class LlamaSharpEngine : IInferenceEngine
         }
 
         var device = ResolveDevice(options.Device, availability.AvailableDevices);
-        var parameters = BuildModelParams(model, options, device);
+        var parameters = BuildModelParams(model, options, device, availability.Accelerators);
 
         _logger.LogInformation(
             "Loading {Model} on {Device} (ctx={Context}, gpuLayers={GpuLayers})",
@@ -231,9 +249,34 @@ public sealed class LlamaSharpEngine : IInferenceEngine
                 .LoadFromFileAsync(parameters, cancellationToken)
                 .ConfigureAwait(false);
 
+            var projector = await LoadProjectorAsync(model, weights, device, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Batching is skipped for a vision model even when it is switched on: an image is
+            // encoded by the projector before any of it reaches the batch, so the work that
+            // dominates a vision request is the part batching cannot overlap — and mixing the two
+            // would mean maintaining a second multimodal path for no throughput gain.
+            if (options.BatchedInference && !options.EmbeddingMode && projector is null)
+            {
+                return new LlamaSharpBatchedSession(
+                    model,
+                    weights,
+                    parameters,
+                    device,
+                    options.MaxSequences,
+                    _loggerFactory.CreateLogger<LlamaSharpBatchedSession>());
+            }
+
+            if (options.BatchedInference && projector is not null)
+            {
+                _logger.LogInformation(
+                    "{Model} is a vision model; serving it serialised rather than batched.", model.Id);
+            }
+
             return new LlamaSharpSession(
                 model,
                 weights,
+                projector,
                 parameters,
                 device,
                 _loggerFactory.CreateLogger<LlamaSharpSession>());
@@ -241,6 +284,56 @@ public sealed class LlamaSharpEngine : IInferenceEngine
         catch (Exception ex) when (ex is not OperationCanceledException and not ModelLoadException)
         {
             throw new ModelLoadException(model.Id, ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// Loads the multimodal projector beside a vision model, or returns null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// A GGUF vision model is two files: the language weights and an <c>mmproj</c> that encodes
+    /// images into the same embedding space. A missing or unreadable projector is not fatal — the
+    /// language weights are perfectly usable on their own, and refusing to load them would turn a
+    /// half-downloaded vision model into no model at all. The session simply reports no vision
+    /// and images are described in words.
+    /// </remarks>
+    private async Task<MtmdWeights?> LoadProjectorAsync(
+        ModelDescriptor model,
+        LLamaWeights weights,
+        DeviceKind device,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(model.ProjectorPath) || !File.Exists(model.ProjectorPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var parameters = MtmdContextParams.Default();
+            parameters.UseGpu = device != DeviceKind.Cpu;
+
+            // The marker has to be the one LocalGen writes into the prompt, so it is taken from
+            // the native library rather than hard-coded on either side.
+            parameters.MediaMarker = NativeApi.MtmdDefaultMarker();
+
+            var projector = await MtmdWeights
+                .LoadFromFileAsync(model.ProjectorPath, weights, parameters, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Loaded multimodal projector for {Model} (vision={Vision}, audio={Audio}).",
+                model.Id, projector.SupportsVision, projector.SupportsAudio);
+
+            return projector;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex, "Projector at {Path} could not be loaded; {Model} will run without vision.",
+                model.ProjectorPath, model.Id);
+
+            return null;
         }
     }
 
@@ -274,10 +367,11 @@ public sealed class LlamaSharpEngine : IInferenceEngine
         return requested;
     }
 
-    private static ModelParams BuildModelParams(
+    private ModelParams BuildModelParams(
         ModelDescriptor model,
         ModelLoadOptions options,
-        DeviceKind device)
+        DeviceKind device,
+        IReadOnlyList<AcceleratorDevice> accelerators)
     {
         var parameters = new ModelParams(model.Path)
         {
@@ -311,12 +405,9 @@ public sealed class LlamaSharpEngine : IInferenceEngine
             parameters.BatchSize = (uint)options.BatchSize.Value;
         }
 
-        if (options.TensorSplit.Count > 0)
+        if (device != DeviceKind.Cpu)
         {
-            for (var i = 0; i < options.TensorSplit.Count && i < parameters.TensorSplits.Length; i++)
-            {
-                parameters.TensorSplits[i] = options.TensorSplit[i];
-            }
+            ApplyMultiGpu(parameters, options, accelerators);
         }
 
         if (options.EmbeddingMode)
@@ -326,5 +417,69 @@ public sealed class LlamaSharpEngine : IInferenceEngine
         }
 
         return parameters;
+    }
+
+    /// <summary>
+    /// Spreads the model over the accelerators present, following the configured split.
+    /// </summary>
+    /// <remarks>
+    /// The resolution happens against the devices ggml actually registered rather than against the
+    /// configuration alone, because the two disagree in exactly the case this feature exists for:
+    /// a host whose second card is not visible to the build that is loaded. Warnings are logged
+    /// rather than thrown — a wrong split should still load the model, on fewer GPUs.
+    /// </remarks>
+    private void ApplyMultiGpu(
+        ModelParams parameters,
+        ModelLoadOptions options,
+        IReadOnlyList<AcceleratorDevice> accelerators)
+    {
+        var plan = TensorSplitPlan.Create(options.TensorSplit, accelerators.Count);
+
+        foreach (var warning in plan.Warnings)
+        {
+            _logger.LogWarning("Multi-GPU configuration: {Warning}", warning);
+        }
+
+        if (!plan.IsAutomatic)
+        {
+            for (var i = 0; i < plan.Fractions.Count && i < parameters.TensorSplits.Length; i++)
+            {
+                parameters.TensorSplits[i] = plan.Fractions[i];
+            }
+
+            _logger.LogInformation("Tensor split: {Split}", plan.Describe(accelerators));
+        }
+
+        if (options.MainGpu is { } mainGpu)
+        {
+            if (accelerators.Count > 0 && mainGpu >= accelerators.Count)
+            {
+                _logger.LogWarning(
+                    "MainGpu is set to {MainGpu} but only {Count} accelerator(s) are visible; using device 0.",
+                    mainGpu, accelerators.Count);
+            }
+            else
+            {
+                parameters.MainGpu = mainGpu;
+            }
+        }
+
+        parameters.SplitMode = options.SplitMode switch
+        {
+            GpuSplitMode.None => LLama.Native.GPUSplitMode.None,
+            GpuSplitMode.Layer => LLama.Native.GPUSplitMode.Layer,
+            GpuSplitMode.Row => LLama.Native.GPUSplitMode.Row,
+
+            // Auto leaves the field unset so llama.cpp keeps its own default, which is Layer.
+            _ => null
+        };
+
+        if (options.SplitMode == GpuSplitMode.Row && accelerators.Count > 1)
+        {
+            _logger.LogInformation(
+                "Row split mode: every layer is computed across all {Count} devices, which needs a fast " +
+                "link between them to beat layer splitting.",
+                accelerators.Count);
+        }
     }
 }

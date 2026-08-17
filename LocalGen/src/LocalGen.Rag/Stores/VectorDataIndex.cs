@@ -31,16 +31,36 @@ public sealed class VectorDataIndex : IVectorIndex
 
         _collection = store.GetCollection<string, DocumentRecord>(
             collectionName,
-            BuildDefinition(embeddingDimensions));
+            BuildDefinition(embeddingDimensions, provider));
     }
 
     public string Provider { get; }
 
     /// <summary>
+    /// Backends do not agree on how to express "close in cosine terms", and asking for the wrong
+    /// one is fatal rather than approximate: the SQLite connector rejects
+    /// <see cref="DistanceFunction.CosineSimilarity"/> outright when the collection is created,
+    /// which takes down the default RAG provider on the first search.
+    /// </summary>
+    /// <remarks>
+    /// sqlite-vec computes cosine <em>distance</em>. It is the same measure inverted —
+    /// <c>distance = 1 - similarity</c> — so <see cref="ToSimilarity"/> converts the scores back
+    /// and every backend keeps reporting similarity in 0..1, as <see cref="SearchHit.Score"/>
+    /// promises.
+    /// </remarks>
+    private static string DistanceFunctionFor(string provider) =>
+        provider.Equals("sqlite", StringComparison.OrdinalIgnoreCase)
+            ? DistanceFunction.CosineDistance
+            : DistanceFunction.CosineSimilarity;
+
+    private double ToSimilarity(double score) =>
+        DistanceFunctionFor(Provider) == DistanceFunction.CosineDistance ? 1 - score : score;
+
+    /// <summary>
     /// Describes the record shape with the embedding dimension the configured model actually
     /// produces. A mismatch here surfaces as an opaque backend error at upsert time.
     /// </summary>
-    private static VectorStoreCollectionDefinition BuildDefinition(int dimensions) => new()
+    private static VectorStoreCollectionDefinition BuildDefinition(int dimensions, string provider) => new()
     {
         Properties =
         [
@@ -65,7 +85,7 @@ public sealed class VectorDataIndex : IVectorIndex
                 typeof(ReadOnlyMemory<float>),
                 dimensions)
             {
-                DistanceFunction = DistanceFunction.CosineSimilarity
+                DistanceFunction = DistanceFunctionFor(provider)
             }
         ]
     };
@@ -108,7 +128,7 @@ public sealed class VectorDataIndex : IVectorIndex
             hits.Add(new SearchHit
             {
                 Record = result.Record,
-                Score = result.Score ?? 0
+                Score = ToSimilarity(result.Score ?? 0)
             });
         }
 

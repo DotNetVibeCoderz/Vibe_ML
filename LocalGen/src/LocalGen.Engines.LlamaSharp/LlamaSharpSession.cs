@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using LLama;
 using LLama.Common;
+using LLama.Native;
 using LLama.Sampling;
 using LocalGen.Core;
 using LocalGen.Core.Engines;
@@ -26,6 +27,9 @@ internal sealed class LlamaSharpSession : IModelSession
     private readonly ILogger<LlamaSharpSession> _logger;
     private readonly SemaphoreSlim _generationLock = new(1, 1);
 
+    private readonly ToolDialect _toolDialect;
+    private readonly MtmdWeights? _projector;
+
     private LLamaEmbedder? _embedder;
     private bool _hasChatTemplate;
     private bool _templateProbed;
@@ -33,6 +37,7 @@ internal sealed class LlamaSharpSession : IModelSession
     public LlamaSharpSession(
         ModelDescriptor model,
         LLamaWeights weights,
+        MtmdWeights? projector,
         ModelParams parameters,
         DeviceKind device,
         ILogger<LlamaSharpSession> logger)
@@ -40,8 +45,19 @@ internal sealed class LlamaSharpSession : IModelSession
         Model = model;
         Device = device;
         _weights = weights;
+        _projector = projector;
         _parameters = parameters;
         _logger = logger;
+
+        // Decided once at load: the template cannot change under a loaded model, and the dialect
+        // has to be the same for the prompt that asks for a call and the filter that reads it.
+        _toolDialect = ToolDialect.Detect(model.ChatTemplate);
+
+        if (_toolDialect != ToolDialect.Hermes)
+        {
+            _logger.LogInformation(
+                "{Model} uses the {Dialect} tool-call convention.", model.Id, _toolDialect.Name);
+        }
 
         _executor = new StatelessExecutor(weights, parameters, logger)
         {
@@ -64,25 +80,51 @@ internal sealed class LlamaSharpSession : IModelSession
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await _generationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        // Disposed at the end of the generation: a vision request runs on a context of its own,
+        // and holding it past the request would keep its KV cache allocated for nothing.
+        VisionScope? vision = null;
+
         try
         {
-            var messages = ChatPrompt.Prepare(request);
+            var images = CollectImages(request);
+            var useVision = images.Count > 0 && SupportsVision;
+
+            if (images.Count > 0 && !useVision)
+            {
+                _logger.LogWarning(
+                    "{Model} was sent {Count} image(s) but has no multimodal projector; they will be described rather than seen.",
+                    Model.Id, images.Count);
+            }
+
+            var messages = ChatPrompt.Prepare(
+                request,
+                _toolDialect,
+                useVision ? NativeApi.MtmdDefaultMarker() : null);
+
             var (prompt, stopSequences) = RenderPrompt(messages, request.Options);
 
             var inferenceParams = BuildInferenceParams(request.Options, stopSequences);
             var promptTokens = CountTokens(prompt);
-            var filter = new ToolCallStreamFilter();
+            var filter = new ToolCallStreamFilter(_toolDialect);
             var completionText = new StringBuilder();
             var finishReason = FinishReason.Stop;
             var generatedTokens = 0;
 
-            _logger.LogDebug(
-                "Generating for {Model}: {PromptTokens} prompt tokens, max {MaxTokens}",
-                Model.Id, promptTokens, inferenceParams.MaxTokens);
+            if (useVision)
+            {
+                vision = CreateVisionScope(images);
+            }
 
-            await foreach (var token in _executor
-                .InferAsync(prompt, inferenceParams, cancellationToken)
-                .ConfigureAwait(false))
+            var tokens = vision is not null
+                ? vision.Executor.InferAsync(prompt, inferenceParams, cancellationToken)
+                : _executor.InferAsync(prompt, inferenceParams, cancellationToken);
+
+            _logger.LogDebug(
+                "Generating for {Model}: {PromptTokens} prompt tokens, max {MaxTokens}, images {Images}",
+                Model.Id, promptTokens, inferenceParams.MaxTokens, images.Count);
+
+            await foreach (var token in tokens.ConfigureAwait(false))
             {
                 generatedTokens++;
                 var visible = filter.Push(token);
@@ -125,7 +167,67 @@ internal sealed class LlamaSharpSession : IModelSession
         }
         finally
         {
+            vision?.Dispose();
             _generationLock.Release();
+        }
+    }
+
+    /// <summary>Whether this session can actually see images.</summary>
+    public bool SupportsVision => _projector is { SupportsVision: true };
+
+    private static IReadOnlyList<ContentPart.Image> CollectImages(ChatRequest request) =>
+        [.. request.Messages.SelectMany(static m => m.Content).OfType<ContentPart.Image>()];
+
+    /// <summary>
+    /// Builds the throwaway context and executor a vision request runs on.
+    /// </summary>
+    /// <remarks>
+    /// The stateless executor the text path uses cannot carry a projector — LLamaSharp exposes
+    /// multimodal input only on the stateful executors — so a vision request gets its own context
+    /// and an <see cref="InteractiveExecutor"/> over it. Building one per request rather than
+    /// keeping it for the session is deliberate: the stateful executor retains the KV cache
+    /// between calls, and a second request against a warm one would be decoded on top of the
+    /// first conversation rather than the prompt actually supplied.
+    /// </remarks>
+    private VisionScope CreateVisionScope(IReadOnlyList<ContentPart.Image> images)
+    {
+        var context = _weights.CreateContext(_parameters, _logger);
+
+        try
+        {
+            var executor = new InteractiveExecutor(context, _projector!, _logger);
+
+            // Order matters: the nth marker in the prompt takes the nth embed, so the images are
+            // added in the order they appeared in the conversation.
+            foreach (var image in images)
+            {
+                executor.Embeds.Add(_projector!.LoadMedia(image.Data.Span));
+            }
+
+            return new VisionScope(context, executor, _projector!);
+        }
+        catch
+        {
+            context.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Owns the per-request context and the media loaded into the projector.</summary>
+    private sealed class VisionScope(
+        LLamaContext context,
+        InteractiveExecutor executor,
+        MtmdWeights projector) : IDisposable
+    {
+        public InteractiveExecutor Executor { get; } = executor;
+
+        public void Dispose()
+        {
+            // The projector holds the decoded bitmaps until told otherwise; leaving them would
+            // leak native memory for every image ever sent to this model.
+            projector.ClearMedia();
+            Executor.Embeds.Clear();
+            context.Dispose();
         }
     }
 
@@ -293,6 +395,10 @@ internal sealed class LlamaSharpSession : IModelSession
     public ValueTask DisposeAsync()
     {
         _embedder?.Dispose();
+
+        // Before the weights: the projector was built against them and holds a reference into
+        // the loaded model.
+        _projector?.Dispose();
         _weights.Dispose();
         _generationLock.Dispose();
         return ValueTask.CompletedTask;

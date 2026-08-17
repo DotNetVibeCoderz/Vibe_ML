@@ -1,5 +1,5 @@
 using System.Text;
-using AngleSharp;
+using ElBruno.MarkItDotNet;
 using LocalGen.Core;
 using Microsoft.Extensions.Logging;
 using UglyToad.PdfPig;
@@ -13,8 +13,23 @@ public sealed record ExtractedDocument
 
     public required string Text { get; init; }
 
-    /// <summary>Detected kind: <c>pdf</c>, <c>markdown</c>, <c>html</c>, <c>text</c>, <c>image</c>.</summary>
+    /// <summary>
+    /// The source format: <c>pdf</c>, <c>docx</c>, <c>xlsx</c>, <c>pptx</c>, <c>epub</c>,
+    /// <c>rtf</c>, <c>csv</c>, <c>html</c>, <c>markdown</c>, <c>text</c> or <c>image</c>.
+    /// </summary>
     public required string Kind { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="Text"/> is markdown, and so can be split on its headings rather than
+    /// on blank lines.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Kind"/> because the two answer different questions: a converted
+    /// Word document has <c>Kind</c> <c>docx</c> — which is what a citation should say — but its
+    /// text is markdown, and chunking it as prose would throw away the heading structure the
+    /// conversion just recovered.
+    /// </remarks>
+    public bool IsMarkdown { get; init; }
 
     /// <summary>Page count for paginated formats; zero otherwise.</summary>
     public int PageCount { get; init; }
@@ -24,31 +39,69 @@ public sealed record ExtractedDocument
 }
 
 /// <summary>
-/// Turns files into plain text for ingestion.
+/// Turns files into text for ingestion.
 /// </summary>
 /// <remarks>
-/// Only formats that can be read without an external converter are handled here. Images are
-/// deliberately not OCR'd: shipping an OCR engine would be a large dependency for a feature most
-/// users would not reach for, so an image is recorded with its metadata and left for a
-/// vision-capable model to interpret at query time.
+/// <para>
+/// Two extraction paths, chosen per format rather than per convenience. Anything with structure
+/// worth keeping — Word, Excel, PowerPoint, EPUB, RTF, HTML, CSV — goes through MarkItDotNet and
+/// comes back as markdown, so headings survive into the chunker and tables stay tables. Formats
+/// LocalGen already reads better than a general converter keep their own path: a PDF for its page
+/// markers, plain text and source code because there is nothing to convert, and an image because
+/// what matters about it is not text at all.
+/// </para>
+/// <para>
+/// Images are deliberately not OCR'd: shipping an OCR engine would be a large dependency for a
+/// feature most users would not reach for, so an image is recorded with its metadata and left for
+/// a vision-capable model to interpret at query time.
+/// </para>
 /// </remarks>
-public sealed class DocumentExtractor(ILogger<DocumentExtractor> logger)
+public sealed class DocumentExtractor(MarkdownService markdown, ILogger<DocumentExtractor> logger)
 {
     /// <summary>Extensions treated as plain text, including source code.</summary>
+    /// <remarks>
+    /// JSON, XML and YAML stay here rather than being converted. MarkItDotNet would wrap them in a
+    /// fenced code block, which re-formats the file without making any of it easier to retrieve —
+    /// the criterion for taking the conversion path is that it recovers structure, not that a
+    /// converter exists.
+    /// </remarks>
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".txt", ".log", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini",
+        ".txt", ".log", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini",
         ".cs", ".fs", ".vb", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".kt", ".go",
         ".rs", ".rb", ".php", ".c", ".h", ".cpp", ".hpp", ".sql", ".sh", ".ps1", ".bat"
     };
 
+    /// <summary>Formats converted to markdown, mapped to the kind recorded against the chunks.</summary>
+    private static readonly Dictionary<string, string> ConvertedExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            [".docx"] = "docx",
+            [".xlsx"] = "xlsx",
+            [".pptx"] = "pptx",
+            [".epub"] = "epub",
+            [".rtf"] = "rtf",
+            [".csv"] = "csv",
+            [".tsv"] = "csv",
+            [".html"] = "html",
+            [".htm"] = "html"
+        };
+
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff"
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff", ".svg"
     };
 
     /// <summary>Guards against loading an enormous file into memory during a bulk ingest.</summary>
-    private const long MaxFileSizeBytes = 100L * 1024 * 1024;
+    public const long MaxFileSizeBytes = 100L * 1024 * 1024;
+
+    /// <summary>Every extension that can be ingested, for messages and directory scans.</summary>
+    public static IReadOnlyCollection<string> SupportedExtensions { get; } =
+        [.. new[] { ".pdf", ".md", ".markdown" }
+            .Concat(ConvertedExtensions.Keys)
+            .Concat(TextExtensions)
+            .Concat(ImageExtensions)
+            .Order(StringComparer.Ordinal)];
 
     public bool CanExtract(string path)
     {
@@ -56,7 +109,7 @@ public sealed class DocumentExtractor(ILogger<DocumentExtractor> logger)
 
         return extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase)
                || extension is ".md" or ".markdown"
-               || extension is ".html" or ".htm"
+               || ConvertedExtensions.ContainsKey(extension)
                || TextExtensions.Contains(extension)
                || ImageExtensions.Contains(extension);
     }
@@ -83,13 +136,59 @@ public sealed class DocumentExtractor(ILogger<DocumentExtractor> logger)
         return extension switch
         {
             ".pdf" => await ExtractPdfAsync(path, cancellationToken).ConfigureAwait(false),
-            ".md" or ".markdown" => await ExtractTextAsync(path, "markdown", cancellationToken).ConfigureAwait(false),
-            ".html" or ".htm" => await ExtractHtmlAsync(path, cancellationToken).ConfigureAwait(false),
+            ".md" or ".markdown" => await ExtractTextAsync(path, "markdown", isMarkdown: true, cancellationToken).ConfigureAwait(false),
+            _ when ConvertedExtensions.TryGetValue(extension, out var kind) =>
+                await ConvertAsync(path, kind, cancellationToken).ConfigureAwait(false),
             _ when ImageExtensions.Contains(extension) => DescribeImage(path, info),
-            _ when TextExtensions.Contains(extension) => await ExtractTextAsync(path, "text", cancellationToken).ConfigureAwait(false),
+            _ when TextExtensions.Contains(extension) =>
+                await ExtractTextAsync(path, "text", isMarkdown: false, cancellationToken).ConfigureAwait(false),
             _ => throw new LocalGenException(
-                $"'{extension}' files cannot be ingested. Supported: PDF, markdown, HTML, images " +
-                "and plain-text formats including source code.")
+                $"'{extension}' files cannot be ingested. Supported: " +
+                $"{string.Join(", ", SupportedExtensions)}.")
+        };
+    }
+
+    /// <summary>
+    /// Converts a structured document to markdown through MarkItDotNet.
+    /// </summary>
+    /// <remarks>
+    /// The converter reports failure in its result rather than by throwing, and a bulk ingest
+    /// distinguishes files it should skip from a run it should abandon by catching exceptions —
+    /// so a failed conversion is turned back into one here, carrying the converter's own reason.
+    /// </remarks>
+    private async Task<ExtractedDocument> ConvertAsync(
+        string path,
+        string kind,
+        CancellationToken cancellationToken)
+    {
+        var result = await markdown.ConvertAsync(path, cancellationToken).ConfigureAwait(false);
+        var fileName = Path.GetFileName(path);
+
+        if (!result.Success)
+        {
+            throw new LocalGenException(
+                $"'{fileName}' could not be read as {kind}: {result.ErrorMessage}");
+        }
+
+        var text = result.Markdown ?? string.Empty;
+        var metadata = new Dictionary<string, string> { ["format"] = kind };
+
+        if (result.Metadata?.WordCount is { } words)
+        {
+            metadata["wordCount"] = words.ToString();
+        }
+
+        logger.LogInformation(
+            "Converted {File} to {Chars:N0} characters of markdown", fileName, text.Length);
+
+        return new ExtractedDocument
+        {
+            FileName = fileName,
+            Text = text.Trim(),
+            Kind = kind,
+            IsMarkdown = true,
+            PageCount = result.Metadata?.PageCount ?? 0,
+            Metadata = metadata
         };
     }
 
@@ -137,42 +236,14 @@ public sealed class DocumentExtractor(ILogger<DocumentExtractor> logger)
     private static async Task<ExtractedDocument> ExtractTextAsync(
         string path,
         string kind,
+        bool isMarkdown,
         CancellationToken cancellationToken) => new()
         {
             FileName = Path.GetFileName(path),
             Text = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false),
-            Kind = kind
+            Kind = kind,
+            IsMarkdown = isMarkdown
         };
-
-    private static async Task<ExtractedDocument> ExtractHtmlAsync(
-        string path,
-        CancellationToken cancellationToken)
-    {
-        var html = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-
-        var context = BrowsingContext.New(Configuration.Default);
-        using var document = await context
-            .OpenAsync(request => request.Content(html), cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (var selector in (string[])["script", "style", "noscript"])
-        {
-            foreach (var element in document.QuerySelectorAll(selector).ToList())
-            {
-                element.Remove();
-            }
-        }
-
-        return new ExtractedDocument
-        {
-            FileName = Path.GetFileName(path),
-            Text = document.Body?.TextContent.Trim() ?? string.Empty,
-            Kind = "html",
-            Metadata = string.IsNullOrWhiteSpace(document.Title)
-                ? new Dictionary<string, string>()
-                : new Dictionary<string, string> { ["title"] = document.Title }
-        };
-    }
 
     /// <summary>
     /// Records an image as a text placeholder. There is nothing to embed, but the entry means a

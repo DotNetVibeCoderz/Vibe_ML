@@ -153,6 +153,55 @@ public class ModelfileParserTests
     }
 
     [Fact]
+    public void Parse_reads_the_multi_gpu_parameters()
+    {
+        var modelfile = ModelfileParser.Parse(
+            """
+            FROM ./model.gguf
+            PARAMETER tensor_split 0.6, 0.4
+            PARAMETER split_mode row
+            PARAMETER main_gpu 1
+            """);
+
+        modelfile.LoadOptions.TensorSplit.Should().Equal(0.6f, 0.4f);
+        modelfile.LoadOptions.SplitMode.Should().Be(GpuSplitMode.Row);
+        modelfile.LoadOptions.MainGpu.Should().Be(1);
+    }
+
+    [Fact]
+    public void Parse_rejects_an_unknown_split_mode()
+    {
+        var act = () => ModelfileParser.Parse(
+            """
+            FROM ./model.gguf
+            PARAMETER split_mode sideways
+            """);
+
+        act.Should().Throw<ModelfileException>()
+            .WithMessage("*expected auto, none, layer or row*");
+    }
+
+    [Fact]
+    public void Render_round_trips_the_multi_gpu_parameters()
+    {
+        // `localgen show --modelfile` is how a split gets copied to the machine that has the
+        // cards, so a split that does not survive rendering would be lost exactly there.
+        var original = ModelfileParser.Parse(
+            """
+            FROM ./model.gguf
+            PARAMETER tensor_split 0.6, 0.4
+            PARAMETER split_mode layer
+            PARAMETER main_gpu 1
+            """);
+
+        var reparsed = ModelfileParser.Parse(ModelfileParser.Render(original));
+
+        reparsed.LoadOptions.TensorSplit.Should().Equal(0.6f, 0.4f);
+        reparsed.LoadOptions.SplitMode.Should().Be(GpuSplitMode.Layer);
+        reparsed.LoadOptions.MainGpu.Should().Be(1);
+    }
+
+    [Fact]
     public void Render_round_trips_through_Parse()
     {
         var original = ModelfileParser.Parse(

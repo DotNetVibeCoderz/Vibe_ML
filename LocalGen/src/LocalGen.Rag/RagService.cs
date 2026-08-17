@@ -82,7 +82,10 @@ public sealed class RagService : IAsyncDisposable
             };
         }
 
-        var chunks = document.Kind == "markdown"
+        // Anything that arrives as markdown is split on its headings, which keeps a section
+        // together and gives every chunk the heading it sat under. That now covers converted
+        // Word, Excel, PowerPoint, EPUB, RTF and HTML as well as markdown files themselves.
+        var chunks = document.IsMarkdown
             ? TextChunker.SplitMarkdown(document.Text, _options.Rag.ChunkSize, _options.Rag.ChunkOverlap)
             : TextChunker.Split(document.Text, _options.Rag.ChunkSize, _options.Rag.ChunkOverlap);
 

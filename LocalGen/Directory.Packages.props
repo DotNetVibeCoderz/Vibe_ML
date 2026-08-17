@@ -17,13 +17,24 @@
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.Abstractions" Version="10.0.11" />
   </ItemGroup>
 
+  <!--
+    Semantic Kernel is held at the 1.74 line, matching the vector-store connectors below.
+
+    This is a compatibility pin, not a preference. The connectors call
+    `VectorSearchOptions.OldFilter`, which `Microsoft.Extensions.VectorData.Abstractions` removed
+    in 10.5.0, while Semantic Kernel 1.79 requires 10.5.2 or newer — so with 1.79 every vector
+    search threw at runtime and only Chroma, which LocalGen speaks to directly, worked at all.
+    1.74 is the release the connectors shipped alongside, so the whole set agrees on 10.1.0.
+
+    Raise all four together once connectors built against the current abstractions are published.
+  -->
   <ItemGroup Label="AI / Semantic Kernel">
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.9.0" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.9.0" />
-    <PackageVersion Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.9.0" />
-    <PackageVersion Include="Microsoft.SemanticKernel" Version="1.79.0" />
-    <PackageVersion Include="Microsoft.SemanticKernel.Abstractions" Version="1.79.0" />
-    <PackageVersion Include="Microsoft.SemanticKernel.Core" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.1.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel" Version="1.74.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Abstractions" Version="1.74.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Core" Version="1.74.0" />
     <PackageVersion Include="Microsoft.SemanticKernel.Connectors.SqliteVec" Version="1.74.0-preview" />
     <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Qdrant" Version="1.74.0-preview" />
     <PackageVersion Include="Microsoft.SemanticKernel.Connectors.AzureAISearch" Version="1.74.0-preview" />
@@ -38,6 +49,21 @@
     <PackageVersion Include="LLamaSharp.semantic-kernel" Version="0.27.0" />
     <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.15.2" />
     <PackageVersion Include="Microsoft.AI.Foundry.Local" Version="1.2.4" />
+  </ItemGroup>
+
+  <!--
+    OpenTelemetry's Prometheus exporter is versioned `beta` and has been for years: the OTel
+    Prometheus specification itself is not stable, not the implementation. It is the official
+    exporter and there is no non-preview alternative, so it is taken here rather than
+    hand-rolling the exposition format — unlike the Chroma connector, where a small REST
+    surface made talking directly the better trade.
+  -->
+  <ItemGroup Label="Observability">
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.17.0-beta.1" />
   </ItemGroup>
 
   <ItemGroup Label="Web / Server">
@@ -66,11 +92,22 @@
     <PackageVersion Include="Spectre.Console.Json" Version="0.55.0" />
   </ItemGroup>
 
+  <!--
+    PdfPig is pinned at 0.1.14 rather than 0.1.11 because ElBruno.MarkItDotNet depends on it:
+    central pinning applies to transitive dependencies too, so the lower version would be a
+    downgrade and fail the restore rather than being quietly resolved upwards.
+  -->
   <ItemGroup Label="Document processing">
     <PackageVersion Include="Markdig" Version="1.3.2" />
-    <PackageVersion Include="PdfPig" Version="0.1.11" />
+    <PackageVersion Include="PdfPig" Version="0.1.14" />
     <PackageVersion Include="AngleSharp" Version="1.7.1" />
     <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageVersion Include="ElBruno.MarkItDotNet" Version="0.9.2" />
+    <PackageVersion Include="ElBruno.MarkItDotNet.Excel" Version="0.9.2" />
+    <PackageVersion Include="ElBruno.MarkItDotNet.PowerPoint" Version="0.9.2" />
+    <!-- Test-only: authoring the Office fixtures the converters are checked against. -->
+    <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageVersion Include="ClosedXML" Version="0.105.0" />
   </ItemGroup>
 
   <!--

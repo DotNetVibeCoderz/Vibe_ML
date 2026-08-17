@@ -20,6 +20,10 @@ public sealed class LocalGenOptions
 
     public RagOptions Rag { get; set; } = new();
 
+    public TelemetryOptions Telemetry { get; set; } = new();
+
+    public CacheOptions Cache { get; set; } = new();
+
     public string ModelsDirectory => Path.Combine(DataDirectory, "models");
 
     public string SkillsDirectory => Path.Combine(DataDirectory, "skills");
@@ -45,8 +49,44 @@ public sealed class EngineOptions
 
     public int? Threads { get; set; }
 
-    /// <summary>Per-GPU weight split for tensor parallelism. Empty means single GPU.</summary>
+    /// <summary>
+    /// Per-GPU weight split for tensor parallelism. Empty leaves the backend to divide the model
+    /// in proportion to free VRAM, which is the right answer for identical cards.
+    /// </summary>
+    /// <remarks>
+    /// Relative weights on any scale: <c>0.6, 0.4</c> and <c>60, 40</c> mean the same thing. Set
+    /// it when the cards differ in size, or to keep part of one card free for something else.
+    /// </remarks>
     public float[] TensorSplit { get; set; } = [];
+
+    /// <summary>
+    /// How a model is divided between GPUs. <c>Layer</c> gives each card a run of layers;
+    /// <c>Row</c> splits every tensor across all of them and needs a fast interconnect to pay off.
+    /// </summary>
+    public GpuSplitMode SplitMode { get; set; } = GpuSplitMode.Auto;
+
+    /// <summary>
+    /// GPU that holds the tensors which are not split. Null means device 0. Setting it matters
+    /// when the cards differ: the KV cache lands here, so it should be the one with room.
+    /// </summary>
+    public int? MainGpu { get; set; }
+
+    /// <summary>
+    /// Decode concurrent requests together against one context instead of queueing them per model.
+    /// </summary>
+    /// <remarks>
+    /// Off by default. It is a real throughput win when requests overlap, but the context window
+    /// is then shared between them rather than belonging to one request at a time, so it changes
+    /// how much room a long conversation has. Vision models keep the serialised path regardless —
+    /// their image encoding does not batch.
+    /// </remarks>
+    public bool BatchedInference { get; set; }
+
+    /// <summary>
+    /// Requests decoded together when <see cref="BatchedInference"/> is on. Null follows
+    /// <see cref="ServerOptions.MaxConcurrentRequests"/>.
+    /// </summary>
+    public int? MaxBatchedSequences { get; set; }
 
     /// <summary>Base address of the remote endpoint when <see cref="Default"/> is RemoteOpenAI.</summary>
     public string? RemoteEndpoint { get; set; }
@@ -60,8 +100,21 @@ public sealed class ServerOptions
 
     public int Port { get; set; } = 11434;
 
-    /// <summary>Optional bearer token. When set, every API call must present it.</summary>
+    /// <summary>
+    /// Optional bearer token for single-tenant use. When set, every API call must present it.
+    /// </summary>
+    /// <remarks>
+    /// Kept alongside <see cref="ApiKeys"/> rather than folded into it: the overwhelmingly common
+    /// deployment is one operator with one key, and making them write a tenant entry for that
+    /// would be ceremony. A key here behaves as an unlimited tenant named <c>default</c>.
+    /// </remarks>
     public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// Named keys with their own quotas, for serving more than one caller from one instance.
+    /// Empty means single-tenant behaviour driven by <see cref="ApiKey"/>.
+    /// </summary>
+    public ApiKeyDescriptor[] ApiKeys { get; set; } = [];
 
     /// <summary>Origins allowed by CORS. <c>*</c> permits any.</summary>
     public string[] CorsOrigins { get; set; } = ["*"];
@@ -76,6 +129,89 @@ public sealed class ServerOptions
     public int MaxConcurrentRequests { get; set; } = 4;
 
     public string BaseUrl => $"http://{Host}:{Port}";
+}
+
+/// <summary>One API key and the limits that apply to whoever holds it.</summary>
+/// <remarks>
+/// Quotas are expressed per key rather than per user because the key is the only identity the
+/// OpenAI wire protocol carries. A zero on any limit means "unmetered" — that is the default, so
+/// adding a key to share access does not silently start throttling it.
+/// </remarks>
+public sealed class ApiKeyDescriptor
+{
+    /// <summary>The secret the caller presents. Compared in fixed time.</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>Label for logs, metrics and the Admin Control. Not a secret.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Lets a key be revoked without deleting its quota configuration.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Requests allowed in any rolling minute. Zero is unmetered.</summary>
+    public int RequestsPerMinute { get; set; }
+
+    /// <summary>Tokens — prompt plus completion — allowed per rolling day. Zero is unmetered.</summary>
+    public long TokensPerDay { get; set; }
+
+    /// <summary>Requests this key may have in flight at once. Zero is unmetered.</summary>
+    public int MaxConcurrentRequests { get; set; }
+
+    /// <summary>Models this key may address. Empty allows every model the server has.</summary>
+    public string[] AllowedModels { get; set; } = [];
+}
+
+/// <summary>
+/// Caching of completed responses, keyed on the prompt and the sampling settings.
+/// </summary>
+public sealed class CacheOptions
+{
+    /// <summary>Off by default: a cache changes observable behaviour, so it is opted into.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Entries retained before the least recently used one is evicted.</summary>
+    public int MaxEntries { get; set; } = 256;
+
+    public TimeSpan Ttl { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Whether sampled generations are cached as well as greedy ones. Off by default: with a
+    /// temperature above zero the caller asked for variety, and replaying one answer forever
+    /// would quietly take that away. Greedy and seeded requests are reproducible anyway, so
+    /// caching them changes only the latency.
+    /// </summary>
+    public bool CacheNonDeterministic { get; set; }
+}
+
+/// <summary>
+/// Export of the metrics LocalGen already collects. Both exporters are off by default so that a
+/// desktop install opens no ports and dials nothing.
+/// </summary>
+public sealed class TelemetryOptions
+{
+    /// <summary>Serves the Prometheus exposition format at <see cref="MetricsPath"/>.</summary>
+    public bool PrometheusEnabled { get; set; }
+
+    public string MetricsPath { get; set; } = "/metrics";
+
+    /// <summary>
+    /// Whether the scrape endpoint sits behind the API key. Off by default because a Prometheus
+    /// server scraping a pod inside a cluster is not usually given one, and the endpoint exposes
+    /// counters rather than content.
+    /// </summary>
+    public bool RequireApiKeyForMetrics { get; set; }
+
+    /// <summary>OTLP collector address. Empty leaves the OTLP exporter unregistered.</summary>
+    public string? OtlpEndpoint { get; set; }
+
+    /// <summary><c>grpc</c> or <c>httpprotobuf</c>.</summary>
+    public string OtlpProtocol { get; set; } = "grpc";
+
+    /// <summary>Whether request traces are exported alongside metrics.</summary>
+    public bool Traces { get; set; } = true;
+
+    /// <summary>Identifies this instance in the collector.</summary>
+    public string ServiceName { get; set; } = "localgen";
 }
 
 public sealed class RuntimeOptions

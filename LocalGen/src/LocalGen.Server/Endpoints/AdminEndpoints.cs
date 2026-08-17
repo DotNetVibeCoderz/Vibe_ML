@@ -7,6 +7,8 @@ using LocalGen.Core.Protocol;
 using LocalGen.Runtime.Diagnostics;
 using LocalGen.Runtime.Engines;
 using LocalGen.Runtime.Sessions;
+using LocalGen.Server.Services;
+using LocalGen.Server.Tenancy;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -29,6 +31,7 @@ public static class AdminEndpoints
 
         api.MapGet("/engines", GetEnginesAsync).WithSummary("Installed backends and their availability.");
         api.MapGet("/metrics", GetMetrics).WithSummary("Inference and resource telemetry.");
+        api.MapGet("/usage", GetUsage).WithSummary("Per-key quota consumption and cache statistics.");
         api.MapGet("/logs", GetLogs).WithSummary("Recent server log entries.");
         api.MapDelete("/logs", ClearLogs).WithSummary("Clears the in-memory log buffer.");
 
@@ -101,10 +104,12 @@ public static class AdminEndpoints
                     UnavailableReason = s.Availability.Reason,
                     Version = s.Availability.Version,
                     Devices = [.. s.Availability.AvailableDevices.Select(static d => d.ToString())],
+                    Accelerators = [.. s.Availability.Accelerators.Select(static a => a.Name)],
                     Formats = [.. s.Descriptor.Capabilities.Formats.Select(static f => f.ToString())],
                     SupportsGrammar = s.Descriptor.Capabilities.SupportsGrammar,
                     SupportsEmbeddings = s.Descriptor.Capabilities.SupportsEmbeddings,
-                    SupportsMultiGpu = s.Descriptor.Capabilities.SupportsMultiGpu
+                    SupportsMultiGpu = s.Descriptor.Capabilities.SupportsMultiGpu,
+                    SupportsVision = s.Descriptor.Capabilities.SupportsVision
                 })
             ],
             RecommendedEngine = recommendation.Engine.ToString(),
@@ -120,6 +125,45 @@ public static class AdminEndpoints
             RecentInference = metrics.RecentInference(),
             RecentResources = metrics.RecentResources()
         });
+
+    /// <summary>
+    /// What each key has spent against its quotas, and how the response cache is performing.
+    /// </summary>
+    /// <remarks>
+    /// Keys themselves are never returned — only the names they were configured under. An
+    /// operator reading this screen already holds the configuration; anyone else reaching it
+    /// should not be handed the secrets.
+    /// </remarks>
+    private static Ok<UsageResponse> GetUsage(ApiKeyRegistry keys, ResponseCache cache)
+    {
+        var total = cache.Hits + cache.Misses;
+
+        return TypedResults.Ok(new UsageResponse
+        {
+            Cache = new CacheStatistics
+            {
+                Enabled = cache.IsEnabled,
+                Entries = cache.Count,
+                Hits = cache.Hits,
+                Misses = cache.Misses,
+                HitRate = total > 0 ? (double)cache.Hits / total : 0
+            },
+            Tenants =
+            [
+                .. keys.Tenants.Select(static t => new TenantUsage
+                {
+                    Name = t.Name,
+                    RequestsThisMinute = t.RequestsThisMinute,
+                    RequestsPerMinuteLimit = t.Descriptor.RequestsPerMinute,
+                    TokensToday = t.TokensToday,
+                    TokensPerDayLimit = t.Descriptor.TokensPerDay,
+                    InFlight = t.InFlight,
+                    ConcurrencyLimit = t.Descriptor.MaxConcurrentRequests,
+                    AllowedModels = t.Descriptor.AllowedModels
+                })
+            ]
+        });
+    }
 
     private static Ok<IReadOnlyList<LogEntry>> GetLogs(
         InMemoryLogStore store,
@@ -363,6 +407,12 @@ public sealed record EngineInfo
 
     public IReadOnlyList<string> Devices { get; init; } = [];
 
+    /// <summary>
+    /// The individual GPUs the backend registered, in the order a tensor split addresses them.
+    /// More than one entry is what makes multi-GPU splitting available on this host.
+    /// </summary>
+    public IReadOnlyList<string> Accelerators { get; init; } = [];
+
     public IReadOnlyList<string> Formats { get; init; } = [];
 
     public bool SupportsGrammar { get; init; }
@@ -370,6 +420,9 @@ public sealed record EngineInfo
     public bool SupportsEmbeddings { get; init; }
 
     public bool SupportsMultiGpu { get; init; }
+
+    /// <summary>Whether the backend can read images, given a model that ships a projector.</summary>
+    public bool SupportsVision { get; init; }
 }
 
 public sealed record MetricsResponse
@@ -379,4 +432,44 @@ public sealed record MetricsResponse
     public IReadOnlyList<InferenceSample> RecentInference { get; init; } = [];
 
     public IReadOnlyList<ResourceSample> RecentResources { get; init; } = [];
+}
+
+public sealed record UsageResponse
+{
+    public required CacheStatistics Cache { get; init; }
+
+    public IReadOnlyList<TenantUsage> Tenants { get; init; } = [];
+}
+
+public sealed record CacheStatistics
+{
+    public bool Enabled { get; init; }
+
+    public int Entries { get; init; }
+
+    public long Hits { get; init; }
+
+    public long Misses { get; init; }
+
+    public double HitRate { get; init; }
+}
+
+/// <summary>One key's consumption. A limit of zero means that dimension is unmetered.</summary>
+public sealed record TenantUsage
+{
+    public required string Name { get; init; }
+
+    public long RequestsThisMinute { get; init; }
+
+    public int RequestsPerMinuteLimit { get; init; }
+
+    public long TokensToday { get; init; }
+
+    public long TokensPerDayLimit { get; init; }
+
+    public int InFlight { get; init; }
+
+    public int ConcurrencyLimit { get; init; }
+
+    public IReadOnlyList<string> AllowedModels { get; init; } = [];
 }

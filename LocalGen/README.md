@@ -29,7 +29,8 @@ LocalGen combines what Ollama, LocalAI and LM Studio each do well into one .NET 
   can be quantized to a smaller format from the CLI or the Admin Control.
 - **Agents and tools** — Semantic Kernel with seven built-in kernel functions, a Skills system
   and MCP client support.
-- **RAG** — document ingestion and vector search over SQLite, Qdrant, Chroma or Azure AI Search.
+- **RAG** — ingest Word, Excel, PowerPoint, PDF, EPUB, RTF, HTML, CSV, markdown and code, then
+  search them by meaning over SQLite, Qdrant, Chroma or Azure AI Search.
 - **Offline** — nothing on the inference path needs the network.
 
 ### Requirements
@@ -39,6 +40,12 @@ LocalGen combines what Ollama, LocalAI and LM Studio each do well into one .NET 
 - Optional: an NVIDIA GPU for the CUDA backend
 
 ### Install and run
+
+There is an installer per platform — an MSI, a signed `.pkg` and a `.deb` — each carrying the CLI,
+the server and the Admin Control with the .NET runtime already inside, so nothing else has to be
+installed first. See [Installers](docs/installers.md) for what each one puts where.
+
+To build from source instead:
 
 ```bash
 git clone https://github.com/gravicode/LocalGen.git
@@ -149,6 +156,7 @@ back to CPU silently, so the number to check is the device, not the speed. See t
 | Guide | Contents |
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites, GPU backends, first run |
+| [Installers](docs/installers.md) | Building, signing and releasing the platform packages |
 | [Using LocalGen](docs/usage.md) | CLI, Admin Control, Playground, web UI |
 | [HTTP API](docs/api.md) | OpenAI-compatible endpoints and LocalGen extensions |
 | [.NET SDK](docs/sdk.md) | Client library, streaming, `IChatClient`, DI |
@@ -207,7 +215,8 @@ LocalGen menggabungkan kekuatan Ollama, LocalAI, dan LM Studio dalam satu solusi
   dan model apa pun bisa dikuantisasi ke format lebih kecil dari CLI maupun Admin Control.
 - **Agent dan tool** — Semantic Kernel dengan tujuh kernel function bawaan, sistem Skills, dan
   dukungan klien MCP.
-- **RAG** — ingest dokumen dan pencarian vektor melalui SQLite, Qdrant, Chroma, atau Azure AI Search.
+- **RAG** — ingest Word, Excel, PowerPoint, PDF, EPUB, RTF, HTML, CSV, markdown, dan kode, lalu
+  cari berdasarkan makna melalui SQLite, Qdrant, Chroma, atau Azure AI Search.
 - **Offline** — tidak ada jalur inference yang membutuhkan jaringan.
 
 ### Kebutuhan
@@ -217,6 +226,12 @@ LocalGen menggabungkan kekuatan Ollama, LocalAI, dan LM Studio dalam satu solusi
 - Opsional: GPU NVIDIA untuk backend CUDA
 
 ### Instalasi dan menjalankan
+
+Tersedia installer untuk tiap platform — MSI, `.pkg` bertanda tangan, dan `.deb` — masing-masing
+sudah memuat CLI, server, dan Admin Control beserta runtime .NET di dalamnya, jadi tidak ada yang
+perlu dipasang lebih dulu. Lihat [Installer](docs/installers.md) untuk rincian isinya.
+
+Atau bangun dari kode sumber:
 
 ```bash
 git clone https://github.com/gravicode/LocalGen.git
@@ -327,6 +342,7 @@ LocalGen secara otomatis.
 | Panduan | Isi |
 | --- | --- |
 | [Instalasi](docs/installation.md) | Prasyarat, backend GPU, menjalankan pertama kali |
+| [Installer](docs/installers.md) | Membangun, menandatangani, dan merilis paket per platform |
 | [Menggunakan LocalGen](docs/usage.md) | CLI, Admin Control, Playground, UI web |
 | [HTTP API](docs/api.md) | Endpoint kompatibel OpenAI dan ekstensi LocalGen |
 | [SDK .NET](docs/sdk.md) | Library klien, streaming, `IChatClient`, DI |

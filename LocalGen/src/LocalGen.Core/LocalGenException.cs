@@ -29,6 +29,24 @@ public sealed class ModelLoadException(string modelId, string reason, Exception?
 public sealed class OfflineModeException(string operation)
     : LocalGenException($"'{operation}' requires network access, but LocalGen is running in offline mode.");
 
+/// <summary>An API key exceeded one of its configured quotas.</summary>
+/// <remarks>
+/// Carries <see cref="RetryAfter"/> so the transport can set the header OpenAI clients already
+/// honour when they back off, rather than leaving the caller to guess how long to wait.
+/// </remarks>
+public sealed class QuotaExceededException(string message, TimeSpan? retryAfter = null)
+    : LocalGenException(message)
+{
+    public TimeSpan? RetryAfter { get; } = retryAfter;
+}
+
+/// <summary>A key addressed a model outside the set it is allowed to use.</summary>
+public sealed class ModelForbiddenException(string modelId, string tenant)
+    : LocalGenException($"Model '{modelId}' is not available to '{tenant}'.")
+{
+    public string ModelId { get; } = modelId;
+}
+
 /// <summary>A tool call was rejected by policy, e.g. a path outside the allowed roots.</summary>
 public sealed class ToolPermissionException(string tool, string reason)
     : LocalGenException($"Tool '{tool}' refused the call: {reason}")

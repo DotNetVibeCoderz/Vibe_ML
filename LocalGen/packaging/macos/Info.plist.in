@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>LocalGen Admin Control</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>LocalGen Admin Control</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>@BUNDLE_ID@</string>
+
+    <key>CFBundleVersion</key>
+    <string>@VERSION@</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+
+    <key>CFBundleExecutable</key>
+    <string>LocalGen.Desktop</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- Avalonia draws its own chrome; without this the window opens behind a light-mode shell. -->
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © Gravicode Studios. Led by Kang Fadhil.</string>
+</dict>
+</plist>

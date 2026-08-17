@@ -42,6 +42,12 @@ public sealed record EngineAvailability
     /// <summary>Devices actually usable right now, which may be narrower than the declared capabilities.</summary>
     public IReadOnlyList<DeviceKind> AvailableDevices { get; init; } = [];
 
+    /// <summary>
+    /// The individual accelerators the backend registered, in the order a tensor split addresses
+    /// them. Its length is what decides whether multi-GPU is available on this machine at all.
+    /// </summary>
+    public IReadOnlyList<AcceleratorDevice> Accelerators { get; init; } = [];
+
     /// <summary>Backend or native library version, for the About and diagnostics screens.</summary>
     public string Version { get; init; } = string.Empty;
 

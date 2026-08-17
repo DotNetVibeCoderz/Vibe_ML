@@ -40,7 +40,13 @@ var configuration = new ConfigurationBuilder()
 
 var services = new ServiceCollection();
 
-services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Warning));
+// A console provider, not just a level: ingestion skips a file it cannot read and logs why, and
+// without somewhere for that warning to go the sample reports "Indexed 0 file(s)" and no reason.
+services.AddLogging(logging =>
+{
+    logging.AddSimpleConsole(console => console.SingleLine = true);
+    logging.SetMinimumLevel(LogLevel.Warning);
+});
 services.AddLocalGenRuntime(configuration);
 services.AddLocalGenRag();
 services.AddLlamaSharpEngine();

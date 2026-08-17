@@ -6,6 +6,8 @@ using LocalGen.Runtime;
 using LocalGen.Runtime.Diagnostics;
 using LocalGen.Server.Endpoints;
 using LocalGen.Server.Services;
+using LocalGen.Server.Telemetry;
+using LocalGen.Server.Tenancy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
@@ -170,6 +172,14 @@ public sealed class LocalGenServerHost : IAsyncDisposable
         builder.Services.AddSingleton<AttachmentResolver>();
         builder.Services.AddHostedService<MaintenanceService>();
 
+        // Quota counters and cached responses are server-lifetime state, so both are singletons.
+        // The context accessor is what lets the singleton inference path see which key is calling.
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddSingleton<ApiKeyRegistry>();
+        builder.Services.AddSingleton<TenantContext>();
+        builder.Services.AddSingleton<ResponseCache>();
+        builder.Services.AddLocalGenTelemetry(options);
+
         builder.Services.ConfigureHttpJsonOptions(json =>
         {
             json.SerializerOptions.PropertyNamingPolicy = OpenAiJson.Options.PropertyNamingPolicy;
@@ -198,9 +208,19 @@ public sealed class LocalGenServerHost : IAsyncDisposable
         app.UseCors();
         app.UseExceptionHandler(handler => handler.Run(WriteProblemAsync));
 
-        if (!string.IsNullOrEmpty(options.Server.ApiKey))
+        // Registered when any key exists, single-tenant or named — the registry is what knows.
+        if (app.Services.GetRequiredService<ApiKeyRegistry>().IsEnabled)
         {
             app.UseMiddleware<ApiKeyMiddleware>();
+        }
+
+        if (options.Telemetry.PrometheusEnabled)
+        {
+            // Resolved eagerly: the observable instruments are created in this object's
+            // constructor, so a scrape before anything else touched it would report nothing.
+            _ = app.Services.GetRequiredService<StateMetrics>();
+
+            app.MapPrometheusScrapingEndpoint(options.Telemetry.MetricsPath);
         }
 
         app.MapOpenAiEndpoints();
@@ -232,9 +252,17 @@ public sealed class LocalGenServerHost : IAsyncDisposable
             Core.EngineNotAvailableException => (StatusCodes.Status503ServiceUnavailable, "engine_unavailable"),
             Core.OfflineModeException => (StatusCodes.Status403Forbidden, "offline_mode"),
             Core.ToolPermissionException => (StatusCodes.Status403Forbidden, "tool_forbidden"),
+            Core.ModelForbiddenException => (StatusCodes.Status403Forbidden, "model_forbidden"),
+            Core.QuotaExceededException => (StatusCodes.Status429TooManyRequests, "rate_limit_exceeded"),
             Core.LocalGenException => (StatusCodes.Status400BadRequest, "invalid_request_error"),
             _ => (StatusCodes.Status500InternalServerError, "server_error")
         };
+
+        if (exception is Core.QuotaExceededException { RetryAfter: { } retryAfter })
+        {
+            context.Response.Headers.RetryAfter =
+                Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+        }
 
         context.Response.StatusCode = status;
         await context.Response.WriteAsJsonAsync(

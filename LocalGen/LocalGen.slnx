@@ -4,6 +4,7 @@
     <Project Path="samples/AvaloniaEmbedded/AvaloniaEmbedded.csproj" />
     <Project Path="samples/ConsoleChat/ConsoleChat.csproj" />
     <Project Path="samples/DocumentQA/DocumentQA.csproj" />
+    <Project Path="samples/MultiAgentTeam/MultiAgentTeam.csproj" />
     <Project Path="samples/WpfChat/WpfChat.csproj" />
   </Folder>
   <Folder Name="/src/">

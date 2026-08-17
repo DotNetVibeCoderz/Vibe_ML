@@ -82,7 +82,9 @@ the model is loaded.
 | `num_thread` (`threads`) | CPU threads. |
 | `num_batch` (`batch_size`) | Prompt ingestion batch size. |
 | `device` | `auto`, `cpu`, `cuda`, `vulkan`, `metal`, `directml`, `npu`. |
-| `tensor_split` | Per-GPU weight split, e.g. `0.6, 0.4`. |
+| `tensor_split` | Per-GPU weight split, e.g. `0.6, 0.4`. Relative weights on any scale — `60, 40` is the same split. Empty divides the model in proportion to free VRAM. |
+| `split_mode` | `auto`, `layer`, `row` or `none`. How the model is divided between GPUs. |
+| `main_gpu` | Index of the GPU holding the KV cache and unsplit tensors. |
 | `use_mmap`, `use_mlock` | Memory-map the weights; lock them in RAM. |
 
 Unrecognised keys are kept rather than rejected, so a file written for a newer version still loads.

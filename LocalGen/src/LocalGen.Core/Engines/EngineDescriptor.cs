@@ -110,8 +110,24 @@ public sealed record ModelLoadOptions
 
     public int? ThreadCount { get; init; }
 
-    /// <summary>Fraction of the model to place on each GPU, for multi-GPU tensor splitting.</summary>
+    /// <summary>
+    /// Relative weight of the model to place on each GPU, for multi-GPU tensor splitting. Empty
+    /// leaves the backend to divide the model in proportion to free VRAM.
+    /// </summary>
+    /// <remarks>
+    /// Any positive scale works: <c>0.6, 0.4</c> and <c>60, 40</c> describe the same split.
+    /// <see cref="TensorSplitPlan"/> normalises it against the devices actually present.
+    /// </remarks>
     public IReadOnlyList<float> TensorSplit { get; init; } = [];
+
+    /// <summary>How the model is divided between GPUs when more than one is present.</summary>
+    public GpuSplitMode SplitMode { get; init; } = GpuSplitMode.Auto;
+
+    /// <summary>
+    /// Device holding the tensors that are not split — the KV cache and small intermediates.
+    /// Null leaves the backend's default, which is device 0.
+    /// </summary>
+    public int? MainGpu { get; init; }
 
     /// <summary>Keep weights memory-mapped instead of copying them into RAM.</summary>
     public bool UseMemoryMap { get; init; } = true;
@@ -121,6 +137,21 @@ public sealed record ModelLoadOptions
 
     /// <summary>Load the model for embedding rather than text generation.</summary>
     public bool EmbeddingMode { get; init; }
+
+    /// <summary>
+    /// Decode several requests together against one context instead of queueing them.
+    /// </summary>
+    /// <remarks>
+    /// Off by default. Batching raises total throughput markedly when requests overlap, but the
+    /// context is shared between them: <see cref="MaxSequences"/> concurrent requests each get
+    /// roughly a <see cref="ContextSize"/>-divided-by-that share of the window, and a long
+    /// conversation that would have fitted on its own can run out of room. That is a trade an
+    /// operator should make deliberately.
+    /// </remarks>
+    public bool BatchedInference { get; init; }
+
+    /// <summary>Requests decoded together when <see cref="BatchedInference"/> is on.</summary>
+    public int MaxSequences { get; init; } = 4;
 
     public static readonly ModelLoadOptions Default = new();
 }

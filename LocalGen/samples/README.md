@@ -9,6 +9,7 @@ Each sample shows one thing well.
 | [DocumentQA](DocumentQA/) | RAG end to end: ingest a folder, then answer from it | no |
 | [WpfChat](WpfChat/) | A WPF client, and the dispatcher marshalling it needs | yes |
 | [AvaloniaEmbedded](AvaloniaEmbedded/) | A desktop app with the runtime **inside it** — no server at all | no |
+| [MultiAgentTeam](MultiAgentTeam/) | Several agents on one task: sequential, concurrent and handoff | no |
 
 Where a sample needs a server, start one first:
 

@@ -14,10 +14,23 @@ public static class ChatPrompt
     /// Rewrites messages so a plain text model can consume them: tool instructions are merged
     /// into the system turn and tool results become user turns the model can read.
     /// </summary>
-    public static IReadOnlyList<ChatMessage> Prepare(ChatRequest request)
+    /// <param name="dialect">
+    /// The model family's tool-call convention. Defaults to the Hermes form when the caller does
+    /// not know the family — which is what an unrecognised model is asked to use.
+    /// </param>
+    /// <param name="imageMarker">
+    /// Placeholder written where an image appears, for a session that can actually see it — the
+    /// backend replaces each marker with the encoded image. Null means the model is text-only,
+    /// and images are described in words instead.
+    /// </param>
+    public static IReadOnlyList<ChatMessage> Prepare(
+        ChatRequest request,
+        ToolDialect? dialect = null,
+        string? imageMarker = null)
     {
+        var convention = dialect ?? ToolDialect.Hermes;
         var messages = new List<ChatMessage>(request.Messages.Count + 1);
-        var toolInstructions = ToolCallProtocol.BuildInstructions(request.Tools);
+        var toolInstructions = convention.BuildInstructions(request.Tools);
         var systemInjected = false;
 
         foreach (var message in request.Messages)
@@ -35,11 +48,11 @@ public static class ChatPrompt
                     break;
 
                 case ChatRole.Assistant when message.ToolCalls.Count > 0:
-                    messages.Add(ChatMessage.Assistant(RenderAssistantToolCalls(message)));
+                    messages.Add(ChatMessage.Assistant(RenderAssistantToolCalls(message, convention)));
                     break;
 
                 default:
-                    messages.Add(FlattenContent(message));
+                    messages.Add(FlattenContent(message, imageMarker));
                     break;
             }
         }
@@ -85,10 +98,15 @@ public static class ChatPrompt
         ["<|im_end|>", "<|im_start|>"];
 
     /// <summary>
-    /// Collapses multimodal parts into text. Images are replaced with a placeholder because
-    /// text-only backends cannot see them; vision-capable sessions handle images separately.
+    /// Collapses multimodal parts into text.
     /// </summary>
-    private static ChatMessage FlattenContent(ChatMessage message)
+    /// <remarks>
+    /// An image becomes <paramref name="imageMarker"/> when the session can see it — the marker
+    /// is where the backend splices the encoded image into the token sequence, so its position
+    /// in the text is what puts the picture in the right place in the conversation. Without a
+    /// marker the image is described in words instead, which is all a text-only model can use.
+    /// </remarks>
+    private static ChatMessage FlattenContent(ChatMessage message, string? imageMarker)
     {
         if (message.Content.All(static p => p is ContentPart.Text))
         {
@@ -115,6 +133,10 @@ public static class ChatPrompt
                     sb.AppendLine(" ---").AppendLine(document.ExtractedText);
                     break;
 
+                case ContentPart.Image image when imageMarker is not null:
+                    sb.Append(imageMarker);
+                    break;
+
                 case ContentPart.Image image:
                     // The model cannot see it, but naming the attachment is more useful than
                     // dropping it — the user can then be told what was ignored.
@@ -133,16 +155,21 @@ public static class ChatPrompt
         return message with { Content = [new ContentPart.Text(sb.ToString())] };
     }
 
-    private static string RenderAssistantToolCalls(ChatMessage message)
+    /// <summary>
+    /// Replays a previous assistant turn's tool calls in the dialect the model speaks, so that
+    /// the transcript it reads back matches the form it was asked to produce.
+    /// </summary>
+    private static string RenderAssistantToolCalls(ChatMessage message, ToolDialect dialect)
     {
         var sb = new StringBuilder(message.Text);
 
         foreach (var call in message.ToolCalls)
         {
-            sb.Append(ToolCallProtocol.OpenTag)
-              .Append("{\"name\": \"").Append(call.Name)
-              .Append("\", \"arguments\": ").Append(call.ArgumentsJson).Append('}')
-              .Append(ToolCallProtocol.CloseTag);
+            var body = $"{{\"name\": \"{call.Name}\", \"{dialect.ArgumentsProperty}\": {call.ArgumentsJson}}}";
+
+            sb.Append(dialect.OpenTag)
+              .Append(dialect.PayloadIsArray ? $"[{body}]" : body)
+              .Append(dialect.CloseTag);
         }
 
         return sb.ToString();

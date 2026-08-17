@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows installer.
+
+  The payload is harvested with <Files> rather than enumerated: the published output is a few
+  hundred files, most of them native libraries whose names change with every LLamaSharp release,
+  and a hand-written component list would be wrong by the next upgrade without anything failing
+  loudly enough to notice.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="LocalGen"
+           Manufacturer="Gravicode Studios"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="8B1F6C42-9A3E-4D7B-B5E1-2C6A0F4D8E93"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <SummaryInformation Description="LocalGen — local AI inference engine"
+                        Manufacturer="Gravicode Studios" />
+
+    <!--
+      An upgrade replaces the install in place. Scheduled after InstallExecute so the older files
+      are removed only once the new ones are known to be installable; the earlier default would
+      leave a machine with neither on a failed upgrade.
+    -->
+    <MajorUpgrade Schedule="afterInstallExecute"
+                  DowngradeErrorMessage="A newer version of LocalGen is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- No ARPPRODUCTICON: the product has no icon asset yet, and a placeholder is worse than none. -->
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/gravicode/LocalGen" />
+
+    <!--
+      Models are gigabytes and live in %LOCALAPPDATA%, not here — but the program files alone are
+      around 400 MB with the CPU backend, and more with CUDA, so the check is worth making before
+      the copy starts rather than after it fails half way.
+    -->
+    <Launch Condition="Installed OR (VersionNT64)"
+            Message="LocalGen requires 64-bit Windows." />
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseFile)" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="LocalGen" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationMenuFolder" Name="LocalGen" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="LocalGen" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="PayloadFiles" />
+      <ComponentGroupRef Id="Integration" />
+    </Feature>
+
+    <ComponentGroup Id="PayloadFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="Integration">
+      <!--
+        The CLI on PATH is the point of installing rather than unzipping, so it is not optional.
+        System-scoped to match the per-machine install: a user-scoped entry would leave the tool
+        missing for everyone but whoever ran the installer.
+      -->
+      <Component Id="PathEntry" Directory="INSTALLFOLDER" Guid="C4E9A7D1-3B5F-4A28-9E60-71D3F8B2C405">
+        <Environment Id="LocalGenPath"
+                     Name="PATH"
+                     Value="[INSTALLFOLDER]"
+                     Part="last"
+                     Action="set"
+                     System="yes"
+                     Permanent="no" />
+      </Component>
+
+      <Component Id="StartMenuShortcuts" Directory="ApplicationMenuFolder"
+                 Guid="2F7D8B14-6C0A-4E93-A1D5-B8E402F9C637">
+        <Shortcut Id="AdminControlShortcut"
+                  Name="LocalGen Admin Control"
+                  Description="Manage models, engines and the local inference service"
+                  Target="[INSTALLFOLDER]LocalGen.Desktop.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+
+        <RemoveFolder Id="RemoveApplicationMenuFolder" On="uninstall" />
+
+        <!-- A per-machine install still needs a per-user key to own the shortcut. -->
+        <RegistryValue Root="HKCU"
+                       Key="Software\Gravicode Studios\LocalGen"
+                       Name="Installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Package>
+</Wix>

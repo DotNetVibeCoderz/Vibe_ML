@@ -108,6 +108,17 @@ public static class Converters
                 ? "Alert"
                 : "Success");
 
+    /// <summary>
+    /// A resolved tensor split reads as ordinary machine output; one the backend had to correct
+    /// takes the signal colour, which is the palette's "you should look at this" without the
+    /// alarm of an error.
+    /// </summary>
+    public static readonly IValueConverter WarningOrMuted =
+        new ThemeBrushConverter(isWarning =>
+            string.Equals(isWarning, bool.TrueString, StringComparison.OrdinalIgnoreCase)
+                ? "Signal"
+                : "TextMuted");
+
     /// <summary>Highlights the selected engine panel without adding a second visual device.</summary>
     public static readonly IValueConverter SelectionBorder =
         new ThemeBrushConverter(selected =>

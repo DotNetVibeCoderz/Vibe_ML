@@ -1,0 +1,97 @@
+{{/*
+Non-secret configuration. LocalGen binds its options from environment variables using the standard
+double-underscore nesting, so the keys here mirror the `LocalGen` section of appsettings.json
+exactly — no translation layer to drift out of step.
+*/}}
+{{/*
+  A tensor split that names more GPUs than the pod is given is caught here rather than at load
+  time: llama.cpp accepts the extra weights and ignores them, so the model would come up on fewer
+  cards than intended with nothing in the pod's logs to say the split had been trimmed.
+*/}}
+{{- if .Values.engine.tensorSplit }}
+{{- if not .Values.gpu.enabled }}
+{{- fail "engine.tensorSplit is set but gpu.enabled is false; the pod would get no GPU to split across." }}
+{{- end }}
+{{- if gt (len .Values.engine.tensorSplit) (int .Values.gpu.count) }}
+{{- fail (printf "engine.tensorSplit names %d GPUs but gpu.count is %d; raise gpu.count or shorten the split." (len .Values.engine.tensorSplit) (int .Values.gpu.count)) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "localgen.fullname" . }}
+  labels:
+    {{- include "localgen.labels" . | nindent 4 }}
+data:
+  LocalGen__Server__Host: "0.0.0.0"
+  LocalGen__Server__Port: {{ .Values.service.port | quote }}
+  LocalGen__Server__MaxLoadedModels: {{ .Values.server.maxLoadedModels | int64 | quote }}
+  LocalGen__Server__MaxConcurrentRequests: {{ .Values.server.maxConcurrentRequests | int64 | quote }}
+  LocalGen__Server__ModelIdleTimeout: {{ .Values.server.modelIdleTimeout | quote }}
+  {{- range $i, $origin := .Values.server.corsOrigins }}
+  LocalGen__Server__CorsOrigins__{{ $i }}: {{ $origin | quote }}
+  {{- end }}
+
+  LocalGen__Engine__Default: {{ .Values.engine.default | quote }}
+  LocalGen__Engine__Device: {{ .Values.engine.device | quote }}
+  {{- with .Values.engine.gpuLayers }}
+  LocalGen__Engine__GpuLayers: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.engine.contextSize }}
+  LocalGen__Engine__ContextSize: {{ . | quote }}
+  {{- end }}
+  {{- range $i, $split := .Values.engine.tensorSplit }}
+  LocalGen__Engine__TensorSplit__{{ $i }}: {{ $split | quote }}
+  {{- end }}
+  {{- with .Values.engine.splitMode }}
+  LocalGen__Engine__SplitMode: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.engine.mainGpu }}
+  LocalGen__Engine__MainGpu: {{ . | quote }}
+  {{- end }}
+
+  LocalGen__Runtime__OfflineMode: {{ .Values.runtime.offlineMode | quote }}
+  {{- with .Values.runtime.preloadModel }}
+  LocalGen__Runtime__PreloadModel: {{ . | quote }}
+  {{- end }}
+
+  LocalGen__Tools__CodeExecution: {{ .Values.tools.codeExecution | quote }}
+  LocalGen__Tools__AllowDependencyInstall: {{ .Values.tools.allowDependencyInstall | quote }}
+  LocalGen__Tools__FileSystem: {{ .Values.tools.fileSystem | quote }}
+  LocalGen__Tools__InternetSearch: {{ .Values.tools.internetSearch | quote }}
+  LocalGen__Tools__Download: {{ .Values.tools.download | quote }}
+  LocalGen__Tools__WebScrape: {{ .Values.tools.webScrape | quote }}
+
+  LocalGen__Cache__Enabled: {{ .Values.cache.enabled | quote }}
+  LocalGen__Cache__MaxEntries: {{ .Values.cache.maxEntries | int64 | quote }}
+  LocalGen__Cache__Ttl: {{ .Values.cache.ttl | quote }}
+  LocalGen__Cache__CacheNonDeterministic: {{ .Values.cache.cacheNonDeterministic | quote }}
+
+  LocalGen__Telemetry__PrometheusEnabled: {{ .Values.telemetry.prometheus.enabled | quote }}
+  LocalGen__Telemetry__MetricsPath: {{ .Values.telemetry.prometheus.path | quote }}
+  LocalGen__Telemetry__RequireApiKeyForMetrics: {{ .Values.telemetry.prometheus.requireApiKey | quote }}
+  LocalGen__Telemetry__ServiceName: {{ .Values.telemetry.serviceName | quote }}
+  LocalGen__Telemetry__Traces: {{ .Values.telemetry.otlp.traces | quote }}
+  {{- with .Values.telemetry.otlp.endpoint }}
+  LocalGen__Telemetry__OtlpEndpoint: {{ . | quote }}
+  LocalGen__Telemetry__OtlpProtocol: {{ $.Values.telemetry.otlp.protocol | quote }}
+  {{- end }}
+
+  {{/*
+    Quota limits are not secret — only the keys themselves are, and those come from the Secret.
+    Splitting them this way keeps `kubectl describe configmap` readable without leaking anything.
+  */}}
+  {{/*
+    Piped through int64 before quoting: YAML reads a large plain number as a float, and Helm
+    then renders it as "2e+06", which .NET's configuration binder rejects. The quota would
+    silently fail to bind and the key would come out unmetered.
+  */}}
+  {{- range $i, $entry := .Values.auth.keys }}
+  LocalGen__Server__ApiKeys__{{ $i }}__Name: {{ $entry.name | quote }}
+  LocalGen__Server__ApiKeys__{{ $i }}__RequestsPerMinute: {{ default 0 $entry.requestsPerMinute | int64 | quote }}
+  LocalGen__Server__ApiKeys__{{ $i }}__TokensPerDay: {{ default 0 $entry.tokensPerDay | int64 | quote }}
+  LocalGen__Server__ApiKeys__{{ $i }}__MaxConcurrentRequests: {{ default 0 $entry.maxConcurrentRequests | int64 | quote }}
+  {{- range $j, $model := default (list) $entry.allowedModels }}
+  LocalGen__Server__ApiKeys__{{ $i }}__AllowedModels__{{ $j }}: {{ $model | quote }}
+  {{- end }}
+  {{- end }}

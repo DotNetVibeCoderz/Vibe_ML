@@ -197,8 +197,13 @@ public sealed class ModelSessionManager : IAsyncDisposable
         ContextSize = _options.Engine.ContextSize ?? model.ContextLength,
         ThreadCount = _options.Engine.Threads,
         TensorSplit = _options.Engine.TensorSplit,
+        SplitMode = _options.Engine.SplitMode,
+        MainGpu = _options.Engine.MainGpu,
         EmbeddingMode = model.Supports(ModelCapability.Embedding)
-                        && !model.Supports(ModelCapability.Chat)
+                        && !model.Supports(ModelCapability.Chat),
+        BatchedInference = _options.Engine.BatchedInference,
+        MaxSequences = _options.Engine.MaxBatchedSequences
+                       ?? _options.Server.MaxConcurrentRequests
     };
 
     private SessionLease Lease(LoadedModel entry)

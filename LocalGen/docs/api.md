@@ -62,6 +62,20 @@ grammar on the LlamaSharp backend. Other backends fall back to instructing the m
 backends have no native function-call channel, so tools are described in the prompt and calls are
 parsed out of the token stream; the wire contract is unchanged.
 
+The *form* of that prompt follows the model. LocalGen reads the chat template baked into the GGUF
+file and speaks the convention that family was fine-tuned on, because a model follows its own
+convention more reliably than one it was merely instructed in:
+
+| Family | Recognised by | A call looks like |
+| --- | --- | --- |
+| Qwen, Hermes, most others | `<tool_call>` in the template, or nothing more specific | `<tool_call>{"name": …, "arguments": {…}}</tool_call>` |
+| Llama 3.1 / 3.2 | `<\|start_header_id\|>` | a bare `{"name": …, "parameters": {…}}`, ended by `<\|eot_id\|>` |
+| Mistral, Nemo | `[TOOL_CALLS]` | `[TOOL_CALLS][{"name": …, "arguments": {…}}]` |
+
+None of this reaches the wire — the request and the `tool_calls` you get back are OpenAI's shape
+either way. A model whose family is not recognised is asked for the first form, which is what most
+instruction-tuned models understand from instructions alone.
+
 ### `POST /v1/completions`
 
 The legacy text completion endpoint. The prompt is wrapped in a single user turn, which is the
@@ -109,6 +123,7 @@ built on these.
 | `GET` | `/api/status` | Service state, uptime, resident models |
 | `GET` | `/api/engines` | Installed backends, availability, recommendation |
 | `GET` | `/api/metrics` | Inference and resource telemetry |
+| `GET` | `/api/usage` | Per-key quota consumption and cache statistics |
 | `GET` | `/api/logs?limit&level` | Recent log entries |
 | `DELETE` | `/api/logs` | Clear the log buffer |
 | `GET` | `/api/models` | Installed models with full metadata |
@@ -206,6 +221,45 @@ for the model.
 
 ---
 
+## Vision
+
+A model can read images when it ships a multimodal projector — the `mmproj` file that encodes
+pixels into the same embedding space as the text. `localgen pull` fetches it alongside the weights
+and the store marks such a model `Vision`; nothing else is needed to turn the feature on.
+
+```bash
+localgen pull huggingface:ggml-org/SmolVLM-256M-Instruct-GGUF
+```
+
+Send the image as a base64 data URL, or as an `image_url` pointing at a file this server stores:
+
+```json
+{
+  "model": "smolvlm-256m-instruct:q8_0",
+  "messages": [{
+    "role": "user",
+    "content": [
+      { "type": "text", "text": "What shape and colour is in this image?" },
+      { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo…" } }
+    ]
+  }]
+}
+```
+
+Several images in one message are allowed, and they are read in the order they appear — the nth
+image lands where the nth image part sat in the text, so a picture can be referred to by its
+position in the sentence around it.
+
+Two things worth knowing:
+
+- **A model without a projector is told, not silently failed.** The message says an image was
+  attached that this model cannot read, and generation continues on the text.
+- **Prompt token counts exclude the image.** The tokens a picture expands into are added inside
+  llama.cpp where LocalGen cannot observe them, so `usage.prompt_tokens` on a vision request
+  counts the text only.
+
+---
+
 ## Errors
 
 Errors use OpenAI's shape:
@@ -221,6 +275,8 @@ Errors use OpenAI's shape:
 | 401 | `invalid_api_key` | Missing or wrong key |
 | 403 | `offline_mode` | The operation needs the network |
 | 403 | `tool_forbidden` | A tool call fell outside its allowed paths |
+| 403 | `model_forbidden` | The key may not use the model it asked for |
+| 429 | `rate_limit_exceeded` | A key exceeded a quota; `Retry-After` says how long to wait |
 | 404 | `model_not_found` | Not installed |
 | 503 | `engine_unavailable` | No backend can serve the model |
 

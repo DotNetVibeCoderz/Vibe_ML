@@ -124,7 +124,9 @@ The two buttons left of the composer attach files. Both upload first, so the fil
 - **Images** are sent as image content, the way the OpenAI API carries them, and render inline in
   the transcript.
 - **Documents** are extracted to text and sent with the message, and the transcript shows a link
-  you can open. PDF, markdown, HTML, plain text and source code are supported.
+  you can open. Word, Excel, PowerPoint, PDF, EPUB, RTF, HTML, CSV, markdown, plain text and
+  source code are all read; the office formats arrive as markdown, so a table in a spreadsheet
+  reaches the model as a table.
 
 Staged files appear as chips above the composer with their size, and each can be removed on its
 own before sending. Files are stored content-addressed by hash, so attaching the same image to

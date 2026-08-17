@@ -3,7 +3,8 @@
   <PropertyGroup>
     <Description>
       Retrieval-augmented generation for LocalGen: document ingestion, chunking and vector search
-      over SQLite, Qdrant, Chroma, Azure AI Search or an in-memory index.
+      over SQLite, Qdrant, Chroma, Azure AI Search or an in-memory index. Reads PDF, Word, Excel,
+      PowerPoint, EPUB, RTF, HTML, CSV, markdown and plain text.
     </Description>
   </PropertyGroup>
 
@@ -15,7 +16,14 @@
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.InMemory" />
     <PackageReference Include="Microsoft.SemanticKernel" />
     <PackageReference Include="PdfPig" />
-    <PackageReference Include="AngleSharp" />
+    <!--
+      Office, EPUB, RTF and tabular formats, converted to markdown. Excel and PowerPoint are
+      separate packages so a deployment that never sees a spreadsheet does not carry ClosedXML;
+      LocalGen takes both, since a document folder that has no .xlsx in it is the exception.
+    -->
+    <PackageReference Include="ElBruno.MarkItDotNet" />
+    <PackageReference Include="ElBruno.MarkItDotNet.Excel" />
+    <PackageReference Include="ElBruno.MarkItDotNet.PowerPoint" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />

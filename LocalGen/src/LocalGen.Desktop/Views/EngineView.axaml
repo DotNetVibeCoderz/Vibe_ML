@@ -91,6 +91,14 @@
                   <Border Classes="chip" Margin="0,0,5,5" IsVisible="{Binding SupportsMultiGpu}">
                     <TextBlock Text="multi-GPU" />
                   </Border>
+                  <Border Classes="chip" Margin="0,0,5,5" IsVisible="{Binding HasAccelerators}">
+                    <TextBlock Text="{Binding Accelerators, StringFormat='GPUs: {0}'}" />
+                  </Border>
+                  <Border Classes="chip" Margin="0,0,5,5" IsVisible="{Binding CanSplit}"
+                          Background="{DynamicResource SignalWash}"
+                          BorderBrush="{DynamicResource SignalDim}">
+                    <TextBlock Text="splittable" Foreground="{DynamicResource Signal}" />
+                  </Border>
                 </WrapPanel>
 
                 <TextBlock Classes="mono muted" Text="{Binding Build}" TextWrapping="Wrap"
@@ -141,6 +149,51 @@
                          Text="{Binding Threads, StringFormat='{}{0} (0 = automatic)'}" />
             </StackPanel>
           </Grid>
+
+          <!--
+            The section states what the backend can see whatever that is; the controls appear
+            only above one GPU. On a one-GPU machine they would be four fields that cannot change
+            anything — but the reason for their absence is the thing a user came here to find out,
+            so it is said rather than left as a gap.
+          -->
+          <Border Classes="panel" Background="{DynamicResource SurfaceSunken}">
+            <StackPanel Spacing="14">
+              <StackPanel Spacing="4">
+                <TextBlock Classes="heading" Text="Across GPUs" />
+                <TextBlock Classes="secondary" Text="{Binding AcceleratorSummary}" TextWrapping="Wrap" />
+              </StackPanel>
+
+              <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto,Auto"
+                    ColumnSpacing="18" RowSpacing="14"
+                    IsVisible="{Binding MultiGpuAvailable}">
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Classes="mono muted" Text="Split mode"
+                           VerticalAlignment="Center" />
+                <ComboBox Grid.Row="0" Grid.Column="1" Width="220" HorizontalAlignment="Left"
+                          ItemsSource="{Binding SplitModes}" SelectedItem="{Binding SplitMode}" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Classes="mono muted" Text="Weights per GPU"
+                           VerticalAlignment="Center" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="6">
+                  <TextBox Classes="mono" Width="260" HorizontalAlignment="Left"
+                           Watermark="0.6, 0.4" Text="{Binding TensorSplitText}" />
+                  <TextBlock Classes="mono" TextWrapping="Wrap" MaxWidth="520"
+                             HorizontalAlignment="Left"
+                             Text="{Binding SplitPreview}"
+                             Foreground="{Binding SplitPreviewIsWarning, Converter={x:Static vm:Converters.WarningOrMuted}}" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Classes="mono muted" Text="Main GPU"
+                           VerticalAlignment="Center" />
+                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="12">
+                  <Slider Value="{Binding MainGpu}" Minimum="0" Maximum="7" TickFrequency="1"
+                          IsSnapToTickEnabled="True" Width="200" />
+                  <TextBlock Classes="mono" VerticalAlignment="Center"
+                             Text="{Binding MainGpu, StringFormat='device {0} holds the KV cache'}" />
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+          </Border>
 
           <StackPanel Orientation="Horizontal" Spacing="10">
             <Button Classes="primary" Content="Apply" Command="{Binding ApplyCommand}" />

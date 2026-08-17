@@ -47,18 +47,44 @@ interface knows the difference.
 
 ## Supported documents
 
-| Kind | Extensions |
-| --- | --- |
-| PDF | `.pdf` — text extracted per page, with page markers kept for citation |
-| Markdown | `.md`, `.markdown` — chunked by heading |
-| HTML | `.html`, `.htm` — scripts and styles stripped |
-| Plain text | `.txt`, `.log`, `.csv`, `.json`, `.xml`, `.yaml`, … |
-| Source code | `.cs`, `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, … |
-| Images | `.png`, `.jpg`, … — indexed by name, not OCR'd |
+| Kind | Extensions | How it is read |
+| --- | --- | --- |
+| Word | `.docx` | Converted to markdown — headings, lists and tables kept |
+| Excel | `.xlsx` | One markdown table per worksheet, each under its sheet name |
+| PowerPoint | `.pptx` | One section per slide |
+| EPUB | `.epub` | Converted to markdown, chapter by chapter |
+| Rich text | `.rtf` | Converted to markdown |
+| PDF | `.pdf` | Text per page, with `[page N]` markers kept for citation |
+| Markdown | `.md`, `.markdown` | Read as-is |
+| HTML | `.html`, `.htm` | Converted to markdown; scripts and styles dropped |
+| Tabular | `.csv`, `.tsv` | Converted to a markdown table |
+| Plain text | `.txt`, `.log`, `.json`, `.xml`, `.yaml`, `.toml`, `.ini` | Read as-is |
+| Source code | `.cs`, `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, … | Read as-is |
+| Images | `.png`, `.jpg`, `.svg`, … | Recorded by name, not OCR'd |
+
+The office and ebook formats go through
+[ElBruno.MarkItDotNet](https://github.com/elbruno/ElBruno.MarkItDotNet), which converts them to
+markdown locally — no service, no network, so ingestion still works in offline mode.
+
+**Why some formats are converted and others are not.** The test is whether the conversion recovers
+structure that retrieval can use, not whether a converter exists for the format:
+
+- A `.docx` becomes markdown because its headings then survive into the chunker, and every
+  retrieved passage arrives labelled with the section it came from.
+- A `.pdf` keeps LocalGen's own reader because the page number is what makes a citation from a
+  300-page manual worth anything, and a general-purpose converter marks page breaks with a
+  horizontal rule instead.
+- `.json`, `.xml` and `.yaml` are read as-is. Converting them would wrap the file in a fenced code
+  block: the same text, re-printed, none of it easier to find.
+- Source code is read as-is for the same reason.
 
 Images are deliberately not OCR'd: shipping an OCR engine would be a large dependency for
 something most users would not reach for. An image is recorded so a search can surface "there is a
 diagram called X here", and a vision-capable model can read it when asked.
+
+One property of the conversion is worth knowing about: characters that would otherwise be markdown
+syntax come back escaped, so `Q4_K_M` is stored as `Q4\_K\_M`. Retrieval is unaffected — an
+embedding is unbothered by a backslash — but a passage quoted back to a model carries them.
 
 ## Chunking
 
@@ -68,7 +94,9 @@ boundary that fits — paragraph, then sentence, then word — and carries an ov
 fact spanning a boundary still appears whole somewhere.
 
 Markdown is chunked by heading, and each chunk carries its heading, so a retrieved passage still
-says what it is about.
+says what it is about. That path covers everything that arrives as markdown, which now includes
+converted Word, Excel, PowerPoint, EPUB, RTF and HTML — the structure the conversion recovers is
+the structure the chunker splits on.
 
 Overlap is capped at half the chunk size. Beyond that each chunk barely advances past the last,
 turning a long document into thousands of near-duplicates.
@@ -144,3 +172,11 @@ behind.
   rebuilding the index — clear it and re-ingest.
 - **Ingestion embeds every chunk**, so a large corpus takes a while on CPU. It is a one-off cost.
 - **A file that fails to read is skipped** during a bulk ingest rather than abandoning the run.
+  The reason is logged, so a run that indexes fewer files than expected has an explanation — make
+  sure your host has a logging provider registered, or the warning has nowhere to go.
+- **Semantic Kernel is pinned to the 1.74 line so the vector-store connectors work.** The
+  connectors call an abstraction that newer Semantic Kernel releases require a version of
+  `Microsoft.Extensions.VectorData.Abstractions` that no longer has, and the symptom is that every
+  search throws while ingestion happily succeeds. Raise `Microsoft.SemanticKernel`,
+  `.Abstractions`, `.Core` and `Microsoft.Extensions.VectorData.Abstractions` together, or not at
+  all. See [PLAN.md](../PLAN.md#known-limitations).
