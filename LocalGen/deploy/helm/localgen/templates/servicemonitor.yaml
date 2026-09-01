@@ -1,0 +1,30 @@
+{{- if and .Values.telemetry.prometheus.enabled .Values.telemetry.prometheus.serviceMonitor.enabled }}
+{{/*
+Requires the Prometheus Operator's CRDs. Guarded on both flags because a ServiceMonitor pointing
+at a server that is not exporting anything is a scrape that fails every interval.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "localgen.fullname" . }}
+  labels:
+    {{- include "localgen.labels" . | nindent 4 }}
+    {{- with .Values.telemetry.prometheus.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "localgen.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: {{ .Values.telemetry.prometheus.path }}
+      interval: {{ .Values.telemetry.prometheus.serviceMonitor.interval }}
+      {{- if .Values.telemetry.prometheus.requireApiKey }}
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "localgen.secretName" . }}
+          key: {{ .Values.auth.existingSecretKey }}
+      {{- end }}
+{{- end }}

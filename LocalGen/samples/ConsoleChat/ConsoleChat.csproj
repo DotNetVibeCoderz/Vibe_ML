@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- In your own project this would be: dotnet add package LocalGen.Sdk -->
+    <ProjectReference Include="..\..\src\LocalGen.Sdk\LocalGen.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>

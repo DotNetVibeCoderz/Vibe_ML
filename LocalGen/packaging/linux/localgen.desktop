@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LocalGen Admin Control
+GenericName=Local AI inference
+Comment=Manage models, engines and the local inference service
+Exec=/opt/localgen/LocalGen.Desktop
+Terminal=false
+Categories=Development;Science;Utility;
+Keywords=AI;LLM;inference;local;OpenAI;GGUF;
+StartupWMClass=LocalGen.Desktop

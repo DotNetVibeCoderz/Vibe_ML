@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Gravicode Studios",
+  "classifications": [ "Desktop", "Avalonia", "AI", "LocalGen" ],
+  "identity": "LocalGen.Avalonia.CSharp",
+  "name": "LocalGen desktop chat",
+  "shortName": "localgen-desktop",
+  "description": "A cross-platform Avalonia chat client for a local model, with light and dark themes.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "LocalGenDesktop",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Endpoint": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "http://127.0.0.1:11434",
+      "replaces": "LOCALGEN_ENDPOINT_PLACEHOLDER",
+      "description": "Address of the LocalGen server."
+    },
+    "Model": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "qwen2.5-7b-instruct:q4_k_m",
+      "replaces": "LOCALGEN_MODEL_PLACEHOLDER",
+      "description": "Model the application talks to by default."
+    },
+    "SdkVersion": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "0.1.0",
+      "replaces": "LOCALGEN_SDK_VERSION",
+      "description": "Version of the LocalGen.Sdk package to reference."
+    }
+  },
+  "primaryOutputs": [ { "path": "LocalGenDesktop.csproj" } ],
+  "postActions": [
+    {
+      "description": "Restore NuGet packages",
+      "manualInstructions": [ { "text": "Run 'dotnet restore'" } ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ]
+}

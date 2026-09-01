@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Microsoft Foundry Local inference backend for LocalGen.</Description>
+
+    <!--
+      The Foundry Local SDK ships RID-specific native assets, so restore has to know which
+      platforms to resolve. Foundry Local itself is Windows and macOS only today.
+    -->
+    <RuntimeIdentifiers>win-x64;win-arm64;osx-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AI.Foundry.Local" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalGen.Core\LocalGen.Core.csproj" />
+    <!-- The SDK already speaks the OpenAI wire format, which is exactly what Foundry Local serves. -->
+    <ProjectReference Include="..\LocalGen.Sdk\LocalGen.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,46 @@
+[Unit]
+Description=LocalGen inference server
+Documentation=https://github.com/gravicode/LocalGen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Not Type=notify: that needs the host to call sd_notify, which LocalGen's server does not, and
+# systemd would then kill it at the start timeout despite it serving perfectly well.
+Type=simple
+ExecStart=/opt/localgen/localgen-server
+Restart=on-failure
+RestartSec=5
+
+User=localgen
+Group=localgen
+
+# Models live here rather than in the service user's home so the path is the same whether the
+# server is run as a service or by hand with LOCALGEN_HOME pointed at it.
+Environment=LOCALGEN_HOME=/var/lib/localgen
+Environment=DOTNET_gcServer=1
+StateDirectory=localgen
+
+# Loopback by default, as everywhere else in LocalGen: an inference endpoint also exposes the
+# tool functions, so opening it to a network is a decision to be made deliberately along with
+# setting LocalGen__Server__ApiKey.
+Environment=LocalGen__Server__Host=127.0.0.1
+Environment=LocalGen__Server__Port=11434
+
+# Loading a model is I/O and memory bound and can take a minute for a large one; the default
+# 90-second start timeout would kill the service part way through.
+TimeoutStartSec=600
+
+# The code execution tool runs whatever the model asks it to, so the service gets no more of the
+# system than it needs. ProtectHome stays off: LOCALGEN_HOME may be pointed at a user directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/localgen
+
+[Install]
+WantedBy=multi-user.target

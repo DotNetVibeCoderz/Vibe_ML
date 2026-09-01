@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "localgen.fullname" . }}
+  labels:
+    {{- include "localgen.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # Recreate, not RollingUpdate: the model volume is ReadWriteOnce, so a new pod cannot mount it
+  # until the old one has let go. A rolling update would deadlock waiting for a volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "localgen.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Rolls the pod when configuration changes; without this a `helm upgrade` that only edits
+        # the ConfigMap leaves the old settings running.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "localgen.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "localgen.serviceAccountName" . }}
+      {{- with .Values.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.gpu.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: localgen
+          image: {{ include "localgen.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "localgen.fullname" . }}
+          env:
+            - name: LOCALGEN_HOME
+              value: /data
+            {{- if .Values.auth.enabled }}
+            - name: LocalGen__Server__ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "localgen.secretName" . }}
+                  key: {{ .Values.auth.existingSecretKey }}
+            {{- end }}
+            {{/* The quota limits come from the ConfigMap; only the secrets are mounted here. */}}
+            {{- range $i, $entry := .Values.auth.keys }}
+            - name: LocalGen__Server__ApiKeys__{{ $i }}__Key
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "localgen.secretName" $ }}
+                  key: {{ printf "tenant-%s" $entry.name }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: models
+              mountPath: /data
+          resources:
+            {{- $resources := deepCopy .Values.resources }}
+            {{- if .Values.gpu.enabled }}
+            {{- $_ := set $resources.limits .Values.gpu.resourceName .Values.gpu.count }}
+            {{- end }}
+            {{- toYaml $resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+      volumes:
+        - name: models
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-models" (include "localgen.fullname" .)) }}
+          {{- else }}
+          # Without persistence every restart re-downloads the weights. Suitable for a smoke test
+          # and nothing else.
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

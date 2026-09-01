@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Gravicode Studios",
+  "classifications": [ "Web", "WebAPI", "AI", "LocalGen" ],
+  "identity": "LocalGen.WebApi.CSharp",
+  "name": "LocalGen web API",
+  "shortName": "localgen-webapi",
+  "description": "An ASP.NET Core minimal API that uses a local model for structured text tasks, with streaming.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "LocalGenApi",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Endpoint": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "http://127.0.0.1:11434",
+      "replaces": "LOCALGEN_ENDPOINT_PLACEHOLDER",
+      "description": "Address of the LocalGen server."
+    },
+    "Model": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "qwen2.5-7b-instruct:q4_k_m",
+      "replaces": "LOCALGEN_MODEL_PLACEHOLDER",
+      "description": "Model the API uses."
+    },
+    "SdkVersion": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "0.1.0",
+      "replaces": "LOCALGEN_SDK_VERSION",
+      "description": "Version of the LocalGen.Sdk package to reference."
+    }
+  },
+  "primaryOutputs": [ { "path": "LocalGenApi.csproj" } ],
+  "postActions": [
+    {
+      "description": "Restore NuGet packages",
+      "manualInstructions": [ { "text": "Run 'dotnet restore'" } ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ]
+}

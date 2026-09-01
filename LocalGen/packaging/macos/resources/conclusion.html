@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /></head>
+<body style="font-family: -apple-system, sans-serif; font-size: 13px;">
+  <h2>Installed</h2>
+  <p>Pull a small model and check it works — this one is about 100 MB:</p>
+  <pre style="background: #f4f4f5; padding: 10px; border-radius: 6px;">
+localgen pull huggingface:bartowski/SmolLM2-135M-Instruct-GGUF
+localgen run smollm2-135m-instruct:q4_k_m "Say hello"</pre>
+  <p>
+    Or open <b>LocalGen Admin Control</b> from Applications, which does the same from the Models
+    and Playground screens and can start the API service.
+  </p>
+  <p>
+    Models are stored in <code>~/.localgen</code> and are not removed when LocalGen is
+    uninstalled.
+  </p>
+</body>
+</html>

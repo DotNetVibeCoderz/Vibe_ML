@@ -1,0 +1,15 @@
+<Router AppAssembly="@typeof(Program).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(Layout.MainLayout)">
+            <div class="page stack">
+                <p class="eyebrow">404</p>
+                <h1 class="display">No page here</h1>
+                <p class="secondary">Pick a destination from the rail on the left.</p>
+            </div>
+        </LayoutView>
+    </NotFound>
+</Router>

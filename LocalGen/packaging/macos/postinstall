@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# Puts the CLI on PATH after the payload is in place.
+#
+# A symlink into /usr/local/bin rather than installing there directly: the payload is one folder
+# of several hundred files, and scattering it across /usr/local/bin would make the uninstall
+# instructions impossible to follow.
+
+set -e
+
+BIN_DIR="/usr/local/bin"
+PAYLOAD="/usr/local/localgen"
+
+mkdir -p "$BIN_DIR"
+
+ln -sf "$PAYLOAD/localgen" "$BIN_DIR/localgen"
+ln -sf "$PAYLOAD/localgen-server" "$BIN_DIR/localgen-server"
+
+# /usr/local/bin is on the default PATH on macOS but is not always on a login shell's PATH when
+# the shell was configured before Homebrew ever created it.
+if ! grep -q '/usr/local/bin' /etc/paths 2>/dev/null; then
+    echo "/usr/local/bin" >> /etc/paths
+fi
+
+exit 0

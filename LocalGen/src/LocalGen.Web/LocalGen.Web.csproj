@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <Description>LocalGen web chat interface, built with Blazor.</Description>
+    <AssemblyName>LocalGen.Web</AssemblyName>
+    <RootNamespace>LocalGen.Web</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LocalGen.Core\LocalGen.Core.csproj" />
+    <ProjectReference Include="..\LocalGen.Sdk\LocalGen.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>

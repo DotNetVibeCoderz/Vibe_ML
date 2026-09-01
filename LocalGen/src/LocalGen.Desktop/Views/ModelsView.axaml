@@ -1,0 +1,219 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:LocalGen.Desktop.ViewModels"
+             xmlns:models="using:LocalGen.Core.Models"
+             mc:Ignorable="d"
+             x:Class="LocalGen.Desktop.Views.ModelsView"
+             x:DataType="vm:ModelsViewModel">
+
+  <Grid RowDefinitions="Auto,Auto,*" Margin="24">
+
+    <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,18">
+      <TextBlock Classes="eyebrow" Text="MODEL GALLERY" />
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0" Classes="display" Text="Weights on this machine" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+          <TextBlock Classes="eyebrow" Text="ON DISK" VerticalAlignment="Center" />
+          <TextBlock Classes="readout" Text="{Binding TotalSize}" />
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+
+    <!-- Download progress -->
+    <Border Grid.Row="1" Classes="panel" Margin="0,0,0,14"
+            IsVisible="{Binding IsDownloading}">
+      <StackPanel Spacing="10">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Grid.Column="0" Classes="mono" Text="{Binding DownloadStatus}" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="danger" Content="Cancel" Padding="10,4"
+                  Command="{Binding CancelDownloadCommand}" />
+        </Grid>
+        <ProgressBar Value="{Binding DownloadPercentage}" Maximum="100" Height="4"
+                     Foreground="{DynamicResource Signal}"
+                     Background="{DynamicResource SurfaceSunken}" />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,20,*">
+
+      <!-- ═══ Installed ═══ -->
+      <Border Grid.Column="0" Classes="panel" Padding="0">
+        <DockPanel>
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,16,20,12">
+            <TextBlock Grid.Column="0" Classes="heading" Text="Installed" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="ghost" Content="Refresh"
+                    Command="{Binding RefreshCommand}" />
+          </Grid>
+
+          <!-- Quantization: converts a model in place in the models directory, so it belongs
+               beside the installed list rather than in the catalogue. -->
+          <Border DockPanel.Dock="Bottom" Classes="tile" Margin="20,0,20,16" Padding="14,12"
+                  IsVisible="{Binding CanQuantize}">
+            <StackPanel Spacing="10">
+              <Grid ColumnDefinitions="Auto,10,*,10,Auto">
+                <TextBlock Grid.Column="0" Classes="eyebrow" Text="QUANTIZE TO"
+                           VerticalAlignment="Center" />
+                <ComboBox Grid.Column="2" HorizontalAlignment="Stretch"
+                          ItemsSource="{Binding QuantizationTargets}"
+                          SelectedItem="{Binding SelectedQuantization}"
+                          IsEnabled="{Binding !IsQuantizing}" />
+                <Button Grid.Column="4" Classes="danger" Content="Cancel" Padding="10,4"
+                        IsVisible="{Binding IsQuantizing}"
+                        Command="{Binding CancelQuantizeCommand}" />
+              </Grid>
+
+              <CheckBox Content="Allow requantizing an already-quantized model"
+                        IsChecked="{Binding AllowRequantize}"
+                        IsEnabled="{Binding !IsQuantizing}" />
+
+              <TextBlock Classes="mono" TextWrapping="Wrap"
+                         Text="{Binding QuantizeStatus}"
+                         Foreground="{DynamicResource Alert}"
+                         IsVisible="{Binding QuantizeFailed}" />
+
+              <TextBlock Classes="mono muted" TextWrapping="Wrap"
+                         Text="{Binding QuantizeStatus}"
+                         IsVisible="{Binding HasQuantizeProgress}" />
+
+              <TextBlock Classes="mono muted" TextWrapping="Wrap"
+                         IsVisible="{Binding !IsQuantizing}"
+                         Text="Press Quantize on a model above. The original is kept; the result is written beside it." />
+            </StackPanel>
+          </Border>
+
+          <Panel>
+            <StackPanel IsVisible="{Binding !Installed.Count}" VerticalAlignment="Center"
+                        HorizontalAlignment="Center" Spacing="6" Margin="20">
+              <TextBlock Classes="secondary" Text="No models yet." HorizontalAlignment="Center" />
+              <TextBlock Classes="mono muted" TextAlignment="Center" MaxWidth="280"
+                         Text="Search the catalogue on the right, then pick a quantization to download." />
+            </StackPanel>
+
+            <ScrollViewer Padding="20,0,20,16" IsVisible="{Binding Installed.Count}">
+              <ItemsControl ItemsSource="{Binding Installed}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="models:ModelDescriptor">
+                    <Border Classes="tile" Margin="0,0,0,8">
+                      <StackPanel Spacing="8">
+                        <TextBlock Classes="mono" Text="{Binding Id}" FontSize="13" />
+
+                        <WrapPanel>
+                          <Border Classes="chip" Margin="0,0,5,5">
+                            <TextBlock Text="{Binding Quantization.Name}" />
+                          </Border>
+                          <Border Classes="chip" Margin="0,0,5,5">
+                            <TextBlock Text="{Binding SizeBytes, Converter={x:Static vm:Converters.BytesToSize}}" />
+                          </Border>
+                          <Border Classes="chip" Margin="0,0,5,5">
+                            <TextBlock Text="{Binding ContextLength, StringFormat='ctx {0:N0}'}" />
+                          </Border>
+                          <Border Classes="chip" Margin="0,0,5,5" IsVisible="{Binding ParameterCountB}">
+                            <TextBlock Text="{Binding ParameterCountB, StringFormat='{}{0:N1}B params'}" />
+                          </Border>
+                        </WrapPanel>
+
+                        <TextBlock Classes="mono muted" Text="{Binding Quantization.Notes}"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding Quantization.Notes, Converter={x:Static vm:Converters.IsNotEmpty}}" />
+
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Button Content="Load" Padding="10,4"
+                                  Command="{Binding $parent[ItemsControl].((vm:ModelsViewModel)DataContext).LoadCommand}"
+                                  CommandParameter="{Binding}" />
+                          <Button Content="Unload" Padding="10,4"
+                                  Command="{Binding $parent[ItemsControl].((vm:ModelsViewModel)DataContext).UnloadCommand}"
+                                  CommandParameter="{Binding}" />
+                          <Button Content="Quantize" Padding="10,4"
+                                  IsVisible="{Binding $parent[ItemsControl].((vm:ModelsViewModel)DataContext).CanQuantize}"
+                                  IsEnabled="{Binding !$parent[ItemsControl].((vm:ModelsViewModel)DataContext).IsQuantizing}"
+                                  Command="{Binding $parent[ItemsControl].((vm:ModelsViewModel)DataContext).QuantizeCommand}"
+                                  CommandParameter="{Binding}" />
+                          <Button Classes="danger" Content="Delete" Padding="10,4"
+                                  Command="{Binding $parent[ItemsControl].((vm:ModelsViewModel)DataContext).RemoveCommand}"
+                                  CommandParameter="{Binding}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Panel>
+        </DockPanel>
+      </Border>
+
+      <!-- ═══ Catalogue ═══ -->
+      <Border Grid.Column="2" Classes="panel" Padding="0">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Margin="20,16,20,12" Spacing="10">
+            <TextBlock Classes="heading" Text="Hugging Face" />
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Grid.Column="0" Text="{Binding SearchQuery}"
+                       Watermark="qwen, llama, mistral, gemma…" />
+              <Button Grid.Column="1" Classes="primary" Content="Search" Margin="8,0,0,0"
+                      Command="{Binding SearchCommand}" />
+            </Grid>
+
+            <TextBlock Classes="mono muted" Text="Searching…" IsVisible="{Binding IsSearching}" />
+            <TextBlock Classes="mono" Foreground="{DynamicResource Alert}"
+                       Text="{Binding ErrorMessage}" TextWrapping="Wrap"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static vm:Converters.IsNotEmpty}}" />
+          </StackPanel>
+
+          <Grid RowDefinitions="*,Auto">
+            <ScrollViewer Grid.Row="0" Padding="20,0,20,10">
+              <ListBox ItemsSource="{Binding SearchResults}"
+                       SelectedItem="{Binding SelectedCatalogEntry}"
+                       Background="Transparent" BorderThickness="0">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="models:CatalogEntry">
+                    <StackPanel Spacing="2" Margin="0,3">
+                      <TextBlock Classes="mono" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                      <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Classes="mono muted" Text="{Binding Downloads, StringFormat='↓ {0:N0}'}" />
+                        <TextBlock Classes="mono muted" Text="{Binding Likes, StringFormat='♥ {0:N0}'}" />
+                      </StackPanel>
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </ScrollViewer>
+
+            <!-- Variants of the selected entry: the actual choice being made. -->
+            <Border Grid.Row="1" Background="{DynamicResource SurfaceSunken}"
+                    BorderBrush="{DynamicResource Edge}" BorderThickness="0,1,0,0"
+                    Padding="20,14" MaxHeight="290"
+                    IsVisible="{Binding Variants.Count}">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Classes="eyebrow" Text="QUANTIZATIONS" Margin="0,0,0,8" />
+                <ScrollViewer>
+                  <ItemsControl ItemsSource="{Binding Variants}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:VariantRow">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,3" ColumnSpacing="10">
+                          <TextBlock Grid.Column="0" Classes="mono" Text="{Binding Quantization}"
+                                     MinWidth="72" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Classes="mono" Text="{Binding Size}"
+                                     MinWidth="66" VerticalAlignment="Center"
+                                     Foreground="{DynamicResource Data}" />
+                          <TextBlock Grid.Column="2" Classes="mono muted" Text="{Binding Notes}"
+                                     TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                          <Button Grid.Column="3" Content="Download" Padding="9,3"
+                                  Command="{Binding $parent[ItemsControl].((vm:ModelsViewModel)DataContext).DownloadCommand}"
+                                  CommandParameter="{Binding}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+          </Grid>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

@@ -1,0 +1,27 @@
+apiVersion: v2
+name: localgen
+description: |
+  LocalGen — a local AI inference engine with an OpenAI-compatible HTTP API.
+  Runs open models on your own hardware.
+type: application
+
+# The chart is versioned independently of the product: a fix to a template is a chart release
+# even when the image it deploys has not moved.
+version: 0.1.0
+appVersion: "0.1.0"
+
+home: https://github.com/gravicode/LocalGen
+sources:
+  - https://github.com/gravicode/LocalGen
+keywords:
+  - ai
+  - llm
+  - inference
+  - openai
+  - gguf
+maintainers:
+  - name: Gravicode Studios
+    url: https://github.com/gravicode
+annotations:
+  # Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+  category: MachineLearning

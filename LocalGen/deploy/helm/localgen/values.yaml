@@ -1,0 +1,192 @@
+# Default values for the LocalGen chart.
+#
+# The defaults deploy a single CPU inference pod with a persistent model volume and no ingress —
+# safe to install into any cluster. GPU, ingress and multi-tenant keys are each opted into.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: localgen
+  tag: ""              # Defaults to the chart's appVersion.
+  pullPolicy: IfNotPresent
+pullSecrets: []
+
+# Generation is serialised per model and the model volume is ReadWriteOnce, so a second replica
+# would queue behind a volume it cannot mount. Scale by adding releases on their own nodes.
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 11434
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: localgen.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Models are gigabytes and take minutes to fetch, so they outlive the pod.
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 100Gi
+  existingClaim: ""
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 8Gi
+  limits:
+    cpu: "8"
+    # Must exceed the model size plus its KV cache, or the pod is OOM-killed part-way through
+    # loading — which looks like a crash loop with no error message.
+    memory: 16Gi
+
+gpu:
+  enabled: false
+  # Resource key the device plugin advertises: nvidia.com/gpu, amd.com/gpu, and so on.
+  resourceName: nvidia.com/gpu
+  count: 1
+  # A CUDA build is a different image; the CPU default cannot use a GPU even when one is attached.
+  image:
+    repository: localgen
+    tag: cuda12
+  runtimeClassName: ""
+
+engine:
+  default: LlamaSharp
+  device: Auto          # Auto, Cpu, Cuda, Vulkan, Metal
+  gpuLayers: ""         # Empty offloads every layer when a GPU is in use.
+  contextSize: ""
+  # Per-GPU weight split for tensor parallelism, e.g. [0.6, 0.4] across two cards. Relative
+  # weights on any scale — [60, 40] means the same. Leave empty for identical cards: the backend
+  # then divides the model in proportion to free VRAM, which is what you want.
+  # The list must not be longer than gpu.count, or the extra entries are dropped with a warning.
+  tensorSplit: []
+  # layer gives each card a run of layers; row splits every tensor across all of them and needs
+  # NVLink or equivalent to be worth it. Empty leaves llama.cpp's default, which is layer.
+  splitMode: ""
+  # Card that holds the KV cache. Empty means device 0.
+  mainGpu: ""
+
+server:
+  maxLoadedModels: 1
+  maxConcurrentRequests: 4
+  modelIdleTimeout: "00:05:00"
+  corsOrigins:
+    - "*"
+
+runtime:
+  offlineMode: false
+  preloadModel: ""
+
+# Tool functions run inside the pod. Code execution is off by default here even though the product
+# default is on: a shared cluster deployment is a different threat model from a laptop.
+tools:
+  codeExecution: false
+  allowDependencyInstall: false
+  fileSystem: true
+  internetSearch: true
+  download: true
+  webScrape: true
+
+auth:
+  # Single-tenant bearer token. Generated into a Secret when enabled and no value is supplied.
+  enabled: true
+  apiKey: ""
+  existingSecret: ""
+  existingSecretKey: api-key
+
+  # Named keys with their own quotas. A zero limit is unmetered.
+  #   - name: research
+  #     key: ""                    # Generated if empty.
+  #     requestsPerMinute: 120
+  #     tokensPerDay: 2000000
+  #     maxConcurrentRequests: 4
+  #     allowedModels: []
+  keys: []
+
+cache:
+  enabled: false
+  maxEntries: 256
+  ttl: "00:30:00"
+  cacheNonDeterministic: false
+
+telemetry:
+  prometheus:
+    enabled: false
+    path: /metrics
+    requireApiKey: false
+    # Creates a ServiceMonitor. Needs the Prometheus Operator's CRDs to be installed.
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      labels: {}
+  otlp:
+    endpoint: ""
+    protocol: grpc      # grpc or httpprotobuf
+    traces: true
+  serviceName: localgen
+
+# The Blazor chat UI. Off by default: the API is the product, the UI is optional.
+web:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: localgen-web
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# Restricts who may reach the inference service. When the web UI is enabled it is allowed through.
+networkPolicy:
+  enabled: false
+  extraIngressSelectors: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]
+
+# A cold start may load a multi-gigabyte model from disk, so the startup probe is generous while
+# the liveness probe stays tight once the pod is up.
+probes:
+  startup:
+    failureThreshold: 30
+    periodSeconds: 10
+  liveness:
+    periodSeconds: 30
+    timeoutSeconds: 5
+  readiness:
+    periodSeconds: 10
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}
+extraEnv: []

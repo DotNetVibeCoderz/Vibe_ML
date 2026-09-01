@@ -1,0 +1,38 @@
+LocalGen {{ .Chart.AppVersion }} is installed as {{ include "localgen.fullname" . }}.
+
+  Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+
+The API is at http://{{ include "localgen.fullname" . }}.{{ .Release.Namespace }}:{{ .Values.service.port }}
+inside the cluster. To reach it from your machine:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "localgen.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+{{ if .Values.auth.enabled -}}
+Read the API key:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "localgen.secretName" . }} -o jsonpath='{.data.{{ .Values.auth.existingSecretKey }}}' | base64 -d
+
+{{ end -}}
+{{- if .Values.auth.keys }}
+Per-key quotas are configured for: {{ range $i, $e := .Values.auth.keys }}{{ if $i }}, {{ end }}{{ $e.name }}{{ end }}.
+Each secret is stored under `tenant-<name>`. Check consumption at any time with GET /api/usage.
+
+{{ end -}}
+No model is installed yet — the volume starts empty. Pull one:
+
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "localgen.fullname" . }} -- \
+    localgen pull huggingface:bartowski/SmolLM2-135M-Instruct-GGUF
+
+{{ if not .Values.gpu.enabled -}}
+This release runs on CPU. For a GPU node pool set `gpu.enabled=true`, which also switches to the
+CUDA image — the CPU image cannot use an accelerator even when one is attached to the pod.
+
+{{ end -}}
+{{- if and .Values.telemetry.prometheus.enabled (not .Values.telemetry.prometheus.serviceMonitor.enabled) }}
+Metrics are exported at {{ .Values.telemetry.prometheus.path }} but nothing is scraping them.
+Set `telemetry.prometheus.serviceMonitor.enabled=true` if you run the Prometheus Operator.
+{{ end -}}
+{{- if and .Values.tools.codeExecution (not .Values.networkPolicy.enabled) }}
+WARNING: code execution is enabled and no NetworkPolicy is in place. A model can run arbitrary
+code in this pod and reach anything the pod can reach. Set `networkPolicy.enabled=true`.
+{{ end -}}

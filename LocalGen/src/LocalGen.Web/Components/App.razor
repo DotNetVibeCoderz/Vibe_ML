@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LocalGen</title>
+    <base href="/" />
+    <link rel="stylesheet" href="app.css" />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+<body>
+    <Routes @rendermode="InteractiveServer" />
+
+    <div id="blazor-error-ui">
+        Something went wrong. <a href="" class="reload">Reload</a>
+    </div>
+
+    <script src="_framework/blazor.web.js"></script>
+    <script>
+        // The theme is applied before Blazor renders so the first paint is not the wrong colour.
+        (function () {
+            const stored = localStorage.getItem('localgen-theme');
+            if (stored) {
+                document.documentElement.setAttribute('data-theme', stored);
+            }
+
+            window.localgenTheme = {
+                toggle: function () {
+                    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                    document.documentElement.setAttribute('data-theme', next);
+                    localStorage.setItem('localgen-theme', next);
+                    return next;
+                },
+                current: function () {
+                    return document.documentElement.getAttribute('data-theme');
+                }
+            };
+
+            window.localgenScrollToEnd = function (id) {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.scrollTop = element.scrollHeight;
+                }
+            };
+        })();
+    </script>
+</body>
+</html>

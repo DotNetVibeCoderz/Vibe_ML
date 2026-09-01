@@ -1,0 +1,423 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:LocalGen.Desktop.ViewModels"
+             xmlns:ctl="using:LocalGen.Desktop.Controls"
+             xmlns:models="using:LocalGen.Core.Models"
+             xmlns:skills="using:LocalGen.Kernel.Skills"
+             xmlns:mcp="using:LocalGen.Kernel.Mcp"
+             mc:Ignorable="d"
+             x:Class="LocalGen.Desktop.Views.PlaygroundView"
+             x:DataType="vm:PlaygroundViewModel">
+
+  <Grid ColumnDefinitions="Auto,*,Auto">
+
+    <!-- ═════════════  Sessions  ═════════════ -->
+    <Border Grid.Column="0" Width="212"
+            IsVisible="{Binding IsSessionsVisible}"
+            Background="{DynamicResource SurfaceSunken}"
+            BorderBrush="{DynamicResource Edge}" BorderThickness="0,0,1,0">
+      <DockPanel Margin="12,16">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="10">
+          <TextBlock Classes="eyebrow" Text="SESSIONS" />
+          <Button Content="New session" HorizontalAlignment="Stretch"
+                  Command="{Binding NewSessionCommand}" />
+        </StackPanel>
+
+        <ListBox ItemsSource="{Binding Sessions}"
+                 SelectedItem="{Binding ActiveSession}"
+                 Classes="rail" Margin="0,12,0,0"
+                 Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:ChatSession">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Spacing="1">
+                  <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="mono muted" Text="{Binding Summary}" />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="ghost" Content="✕" Padding="6,2"
+                        ToolTip.Tip="Delete this session"
+                        Command="{Binding $parent[ItemsControl].((vm:PlaygroundViewModel)DataContext).RemoveSessionCommand}"
+                        CommandParameter="{Binding}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- ═════════════  Transcript  ═════════════ -->
+    <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
+
+      <!-- Model bar -->
+      <Border Grid.Row="0" Padding="14,12" BorderBrush="{DynamicResource Edge}" BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+
+          <!-- Panel toggles bracket the bar, so the transcript can take the whole window. -->
+          <Button Grid.Column="0" Classes="ghost" Padding="7" Margin="0,0,8,0"
+                  Command="{Binding ToggleSessionsCommand}"
+                  ToolTip.Tip="Show or hide sessions">
+            <Path Width="15" Height="15" Stretch="Uniform"
+                  Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.5"
+                  StrokeLineCap="Round" StrokeJoin="Round"
+                  Data="M4 5h16v14H4z M9.5 5v14" />
+          </Button>
+
+          <ComboBox Grid.Column="1" ItemsSource="{Binding Models}"
+                    SelectedItem="{Binding SelectedModel}"
+                    PlaceholderText="Choose a model"
+                    HorizontalAlignment="Left" MinWidth="260" MaxWidth="380">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="models:ModelDescriptor">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Classes="mono" Text="{Binding Id}" VerticalAlignment="Center" />
+                  <TextBlock Classes="mono muted" Text="{Binding Quantization.Name}" VerticalAlignment="Center" />
+                </StackPanel>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+
+          <Button Grid.Column="2" Classes="ghost" Content="Refresh"
+                  Command="{Binding RefreshModelsCommand}" />
+
+          <Button Grid.Column="3" Classes="ghost" Content="Reset chat"
+                  ToolTip.Tip="Clear this conversation but keep the session"
+                  Command="{Binding ResetSessionCommand}" />
+
+          <Button Grid.Column="4" Classes="ghost" Padding="7" Margin="8,0,0,0"
+                  Command="{Binding ToggleConfigCommand}"
+                  ToolTip.Tip="Show or hide settings">
+            <Path Width="15" Height="15" Stretch="Uniform"
+                  Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.5"
+                  StrokeLineCap="Round" StrokeJoin="Round"
+                  Data="M4 5h16v14H4z M14.5 5v14" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- Messages. Horizontal scrolling is disabled explicitly so the transcript is measured
+           against the real column width and long prose wraps instead of running under the
+           settings panel. -->
+      <ScrollViewer Grid.Row="1" Padding="20,16"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+        <Panel>
+
+          <!-- Empty state doubles as the sample prompt launcher. -->
+          <StackPanel IsVisible="{Binding !ActiveSession.Entries.Count}"
+                      Spacing="14" MaxWidth="580" VerticalAlignment="Center">
+            <TextBlock Classes="eyebrow" Text="TRY ONE OF THESE" />
+            <ItemsControl ItemsSource="{Binding SamplePrompts}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <Button HorizontalAlignment="Stretch" Margin="0,3"
+                          HorizontalContentAlignment="Left"
+                          Command="{Binding $parent[ItemsControl].((vm:PlaygroundViewModel)DataContext).UseSamplePromptCommand}"
+                          CommandParameter="{Binding}">
+                    <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <ItemsControl ItemsSource="{Binding ActiveSession.Entries}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ChatEntry">
+                <!-- 620 keeps a comfortable measure for reading, and fits even with both side
+                     panels open, where the column is narrower than the bubble would otherwise be. -->
+                <Border Margin="0,0,0,12" Padding="14,11"
+                        CornerRadius="{DynamicResource RadiusMedium}"
+                        MaxWidth="620"
+                        HorizontalAlignment="{Binding IsUser, Converter={x:Static vm:Converters.UserAlignment}}"
+                        Background="{Binding Kind, Converter={x:Static vm:Converters.EntryBackground}}"
+                        BorderBrush="{Binding Kind, Converter={x:Static vm:Converters.EntryBorder}}"
+                        BorderThickness="1">
+                  <StackPanel Spacing="6">
+
+                    <!-- Tool turns name the function; the rest carry no label, because who is
+                         speaking is already clear from the alignment and colour. -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsTool}">
+                      <TextBlock Classes="eyebrow" Text="TOOL" Foreground="{DynamicResource Signal}" />
+                      <TextBlock Classes="mono" Text="{Binding Tool}" Foreground="{DynamicResource Signal}" />
+                    </StackPanel>
+
+                    <!-- Prose renders as markdown: tables, code, images and links all become
+                         real controls rather than a wall of literal syntax. -->
+                    <ctl:MarkdownView Markdown="{Binding Text}"
+                                      IsVisible="{Binding RendersMarkdown}" />
+
+                    <!-- Tool output and errors stay verbatim; they are machine text, and a
+                         markdown pass would mangle JSON or a stack trace. -->
+                    <SelectableTextBlock Text="{Binding Text}"
+                                         IsVisible="{Binding !RendersMarkdown}"
+                                         TextWrapping="Wrap"
+                                         FontFamily="{DynamicResource FontMono}"
+                                         FontSize="{DynamicResource TextSmall}"
+                                         Foreground="{Binding Kind, Converter={x:Static vm:Converters.EntryForeground}}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Panel>
+      </ScrollViewer>
+
+      <!-- Composer -->
+      <Border Grid.Row="2" Padding="20,14" BorderBrush="{DynamicResource Edge}" BorderThickness="0,1,0,0">
+        <StackPanel Spacing="10">
+
+          <TextBlock Classes="mono" Foreground="{DynamicResource Alert}"
+                     Text="{Binding ErrorMessage}" TextWrapping="Wrap"
+                     IsVisible="{Binding ErrorMessage, Converter={x:Static vm:Converters.IsNotEmpty}}" />
+
+          <!-- Staged attachments. Shown before sending so it is obvious what will travel with
+               the message, and each can be removed without clearing the lot. -->
+          <ItemsControl ItemsSource="{Binding ActiveSession.Pending}"
+                        IsVisible="{Binding ActiveSession.Pending.Count}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:Attachment">
+                <Border Classes="chip" Margin="0,0,6,6" Padding="8,4">
+                  <StackPanel Orientation="Horizontal" Spacing="7">
+                    <TextBlock Text="{Binding IsImage, Converter={x:Static vm:Converters.AttachmentGlyph}}"
+                               Foreground="{DynamicResource Signal}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding FileName}" MaxWidth="200"
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding SizeLabel}" Foreground="{DynamicResource TextMuted}"
+                               VerticalAlignment="Center" />
+                    <Button Classes="ghost" Content="✕" Padding="3,0" FontSize="10"
+                            Command="{Binding $parent[ItemsControl].((vm:PlaygroundViewModel)DataContext).RemoveAttachmentCommand}"
+                            CommandParameter="{Binding}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+
+            <Button Grid.Column="0" Classes="ghost" Padding="8" Margin="0,0,4,0"
+                    Command="{Binding AttachImageCommand}"
+                    ToolTip.Tip="Attach an image — uploaded, then sent as image content">
+              <Path Width="17" Height="17" Stretch="Uniform"
+                    Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.5"
+                    StrokeLineCap="Round" StrokeJoin="Round"
+                    Data="M4 5h16v14H4z M4 16l4.5-4.5 3.5 3.5 3-3L20 16 M9 9.5a1 1 0 1 1-.001-.001" />
+            </Button>
+
+            <Button Grid.Column="1" Classes="ghost" Padding="8" Margin="0,0,8,0"
+                    Command="{Binding AttachDocumentCommand}"
+                    ToolTip.Tip="Attach a document — its text is sent, with a link in the message">
+              <Path Width="17" Height="17" Stretch="Uniform"
+                    Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.5"
+                    StrokeLineCap="Round" StrokeJoin="Round"
+                    Data="M13 3H6v18h12V8z M13 3v5h5 M9 12h6 M9 16h6" />
+            </Button>
+
+            <TextBox Grid.Column="2" Text="{Binding Prompt}"
+                     Watermark="Ask something, or describe a task to carry out"
+                     AcceptsReturn="True" MaxHeight="140"
+                     TextWrapping="Wrap" />
+
+            <StackPanel Grid.Column="3" Margin="10,0,0,0" Spacing="6">
+              <Button Classes="primary" Content="Send" MinWidth="86"
+                      Command="{Binding SendCommand}"
+                      IsVisible="{Binding !IsGenerating}" />
+              <Button Classes="danger" Content="Stop" MinWidth="86"
+                      Command="{Binding StopCommand}"
+                      IsVisible="{Binding IsGenerating}" />
+            </StackPanel>
+          </Grid>
+
+          <TextBlock Classes="mono muted" Text="{Binding AttachmentStatus}"
+                     IsVisible="{Binding AttachmentStatus, Converter={x:Static vm:Converters.IsNotEmpty}}" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- ═════════════  Configuration  ═════════════ -->
+    <Border Grid.Column="2" Width="330"
+            IsVisible="{Binding IsConfigVisible}"
+            Background="{DynamicResource SurfaceSunken}"
+            BorderBrush="{DynamicResource Edge}" BorderThickness="1,0,0,0">
+      <ScrollViewer Padding="16,16,22,16">
+        <StackPanel Spacing="20">
+
+          <!-- Sampling -->
+          <StackPanel Spacing="10">
+            <TextBlock Classes="eyebrow" Text="MODEL CONFIG" />
+
+            <StackPanel Spacing="4">
+              <TextBlock Classes="mono muted" Text="System prompt" />
+              <TextBox Text="{Binding SystemPrompt}" AcceptsReturn="True"
+                       Height="86" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Classes="mono muted" Text="Temperature" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Classes="mono"
+                         Text="{Binding Temperature, StringFormat='{}{0:0.00}'}" />
+            </Grid>
+            <Slider Value="{Binding Temperature}" Minimum="0" Maximum="2" TickFrequency="0.05" />
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Classes="mono muted" Text="Top-p" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Classes="mono"
+                         Text="{Binding TopP, StringFormat='{}{0:0.00}'}" />
+            </Grid>
+            <Slider Value="{Binding TopP}" Minimum="0" Maximum="1" TickFrequency="0.05" />
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Classes="mono muted" Text="Max tokens" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Classes="mono" Text="{Binding MaxTokens}" />
+            </Grid>
+            <Slider Value="{Binding MaxTokens}" Minimum="64" Maximum="8192" TickFrequency="64" />
+          </StackPanel>
+
+          <Border Classes="rule" />
+
+          <!-- Kernel functions -->
+          <StackPanel Spacing="8">
+            <TextBlock Classes="eyebrow" Text="KERNEL FUNCTIONS" />
+            <TextBlock Classes="mono muted"
+                       Text="All on by default. Unchecking removes the function from the kernel." />
+
+            <ItemsControl ItemsSource="{Binding Tools}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ToolToggle">
+                  <CheckBox IsChecked="{Binding IsEnabled}" Margin="0,2"
+                            ToolTip.Tip="{Binding Description}">
+                    <TextBlock Text="{Binding Label}" />
+                  </CheckBox>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <Border Classes="rule" />
+
+          <!-- Skills -->
+          <StackPanel Spacing="8">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Classes="eyebrow" Text="SKILLS" VerticalAlignment="Center" />
+              <Button Grid.Column="1" Classes="ghost" Content="Reload" Padding="6,2"
+                      Command="{Binding RefreshSkillsCommand}" />
+            </Grid>
+
+            <ItemsControl ItemsSource="{Binding InstalledSkills}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="skills:Skill">
+                  <Border Classes="tile" Padding="10,8" Margin="0,3">
+                    <StackPanel Spacing="2">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Classes="mono" Text="{Binding Name}" />
+                        <Button Grid.Column="1" Classes="ghost" Content="✕" Padding="4,0"
+                                Command="{Binding $parent[ItemsControl].((vm:PlaygroundViewModel)DataContext).RemoveSkillCommand}"
+                                CommandParameter="{Binding}" />
+                      </Grid>
+                      <TextBlock Classes="mono muted" Text="{Binding Description}" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="mono muted" Text="No skills installed."
+                       IsVisible="{Binding !InstalledSkills.Count}" />
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Grid.Column="0" Text="{Binding SkillQuery}" Watermark="Search gallery" />
+              <Button Grid.Column="1" Content="Find" Margin="6,0,0,0"
+                      Command="{Binding SearchSkillsCommand}" />
+            </Grid>
+
+            <ItemsControl ItemsSource="{Binding GallerySkills}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="skills:SkillGalleryEntry">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                    <StackPanel Grid.Column="0" Spacing="1">
+                      <TextBlock Classes="mono" Text="{Binding Name}" />
+                      <TextBlock Classes="mono muted" Text="{Binding Description}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Install" Padding="8,3"
+                            IsEnabled="{Binding !Installed}"
+                            Command="{Binding $parent[ItemsControl].((vm:PlaygroundViewModel)DataContext).InstallSkillCommand}"
+                            CommandParameter="{Binding}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <Border Classes="rule" />
+
+          <!-- MCP -->
+          <StackPanel Spacing="8">
+            <TextBlock Classes="eyebrow" Text="MCP SERVERS" />
+            <TextBlock Classes="mono muted"
+                       Text="Attach external tool servers. Enabling one starts it on the next message." />
+
+            <ItemsControl ItemsSource="{Binding McpServers}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="mcp:McpServerDefinition">
+                  <Border Classes="tile" Padding="10,8" Margin="0,3">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Grid.Column="0" Spacing="1">
+                        <TextBlock Classes="mono" Text="{Binding Name}" />
+                        <TextBlock Classes="mono muted" Text="{Binding Description}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <ToggleSwitch Grid.Column="1" IsChecked="{Binding Enabled}"
+                                    OnContent="" OffContent=""
+                                    Command="{Binding $parent[ItemsControl].((vm:PlaygroundViewModel)DataContext).ToggleMcpCommand}"
+                                    CommandParameter="{Binding}" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <Border Classes="rule" />
+
+          <!-- SDK code generation -->
+          <StackPanel Spacing="8">
+            <TextBlock Classes="eyebrow" Text="USE THIS FROM CODE" />
+            <TextBlock Classes="mono muted"
+                       Text="Emits a snippet wired to the model and settings above." />
+
+            <WrapPanel>
+              <Button Content=".NET SDK" Margin="0,0,6,6" Padding="9,4"
+                      Command="{Binding GenerateCodeCommand}" CommandParameter="sdk" />
+              <Button Content="Semantic Kernel" Margin="0,0,6,6" Padding="9,4"
+                      Command="{Binding GenerateCodeCommand}" CommandParameter="kernel" />
+              <Button Content="Python" Margin="0,0,6,6" Padding="9,4"
+                      Command="{Binding GenerateCodeCommand}" CommandParameter="openai" />
+              <Button Content="curl" Margin="0,0,6,6" Padding="9,4"
+                      Command="{Binding GenerateCodeCommand}" CommandParameter="curl" />
+            </WrapPanel>
+
+            <Border Background="{DynamicResource SurfaceBase}"
+                    BorderBrush="{DynamicResource Edge}" BorderThickness="1"
+                    CornerRadius="{DynamicResource RadiusSmall}"
+                    Padding="12,10"
+                    IsVisible="{Binding GeneratedCode, Converter={x:Static vm:Converters.IsNotEmpty}}">
+              <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Disabled">
+                <SelectableTextBlock Classes="mono" Text="{Binding GeneratedCode}"
+                                     TextWrapping="NoWrap" />
+              </ScrollViewer>
+            </Border>
+          </StackPanel>
+
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+  </Grid>
+</UserControl>

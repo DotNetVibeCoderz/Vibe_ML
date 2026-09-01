@@ -1,0 +1,117 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:LocalGen.Desktop.ViewModels"
+             mc:Ignorable="d"
+             x:Class="LocalGen.Desktop.Views.AboutView"
+             x:DataType="vm:AboutViewModel">
+
+  <ScrollViewer>
+    <StackPanel Margin="24" Spacing="18" MaxWidth="860" HorizontalAlignment="Left">
+
+      <StackPanel Spacing="10">
+        <TextBlock Classes="eyebrow" Text="ABOUT" />
+
+        <StackPanel Orientation="Horizontal" Spacing="14">
+          <Border Width="46" Height="46" Background="{DynamicResource Signal}"
+                  CornerRadius="{DynamicResource RadiusMedium}">
+            <TextBlock Text="L" FontFamily="{DynamicResource FontMono}"
+                       FontSize="26" FontWeight="Bold" Foreground="#12151A"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="display" Text="LocalGen" />
+            <TextBlock Classes="secondary" Text="{Binding Tagline}" />
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- Attribution -->
+      <Border Classes="panel"
+              Background="{DynamicResource SignalWash}"
+              BorderBrush="{DynamicResource SignalDim}">
+        <StackPanel Spacing="5">
+          <TextBlock Classes="eyebrow" Text="DIBUAT OLEH" Foreground="{DynamicResource Signal}" />
+          <TextBlock Classes="title" Text="{Binding Author}" Foreground="{DynamicResource Signal}" />
+          <TextBlock Classes="secondary" Text="Dipimpin oleh Kang Fadhil" />
+        </StackPanel>
+      </Border>
+
+      <!-- Environment -->
+      <Border Classes="panel">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="heading" Text="Environment" />
+
+          <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                ColumnSpacing="18" RowSpacing="8">
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="eyebrow" Text="VERSION" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="0" Grid.Column="1" Classes="mono" Text="{Binding Version}" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Classes="eyebrow" Text="RUNTIME" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="{Binding Runtime}" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Classes="eyebrow" Text="PLATFORM" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="{Binding Platform}" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Classes="eyebrow" Text="CPU" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding Processors}" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Classes="eyebrow" Text="ENDPOINT" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="4" Grid.Column="1" Classes="mono" Text="{Binding Endpoint}"
+                                 Foreground="{DynamicResource Data}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- Folders -->
+      <Border Classes="panel">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="heading" Text="Folders" />
+
+          <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+            <SelectableTextBlock Grid.Row="0" Grid.Column="0" Classes="mono"
+                                 Text="{Binding DataDirectory}" VerticalAlignment="Center" />
+            <Button Grid.Row="0" Grid.Column="1" Classes="ghost" Content="Open"
+                    Command="{Binding OpenDataDirectoryCommand}" />
+
+            <SelectableTextBlock Grid.Row="1" Grid.Column="0" Classes="mono"
+                                 Text="{Binding ModelsDirectory}" VerticalAlignment="Center" />
+            <Button Grid.Row="1" Grid.Column="1" Classes="ghost" Content="Open"
+                    Command="{Binding OpenModelsDirectoryCommand}" />
+
+            <SelectableTextBlock Grid.Row="2" Grid.Column="0" Classes="mono"
+                                 Text="{Binding SkillsDirectory}" VerticalAlignment="Center" />
+            <Button Grid.Row="2" Grid.Column="1" Classes="ghost" Content="Open"
+                    Command="{Binding OpenSkillsDirectoryCommand}" />
+          </Grid>
+
+          <TextBlock Classes="mono" Foreground="{DynamicResource Alert}"
+                     Text="{Binding ErrorMessage}" TextWrapping="Wrap"
+                     IsVisible="{Binding ErrorMessage, Converter={x:Static vm:Converters.IsNotEmpty}}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Components -->
+      <Border Classes="panel">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="heading" Text="Components" />
+
+          <ItemsControl ItemsSource="{Binding Components}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:Component">
+                <Grid ColumnDefinitions="250,*" Margin="0,3" ColumnSpacing="18">
+                  <TextBlock Grid.Column="0" Classes="mono" Text="{Binding Name}" />
+                  <TextBlock Grid.Column="1" Classes="mono muted" Text="{Binding Purpose}"
+                             TextWrapping="Wrap" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

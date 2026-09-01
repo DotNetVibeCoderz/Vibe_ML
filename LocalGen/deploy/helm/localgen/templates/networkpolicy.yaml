@@ -1,0 +1,36 @@
+{{- if .Values.networkPolicy.enabled }}
+{{/*
+The inference service holds the machine's GPU and, depending on configuration, its tool functions.
+Nothing in the cluster should reach it except what has been named here.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "localgen.fullname" . }}
+  labels:
+    {{- include "localgen.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "localgen.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- if .Values.web.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "localgen.web.selectorLabels" . | nindent 14 }}
+        {{- end }}
+        {{- if .Values.telemetry.prometheus.serviceMonitor.enabled }}
+        # The scrape has to reach the pod, or every interval fails.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+        {{- end }}
+        {{- with .Values.networkPolicy.extraIngressSelectors }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+{{- end }}
