@@ -22,6 +22,7 @@ public static class Windowing
     /// With ties, <c>false</c> leaves gaps after them (1, 2, 2, 4) and <c>true</c> does not
     /// (1, 2, 2, 3).
     /// </param>
+    /// <param name="name">Name of the returned series.</param>
     public static NumericSeries Rank(DataFrame frame, IReadOnlyList<string> partitionBy,
         string orderBy, bool descending = false, bool dense = false, string name = "rank")
     {

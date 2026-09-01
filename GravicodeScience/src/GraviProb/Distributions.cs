@@ -7,7 +7,7 @@ namespace Gravicode.Science.GraviProb;
 /// A univariate probability distribution.
 /// </summary>
 /// <remarks>
-/// <see cref="LogDensity"/> rather than a plain density is the primitive because inference
+/// <see cref="LogDensity(double)"/> rather than a plain density is the primitive because inference
 /// multiplies many densities together: in linear space a few hundred observations underflow to
 /// zero, while in log space they simply add. Every sampler in this library works with log
 /// densities for that reason.

@@ -79,7 +79,7 @@ public static class OnnxReader
         return tensors;
     }
 
-    /// <summary>Reads initializers into <paramref name="tensors"/>, by name.</summary>
+    /// <summary>Reads the initializers of the model at <paramref name="path"/>, keyed by name.</summary>
     public static Dictionary<string, OnnxTensor> ReadWeightsByName(string path)
         => ReadWeights(path).ToDictionary(t => t.Name, StringComparer.Ordinal);
 

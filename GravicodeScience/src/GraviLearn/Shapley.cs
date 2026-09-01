@@ -5,10 +5,10 @@ namespace Gravicode.Science.GraviLearn.Explain;
 /// <summary>
 /// An additive explanation of a single prediction.
 /// </summary>
-/// <param name="BaseValue">
+/// <param name="baseValue">
 /// What the model predicts on average over the background data — where the explanation starts.
 /// </param>
-/// <param name="Contributions">One value per feature; they sum to the prediction minus the base.</param>
+/// <param name="contributions">One value per feature; they sum to the prediction minus the base.</param>
 public sealed class Attribution(double baseValue, double[] contributions)
 {
     /// <summary>The average prediction over the background data.</summary>

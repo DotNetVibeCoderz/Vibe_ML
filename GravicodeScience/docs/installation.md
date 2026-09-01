@@ -20,13 +20,13 @@ dotnet --version   # expects 10.0.x
 ## Building from source
 
 ```bash
-git clone https://github.com/gravicode/Gravicode.Science.git
-cd Gravicode.Science
+git clone https://github.com/DotNetVibeCoderz/Vibe_ML.git
+cd Vibe_ML/GravicodeScience
 dotnet build Gravicode.Science.sln -c Release
 dotnet test
 ```
 
-The whole test suite (400 tests) runs in about a minute.
+The whole test suite (1,049 tests) runs in about a minute and a half.
 
 ## Adding the libraries to a project
 
@@ -46,10 +46,14 @@ While working from a clone, reference the projects directly instead:
 
 ```xml
 <ItemGroup>
-  <ProjectReference Include="../Gravicode.Science/src/GraviNum/GraviNum.csproj" />
-  <ProjectReference Include="../Gravicode.Science/src/GraviFrame/GraviFrame.csproj" />
+  <ProjectReference Include="../GravicodeScience/src/GraviNum/GraviNum.csproj" />
+  <ProjectReference Include="../GravicodeScience/src/GraviFrame/GraviFrame.csproj" />
 </ItemGroup>
 ```
+
+Each package carries its XML documentation, so the comments in this repository reach you through
+IntelliSense, and a `.snupkg` symbol package, so a debugger can step into library code. See
+[publishing.md](publishing.md) for how the packages are built and released.
 
 ### What depends on what
 
@@ -128,7 +132,7 @@ dotnet run --project samples/GraviProb.Console
 
 ## Notebooks
 
-The notebooks in [`notebooks/`](../../notebooks) need the
+The notebooks in [`notebooks/`](../notebooks) need the
 [Polyglot Notebooks](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.dotnet-interactive-vscode)
 extension for VS Code. They reference the built assemblies, so build in Release first:
 

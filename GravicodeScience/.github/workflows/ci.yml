@@ -1,0 +1,123 @@
+# Gravicode.Science - build, test and pack.
+#
+# GravicodeScience is a subdirectory of the Vibe_ML repository, and GitHub reads workflows only
+# from the repository root, so this file belongs at Vibe_ML/.github/workflows/ and every step
+# runs with GravicodeScience as its working directory. The path filters keep it from firing on
+# changes to the rest of the monorepo.
+#
+# Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+
+name: Gravicode.Science CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'GravicodeScience/**'
+      - '.github/workflows/gravicode-science-*.yml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'GravicodeScience/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: GravicodeScience
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Restores are the slow part of a cold runner and they are identical across jobs.
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing is worth seeing on the other, so the matrix runs to completion.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: GravicodeScience/global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ matrix.os }}-${{ hashFiles('GravicodeScience/Directory.Packages.props') }}
+          restore-keys: nuget-${{ matrix.os }}-
+
+      - name: Restore
+        run: dotnet restore Gravicode.Science.sln
+
+      # Warnings are not errors here on purpose: the six shipping libraries build clean, and
+      # failing the build on a warning in the Avalonia tool would gate the packages on the IDE.
+      - name: Build
+        run: dotnet build Gravicode.Science.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Gravicode.Science.sln -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: GravicodeScience/TestResults/**/*.trx
+          if-no-files-found: warn
+
+  notebooks:
+    name: notebook cells compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: GravicodeScience/global.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # A notebook is JSON, so it validates whether or not the C# inside it compiles. All six
+      # once called GetImageHtml, which ScottPlot marks [Obsolete(error: true)] - every chart
+      # cell would have failed at run time and nothing else in CI could have seen it.
+      - name: Compile every notebook cell
+        run: python tools/verify/notebook_cells.py
+
+  pack:
+    name: pack
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: GravicodeScience/global.json
+
+      - name: Pack
+        run: dotnet pack Gravicode.Science.sln -c Release -p:ContinuousIntegrationBuild=true
+
+      # Uploaded rather than published: a push to nuget.org is irreversible - a version can be
+      # unlisted but never replaced - so it happens only from a tag, in the release workflow.
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: |
+            GravicodeScience/artifacts/packages/*.nupkg
+            GravicodeScience/artifacts/packages/*.snupkg
+          if-no-files-found: error

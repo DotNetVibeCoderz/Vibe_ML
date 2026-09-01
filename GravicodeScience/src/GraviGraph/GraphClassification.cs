@@ -158,7 +158,7 @@ public static class GraphPooling
 /// classifier trained. That is a real architecture, not a shortcut: it is the graph analogue of a
 /// random-features model, it trains in closed form, and it is a genuinely strong baseline — a
 /// learned GNN that cannot beat it is not learning anything the structure did not already give away.
-/// A fully trained version belongs on the autodiff tape alongside <see cref="GnnTape"/>.
+/// A fully trained version belongs on the autodiff tape alongside <see cref="Neural.GnnTape"/>.
 /// </para>
 /// </remarks>
 public sealed class GraphClassifier

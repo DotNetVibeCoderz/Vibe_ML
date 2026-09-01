@@ -404,6 +404,12 @@ public sealed class DistributedForest(
     /// <param name="y">Targets.</param>
     /// <param name="shard">Which tree indices this worker owns.</param>
     /// <param name="classes">The global class set, so every worker agrees on column order.</param>
+    /// <param name="maxDepth">Depth limit per tree; 0 grows until the leaves are pure.</param>
+    /// <param name="minSamplesSplit">Fewest samples a node needs before it may split.</param>
+    /// <param name="minSamplesLeaf">Fewest samples a leaf must keep.</param>
+    /// <param name="maxFeatures">Features considered per split; 0 uses the square root of the count.</param>
+    /// <param name="seed">Base seed. Tree <c>t</c> is grown from <c>seed + t * 7919</c>.</param>
+    /// <param name="criterion">Impurity measure used to score a split.</param>
     /// <remarks>
     /// The class set is passed in rather than derived, because a worker whose shard happens to miss
     /// a rare class would otherwise build trees with a different number of output columns, and the

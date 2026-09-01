@@ -205,6 +205,11 @@ public static class GnnTape
         => AttentionLayer(edges, x, weight, attentionSource, attentionTarget, out _);
 
     /// <inheritdoc cref="AttentionLayer(EdgeList, Tensor, Tensor, Tensor, Tensor)"/>
+    /// <param name="edges">The graph's edges, source and target per entry.</param>
+    /// <param name="x">Node features, one row per node.</param>
+    /// <param name="weight">The shared linear projection applied before attention.</param>
+    /// <param name="attentionSource">Attention vector applied to the source half of each edge.</param>
+    /// <param name="attentionTarget">Attention vector applied to the target half of each edge.</param>
     /// <param name="attention">
     /// The per-edge attention coefficients, in edge-list order. Useful for inspecting which
     /// neighbours a node learned to attend to.

@@ -108,7 +108,7 @@ public static class Statistics
         return m2 / (n - ddof);
     }
 
-    /// <summary>Standard deviation; see <see cref="Var"/> for <paramref name="ddof"/>.</summary>
+    /// <summary>Standard deviation; see <see cref="Var(NdArray, int)"/> for <paramref name="ddof"/>.</summary>
     public static double Std(NdArray a, int ddof = 0) => Math.Sqrt(Var(a, ddof));
 
     /// <summary>Median value.</summary>

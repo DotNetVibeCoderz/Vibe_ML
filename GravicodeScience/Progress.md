@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v0.2.0-dev · **Target framework**: .NET 10 · **Tests**: 1,049 passing, 0 failing
+**Release**: v1.0.0 · **Target framework**: .NET 10 · **Tests**: 1,049 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -23,6 +23,8 @@ Roadmap: [PLAN.md](PLAN.md)
 | Datasets | ✅ Complete | 4 real, 4 generated |
 | Documentation | ✅ Complete | 10 pages × 2 languages, with a visualisation gallery per library |
 | Screenshots | ✅ Complete | 13 rendered by the samples, plus 6 of ScienceAppGen |
+| Packaging | ✅ Complete | 6 NuGet packages with XML docs and `.snupkg`, packed and verified |
+| CI | ✅ Complete | Build + test on Linux and Windows, notebook cells compiled, tag-driven release |
 
 ---
 

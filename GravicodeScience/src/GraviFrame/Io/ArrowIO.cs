@@ -160,6 +160,8 @@ public static class ArrowFile
     /// <summary>
     /// A column's name, its logical kind, and whatever else its Arrow type carries.
     /// </summary>
+    /// <param name="Name">The column's name, as it appears in the schema.</param>
+    /// <param name="Kind">The logical type the column was mapped to.</param>
     /// <param name="Unit">Timestamp unit: 0 second, 1 milli, 2 micro, 3 nano.</param>
     /// <param name="BitWidth">Integer width in bits, when the source column was an integer.</param>
     /// <param name="Signed">Whether that integer was signed.</param>

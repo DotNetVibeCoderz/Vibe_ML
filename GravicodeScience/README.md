@@ -6,6 +6,10 @@ each with a runnable sample, an interactive notebook, benchmarks and tests.
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
 [![tests](https://img.shields.io/badge/tests-1049%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
+[![nuget](https://img.shields.io/badge/nuget-Gravicode.Science.*-004880)](https://www.nuget.org/packages?q=Gravicode.Science)
+
+Published from
+[DotNetVibeCoderz/Vibe_ML](https://github.com/DotNetVibeCoderz/Vibe_ML/tree/main/GravicodeScience).
 
 | Library | Python analogue | Focus |
 |---|---|---|
@@ -16,11 +20,25 @@ each with a runnable sample, an interactive notebook, benchmarks and tests.
 | [**GraviGraph**](docs/GraviGraph.md) | PyTorch Geometric / DGL | Graph structures, embeddings, GNNs |
 | [**GraviProb**](docs/GraviProb.md) | PyMC / Stan | Distributions, MCMC and NUTS, variational inference, probabilistic models |
 
+## Install
+
+```bash
+dotnet add package Gravicode.Science.GraviNum      # arrays, linear algebra, autodiff
+dotnet add package Gravicode.Science.GraviFrame    # dataframes
+dotnet add package Gravicode.Science.GraviLearn    # machine learning
+dotnet add package Gravicode.Science.GraviText     # NLP
+dotnet add package Gravicode.Science.GraviGraph    # graphs and GNNs
+dotnet add package Gravicode.Science.GraviProb     # Bayesian inference
+```
+
+Take only what you need — every package pulls in `GraviNum`, and nothing else is mandatory. See
+[docs/publishing.md](docs/publishing.md) for how a release is cut.
+
 ## Quick start
 
 ```bash
-git clone https://github.com/gravicode/Gravicode.Science.git
-cd Gravicode.Science
+git clone https://github.com/DotNetVibeCoderz/Vibe_ML.git
+cd Vibe_ML/GravicodeScience
 dotnet build Gravicode.Science.sln -c Release
 dotnet test
 
@@ -168,6 +186,7 @@ failure rather than as a plausible-looking number:
 | Benchmarks | [benchmarks.md](docs/benchmarks.md) | [id/benchmarks.md](docs/id/benchmarks.md) |
 | Datasets | [datasets.md](docs/datasets.md) | [id/datasets.md](docs/id/datasets.md) |
 | ScienceAppGen | [ScienceAppGen.md](docs/ScienceAppGen.md) | [id/ScienceAppGen.md](docs/id/ScienceAppGen.md) |
+| Publishing and CI | [publishing.md](docs/publishing.md) | [id/publishing.md](docs/id/publishing.md) |
 
 Per-library guides sit alongside them in [`docs/`](docs) and [`docs/id/`](docs/id).
 

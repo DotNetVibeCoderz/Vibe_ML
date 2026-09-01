@@ -20,13 +20,13 @@ dotnet --version   # diharapkan 10.0.x
 ## Membangun dari sumber
 
 ```bash
-git clone https://github.com/gravicode/Gravicode.Science.git
-cd Gravicode.Science
+git clone https://github.com/DotNetVibeCoderz/Vibe_ML.git
+cd Vibe_ML/GravicodeScience
 dotnet build Gravicode.Science.sln -c Release
 dotnet test
 ```
 
-Seluruh rangkaian tes (400 tes) selesai dalam sekitar satu menit.
+Seluruh rangkaian tes (1.049 tes) selesai dalam sekitar satu setengah menit.
 
 ## Menambahkan library ke proyek Anda
 
@@ -46,10 +46,14 @@ Jika bekerja dari hasil clone, rujuk proyeknya langsung:
 
 ```xml
 <ItemGroup>
-  <ProjectReference Include="../Gravicode.Science/src/GraviNum/GraviNum.csproj" />
-  <ProjectReference Include="../Gravicode.Science/src/GraviFrame/GraviFrame.csproj" />
+  <ProjectReference Include="../GravicodeScience/src/GraviNum/GraviNum.csproj" />
+  <ProjectReference Include="../GravicodeScience/src/GraviFrame/GraviFrame.csproj" />
 </ItemGroup>
 ```
+
+Setiap paket membawa dokumentasi XML-nya, sehingga komentar di repositori ini sampai kepada Anda
+melalui IntelliSense, serta paket simbol `.snupkg`, sehingga debugger bisa masuk ke dalam kode
+pustakanya. Lihat [publishing.md](publishing.md) untuk cara paketnya dibangun dan dirilis.
 
 ### Ketergantungan antar library
 

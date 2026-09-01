@@ -3,11 +3,20 @@ obj/
 *.user
 *.suo
 .vs/
+.vscode/
 .idea/
 artifacts/
 BenchmarkDotNet.Artifacts/
 TestResults/
 *.nupkg
+*.snupkg
 *.binlog
 .ipynb_checkpoints/
 datasets/**/*.large.csv
+
+# Secrets. testkey.txt holds a live Azure OpenAI key and a Tavily key; ScienceAppGen reads them
+# from SCIENCEAPPGEN_APIKEY / SCIENCEAPPGEN_ENDPOINT / TAVILY_API_KEY, and app.config ships with
+# both key fields blank, so nothing here needs the file to be committed.
+testkey.txt
+*.key
+appsettings.*.local.json

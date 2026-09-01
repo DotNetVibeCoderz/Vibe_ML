@@ -338,7 +338,7 @@ public sealed partial class NdArray
         return FromValues(kept);
     }
 
-    /// <summary>Elements greater than <paramref name="threshold"/>, as a 1-D array.</summary>
+    /// <summary>Elements satisfying <paramref name="predicate"/>, as a 1-D array.</summary>
     public NdArray Where(Func<double, bool> predicate)
     {
         var kept = new List<double>();

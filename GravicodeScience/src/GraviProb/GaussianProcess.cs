@@ -230,7 +230,7 @@ public readonly record struct GpPrediction(NdArray Mean, NdArray Variance)
 /// than a tuning of this one.
 /// </para>
 /// <para>
-/// <b>Noise is not optional.</b> The <paramref name="noise"/> term added to the diagonal is both the
+/// <b>Noise is not optional.</b> The <c>noise</c> term added to the diagonal is both the
 /// observation-error model and what keeps the covariance invertible — with duplicate or nearly
 /// duplicate inputs it is singular without it, and the factorisation fails. A zero-noise GP that
 /// works is one that happened to have well-separated inputs.
