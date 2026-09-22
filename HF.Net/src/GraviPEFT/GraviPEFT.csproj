@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviPEFT</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviPEFT</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviPEFT</PackageId>
+    <Description>GraviPEFT - parameter efficient fine tuning for .NET: LoRA adapters that load from and save to the Hugging Face PEFT format, adapter merging, and lightweight task heads over a frozen encoder. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Gravicode.Science.GraviLearn" />
+    <PackageReference Include="Gravicode.Science.GraviText" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviHub\GraviHub.csproj" />
+    <ProjectReference Include="..\GraviTransformers\GraviTransformers.csproj" />
+  </ItemGroup>
+
+</Project>

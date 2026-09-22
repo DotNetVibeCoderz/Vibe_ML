@@ -1,0 +1,98 @@
+{
+  "runtime": "Python 3.12.10",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "Intel64 Family 6 Model 142 Stepping 10, GenuineIntel",
+  "transformers": "5.17.0",
+  "tokenizers": "0.23.2",
+  "tokenizer_single_ms": 0.0347999157384038,
+  "tokenizer_single_median_ms": 0.035100034438073635,
+  "tokenizer_batch_1000_ms": 18.134500016458333,
+  "tokenizer_batch_1000_median_ms": 20.754149998538196,
+  "tokenizer_docs_per_second": 55143.51093729796,
+  "tokenizer_reference_ids": [
+    101,
+    7592,
+    1010,
+    2088,
+    999,
+    19204,
+    17629,
+    2015,
+    2024,
+    23653,
+    1012,
+    102
+  ],
+  "tokenizer_reference_tokens": [
+    "[CLS]",
+    "hello",
+    ",",
+    "world",
+    "!",
+    "token",
+    "##izer",
+    "##s",
+    "are",
+    "unbelievable",
+    ".",
+    "[SEP]"
+  ],
+  "safetensors_header_ms": 0.6536999717354774,
+  "safetensors_one_tensor_ms": 1.1411999585106969,
+  "safetensors_tensor_count": 206,
+  "safetensors_file_mb": 420.0456314086914,
+  "torch": "2.14.0+cpu",
+  "inference_base_single_ms": 50.82799994852394,
+  "inference_base_single_median_ms": 54.66630001319572,
+  "inference_base_batch8_ms": 261.6196000017226,
+  "inference_base_tokens": 12,
+  "inference_tiny_single_ms": 1.4748999383300543,
+  "inference_tiny_single_median_ms": 2.296549966558814,
+  "inference_tiny_batch8_ms": 3.2971000764518976,
+  "inference_tiny_tokens": 12,
+  "torch_threads": 4,
+  "fillmask_france": [
+    {
+      "token": "paris",
+      "score": 0.416789710521698
+    },
+    {
+      "token": "lille",
+      "score": 0.07141639292240143
+    },
+    {
+      "token": "lyon",
+      "score": 0.06339258700609207
+    },
+    {
+      "token": "marseille",
+      "score": 0.04444751888513565
+    },
+    {
+      "token": "tours",
+      "score": 0.030297281220555305
+    }
+  ],
+  "fillmask_player": [
+    {
+      "token": "regular",
+      "score": 0.5489212870597839
+    },
+    {
+      "token": "key",
+      "score": 0.19474826753139496
+    },
+    {
+      "token": "former",
+      "score": 0.05815143510699272
+    },
+    {
+      "token": "capped",
+      "score": 0.021575497463345528
+    },
+    {
+      "token": "prominent",
+      "score": 0.013642656616866589
+    }
+  ]
+}

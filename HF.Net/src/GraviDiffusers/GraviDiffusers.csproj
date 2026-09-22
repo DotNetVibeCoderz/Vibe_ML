@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviDiffusers</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviDiffusers</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviDiffusers</PackageId>
+    <Description>GraviDiffusers - denoising diffusion for .NET: DDPM, DDIM and Euler schedulers, and a Stable Diffusion text to image pipeline driven through ONNX Runtime. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The latent initialiser and the image conversion are internal; the tests pin them because
+         both are places where a silent off-by-one produces a plausible-looking picture. -->
+    <InternalsVisibleTo Include="GraviDiffusers.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviHub\GraviHub.csproj" />
+    <ProjectReference Include="..\GraviOptimum\GraviOptimum.csproj" />
+    <ProjectReference Include="..\GraviTokenizers\GraviTokenizers.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviAccelerate</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviAccelerate</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviAccelerate</PackageId>
+    <Description>GraviAccelerate - device and scaling abstraction for .NET machine learning: device selection across CPU SIMD and ILGPU, sharded data-parallel training, gradient accumulation and throughput measurement. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Gravicode.Science.GraviLearn" />
+    <PackageReference Include="ILGPU" />
+    <PackageReference Include="ILGPU.Algorithms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviDatasets\GraviDatasets.csproj" />
+  </ItemGroup>
+
+</Project>

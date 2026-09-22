@@ -1,0 +1,248 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    HFAppGen design tokens.
+
+    The idea behind the palette: HF.Net's characteristic artifact is the safetensors header - a
+    contiguous buffer carved into named, UNEQUAL byte spans. A gutter, a file tree and a build log
+    are the same shape of thing, so the app's signature is an offset rail rather than a spectrum:
+    discrete segments, hairline gaps, widths taken from the real size of each library.
+
+    Two accents, each with a meaning that never varies:
+      amber  identity and action - warm signal against cold graphite
+      cyan   measured quantity only - offsets, shapes, timings, token counts
+
+    Status colours (Spec*) and library colours (Lib*) are deliberately separate palettes. They were
+    one palette in the predecessor app, which meant "green" had to mean both success and one
+    particular library, and neither reading survived the other.
+  -->
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <!-- ============================================================ DARK (default) -->
+    <ResourceDictionary x:Key="Dark">
+
+      <!-- Ground and surfaces: blue-leaning graphite, not black. -->
+      <Color x:Key="Ink900">#101418</Color>
+      <Color x:Key="Ink800">#171C22</Color>
+      <Color x:Key="Ink700">#1E242B</Color>
+      <Color x:Key="Ink650">#252D36</Color>
+      <Color x:Key="Ink600">#2A323B</Color>
+      <Color x:Key="Ink500">#3B4552</Color>
+
+      <!-- Text -->
+      <Color x:Key="TextHigh">#E7EDF4</Color>
+      <Color x:Key="TextBase">#C2CBD6</Color>
+      <Color x:Key="TextMuted">#8894A3</Color>
+      <Color x:Key="TextFaint">#5D6875</Color>
+
+      <!-- Amber: identity and action. -->
+      <Color x:Key="Accent">#FFB454</Color>
+      <Color x:Key="AccentBright">#FFC87A</Color>
+      <Color x:Key="AccentDim">#5A3F1C</Color>
+
+      <!-- Cyan: measured quantity, and nothing else. -->
+      <Color x:Key="Measure">#57C7E3</Color>
+
+      <SolidColorBrush x:Key="AppGround" Color="{DynamicResource Ink900}" />
+      <SolidColorBrush x:Key="PanelGround" Color="{DynamicResource Ink800}" />
+      <SolidColorBrush x:Key="RaisedGround" Color="{DynamicResource Ink700}" />
+      <SolidColorBrush x:Key="HoverGround" Color="{DynamicResource Ink650}" />
+      <SolidColorBrush x:Key="SelectedGround" Color="#3A2E1A" />
+      <SolidColorBrush x:Key="BorderSoft" Color="{DynamicResource Ink600}" />
+      <SolidColorBrush x:Key="BorderStrong" Color="{DynamicResource Ink500}" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="{DynamicResource TextHigh}" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="{DynamicResource TextBase}" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="{DynamicResource TextMuted}" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="{DynamicResource TextFaint}" />
+      <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource Accent}" />
+      <SolidColorBrush x:Key="AccentBrightBrush" Color="{DynamicResource AccentBright}" />
+      <SolidColorBrush x:Key="AccentDimBrush" Color="{DynamicResource AccentDim}" />
+      <SolidColorBrush x:Key="MeasureBrush" Color="{DynamicResource Measure}" />
+
+      <SolidColorBrush x:Key="EditorGround" Color="#12171C" />
+      <SolidColorBrush x:Key="EditorGutter" Color="#5D6875" />
+      <SolidColorBrush x:Key="EditorCurrentLine" Color="#1A2027" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#3D3524" />
+
+      <!-- Code palette, tuned to this ground. Numeric literals take the measurement cyan, so the
+           one colour means the same thing in the editor as it does in the status bar.
+           Every colour here clears 4.5:1 against #12171C. -->
+      <Color x:Key="CodeComment">#6F7C8B</Color>      <!-- slate, italic              -->
+      <Color x:Key="CodeKeyword">#E08FB0</Color>      <!-- rose                       -->
+      <Color x:Key="CodeType">#7FD4B0</Color>         <!-- mint                       -->
+      <Color x:Key="CodeMethod">#FFB454</Color>       <!-- amber, matches the accent  -->
+      <Color x:Key="CodeString">#B9CE6E</Color>       <!-- olive                      -->
+      <Color x:Key="CodeNumber">#57C7E3</Color>       <!-- cyan = a measured quantity -->
+      <Color x:Key="CodeMeta">#A79BE8</Color>         <!-- violet                     -->
+      <Color x:Key="CodePunctuation">#8894A3</Color>
+
+    </ResourceDictionary>
+
+    <!-- ============================================================ LIGHT -->
+    <ResourceDictionary x:Key="Light">
+
+      <Color x:Key="Ink900">#F6F7F9</Color>
+      <Color x:Key="Ink800">#FFFFFF</Color>
+      <Color x:Key="Ink700">#F0F2F5</Color>
+      <Color x:Key="Ink650">#E6E9EE</Color>
+      <Color x:Key="Ink600">#D6DAE1</Color>
+      <Color x:Key="Ink500">#B4BCC7</Color>
+
+      <Color x:Key="TextHigh">#101418</Color>
+      <Color x:Key="TextBase">#2A323B</Color>
+      <Color x:Key="TextMuted">#5D6875</Color>
+      <Color x:Key="TextFaint">#8894A3</Color>
+
+      <!-- Amber has to be darkened for white or it fails contrast as text. -->
+      <Color x:Key="Accent">#9A6212</Color>
+      <Color x:Key="AccentBright">#B87717</Color>
+      <Color x:Key="AccentDim">#F7E6C9</Color>
+
+      <Color x:Key="Measure">#12708C</Color>
+
+      <SolidColorBrush x:Key="AppGround" Color="{DynamicResource Ink900}" />
+      <SolidColorBrush x:Key="PanelGround" Color="{DynamicResource Ink800}" />
+      <SolidColorBrush x:Key="RaisedGround" Color="{DynamicResource Ink700}" />
+      <SolidColorBrush x:Key="HoverGround" Color="{DynamicResource Ink650}" />
+      <SolidColorBrush x:Key="SelectedGround" Color="#FBEDD6" />
+      <SolidColorBrush x:Key="BorderSoft" Color="{DynamicResource Ink600}" />
+      <SolidColorBrush x:Key="BorderStrong" Color="{DynamicResource Ink500}" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="{DynamicResource TextHigh}" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="{DynamicResource TextBase}" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="{DynamicResource TextMuted}" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="{DynamicResource TextFaint}" />
+      <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource Accent}" />
+      <SolidColorBrush x:Key="AccentBrightBrush" Color="{DynamicResource AccentBright}" />
+      <SolidColorBrush x:Key="AccentDimBrush" Color="{DynamicResource AccentDim}" />
+      <SolidColorBrush x:Key="MeasureBrush" Color="{DynamicResource Measure}" />
+
+      <SolidColorBrush x:Key="EditorGround" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="EditorGutter" Color="#8894A3" />
+      <SolidColorBrush x:Key="EditorCurrentLine" Color="#F4F6F9" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#F3E2C4" />
+
+      <!-- The same roles deepened for white; every colour clears 4.5:1 against #FFFFFF. -->
+      <Color x:Key="CodeComment">#5F6B79</Color>
+      <Color x:Key="CodeKeyword">#A32F63</Color>
+      <Color x:Key="CodeType">#11704F</Color>
+      <Color x:Key="CodeMethod">#8A5A0C</Color>
+      <Color x:Key="CodeString">#5A6B12</Color>
+      <Color x:Key="CodeNumber">#12708C</Color>
+      <Color x:Key="CodeMeta">#5B4BB5</Color>
+      <Color x:Key="CodePunctuation">#4A5560</Color>
+
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+
+  <!-- ================================================================ STATUS
+       What a colour means in a log line or a file badge. Held apart from the library
+       palette below so neither has to compromise for the other.
+  -->
+  <SolidColorBrush x:Key="Spec1" Color="#E4635F" />  <!-- error     -->
+  <SolidColorBrush x:Key="Spec2" Color="#E29A42" />  <!-- warning   -->
+  <SolidColorBrush x:Key="Spec3" Color="#D3BB4E" />  <!-- build     -->
+  <SolidColorBrush x:Key="Spec4" Color="#5FBE86" />  <!-- success   -->
+  <SolidColorBrush x:Key="Spec5" Color="#57C7E3" />  <!-- info      -->
+  <SolidColorBrush x:Key="Spec6" Color="#A79BE8" />  <!-- assistant -->
+
+  <!-- ================================================================ LIBRARIES
+       One hue per HF.Net library, in pipeline order: artifacts arrive at the Hub, are
+       tokenized, batched, encoded, adapted, scheduled, optimised and finally generated
+       from. The ramp is anchored by the two accents - amber where data enters, cyan
+       where it is measured - so it introduces a gradient rather than eight new colours.
+  -->
+  <SolidColorBrush x:Key="Lib1" Color="#FFB454" />  <!-- GraviHub          -->
+  <SolidColorBrush x:Key="Lib2" Color="#F2915C" />  <!-- GraviTokenizers   -->
+  <SolidColorBrush x:Key="Lib3" Color="#E2726A" />  <!-- GraviDatasets     -->
+  <SolidColorBrush x:Key="Lib4" Color="#C86089" />  <!-- GraviTransformers -->
+  <SolidColorBrush x:Key="Lib5" Color="#9E63A8" />  <!-- GraviPEFT         -->
+  <SolidColorBrush x:Key="Lib6" Color="#7370BE" />  <!-- GraviAccelerate   -->
+  <SolidColorBrush x:Key="Lib7" Color="#4E86C4" />  <!-- GraviOptimum      -->
+  <SolidColorBrush x:Key="Lib8" Color="#57C7E3" />  <!-- GraviDiffusers    -->
+
+  <!-- ================================================================ OFFSET RAIL
+       The signature. Eight spans, hairline gaps between them, and the widths are the
+       real proportion of HF.Net's source that each library occupies - GraviHub is
+       nearly a third of it and the rail says so. A smooth six-stop gradient was what
+       the predecessor used; this is the same gesture carrying actual information.
+
+       Cumulative boundaries: .2869 .5214 .5973 .7356 .8105 .8405 .9168 1
+  -->
+  <LinearGradientBrush x:Key="OffsetRail" StartPoint="0%,0%" EndPoint="100%,0%">
+    <GradientStop Offset="0.0000" Color="#FFB454" />
+    <GradientStop Offset="0.2809" Color="#FFB454" />
+    <GradientStop Offset="0.2809" Color="#00000000" />
+    <GradientStop Offset="0.2869" Color="#00000000" />
+
+    <GradientStop Offset="0.2869" Color="#F2915C" />
+    <GradientStop Offset="0.5154" Color="#F2915C" />
+    <GradientStop Offset="0.5154" Color="#00000000" />
+    <GradientStop Offset="0.5214" Color="#00000000" />
+
+    <GradientStop Offset="0.5214" Color="#E2726A" />
+    <GradientStop Offset="0.5913" Color="#E2726A" />
+    <GradientStop Offset="0.5913" Color="#00000000" />
+    <GradientStop Offset="0.5973" Color="#00000000" />
+
+    <GradientStop Offset="0.5973" Color="#C86089" />
+    <GradientStop Offset="0.7296" Color="#C86089" />
+    <GradientStop Offset="0.7296" Color="#00000000" />
+    <GradientStop Offset="0.7356" Color="#00000000" />
+
+    <GradientStop Offset="0.7356" Color="#9E63A8" />
+    <GradientStop Offset="0.8045" Color="#9E63A8" />
+    <GradientStop Offset="0.8045" Color="#00000000" />
+    <GradientStop Offset="0.8105" Color="#00000000" />
+
+    <GradientStop Offset="0.8105" Color="#7370BE" />
+    <GradientStop Offset="0.8345" Color="#7370BE" />
+    <GradientStop Offset="0.8345" Color="#00000000" />
+    <GradientStop Offset="0.8405" Color="#00000000" />
+
+    <GradientStop Offset="0.8405" Color="#4E86C4" />
+    <GradientStop Offset="0.9108" Color="#4E86C4" />
+    <GradientStop Offset="0.9108" Color="#00000000" />
+    <GradientStop Offset="0.9168" Color="#00000000" />
+
+    <GradientStop Offset="0.9168" Color="#57C7E3" />
+    <GradientStop Offset="1.0000" Color="#57C7E3" />
+  </LinearGradientBrush>
+
+  <!--
+    Kept under its old name so the dialogs that draw a rule at the top of a window do not
+    each need editing; they get the new rail.
+  -->
+  <StaticResource x:Key="SpectrumRule" ResourceKey="OffsetRail" />
+
+  <!-- ================================================================ TYPE
+       No decorative display face. In an IDE the monospace IS the display face: shapes,
+       offsets and timings are the content with the most personality, so they carry it.
+       Inter handles the chrome, and the instrument feel comes from treatment - wide
+       tracking on small uppercase labels, tabular figures wherever a number changes in
+       place - rather than from a typeface a desktop cannot assume is installed.
+  -->
+  <FontFamily x:Key="UiFont">avares://Avalonia.Fonts.Inter/Assets#Inter, Segoe UI Variable Text, Segoe UI, sans-serif</FontFamily>
+  <FontFamily x:Key="MonoFont">Cascadia Mono, Cascadia Code, Consolas, Menlo, monospace</FontFamily>
+
+  <x:Double x:Key="FontMicro">10.5</x:Double>
+  <x:Double x:Key="FontSmall">12</x:Double>
+  <x:Double x:Key="FontBase">13</x:Double>
+  <x:Double x:Key="FontMedium">14</x:Double>
+  <x:Double x:Key="FontLarge">17</x:Double>
+  <x:Double x:Key="FontDisplay">22</x:Double>
+
+  <!-- ================================================================ METRICS -->
+  <x:Double x:Key="TitleBarHeight">34</x:Double>
+  <x:Double x:Key="ToolBarHeight">42</x:Double>
+  <x:Double x:Key="StatusBarHeight">26</x:Double>
+  <x:Double x:Key="PanelHeaderHeight">30</x:Double>
+  <CornerRadius x:Key="RadiusSmall">4</CornerRadius>
+  <CornerRadius x:Key="RadiusMedium">7</CornerRadius>
+  <CornerRadius x:Key="RadiusLarge">10</CornerRadius>
+  <Thickness x:Key="PanelPadding">12</Thickness>
+
+</ResourceDictionary>

@@ -1,0 +1,62 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The Gravicode.Science foundation. HF.Net binds to these as packages rather than as
+      ProjectReferences into the sibling checkout: a cross-repository ProjectReference packs into a
+      .nupkg with no dependency recorded at all, so consumers would restore HF.Net and then fail at
+      the first NdArray. Published by Gravicode Studios on nuget.org.
+    -->
+    <PackageVersion Include="Gravicode.Science.GraviNum" Version="1.0.0" />
+    <PackageVersion Include="Gravicode.Science.GraviFrame" Version="1.0.0" />
+    <PackageVersion Include="Gravicode.Science.GraviLearn" Version="1.0.0" />
+    <PackageVersion Include="Gravicode.Science.GraviText" Version="1.0.0" />
+
+    <!-- GPU backend (CUDA / OpenCL / CPU accelerator), used by GraviAccelerate. -->
+    <PackageVersion Include="ILGPU" Version="1.5.3" />
+    <PackageVersion Include="ILGPU.Algorithms" Version="1.5.3" />
+
+    <!-- Hardware-aware inference for GraviOptimum. -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.24.1" />
+
+    <!-- IO. Pinned to 5.6.x for the same reason as the foundation: 6.x replaced the DataColumn
+         API with a lower-level Memory<T> surface. -->
+    <PackageVersion Include="Parquet.Net" Version="5.6.1" />
+
+    <!-- Image decode/encode for the vision and diffusion pipelines. -->
+    <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
+
+    <!-- Visualization hooks used by samples and notebooks. -->
+    <PackageVersion Include="ScottPlot" Version="5.1.59" />
+
+    <!-- Benchmarking -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+
+    <!-- Testing -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+
+    <!-- HFAppGen (tools/) -->
+    <PackageVersion Include="Avalonia" Version="12.1.1" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageVersion Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="System.Configuration.ConfigurationManager" Version="10.0.11" />
+
+    <!-- Semantic Kernel. Google and Ollama ship as alpha only; Anthropic has no official
+         connector, so Claude is served by a hand-written IChatCompletionService. -->
+    <PackageVersion Include="Microsoft.SemanticKernel" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.AzureOpenAI" Version="1.79.0" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Google" Version="1.79.0-alpha" />
+    <PackageVersion Include="Microsoft.SemanticKernel.Connectors.Ollama" Version="1.79.0-alpha" />
+  </ItemGroup>
+
+</Project>

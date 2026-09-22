@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviOptimum</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviOptimum</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviOptimum</PackageId>
+    <Description>GraviOptimum - hardware aware inference for .NET: run Hugging Face ONNX exports through ONNX Runtime with a chosen execution provider, quantise weights, and measure the latency each choice actually buys. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviHub\GraviHub.csproj" />
+    <ProjectReference Include="..\GraviTokenizers\GraviTokenizers.csproj" />
+  </ItemGroup>
+
+</Project>

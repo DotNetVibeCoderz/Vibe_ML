@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviTokenizers</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviTokenizers</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviTokenizers</PackageId>
+    <Description>GraviTokenizers - fast tokenizers for .NET: WordPiece, BPE, byte-level BPE and Unigram, with a loader for Hugging Face tokenizer.json. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Gravicode.Science.GraviText" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviHub\GraviHub.csproj" />
+  </ItemGroup>
+
+</Project>

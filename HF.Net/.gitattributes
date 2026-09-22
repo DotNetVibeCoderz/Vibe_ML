@@ -1,0 +1,4 @@
+# Screenshots and datasets are binary; never normalise line endings in them.
+*.png binary
+*.parquet binary
+*.ipynb text eol=lf

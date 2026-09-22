@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:HFAppGen.Services"
+             x:Class="HFAppGen.Views.LogsView"
+             x:DataType="svc:LogService">
+
+  <Border Background="{DynamicResource PanelGround}"
+          BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,1,0,0">
+    <Grid RowDefinitions="Auto,*">
+
+      <Border Grid.Row="0" Height="{DynamicResource PanelHeaderHeight}" Padding="12,0"
+              BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+          <TextBlock Grid.Column="0" Classes="panelHeader" Text="OUTPUT" />
+          <TextBlock Grid.Column="1" Classes="caption" Margin="10,0,0,0" VerticalAlignment="Center"
+                     Text="{Binding Entries.Count, StringFormat='{}{0} lines'}" />
+          <Button Grid.Column="3" Classes="icon" Content="⌫" Click="OnClear"
+                  ToolTip.Tip="Clear output" FontSize="12" />
+        </Grid>
+      </Border>
+
+      <ScrollViewer Name="Scroller" Grid.Row="1" Padding="12,8">
+        <ItemsControl ItemsSource="{Binding Entries}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnDefinitions="Auto,Auto,Auto,*" Margin="0,1">
+                <!-- The severity band is the only colour on the row, so scanning for an
+                     error means scanning one narrow column. -->
+                <Border Grid.Column="0" Width="3" Height="13" CornerRadius="2"
+                        Background="{DynamicResource Spec5}" VerticalAlignment="Top" Margin="0,2,0,0" />
+                <TextBlock Grid.Column="1" Text="{Binding Time}" Classes="mono" Margin="9,0,0,0"
+                           Foreground="{DynamicResource TextFaintBrush}" FontSize="11" />
+                <TextBlock Grid.Column="2" Text="{Binding Source}" Classes="mono" Margin="9,0,0,0"
+                           Foreground="{DynamicResource TextMutedBrush}" FontSize="11"
+                           Width="62" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="3" Text="{Binding Message}" Classes="mono" Margin="9,0,0,0"
+                           Foreground="{DynamicResource TextBaseBrush}" FontSize="11"
+                           TextWrapping="Wrap" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Grid>
+  </Border>
+</UserControl>

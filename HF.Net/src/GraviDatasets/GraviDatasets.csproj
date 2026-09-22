@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviDatasets</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviDatasets</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviDatasets</PackageId>
+    <Description>GraviDatasets - dataset loading for .NET: CSV, Parquet, JSON and JSON Lines, Hugging Face Hub datasets, splits, streaming and memory-mapped reads, over GraviFrame. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Gravicode.Science.GraviFrame" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviHub\GraviHub.csproj" />
+  </ItemGroup>
+
+</Project>

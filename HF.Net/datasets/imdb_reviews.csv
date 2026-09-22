@@ -1,0 +1,81 @@
+review,sentiment,language
+"An absolute masterpiece from start to finish; the direction is confident and every performance lands.",positive,en
+"A wonderful, warm film with a perfect ending that earns every bit of its emotion.",positive,en
+"Brilliant screenplay and outstanding cinematography make this one of the best releases of the year.",positive,en
+"I loved every minute of it. The pacing is superb and the soundtrack is genuinely beautiful.",positive,en
+"Engaging, thoughtful and surprisingly funny. Highly recommend it to anyone who enjoys good drama.",positive,en
+"The lead performance is impressive and the story stays satisfying right through the final act.",positive,en
+"A charming and delightful adventure that works equally well for children and adults.",positive,en
+"Excellent character work, solid editing, and a script that trusts its audience.",positive,en
+"Beautifully shot and emotionally honest; I walked out of the cinema genuinely moved.",positive,en
+"Superb ensemble cast. Every scene has purpose and the ending is enormously rewarding.",positive,en
+"A fantastic thriller that keeps the tension high without ever feeling cheap.",positive,en
+"Great fun. Sharp dialogue, likeable characters and a wonderful sense of pace.",positive,en
+"Genuinely moving and beautifully acted. Worth every minute of the running time.",positive,en
+"An impressive debut with confident visuals and a satisfying, well-earned conclusion.",positive,en
+"The best comedy I have seen in years; clever, warm and consistently funny.",positive,en
+"Outstanding production design and a brilliant central performance carry this one.",positive,en
+"A delightful surprise. Charming, engaging and far smarter than the trailer suggested.",positive,en
+"Wonderful storytelling with excellent pacing and a genuinely satisfying payoff.",positive,en
+"Solid, thoughtful filmmaking. The script is strong and the acting is uniformly good.",positive,en
+"I recommend this without hesitation. Beautiful, funny and quietly powerful.",positive,en
+"Terrible from the opening scene. Boring, badly written and a complete waste of time.",negative,en
+"Awful acting and a confusing plot. Easily the worst film I have watched this year.",negative,en
+"Disappointing and dull. The script is weak and none of the characters are believable.",negative,en
+"A poor effort. Painfully slow, badly edited and full of annoying dialogue.",negative,en
+"I regret watching this. The story goes nowhere and the ending is deeply unsatisfying.",negative,en
+"Bland and mediocre. Nothing here is memorable and the pacing is horrible.",negative,en
+"Weak characters, flawed structure, and a soundtrack that is genuinely irritating.",negative,en
+"Overpriced spectacle with no substance. Avoid this one entirely.",negative,en
+"Boring, predictable and badly acted. I could not wait for it to finish.",negative,en
+"A dull, lifeless film. The direction is poor and the humour never lands.",negative,en
+"Terrible pacing and a nonsensical script. Two hours I will never get back.",negative,en
+"The worst kind of sequel: louder, longer and far more confusing than the original.",negative,en
+"Awful dialogue and a plot full of holes. Deeply disappointing given the cast.",negative,en
+"Painful to sit through. Weak performances and an annoying, repetitive score.",negative,en
+"Mediocre at best. The story is thin and the characters are completely flat.",negative,en
+"Badly written, badly shot, and a waste of an otherwise interesting premise.",negative,en
+"Dull and confusing. I lost interest well before the halfway point.",negative,en
+"A poor and predictable thriller with no tension whatsoever.",negative,en
+"Terrible ending that undoes everything the first hour worked for.",negative,en
+"Boring and overlong. The whole thing feels like a first draft.",negative,en
+"Film ini bagus sekali, ceritanya menarik dan aktingnya sangat memuaskan.",positive,id
+"Sangat keren dan berkualitas. Saya suka sekali dengan alurnya yang rapi.",positive,id
+"Luar biasa. Sinematografinya indah dan musiknya benar-benar mendukung suasana.",positive,id
+"Ceritanya menyenangkan dan endingnya memuaskan. Sangat direkomendasikan.",positive,id
+"Akting pemainnya hebat dan dialognya terasa natural. Film terbaik tahun ini.",positive,id
+"Mantap, alurnya cepat dan tidak membosankan sama sekali.",positive,id
+"Sangat menarik dari awal sampai akhir. Cocok ditonton bersama keluarga.",positive,id
+"Bagus dan bermanfaat. Pesan moralnya tersampaikan dengan baik.",positive,id
+"Keren banget, visualnya indah dan ceritanya sangat menyentuh.",positive,id
+"Saya senang menontonnya. Sutradaranya berhasil membuat film yang berkualitas.",positive,id
+"Film yang menyenangkan dengan humor yang cerdas dan karakter yang kuat.",positive,id
+"Sangat memuaskan. Setiap adegan terasa penting dan tidak ada yang sia-sia.",positive,id
+"Indah, hangat, dan sangat menarik. Saya merekomendasikannya.",positive,id
+"Hebat sekali. Naskahnya kuat dan aktingnya sempurna.",positive,id
+"Bagus, ceritanya cocok untuk semua umur dan endingnya membahagiakan.",positive,id
+"Film ini mengecewakan dan sangat membosankan dari awal.",negative,id
+"Jelek, ceritanya parah dan aktingnya bikin kecewa.",negative,id
+"Buruk sekali. Alurnya lambat dan dialognya menyebalkan.",negative,id
+"Sangat mengecewakan. Naskahnya lemah dan karakternya tidak menarik.",negative,id
+"Membosankan dan tidak masuk akal. Rugi menonton film ini.",negative,id
+"Parah, editingnya kasar dan musiknya mengganggu.",negative,id
+"Kurang bagus. Ceritanya tidak jelas dan endingnya payah.",negative,id
+"Percuma menontonnya, tidak ada yang menarik sama sekali.",negative,id
+"Jelek dan lambat. Saya menyesal sudah membeli tiketnya.",negative,id
+"Buruk, aktingnya kaku dan ceritanya membosankan.",negative,id
+"Mengecewakan sekali. Terlalu panjang dan tidak fokus.",negative,id
+"Sangat payah. Humornya tidak lucu dan alurnya susah diikuti.",negative,id
+"Tidak berkualitas. Banyak adegan yang terasa dipaksakan.",negative,id
+"Kurang menarik dan terlalu mahal untuk kualitas seperti ini.",negative,id
+"Parah banget, ceritanya kacau dan aktingnya buruk.",negative,id
+"A quietly brilliant film that rewards patience with a genuinely beautiful final act.",positive,en
+"Consistently engaging, with excellent performances and a satisfying, well-built story.",positive,en
+"Wonderful direction and a superb script. One of the best things I have seen.",positive,en
+"Confusing, dull and badly paced. The premise is wasted entirely.",negative,en
+"Weak and disappointing. Poor dialogue and a plot that makes no sense.",negative,en
+"Terrible. Annoying characters and an ending that is simply awful.",negative,en
+"Sangat bagus dan menyentuh. Aktingnya luar biasa dan ceritanya kuat.",positive,id
+"Keren, alurnya menarik dan visualnya sangat indah.",positive,id
+"Buruk dan membosankan. Tidak ada yang bisa dinikmati dari film ini.",negative,id
+"Mengecewakan. Ceritanya lemah dan endingnya sangat jelek.",negative,id

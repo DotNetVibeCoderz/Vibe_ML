@@ -1,0 +1,94 @@
+<Project>
+
+  <!--
+    HF.Net - shared MSBuild settings for every project in the solution.
+    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>CS1591</WarningsNotAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
+  </PropertyGroup>
+
+  <!--
+    Hardware oriented defaults. The stack underneath (Gravicode.Science) leans on SIMD and tiered
+    PGO, and HF.Net's own kernels do the same; Release has to opt into both or the published
+    benchmark figures cannot be reproduced.
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Optimize>true</Optimize>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <!--
+    Version for every shipping package. Override from the command line or from CI with
+    `-p:Version=0.2.0`; a tag-driven release passes the tag through so the tag and the package
+    version cannot disagree.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+
+  <!-- NuGet metadata shared by the eight shipping libraries (src/**). -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('$([System.IO.Path]::DirectorySeparatorChar)src$([System.IO.Path]::DirectorySeparatorChar)'))">
+    <IsPackable>true</IsPackable>
+    <Authors>Gravicode Studios</Authors>
+    <Company>Gravicode Studios</Company>
+    <Product>HF.Net</Product>
+    <Copyright>Copyright (c) Gravicode Studios</Copyright>
+    <PackageProjectUrl>https://github.com/DotNetVibeCoderz/Vibe_ML/tree/main/HF.Net</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/DotNetVibeCoderz/Vibe_ML/tree/main/HF.Net</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>huggingface;transformers;diffusers;datasets;tokenizers;peft;onnx;machine-learning;dotnet;simd;gpu;gravicode</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>HF.Net - a Hugging Face style machine learning ecosystem for .NET, built on Gravicode.Science. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+
+    <!--
+      XML docs ship with the package: the comments in this repository exist to be read from
+      IntelliSense rather than from the source. CS1591 is silenced rather than fixed - a public
+      member without a doc comment is a gap in the docs, not a broken build, and treating it as an
+      error would gate packing on prose.
+    -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- A .snupkg alongside each package, so a debugger can step into library code. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
+  </PropertyGroup>
+
+  <!--
+    Deterministic paths in CI. Left off locally on purpose: it rewrites source paths to
+    placeholders, which is right for a published artifact and unhelpful in a local stack trace.
+  -->
+  <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == '' And '$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <!-- Samples, benchmarks, tests and tools are never packed. -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'true'">
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

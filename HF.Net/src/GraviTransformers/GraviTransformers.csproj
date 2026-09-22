@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviTransformers</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviTransformers</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviTransformers</PackageId>
+    <Description>GraviTransformers - run Hugging Face transformer models on .NET: load pretrained BERT-family checkpoints from safetensors or PyTorch weights and serve them through task pipelines. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Softmax is internal and is pinned against overflow; the tests reach it directly because a
+         NaN there only shows up as a model that silently predicts nothing. -->
+    <InternalsVisibleTo Include="GraviTransformers.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Gravicode.Science.GraviFrame" />
+    <PackageReference Include="Gravicode.Science.GraviLearn" />
+    <PackageReference Include="Gravicode.Science.GraviText" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviHub\GraviHub.csproj" />
+    <ProjectReference Include="..\GraviTokenizers\GraviTokenizers.csproj" />
+  </ItemGroup>
+
+</Project>

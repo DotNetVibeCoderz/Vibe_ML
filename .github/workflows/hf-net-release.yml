@@ -1,0 +1,135 @@
+# HF.Net - publish the eight packages to NuGet.
+#
+# Triggered by a tag, so the tag and the package version cannot disagree: the version is read from
+# the tag and passed to `dotnet pack`, rather than from a file somebody forgot to bump. The tag is
+# prefixed because HF.Net is one project inside the Vibe_ML monorepo and a bare `v0.1.0` would be
+# ambiguous.
+#
+#   git tag hf-net-v0.2.0
+#   git push origin hf-net-v0.2.0
+#
+# Requires one repository secret: NUGET_API_KEY, from https://www.nuget.org/account/apikeys,
+# scoped to Gravicode.HFNet.*
+#
+# Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+
+name: HF.Net Release
+
+on:
+  push:
+    tags:
+      - 'hf-net-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, e.g. 0.2.0'
+        required: true
+      dry_run:
+        description: 'Pack and check, but do not push to NuGet'
+        type: boolean
+        default: true
+
+defaults:
+  run:
+    working-directory: HF.Net
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  release:
+    name: pack and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # to create the GitHub Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: HF.Net/global.json
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#hf-net-v}"
+          fi
+
+          # Fail here rather than publishing something malformed: a bad version on nuget.org
+          # cannot be replaced, only unlisted.
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid semantic version."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION"
+
+      - name: Restore
+        run: dotnet restore HF.Net.sln
+
+      - name: Build
+        run: dotnet build HF.Net.sln -c Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      # The suite is the gate. A package that ships a failing library is worse than a late one.
+      - name: Test
+        run: dotnet test HF.Net.sln -c Release --no-build
+
+      - name: Pack
+        run: |
+          dotnet pack HF.Net.sln -c Release --no-build \
+            -p:Version=${{ steps.version.outputs.version }} \
+            -p:ContinuousIntegrationBuild=true
+
+      - name: List what will be published
+        run: ls -la artifacts/packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-${{ steps.version.outputs.version }}
+          path: |
+            HF.Net/artifacts/packages/*.nupkg
+            HF.Net/artifacts/packages/*.snupkg
+          if-no-files-found: error
+
+      # --skip-duplicate so a re-run after a partial failure finishes the remaining packages
+      # instead of failing on the ones that already landed.
+      #
+      # GraviHub goes first because every other package depends on it, and a dependency that is
+      # not yet indexed leaves the dependents unrestorable for several minutes. That is not
+      # theoretical: publishing 0.1.0 by hand, three of the eight were still validating while the
+      # rest were already live.
+      - name: Push to NuGet
+        if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          dotnet nuget push "artifacts/packages/Gravicode.HFNet.GraviHub.*.nupkg" \
+            --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+          for package in artifacts/packages/*.nupkg; do
+            case "$package" in *GraviHub*) continue ;; esac
+            dotnet nuget push "$package" \
+              --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          done
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: HF.Net ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            HF.Net/artifacts/packages/*.nupkg
+            HF.Net/artifacts/packages/*.snupkg

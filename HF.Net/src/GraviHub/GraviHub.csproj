@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviHub</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviHub</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviHub</PackageId>
+    <Description>GraviHub - Hugging Face Hub client for .NET: model and dataset download/upload, repository metadata, a local cache, and readers for the formats the Hub serves (safetensors, tokenizer.json, config.json). Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The dtype decoders are internal; the tests pin them against hand-computed bit patterns,
+         which is the only way to catch a wrong exponent bias that a round trip would hide. -->
+    <InternalsVisibleTo Include="GraviHub.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Gravicode.Science.GraviFrame" />
+  </ItemGroup>
+
+</Project>

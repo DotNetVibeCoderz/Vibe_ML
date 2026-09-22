@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:HFAppGen.Views"
+        x:Class="HFAppGen.Views.NewProjectDialog"
+        Title="New project"
+        Width="820" Height="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppGround}"
+        FontFamily="{DynamicResource UiFont}">
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+    <!-- The spectrum rule again: this is where a prompt becomes a project. -->
+    <Border Grid.Row="0" Height="3" Background="{DynamicResource SpectrumRule}" />
+
+    <StackPanel Grid.Row="1" Margin="24,20,24,16" Spacing="14">
+      <TextBlock Text="New project" FontSize="{DynamicResource FontDisplay}"
+                 Foreground="{DynamicResource TextHighBrush}" />
+
+      <Grid ColumnDefinitions="*,12,2*" RowDefinitions="Auto,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" Classes="caption" Text="Name" Margin="0,0,0,5" />
+        <TextBox Grid.Row="1" Grid.Column="0" Name="NameBox" Classes="field" Text="MyAnalysis" />
+
+        <TextBlock Grid.Row="0" Grid.Column="2" Classes="caption" Text="Location" Margin="0,0,0,5" />
+        <Grid Grid.Row="1" Grid.Column="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBox Grid.Column="0" Name="LocationBox" Classes="field" />
+          <Button Grid.Column="1" Classes="ghost" Content="Browse" Click="OnBrowse" />
+        </Grid>
+      </Grid>
+    </StackPanel>
+
+    <Grid Grid.Row="2" Margin="24,0,24,0" RowDefinitions="Auto,*">
+      <TextBlock Grid.Row="0" Classes="caption" Text="Start from" Margin="0,0,0,8" />
+
+      <ListBox Grid.Row="1" Name="TemplateList" Classes="cards" Background="Transparent"
+               BorderThickness="0" SelectionMode="Single">
+        <ListBox.ItemsPanel>
+          <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+        </ListBox.ItemsPanel>
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <Border Name="Card" Width="238" Height="104" Padding="14,12" Margin="0,0,10,10"
+                    CornerRadius="{DynamicResource RadiusMedium}"
+                    Background="{DynamicResource RaisedGround}"
+                    BorderBrush="{DynamicResource BorderSoft}" BorderThickness="1">
+              <Grid RowDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Row="0" Text="{Binding Name}"
+                           FontSize="{DynamicResource FontMedium}" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextHighBrush}" />
+                <TextBlock Grid.Row="1" Text="{Binding Description}" Classes="caption"
+                           TextWrapping="Wrap" Margin="0,6,0,0" />
+                <!-- One band per library the template uses, in that library's colour: the card
+                     shows its own ingredients rather than an anonymous count. -->
+                <ItemsControl Grid.Row="2" ItemsSource="{Binding LibraryColours}" Margin="0,8,0,0">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Height="3" Width="26" CornerRadius="2"
+                              Background="{Binding ., Converter={x:Static views:HexBrushConverter.Instance}}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+
+    <Border Grid.Row="3" Padding="24,14" BorderBrush="{DynamicResource BorderSoft}"
+            BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+        <TextBlock Grid.Column="0" Name="Hint" Classes="caption" VerticalAlignment="Center" />
+        <Button Grid.Column="1" Classes="ghost" Content="Cancel" Click="OnCancel" />
+        <Button Grid.Column="2" Classes="primary" Content="Create project" Click="OnCreate" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

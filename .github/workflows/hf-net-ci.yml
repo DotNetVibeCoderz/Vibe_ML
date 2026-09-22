@@ -1,0 +1,198 @@
+# HF.Net - build, test and pack.
+#
+# HF.Net is a subdirectory of the Vibe_ML repository, and GitHub reads workflows ONLY from the
+# repository root - so this file belongs here and not in HF.Net/.github/, and every step runs with
+# HF.Net as its working directory. The path filters keep it from firing on changes to the rest of
+# the monorepo.
+#
+# Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+
+name: HF.Net CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'HF.Net/**'
+      - '.github/workflows/hf-net-ci.yml'
+  pull_request:
+    paths:
+      - 'HF.Net/**'
+      - '.github/workflows/hf-net-ci.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: HF.Net
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Restores are the slow part of a cold runner and they are identical across jobs.
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing is worth seeing on the other, so the matrix runs to completion.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: HF.Net/global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-${{ matrix.os }}-${{ hashFiles('HF.Net/Directory.Packages.props') }}
+          restore-keys: nuget-${{ matrix.os }}-
+
+      - name: Restore
+        run: dotnet restore HF.Net.sln
+
+      # Warnings are not errors here on purpose: the eight shipping libraries build clean, and
+      # failing the build on an inherited Avalonia warning would gate the packages on the IDE.
+      - name: Build
+        run: dotnet build HF.Net.sln -c Release --no-restore
+
+      # Every one of the 178 tests runs offline. Anything that needs the Hub lives in the samples
+      # and in benchmarks/comparison, deliberately, so CI is not at the mercy of a rate limit.
+      - name: Test
+        run: dotnet test HF.Net.sln -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: HF.Net/TestResults/**/*.trx
+          if-no-files-found: warn
+
+  notebooks:
+    name: notebooks are valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # A notebook is JSON, so a malformed one is only discovered when somebody opens it. This
+      # checks the structure; compiling the C# inside the cells is on the roadmap.
+      - name: Validate notebooks
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+
+          failures = []
+          for path in sorted(pathlib.Path("notebooks").glob("*.ipynb")):
+              try:
+                  data = json.loads(path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError as error:
+                  failures.append(f"{path}: {error}")
+                  continue
+
+              if "cells" not in data or not data["cells"]:
+                  failures.append(f"{path}: no cells")
+                  continue
+
+              for i, cell in enumerate(data["cells"]):
+                  if cell.get("cell_type") not in ("code", "markdown"):
+                      failures.append(f"{path} cell {i}: unknown type {cell.get('cell_type')!r}")
+                  if "source" not in cell:
+                      failures.append(f"{path} cell {i}: no source")
+
+              print(f"{path.name}: {len(data['cells'])} cells")
+
+          if failures:
+              for failure in failures:
+                  print(f"::error::{failure}")
+              sys.exit(1)
+          PY
+
+  docs:
+    name: docs are bilingual
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every page under docs/ is meant to have a counterpart under docs/id/. A page in one
+      # language only is an unfinished page, and it is the kind of gap nothing else notices.
+      - name: Check every page has both languages
+        run: |
+          missing=0
+          for page in docs/*.md; do
+            name=$(basename "$page")
+            # getting-started.md is published in Indonesian as memulai.md.
+            [ "$name" = "getting-started.md" ] && name="memulai.md"
+
+            if [ ! -f "docs/id/$name" ]; then
+              echo "::error::docs/$(basename "$page") has no counterpart at docs/id/$name"
+              missing=1
+            fi
+          done
+
+          for page in docs/id/*.md; do
+            name=$(basename "$page")
+            [ "$name" = "memulai.md" ] && name="getting-started.md"
+
+            if [ ! -f "docs/$name" ]; then
+              echo "::error::docs/id/$(basename "$page") has no counterpart at docs/$name"
+              missing=1
+            fi
+          done
+
+          [ "$missing" = "0" ] && echo "Every page exists in both languages."
+          exit $missing
+
+      - name: Check the screenshots the docs reference exist
+        run: |
+          missing=0
+          for image in $(grep -rhoE '\]\(([^)]*screenshots/[^)]+\.png)\)' docs README.md \
+                         | sed -E 's/^\]\(//; s/\)$//' | sort -u); do
+            # Paths are relative to the file that referenced them; all of them land here.
+            base=$(basename "$image")
+            if [ ! -f "docs/screenshots/$base" ]; then
+              echo "::error::docs/screenshots/$base is referenced but missing"
+              missing=1
+            fi
+          done
+
+          [ "$missing" = "0" ] && echo "Every referenced screenshot is present."
+          exit $missing
+
+  pack:
+    name: pack
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: HF.Net/global.json
+
+      - name: Pack
+        run: dotnet pack HF.Net.sln -c Release -p:ContinuousIntegrationBuild=true
+
+      # Uploaded rather than published: a push to nuget.org is irreversible - a version can be
+      # unlisted but never replaced - so it happens only from a tag, in the release workflow.
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: |
+            HF.Net/artifacts/packages/*.nupkg
+            HF.Net/artifacts/packages/*.snupkg
+          if-no-files-found: error

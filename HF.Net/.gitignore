@@ -1,0 +1,19 @@
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.idea/
+BenchmarkDotNet.Artifacts/
+TestResults/
+
+# Live credentials — never commit.
+testkey.txt
+HFToken.txt
+PackageCredentials.txt
+**/app.local.config
+
+# Model/dataset cache produced by GraviHub at runtime.
+.hfcache/
+datasets/cache/

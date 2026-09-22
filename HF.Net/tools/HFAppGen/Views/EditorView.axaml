@@ -1,0 +1,60 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HFAppGen.ViewModels"
+             xmlns:edit="using:AvaloniaEdit"
+             x:Class="HFAppGen.Views.EditorView"
+             x:DataType="vm:EditorViewModel">
+
+  <Border Background="{DynamicResource EditorGround}">
+    <Grid RowDefinitions="Auto,*">
+
+      <!-- Tab strip -->
+      <Border Grid.Row="0" Background="{DynamicResource PanelGround}"
+              BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1"
+              IsVisible="{Binding Documents.Count}">
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding Documents}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Padding="14,7" Margin="0" Background="Transparent"
+                        BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,1,0"
+                        PointerPressed="OnTabPressed" Cursor="Hand">
+                  <StackPanel Orientation="Horizontal" Spacing="9">
+                    <TextBlock Text="{Binding Caption}" FontSize="{DynamicResource FontSmall}"
+                               Foreground="{DynamicResource TextBaseBrush}" VerticalAlignment="Center" />
+                    <Button Classes="icon" Content="✕" Width="16" Height="16" FontSize="9"
+                            Click="OnCloseTab" Tag="{Binding}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+
+      <edit:TextEditor Name="Editor" Grid.Row="1"
+                       Background="{DynamicResource EditorGround}"
+                       Foreground="{DynamicResource TextHighBrush}"
+                       LineNumbersForeground="{DynamicResource EditorGutter}"
+                       ShowLineNumbers="{Binding ShowLineNumbers}"
+                       FontFamily="{DynamicResource MonoFont}"
+                       FontSize="13"
+                       HorizontalScrollBarVisibility="Auto"
+                       VerticalScrollBarVisibility="Auto" />
+
+      <!-- Empty state. An empty editor is a place to start, not a blank wall. -->
+      <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Spacing="14" IsVisible="{Binding !Documents.Count}">
+        <Border Width="150" Height="3" CornerRadius="2"
+                Background="{DynamicResource SpectrumRule}" HorizontalAlignment="Center" />
+        <TextBlock Text="Nothing open" FontSize="{DynamicResource FontLarge}"
+                   Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" />
+        <TextBlock Classes="caption" HorizontalAlignment="Center" TextAlignment="Center"
+                   Text="Open a project from the toolbar, or ask Jack to build one.&#x0a;Ctrl+Shift+N starts a new project." />
+      </StackPanel>
+    </Grid>
+  </Border>
+</UserControl>

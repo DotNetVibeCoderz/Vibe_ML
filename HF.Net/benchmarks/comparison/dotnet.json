@@ -1,0 +1,98 @@
+{
+  "runtime": ".NET 10.0.12",
+  "platform": "Microsoft Windows 10.0.26200",
+  "processor": "8 logical cores",
+  "configuration": "Release",
+  "tokenizer_single_ms": 0.0124,
+  "tokenizer_single_median_ms": 0.0134,
+  "tokenizer_batch_1000_ms": 10.9382,
+  "tokenizer_batch_1000_median_ms": 15.2531,
+  "tokenizer_docs_per_second": 91422.72037446746,
+  "tokenizer_reference_ids": [
+    101,
+    7592,
+    1010,
+    2088,
+    999,
+    19204,
+    17629,
+    2015,
+    2024,
+    23653,
+    1012,
+    102
+  ],
+  "tokenizer_reference_tokens": [
+    "[CLS]",
+    "hello",
+    ",",
+    "world",
+    "!",
+    "token",
+    "##izer",
+    "##s",
+    "are",
+    "unbelievable",
+    ".",
+    "[SEP]"
+  ],
+  "safetensors_header_ms": 0.7127,
+  "safetensors_one_tensor_ms": 196.9617,
+  "safetensors_tensor_count": 206,
+  "safetensors_file_mb": 420.0456314086914,
+  "inference_base_single_ms": 597.9407,
+  "inference_base_single_median_ms": 1536.9914,
+  "inference_base_batch8_ms": 1736.3986,
+  "inference_base_tokens": 12,
+  "inference_tiny_single_ms": 2.093,
+  "inference_tiny_single_median_ms": 2.2324,
+  "inference_tiny_batch8_ms": 8.2958,
+  "inference_tiny_tokens": 12,
+  "fillmask_france": [
+    {
+      "token": "paris",
+      "score": 0.41531680517275477
+    },
+    {
+      "token": "lille",
+      "score": 0.07164636415932508
+    },
+    {
+      "token": "lyon",
+      "score": 0.06314477236641558
+    },
+    {
+      "token": "marseille",
+      "score": 0.044569012770324906
+    },
+    {
+      "token": "tours",
+      "score": 0.030192260090546267
+    }
+  ],
+  "fillmask_player": [
+    {
+      "token": "regular",
+      "score": 0.5500369610907734
+    },
+    {
+      "token": "key",
+      "score": 0.19388146593373773
+    },
+    {
+      "token": "former",
+      "score": 0.05826779260375714
+    },
+    {
+      "token": "capped",
+      "score": 0.021432492838582153
+    },
+    {
+      "token": "prominent",
+      "score": 0.013596830561745576
+    }
+  ],
+  "onnx_provider": "Cpu",
+  "onnx_single_ms": 0.6745,
+  "onnx_single_median_ms": 0.8452
+}

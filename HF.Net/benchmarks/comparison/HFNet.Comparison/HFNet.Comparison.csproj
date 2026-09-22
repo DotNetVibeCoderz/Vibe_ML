@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.HFNet.Comparison</RootNamespace>
+    <AssemblyName>HFNet.Comparison</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\GraviHub\GraviHub.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviTokenizers\GraviTokenizers.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviTransformers\GraviTransformers.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviOptimum\GraviOptimum.csproj" />
+  </ItemGroup>
+
+</Project>

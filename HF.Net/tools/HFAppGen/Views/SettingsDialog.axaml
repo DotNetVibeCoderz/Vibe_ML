@@ -1,0 +1,121 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="HFAppGen.Views.SettingsDialog"
+        Title="Settings"
+        Width="700" Height="700"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppGround}"
+        FontFamily="{DynamicResource UiFont}">
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+    <Border Grid.Row="0" Height="3" Background="{DynamicResource SpectrumRule}" />
+
+    <TextBlock Grid.Row="1" Text="Settings" FontSize="{DynamicResource FontDisplay}"
+               Foreground="{DynamicResource TextHighBrush}" Margin="24,18,24,12" />
+
+    <ScrollViewer Grid.Row="2" Padding="24,0">
+      <StackPanel Spacing="22">
+
+        <!-- ============================== assistant -->
+        <StackPanel Spacing="10">
+          <TextBlock Classes="panelHeader" Text="ASSISTANT" />
+
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                RowSpacing="9" ColumnSpacing="12">
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="caption" Text="Provider"
+                       VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" Name="ProviderBox" Classes="field"
+                      HorizontalAlignment="Stretch" SelectionChanged="OnProviderChanged" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Classes="caption" Text="Model"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="ModelBox" Classes="field" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Classes="caption" Text="API key"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Name="KeyBox" Classes="field"
+                     PasswordChar="•" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Classes="caption" Text="Endpoint"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="3" Grid.Column="1" Name="EndpointBox" Classes="field" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Classes="caption" Text="Temperature"
+                       VerticalAlignment="Center" />
+            <Grid Grid.Row="4" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+              <Slider Grid.Column="0" Name="TemperatureSlider" Minimum="0" Maximum="2"
+                      TickFrequency="0.1" IsSnapToTickEnabled="True" />
+              <TextBlock Grid.Column="1" Name="TemperatureLabel" Classes="mono" Width="34"
+                         VerticalAlignment="Center" Foreground="{DynamicResource AccentBrush}" />
+            </Grid>
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Classes="caption" Text="Max tokens"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="5" Grid.Column="1" Name="MaxTokensBox" Classes="field" />
+          </Grid>
+
+          <TextBlock Name="ProviderHint" Classes="caption" TextWrapping="Wrap"
+                     Foreground="{DynamicResource Spec2}" />
+
+          <TextBlock Classes="caption" Text="Models offered in the chat picker (comma separated)"
+                     Margin="0,6,0,0" />
+          <TextBox Name="ModelsBox" Classes="field" />
+
+          <TextBlock Classes="caption" Text="System prompt" Margin="0,6,0,0" />
+          <TextBox Name="PromptBox" Classes="field" AcceptsReturn="True" TextWrapping="Wrap"
+                   Height="150" VerticalContentAlignment="Top" />
+        </StackPanel>
+
+        <!-- ============================== tools -->
+        <StackPanel Spacing="10">
+          <TextBlock Classes="panelHeader" Text="TOOLS" />
+
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" RowSpacing="9" ColumnSpacing="12">
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="caption" Text="Tavily key"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="TavilyBox" Classes="field" PasswordChar="•" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Classes="caption" Text="Web timeout (s)"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="WebTimeoutBox" Classes="field" />
+          </Grid>
+
+          <TextBlock Classes="caption" TextWrapping="Wrap"
+                     Text="Without a Tavily key, SearchInternet is disabled and Jack answers from what it already knows." />
+        </StackPanel>
+
+        <!-- ============================== editor -->
+        <StackPanel Spacing="10">
+          <TextBlock Classes="panelHeader" Text="EDITOR" />
+
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="9" ColumnSpacing="12">
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="caption" Text="Font size"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="0" Grid.Column="1" Name="FontSizeBox" Classes="field" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Classes="caption" Text="Tab size"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Row="1" Grid.Column="1" Name="TabSizeBox" Classes="field" />
+
+            <CheckBox Grid.Row="2" Grid.Column="1" Name="LineNumbersBox" Classes="field"
+                      Content="Show line numbers" />
+          </Grid>
+        </StackPanel>
+
+        <Border Height="16" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <Border Grid.Row="3" Padding="24,14" BorderBrush="{DynamicResource BorderSoft}"
+            BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+        <TextBlock Grid.Column="0" Name="ConfigPathLabel" Classes="caption"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        <Button Grid.Column="1" Classes="ghost" Content="Cancel" Click="OnCancel" />
+        <Button Grid.Column="2" Classes="primary" Content="Save settings" Click="OnSave" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
