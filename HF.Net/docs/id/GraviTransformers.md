@@ -75,6 +75,46 @@ Ini sekaligus uji paling tajam bahwa sebuah checkpoint termuat dengan benar. Mod
 ter-transpose atau position embedding yang bergeser tetap menghasilkan vektor yang tampak masuk akal —
 tetapi tidak akan menjawab pertanyaan tentang Prancis dengan *paris*.
 
+### Named entity
+
+```csharp
+using var model = TransformerModel.Load("dslim/bert-base-NER");
+
+foreach (var entity in model.FindEntities(text))
+    Console.WriteLine($"{entity.Label,-5} {entity.Text}  [{entity.Start}..{entity.End})  {entity.Score:P1}");
+
+// PER   Kang Fadhil        [0..11)     98,8 %
+// ORG   Gravicode Studios  [20..37)    99,5 %
+// LOC   Bandung            [41..48)    99,7 %
+```
+
+Tag BIO didekode menjadi entitas utuh, dan tiap entitas dikembalikan sebagai **rentang dari string
+asli**, bukan sebagai potongan subword yang disambung kembali. Dengan begitu kapitalisasi dan tanda
+baca di dalam entitas tetap utuh, dan pemanggilnya tidak perlu membersihkan awalan `##` dengan
+menebak-nebak. Pemeriksaannya: `model.HasTokenClassificationHead`.
+
+Token classifier menyimpan `classifier.weight` dengan bentuk yang sama seperti sequence classifier,
+jadi pemuat mengklaim token head lebih dulu; jika terbalik, setiap checkpoint NER akan termuat
+sebagai pengklasifikasi kalimat dengan ratusan kelas tak bermakna.
+
+### Question answering
+
+```csharp
+using var model = TransformerModel.Load("distilbert-base-cased-distilled-squad");
+
+foreach (var answer in model.Answer(question, passage, topK: 3))
+    Console.WriteLine($"{answer.Text}  ({answer.Score:P1})");
+
+// safetensors and PyTorch checkpoints  (52,4 %)
+// both safetensors and PyTorch checkpoints  (37,8 %)
+```
+
+Pertanyaan dan paragraf masuk sebagai pasangan, dan itulah yang menguji `SegmentDelta`. Pencarian
+rentangnya dibatasi, bukan sepasang argmax yang berdiri sendiri: hanya posisi di segmen 1 yang
+memenuhi syarat, akhir tidak boleh mendahului awal, dan panjangnya dibatasi. Pencarian tanpa batasan
+dengan senang hati menjawab dengan rentang yang mulai di pertanyaan dan berakhir di paragraf.
+Pemeriksaannya: `model.HasQuestionAnsweringHead`.
+
 ### Embedding
 
 ```csharp
@@ -156,9 +196,13 @@ paling banyak diunduh di Hub. Keduanya diterima.
 
 **Token type embedding dilipat ke dalam word embedding.** Untuk masukan satu-urutan setiap posisi
 bersegmen 0, jadi menambahkan `token_type_embeddings[0]` ke setiap baris matriks word embedding adalah
-*persis* setara. Itu tidak setara untuk pasangan kalimat — `CheckpointLoader.SupportsPairs` bernilai
-`false` dan menyatakannya. Membuang sukunya justru akan menggeser setiap hidden state sebesar vektor
-konstan yang tidak dihilangkan layer norm pertama, karena ia ditambahkan sebelum norm, bukan sesudah.
+*persis* setara. Membuang sukunya justru akan menggeser setiap hidden state sebesar vektor konstan
+yang tidak dihilangkan layer norm pertama, karena ia ditambahkan sebelum norm, bukan sesudah.
+
+Pasangan kalimat juga memerlukan segmen 1, dan pelipatan tidak bisa menyediakannya. **Selisih**
+`token_type_embeddings[1] - token_type_embeddings[0]` dibawa pada `LoadReport.SegmentDelta` dan
+ditambahkan per posisi untuk baris yang termasuk urutan kedua, sehingga kedua segmen tereproduksi
+persis. `CheckpointLoader.SupportsPairs` bernilai `true`.
 
 ## Task head
 
@@ -190,8 +234,7 @@ Tidak ada KV cache karena ini encoder: setiap posisi toh memperhatikan semua pos
 ## Batasan
 
 - Arsitektur decoder-only dan encoder-decoder ditolak.
-- Pasangan kalimat bersifat hampiran — lihat catatan token type di atas.
-- Model vision (ViT, CLIP), klasifikasi token dan question answering ada di peta jalan; lihat
+- Model vision (ViT, CLIP) ada di peta jalan; lihat
   [PLAN.md](../../PLAN.md).
 
 ## Lihat juga

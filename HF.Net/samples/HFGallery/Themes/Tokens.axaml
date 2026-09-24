@@ -1,0 +1,151 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    HF Gallery design tokens.
+
+    Shares HF.Net's identity with HFAppGen - graphite ground, amber for identity and action, cyan
+    reserved for measured quantities - and adds what a gallery of charts needs that an editor does
+    not: a categorical palette and a sequential ramp.
+
+    Those two are NOT the amber/cyan accents and NOT the library ramp. The library ramp is a
+    deliberate warm-to-cool gradient, correct for the offset rail where adjacency carries meaning,
+    and wrong for categories: its neighbours measure ΔE 6.8 under normal vision, which is a hard
+    fail. The values below were searched in OKLCH and checked with the dataviz validator; the
+    results are recorded beside each set so a future change can be re-checked rather than eyeballed.
+  -->
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <!-- ============================================================ DARK (default) -->
+    <ResourceDictionary x:Key="Dark">
+
+      <Color x:Key="Ink900">#101418</Color>
+      <Color x:Key="Ink800">#171C22</Color>
+      <Color x:Key="Ink700">#1E242B</Color>
+      <Color x:Key="Ink650">#252D36</Color>
+      <Color x:Key="Ink600">#2A323B</Color>
+
+      <Color x:Key="TextHigh">#E7EDF4</Color>
+      <Color x:Key="TextBase">#C2CBD6</Color>
+      <Color x:Key="TextMuted">#8894A3</Color>
+      <Color x:Key="TextFaint">#5D6875</Color>
+
+      <Color x:Key="Accent">#FFB454</Color>
+      <Color x:Key="Measure">#57C7E3</Color>
+
+      <SolidColorBrush x:Key="AppGround" Color="{DynamicResource Ink900}" />
+      <SolidColorBrush x:Key="PanelGround" Color="{DynamicResource Ink800}" />
+      <SolidColorBrush x:Key="RaisedGround" Color="{DynamicResource Ink700}" />
+      <SolidColorBrush x:Key="HoverGround" Color="{DynamicResource Ink650}" />
+      <SolidColorBrush x:Key="SelectedGround" Color="#3A2E1A" />
+      <SolidColorBrush x:Key="BorderSoft" Color="{DynamicResource Ink600}" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="{DynamicResource TextHigh}" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="{DynamicResource TextBase}" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="{DynamicResource TextMuted}" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="{DynamicResource TextFaint}" />
+      <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource Accent}" />
+      <SolidColorBrush x:Key="MeasureBrush" Color="{DynamicResource Measure}" />
+
+      <!-- Grid and axes stay recessive: they orient, they do not compete with the marks. -->
+      <SolidColorBrush x:Key="GridBrush" Color="#232A33" />
+      <SolidColorBrush x:Key="AxisBrush" Color="#38424E" />
+
+      <!-- Sequential ramp, light to dark, for magnitude. Its own steps for this surface rather
+           than a flipped copy of the light one: a ramp wide enough to read as a ramp always puts
+           one end too close to whichever ground it is drawn on.
+           Validated: monotone, ΔL ≥ 0.06, light end 3.04:1 vs #171C22, hue spread 1°. -->
+      <SolidColorBrush x:Key="Seq1" Color="#925B0C" />
+      <SolidColorBrush x:Key="Seq2" Color="#B5720F" />
+      <SolidColorBrush x:Key="Seq3" Color="#DA8A11" />
+      <SolidColorBrush x:Key="Seq4" Color="#F7A745" />
+      <SolidColorBrush x:Key="Seq5" Color="#FDCE9B" />
+
+    </ResourceDictionary>
+
+    <!-- ============================================================ LIGHT -->
+    <ResourceDictionary x:Key="Light">
+
+      <Color x:Key="Ink900">#F6F7F9</Color>
+      <Color x:Key="Ink800">#FFFFFF</Color>
+      <Color x:Key="Ink700">#F0F2F5</Color>
+      <Color x:Key="Ink650">#E6E9EE</Color>
+      <Color x:Key="Ink600">#D6DAE1</Color>
+
+      <Color x:Key="TextHigh">#101418</Color>
+      <Color x:Key="TextBase">#2A323B</Color>
+      <Color x:Key="TextMuted">#5D6875</Color>
+      <Color x:Key="TextFaint">#8894A3</Color>
+
+      <Color x:Key="Accent">#9A6212</Color>
+      <Color x:Key="Measure">#12708C</Color>
+
+      <SolidColorBrush x:Key="AppGround" Color="{DynamicResource Ink900}" />
+      <SolidColorBrush x:Key="PanelGround" Color="{DynamicResource Ink800}" />
+      <SolidColorBrush x:Key="RaisedGround" Color="{DynamicResource Ink700}" />
+      <SolidColorBrush x:Key="HoverGround" Color="{DynamicResource Ink650}" />
+      <SolidColorBrush x:Key="SelectedGround" Color="#FBEDD6" />
+      <SolidColorBrush x:Key="BorderSoft" Color="{DynamicResource Ink600}" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="{DynamicResource TextHigh}" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="{DynamicResource TextBase}" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="{DynamicResource TextMuted}" />
+      <SolidColorBrush x:Key="TextFaintBrush" Color="{DynamicResource TextFaint}" />
+      <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource Accent}" />
+      <SolidColorBrush x:Key="MeasureBrush" Color="{DynamicResource Measure}" />
+
+      <SolidColorBrush x:Key="GridBrush" Color="#E9ECF1" />
+      <SolidColorBrush x:Key="AxisBrush" Color="#C3CAD3" />
+
+      <!-- Validated: monotone, ΔL ≥ 0.06, light end 2.53:1 vs #FFFFFF, hue spread 1°. -->
+      <SolidColorBrush x:Key="Seq1" Color="#DA943F" />
+      <SolidColorBrush x:Key="Seq2" Color="#BE770D" />
+      <SolidColorBrush x:Key="Seq3" Color="#9A600B" />
+      <SolidColorBrush x:Key="Seq4" Color="#774A08" />
+      <SolidColorBrush x:Key="Seq5" Color="#563406" />
+
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+
+  <!-- ================================================================ CATEGORICAL
+       Identity, not magnitude. Assigned in this fixed order and never cycled: a seventh
+       series folds into "other" rather than repeating a hue, because a repeated hue is a
+       lie about identity.
+
+       Searched in OKLCH and validated against #171C22 and #FFFFFF, all pairs:
+         lightness band   PASS      chroma floor    PASS
+         CVD separation   ΔE 9.4    normal vision   ΔE 15.8      contrast        PASS
+       The same values serve both themes; only the surfaces they are checked against differ.
+  -->
+  <SolidColorBrush x:Key="Cat1" Color="#B55508" />
+  <SolidColorBrush x:Key="Cat2" Color="#0AA0D2" />
+  <SolidColorBrush x:Key="Cat3" Color="#04896A" />
+  <SolidColorBrush x:Key="Cat4" Color="#989912" />
+  <SolidColorBrush x:Key="Cat5" Color="#765AD4" />
+  <SolidColorBrush x:Key="Cat6" Color="#DF5BA1" />
+
+  <!-- ================================================================ STATUS
+       Reserved. Never reused as "series 7", and always shipped with a label rather than
+       standing alone as colour.
+  -->
+  <SolidColorBrush x:Key="StatusGood" Color="#5FBE86" />
+  <SolidColorBrush x:Key="StatusWarn" Color="#E29A42" />
+  <SolidColorBrush x:Key="StatusBad" Color="#E4635F" />
+
+  <!-- ================================================================ TYPE -->
+  <FontFamily x:Key="UiFont">avares://Avalonia.Fonts.Inter/Assets#Inter, Segoe UI Variable Text, Segoe UI, sans-serif</FontFamily>
+  <FontFamily x:Key="MonoFont">Cascadia Mono, Cascadia Code, Consolas, Menlo, monospace</FontFamily>
+
+  <x:Double x:Key="FontMicro">10.5</x:Double>
+  <x:Double x:Key="FontSmall">12</x:Double>
+  <x:Double x:Key="FontBase">13</x:Double>
+  <x:Double x:Key="FontMedium">15</x:Double>
+  <x:Double x:Key="FontLarge">19</x:Double>
+  <x:Double x:Key="FontDisplay">26</x:Double>
+
+  <CornerRadius x:Key="RadiusSmall">4</CornerRadius>
+  <CornerRadius x:Key="RadiusMedium">8</CornerRadius>
+  <CornerRadius x:Key="RadiusLarge">12</CornerRadius>
+
+</ResourceDictionary>

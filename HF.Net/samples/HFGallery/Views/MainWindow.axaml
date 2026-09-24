@@ -1,0 +1,206 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:HFGallery.Controls"
+        xmlns:vm="clr-namespace:HFGallery.ViewModels"
+        x:Class="HFGallery.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="HF Gallery"
+        Width="1280" Height="860"
+        MinWidth="960" MinHeight="640"
+        Background="{DynamicResource AppGround}">
+
+  <Grid RowDefinitions="Auto,*">
+
+    <!-- ============================================================ header -->
+    <Border Grid.Row="0" Padding="20,14"
+            Background="{DynamicResource PanelGround}"
+            BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <Border Width="4" Height="22" CornerRadius="2" Background="{DynamicResource AccentBrush}" />
+          <TextBlock Text="HF Gallery" FontSize="{DynamicResource FontLarge}" FontWeight="SemiBold"
+                     Foreground="{DynamicResource TextHighBrush}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <TextBlock Grid.Column="1" Margin="20,0" VerticalAlignment="Center"
+                   Classes="muted"
+                   Text="Nine things HF.Net does, each one running against a real model." />
+
+        <TextBlock Grid.Column="2" Classes="mono muted" VerticalAlignment="Center"
+                   Text="Gravicode Studios" />
+      </Grid>
+    </Border>
+
+    <!-- ============================================================ body -->
+    <Grid Grid.Row="1" ColumnDefinitions="248,*">
+
+      <!-- === rail -->
+      <Border Grid.Column="0" Background="{DynamicResource PanelGround}"
+              BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,1,0">
+        <DockPanel Margin="10,14">
+
+          <TextBlock DockPanel.Dock="Top" Classes="eyebrow" Text="USE CASES" Margin="8,0,0,8" />
+
+          <ListBox Classes="rail"
+                   ItemsSource="{Binding Cases}"
+                   SelectedItem="{Binding Selected}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:CaseItem">
+                <Grid ColumnDefinitions="3,*">
+                  <Border Name="Marker" Grid.Column="0" CornerRadius="2" Margin="0,4" />
+                  <StackPanel Grid.Column="1" Margin="11,7,10,7" Spacing="2">
+                    <TextBlock Classes="railTitle" Text="{Binding Title}"
+                               Foreground="{DynamicResource TextBaseBrush}" />
+                    <TextBlock Classes="mono" FontSize="{DynamicResource FontMicro}"
+                               Foreground="{DynamicResource TextFaintBrush}"
+                               Text="{Binding Library}" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+
+      <!-- === case -->
+      <ScrollViewer Grid.Column="1" Padding="24,20,24,28">
+        <StackPanel Spacing="16" MaxWidth="980" HorizontalAlignment="Stretch">
+
+          <!-- what this case is -->
+          <StackPanel Spacing="6">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Classes="title" Text="{Binding Selected.Title}" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Border Classes="chip">
+                  <TextBlock Classes="mono" Foreground="{DynamicResource MeasureBrush}"
+                             Text="{Binding Selected.Library}" />
+                </Border>
+                <Border Classes="chip">
+                  <TextBlock Classes="mono" Foreground="{DynamicResource TextMutedBrush}"
+                             Text="{Binding Selected.Cost}" />
+                </Border>
+              </StackPanel>
+            </Grid>
+            <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding Selected.Blurb}" />
+          </StackPanel>
+
+          <!-- input -->
+          <Border Classes="panel" Padding="16" IsVisible="{Binding HasInput}">
+            <StackPanel Spacing="10">
+
+              <StackPanel Spacing="5">
+                <TextBlock Classes="eyebrow" Text="{Binding Selected.Source.InputLabel}" />
+                <TextBox Text="{Binding Input}" AcceptsReturn="True" TextWrapping="Wrap"
+                         MinHeight="60" MaxHeight="150" />
+              </StackPanel>
+
+              <StackPanel Spacing="5" IsVisible="{Binding HasSecond}">
+                <TextBlock Classes="eyebrow" Text="{Binding Selected.Source.SecondInputLabel}" />
+                <TextBox Text="{Binding Second}" AcceptsReturn="True" TextWrapping="Wrap"
+                         MinHeight="72" MaxHeight="170" />
+              </StackPanel>
+
+              <Grid ColumnDefinitions="Auto,*">
+                <Button Grid.Column="0" Classes="primary" Content="Run"
+                        Command="{Binding RunCommand}"
+                        IsEnabled="{Binding !IsBusy}" />
+                <TextBlock Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center"
+                           Classes="mono muted" TextTrimming="CharacterEllipsis"
+                           Text="{Binding Status}" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- the cases that take no input still need somewhere to start from -->
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding !HasInput}">
+            <Button Grid.Column="0" Classes="primary" Content="Run"
+                    Command="{Binding RunCommand}" IsEnabled="{Binding !IsBusy}" />
+            <TextBlock Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center"
+                       Classes="mono muted" Text="{Binding Status}" />
+          </Grid>
+
+          <!-- result -->
+          <Border Name="ResultPanel" Classes="panel" Padding="18"
+                  IsVisible="{Binding Result, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Grid ColumnDefinitions="*,Auto">
+
+              <StackPanel Grid.Column="0" Spacing="14">
+
+                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap"
+                           FontSize="{DynamicResource FontMedium}"
+                           Foreground="{DynamicResource TextHighBrush}" />
+
+                <c:Legend Items="{Binding Legend}"
+                          IsVisible="{Binding Legend, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                <c:SpanView Source="{Binding Spans}" TextWrapping="Wrap" LineHeight="26"
+                            FontSize="{DynamicResource FontMedium}"
+                            IsVisible="{Binding Spans, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                <c:BarChart Items="{Binding Bars}" Unit="{Binding Unit}"
+                            IsVisible="{Binding Bars, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                <c:ScatterChart Items="{Binding Scatter}" Height="300"
+                                IsVisible="{Binding Scatter, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                <c:LineChart Series="{Binding Lines}" XLabel="{Binding XLabel}" Height="300"
+                             IsVisible="{Binding Lines, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                <c:Treemap Items="{Binding Treemap}" Height="290"
+                           IsVisible="{Binding Treemap, Converter={x:Static ObjectConverters.IsNotNull}}" />
+              </StackPanel>
+
+              <!-- the table view: every chart on the left has its numbers here -->
+              <Border Grid.Column="1" Margin="22,0,0,0" MinWidth="200" MaxWidth="280"
+                      VerticalAlignment="Top"
+                      IsVisible="{Binding Facts, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="eyebrow" Text="DETAIL" />
+                  <ItemsControl ItemsSource="{Binding Facts}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <StackPanel Spacing="1" Margin="0,0,0,8">
+                          <TextBlock Classes="mono" FontSize="{DynamicResource FontMicro}"
+                                     Foreground="{DynamicResource TextFaintBrush}"
+                                     Text="{Binding Key}" />
+                          <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource FontSmall}"
+                                     Foreground="{DynamicResource TextBaseBrush}"
+                                     Text="{Binding Value}" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+            </Grid>
+          </Border>
+
+          <!-- the code that does it -->
+          <Border Classes="panel" Padding="0">
+            <DockPanel>
+              <Border DockPanel.Dock="Top" Padding="16,11"
+                      BorderBrush="{DynamicResource BorderSoft}" BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0" Classes="eyebrow" Text="THE SAME THING, IN C#" />
+                  <TextBlock Grid.Column="1" Classes="mono"
+                             Foreground="{DynamicResource TextFaintBrush}"
+                             Text="{Binding Selected.Source.Model}" />
+                </Grid>
+              </Border>
+
+              <ScrollViewer HorizontalScrollBarVisibility="Auto" Padding="16,14">
+                <SelectableTextBlock FontFamily="{DynamicResource MonoFont}"
+                                     FontSize="{DynamicResource FontSmall}"
+                                     LineHeight="20"
+                                     Foreground="{DynamicResource TextBaseBrush}"
+                                     Text="{Binding Selected.Source.Code}" />
+              </ScrollViewer>
+            </DockPanel>
+          </Border>
+
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>

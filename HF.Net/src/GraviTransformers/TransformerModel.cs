@@ -46,6 +46,8 @@ public sealed class TransformerModel : IDisposable
     private readonly WeightStore _weights;
     private readonly ClassificationHead? _classifier;
     private readonly MaskedLanguageHead? _maskedLanguage;
+    private readonly TokenClassificationHead? _tokenClassifier;
+    private readonly QuestionAnsweringHead? _questionAnswering;
     private bool _disposed;
 
     private TransformerModel(
@@ -63,8 +65,13 @@ public sealed class TransformerModel : IDisposable
         Report = report;
         _weights = weights;
 
-        _classifier = ClassificationHead.TryLoad(weights, config);
+        // Order matters: a token classifier stores classifier.weight with the same shape a
+        // sequence classifier does, so it has to be claimed first or Predict would answer with one
+        // label for a model that produces one per token.
+        _tokenClassifier = TokenClassificationHead.TryLoad(weights, config);
+        _classifier = _tokenClassifier is null ? ClassificationHead.TryLoad(weights, config) : null;
         _maskedLanguage = MaskedLanguageHead.TryLoad(weights, config, encoder);
+        _questionAnswering = QuestionAnsweringHead.TryLoad(weights);
     }
 
     /// <summary>The Hub id this model came from.</summary>
@@ -87,6 +94,12 @@ public sealed class TransformerModel : IDisposable
 
     /// <summary>Whether the checkpoint carries a masked language modelling head.</summary>
     public bool HasMaskedLanguageHead => _maskedLanguage is not null;
+
+    /// <summary>Whether the checkpoint carries a token classification head, for named entities.</summary>
+    public bool HasTokenClassificationHead => _tokenClassifier is not null;
+
+    /// <summary>Whether the checkpoint carries an extractive question answering head.</summary>
+    public bool HasQuestionAnsweringHead => _questionAnswering is not null;
 
     /// <summary>The label names, when the model has a classification head.</summary>
     public IReadOnlyList<string> Labels =>
@@ -159,7 +172,75 @@ public sealed class TransformerModel : IDisposable
         if (ids.Length > maxLength) ids = ids[..maxLength];
         var mask = Enumerable.Repeat(1, ids.Length).ToArray();
 
+        // Every position is segment 0, and segment 0 is already folded into the word embeddings,
+        // so the encoder's own forward pass is exact here and cheaper than rebuilding it.
         return Encoder.Forward(ids, mask);
+    }
+
+    /// <summary>The final hidden states for a sentence pair, one row per token.</summary>
+    /// <param name="first">The first sequence - a question, a premise, a query.</param>
+    /// <param name="second">The second - a context, a hypothesis, a candidate.</param>
+    /// <param name="maxLength">Truncation limit in tokens.</param>
+    /// <returns>The hidden states and the encoding they came from.</returns>
+    /// <remarks>
+    /// The embedding step is rebuilt here rather than delegated, because the encoder underneath has
+    /// no segment input and a pair needs one. Segment 0 arrives folded into the word embeddings;
+    /// this adds the segment-1 difference to the positions that need it, before the embedding norm
+    /// rather than after - which is where the reference implementation adds it, and the two are not
+    /// the same thing.
+    /// </remarks>
+    public (NdArray Hidden, Encoding Encoding) HiddenPair(string first, string second, int maxLength = 512)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var encoding = Tokenizer.Encode(first, second);
+        if (encoding.Length > maxLength)
+        {
+            encoding = new Encoding(
+                [.. encoding.Ids.Take(maxLength)],
+                [.. encoding.Tokens.Take(maxLength)],
+                [.. encoding.AttentionMask.Take(maxLength)],
+                [.. encoding.TypeIds.Take(maxLength)],
+                [.. encoding.SpecialTokensMask.Take(maxLength)],
+                [.. encoding.Offsets.Take(maxLength)]);
+        }
+
+        return (Forward(encoding.ToIdArray(), [.. encoding.TypeIds], encoding.ToMaskArray()), encoding);
+    }
+
+    /// <summary>Runs the encoder with explicit segment ids.</summary>
+    /// <param name="ids">Token ids.</param>
+    /// <param name="typeIds">Segment id per position: 0 for the first sequence, 1 for the second.</param>
+    /// <param name="attentionMask">1 for a real token, 0 for padding.</param>
+    public NdArray Forward(int[] ids, int[] typeIds, int[] attentionMask)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var delta = Report.SegmentDelta;
+        var needsSegments = delta is not null && typeIds.Any(t => t != 0);
+
+        if (!needsSegments) return Encoder.Forward(ids, attentionMask);
+
+        var width = Config.HiddenSize;
+        var hidden = NdArray.Zeros(ids.Length, width);
+
+        for (var i = 0; i < ids.Length; i++)
+        {
+            var id = Math.Clamp(ids[i], 0, Config.VocabularySize - 1);
+            var segment = typeIds[i] == 0 ? 0.0 : 1.0;
+
+            for (var d = 0; d < width; d++)
+            {
+                hidden[i, d] = Encoder.TokenEmbeddings[id, d]
+                    + Encoder.PositionEmbeddings[i, d]
+                    + segment * delta!.At(d);
+            }
+        }
+
+        hidden = Encoder.EmbeddingNorm.Forward(hidden);
+        foreach (var layer in Encoder.Layers) hidden = layer.Forward(hidden, attentionMask);
+
+        return hidden;
     }
 
     /// <summary>A single vector for a text, mean-pooled over its tokens.</summary>
@@ -274,6 +355,57 @@ public sealed class TransformerModel : IDisposable
                 Tokenizer.IdToToken(p.id),
                 p.score,
                 text.Replace(Tokenizer.IdToToken(Tokenizer.MaskId), Tokenizer.IdToToken(p.id))))];
+    }
+
+    /// <summary>Finds the named entities in a text.</summary>
+    /// <param name="text">The input.</param>
+    /// <param name="maxLength">Truncation limit in tokens.</param>
+    /// <exception cref="InvalidOperationException">The checkpoint has no token classification head.</exception>
+    /// <remarks>
+    /// Spans come back as substrings of <paramref name="text"/>, taken from the tokenizer's
+    /// offsets - so the original casing and any punctuation inside an entity survive, which
+    /// rejoining subword pieces would not manage.
+    /// </remarks>
+    public IReadOnlyList<Entity> FindEntities(string text, int maxLength = 512)
+    {
+        if (_tokenClassifier is null)
+        {
+            throw new InvalidOperationException(
+                $"'{RepoId}' has no token classification head. Load a checkpoint fine-tuned for it, "
+                + "for example dslim/bert-base-NER.");
+        }
+
+        var encoding = Tokenizer.Encode(text);
+        var hidden = Hidden(text, maxLength);
+        var logits = _tokenClassifier.Apply(hidden);
+
+        return TokenClassificationHead.Decode(text, encoding, logits, Config.IdToLabel);
+    }
+
+    /// <summary>Answers a question from a passage, by extracting a span of it.</summary>
+    /// <param name="question">What to ask.</param>
+    /// <param name="context">The passage the answer must come from.</param>
+    /// <param name="topK">How many candidate spans to return, best first.</param>
+    /// <param name="maxLength">Truncation limit in tokens.</param>
+    /// <exception cref="InvalidOperationException">The checkpoint has no question answering head.</exception>
+    /// <remarks>
+    /// The question and the passage go in as a pair, so this is also the path that exercises the
+    /// segment embeddings - an answer decoded from a model that ignored them is subtly worse in a
+    /// way no shape check would catch.
+    /// </remarks>
+    public IReadOnlyList<Answer> Answer(string question, string context, int topK = 1, int maxLength = 512)
+    {
+        if (_questionAnswering is null)
+        {
+            throw new InvalidOperationException(
+                $"'{RepoId}' has no question answering head. Load a checkpoint fine-tuned for it, "
+                + "for example distilbert-base-cased-distilled-squad.");
+        }
+
+        var (hidden, encoding) = HiddenPair(question, context, maxLength);
+        var (start, end) = _questionAnswering.Apply(hidden);
+
+        return QuestionAnsweringHead.Decode(context, encoding, start, end, topK: topK);
     }
 
     /// <summary>Cosine similarity between two texts' embeddings, in <c>[-1,1]</c>.</summary>

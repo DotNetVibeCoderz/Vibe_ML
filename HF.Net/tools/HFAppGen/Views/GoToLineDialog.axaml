@@ -12,7 +12,7 @@
     <TextBlock Text="Go to line" FontSize="{DynamicResource FontLarge}"
                Foreground="{DynamicResource TextHighBrush}" />
 
-    <TextBox Name="LineBox" Classes="field" Watermark="Line number" KeyDown="OnKeyDown" />
+    <TextBox Name="LineBox" Classes="field" PlaceholderText="Line number" KeyDown="OnKeyDown" />
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
       <Button Classes="ghost" Content="Cancel" Click="OnCancel" />

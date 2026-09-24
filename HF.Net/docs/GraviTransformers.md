@@ -75,6 +75,46 @@ This is also the sharpest available check that a checkpoint loaded correctly. A 
 transposed weight or a shifted position embedding still produces plausible-looking vectors - but it
 does not answer the France question with *paris*.
 
+### Named entities
+
+```csharp
+using var model = TransformerModel.Load("dslim/bert-base-NER");
+
+foreach (var entity in model.FindEntities(text))
+    Console.WriteLine($"{entity.Label,-5} {entity.Text}  [{entity.Start}..{entity.End})  {entity.Score:P1}");
+
+// PER   Kang Fadhil        [0..11)     98.8 %
+// ORG   Gravicode Studios  [20..37)    99.5 %
+// LOC   Bandung            [41..48)    99.7 %
+```
+
+BIO tags are decoded into whole entities, and each one is returned as a **span of the original
+string** rather than as rejoined subword pieces. That keeps the casing and any punctuation inside
+the entity, and it leaves nothing for a caller to clean up by guessing at `##` prefixes.
+`model.HasTokenClassificationHead` is the check.
+
+A token classifier stores `classifier.weight` with the same shape a sequence classifier does, so the
+loader claims the token head first; the other way round, every NER checkpoint would load as a
+sentence classifier with several hundred nonsense classes.
+
+### Question answering
+
+```csharp
+using var model = TransformerModel.Load("distilbert-base-cased-distilled-squad");
+
+foreach (var answer in model.Answer(question, passage, topK: 3))
+    Console.WriteLine($"{answer.Text}  ({answer.Score:P1})");
+
+// safetensors and PyTorch checkpoints  (52.4 %)
+// both safetensors and PyTorch checkpoints  (37.8 %)
+```
+
+The question and the passage go in as a pair, which is what exercises `SegmentDelta`. The span
+search is constrained rather than a pair of independent argmaxes: only positions in segment 1 are
+eligible, the end may not precede the start, and the length is capped. An unconstrained search
+happily answers with a span that starts in the question and ends in the passage.
+`model.HasQuestionAnsweringHead` is the check.
+
 ### Embeddings
 
 ```csharp
@@ -156,10 +196,14 @@ the most-downloaded model on the Hub. Both are accepted.
 
 **Token type embeddings are folded into the word embeddings.** For a single-sequence input every
 position gets segment 0, so adding `token_type_embeddings[0]` to every row of the word embedding
-matrix is *exactly* equivalent. It is not equivalent for a sentence pair -
-`CheckpointLoader.SupportsPairs` is `false` and says so. Dropping the term instead would shift every
-hidden state by a constant vector that the first layer norm does not remove, because it is added
-before the norm rather than after.
+matrix is *exactly* equivalent. Dropping the term instead would shift every hidden state by a
+constant vector that the first layer norm does not remove, because it is added before the norm
+rather than after.
+
+A sentence pair needs segment 1 as well, and folding cannot supply it. The **difference**
+`token_type_embeddings[1] - token_type_embeddings[0]` is carried on `LoadReport.SegmentDelta` and
+added per position for the rows that belong to the second sequence, which reproduces both segments
+exactly. `CheckpointLoader.SupportsPairs` is `true`.
 
 ## Task heads
 
@@ -191,9 +235,7 @@ There is no KV cache because this is an encoder: every position attends to every
 ## Limits
 
 - Decoder-only and encoder-decoder architectures are refused.
-- Sentence pairs are approximate - see the token-type note above.
-- Vision models (ViT, CLIP), token classification and question answering are on the roadmap; see
-  [PLAN.md](../PLAN.md).
+- Vision models (ViT, CLIP) are on the roadmap; see [PLAN.md](../PLAN.md).
 
 ## See also
 

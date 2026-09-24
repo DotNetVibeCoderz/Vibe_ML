@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.1.0 is implemented: **25 projects, 178 tests passing**, the whole solution builds clean, and the
+v0.1.0 is implemented: **26 projects, 191 tests passing**, the whole solution builds clean, and the
 eight libraries are published on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the
 specification of record; [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says
 where it is going.
@@ -119,6 +119,14 @@ ProjectReference into a sibling checkout packs into a .nupkg with no dependency 
 Adding a library means adding all five artifacts (src, sample, tests, benchmark, docs) plus
 `docs/<Name>.md` **and** `docs/id/<Name>.md` — the spec treats them as one deliverable.
 
+`samples/HFGallery` is an Avalonia app holding one case per capability, each running against a real
+model. A case is a `GalleryCase` subclass registered in `Catalog.All` that returns a `CaseResult`;
+whichever fields it fills in get drawn. `--run <case>` runs one headless, which is the quickest way
+to check a model-facing change end to end without opening a window. Its charts are drawn by hand in
+`Controls/Charts.cs` — there is no charting library, and `Palette.Resource` must pass
+`ActualThemeVariant` or every token defined under `ThemeDictionaries` silently resolves to the
+fallback grey.
+
 ## Testing conventions
 
 Pin against something independently known — the reference implementation's own output, a
@@ -135,10 +143,12 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 178
+dotnet test                                                     # all 191
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased
+dotnet run --project samples/HFGallery                          # the use case gallery
+dotnet run --project samples/HFGallery -- --run Named           # one case, headless
 dotnet run --project tools/HFAppGen                             # the IDE
 dotnet run --project tools/HFAppGen -- --selftest               # headless LLM check
 dotnet pack HF.Net.sln -c Release                               # -> artifacts/packages

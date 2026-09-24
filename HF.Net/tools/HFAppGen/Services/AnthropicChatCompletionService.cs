@@ -105,12 +105,15 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream);
 
-        // Server-sent events: data lines carry JSON, everything else is framing.
-        while (!reader.EndOfStream)
+        // Server-sent events: data lines carry JSON, everything else is framing. The loop reads
+        // until ReadLineAsync returns null rather than testing EndOfStream, which blocks the thread
+        // on a network stream to find out whether more is coming.
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null) break;
             if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.Ordinal)) continue;
 
             var json = line[5..].Trim();

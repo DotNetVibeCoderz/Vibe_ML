@@ -27,13 +27,16 @@ So the order of work is formats first, models second, training last.
    than token embeddings, so the block is already there; what is missing is the patch embedding, the
    image preprocessing pipeline (resize, centre crop, normalise) and CLIP's dual-tower contrastive
    head. This is the largest single increase in what HF.Net can open.
-2. **Token classification and question answering.** Both are a linear head over the per-token hidden
-   states, which already exist. The work is in the *decoding*: aggregating subword predictions back
-   into word-level spans, and choosing a start/end pair under the constraint that end ≥ start. The
-   offsets are already exact, so the spans can be returned as real substrings.
-3. **Sentence-pair fidelity.** Add a segment input to the encoder so `token_type_embeddings[1]` can
-   be applied. Today segment 0 is folded into the word embeddings, which is exact for single
-   sequences and approximate for pairs — this closes that gap and makes cross-encoders correct.
+2. ~~**Token classification and question answering.**~~ **Done.** `FindEntities` decodes BIO tags
+   into whole entities and `Answer` searches a constrained start/end pair; both return real
+   substrings of the input, taken from the tokenizer's offsets. The ordering trap worth recording:
+   a token classifier's `classifier.weight` has the same shape a sequence classifier's does, so the
+   token head has to be claimed first or every NER checkpoint loads as a sentence classifier with
+   several hundred nonsense classes.
+3. ~~**Sentence-pair fidelity.**~~ **Done.** The *difference*
+   `token_type_embeddings[1] - token_type_embeddings[0]` is carried on `LoadReport.SegmentDelta` and
+   added per position to the rows of the second sequence. Segment 0 stays folded into the word
+   embeddings, so both segments are now exact and `CheckpointLoader.SupportsPairs` is `true`.
 4. **Sharded checkpoints end to end.** The index reader exists; the loader should stream a model
    that does not fit in memory rather than requiring it to.
 
@@ -86,7 +89,9 @@ These do not wait for a version.
 
 - **Bilingual documentation.** Every page under `docs/` has a counterpart under `docs/id/`. A page
   that exists in only one language is an unfinished page.
-- **Samples and notebooks** for each library, and screenshots in the docs.
+- **Samples and notebooks** for each library, and screenshots in the docs. `samples/HFGallery` is
+  where a new capability earns its demonstration: a case there runs against a real model, so a
+  feature that cannot be shown working in it is not finished.
 - **Tests pinned to something independently known** — a published figure, a closed-form answer, or
   the reference implementation's own output. A test that only checks HF.Net against itself passes
   just as happily when both sides are wrong.
@@ -95,10 +100,11 @@ These do not wait for a version.
 
 ## Publishing
 
-`Gravicode.HFNet.*` to nuget.org once v0.2 lands, `GraviHub` first — everything depends on it, and a
-dependency that is not yet indexed leaves the dependents unrestorable for a few minutes. Until then
-generated projects use `ProjectReference`, which is why HFAppGen has an `HFNetProjectReferences`
-tool.
+`Gravicode.HFNet.*` is on nuget.org, `GraviHub` pushed first — everything depends on it, and a
+dependency that is not yet indexed leaves the dependents unrestorable for a few minutes.
+`hf-net-release.yml` does this from a `hf-net-v*` tag. Generated projects still use
+`ProjectReference`, which is why HFAppGen has an `HFNetProjectReferences` tool: a generated app that
+restores from nuget.org cannot be tested against uncommitted changes to the libraries.
 
 ## Deliberately out of scope
 

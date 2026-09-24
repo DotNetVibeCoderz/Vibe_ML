@@ -99,7 +99,7 @@
 
           <TextBox Name="Composer" Grid.Row="0" Classes="field"
                    Text="{Binding Composer}"
-                   Watermark="Ask Jack to build something…"
+                   PlaceholderText="Ask Jack to build something…"
                    AcceptsReturn="True" TextWrapping="Wrap"
                    MinHeight="72" MaxHeight="190"
                    VerticalContentAlignment="Top"

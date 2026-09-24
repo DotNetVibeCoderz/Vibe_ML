@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>HFGallery</RootNamespace>
+    <AssemblyName>HFGallery</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Themes\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GraviHub\GraviHub.csproj" />
+    <ProjectReference Include="..\..\src\GraviTokenizers\GraviTokenizers.csproj" />
+    <ProjectReference Include="..\..\src\GraviTransformers\GraviTransformers.csproj" />
+    <ProjectReference Include="..\..\src\GraviDiffusers\GraviDiffusers.csproj" />
+    <ProjectReference Include="..\..\src\GraviDatasets\GraviDatasets.csproj" />
+  </ItemGroup>
+
+</Project>

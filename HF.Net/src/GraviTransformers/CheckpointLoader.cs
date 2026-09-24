@@ -10,6 +10,17 @@ namespace Gravicode.HFNet.GraviTransformers;
 /// <param name="Prefix">The parameter-name prefix that was detected, for example <c>bert.</c>.</param>
 public sealed record LoadReport(IReadOnlyList<string> Loaded, IReadOnlyList<string> Missing, string Prefix)
 {
+    /// <summary>
+    /// What to add to a position whose segment id is 1, or <c>null</c> when the checkpoint has no
+    /// token type embeddings.
+    /// </summary>
+    /// <remarks>
+    /// Segment 0 is folded into the word embeddings, so only the <i>difference</i> between the two
+    /// segment vectors is left to apply - and it is a single vector, constant across positions.
+    /// Keeping it here is what lets a sentence pair be encoded exactly rather than approximately.
+    /// </remarks>
+    public NdArray? SegmentDelta { get; init; }
+
     /// <summary>Whether every parameter the encoder needs was found.</summary>
     public bool IsComplete => Missing.Count == 0;
 
@@ -33,20 +44,23 @@ public sealed record LoadReport(IReadOnlyList<string> Loaded, IReadOnlyList<stri
 /// the attention projections are square and accept either reading silently.
 /// </para>
 /// <para>
-/// <b>Token type embeddings are folded into the word embeddings.</b> The encoder underneath has no
-/// segment input, but for a single-sequence input every position gets segment 0, so adding
-/// <c>token_type_embeddings[0]</c> to every row of the word embedding matrix is exactly equivalent.
-/// It is not equivalent for a sentence pair, and <see cref="SupportsPairs"/> reports that.
+/// <b>Token type embeddings are split in two.</b> The encoder underneath has no segment input, so
+/// <c>token_type_embeddings[0]</c> is folded into every row of the word embedding matrix - exact,
+/// because every position of a single sequence is segment 0 - and the difference between the two
+/// segment vectors is carried on <see cref="LoadReport.SegmentDelta"/> for a pair to apply per
+/// position. Both halves are exact; see <see cref="SupportsPairs"/>.
 /// </para>
 /// </remarks>
 public static class CheckpointLoader
 {
     /// <summary>Whether a model loaded this way reproduces sentence-pair inputs exactly.</summary>
     /// <remarks>
-    /// False: the segment-1 embedding cannot be folded away the way segment 0 can. Pair inputs
-    /// still run and still give sensible output, but they are not bit-identical to the reference.
+    /// True. Segment 0 is folded into the word embeddings, and the remaining segment-1 difference
+    /// is carried on <see cref="LoadReport.SegmentDelta"/> and applied per position by
+    /// <c>TransformerModel.Hidden</c>. Both halves are exact, so a pair encodes to the same hidden
+    /// states the reference implementation produces.
     /// </remarks>
-    public const bool SupportsPairs = false;
+    public const bool SupportsPairs = true;
 
     /// <summary>Builds an encoder from a config and fills it from a checkpoint.</summary>
     /// <param name="config">The model's configuration.</param>
@@ -107,7 +121,10 @@ public static class CheckpointLoader
             LoadNorm(weights, block.OutputNorm, names.OutputNorm(layer), loaded, missing);
         }
 
-        var report = new LoadReport(loaded, missing, names.Prefix);
+        var report = new LoadReport(loaded, missing, names.Prefix)
+        {
+            SegmentDelta = SegmentDeltaOf(weights, names, config.HiddenSize),
+        };
 
         if (strict && !report.IsComplete)
         {
@@ -120,6 +137,21 @@ public static class CheckpointLoader
 
         if (report.IsComplete) model.MarkPretrained();
         return (model, report);
+    }
+
+    /// <summary>
+    /// The difference between the two segment embeddings, which is all that is left to apply once
+    /// segment 0 has been folded into the word embeddings.
+    /// </summary>
+    private static NdArray? SegmentDeltaOf(WeightStore weights, Naming names, int hiddenSize)
+    {
+        if (!weights.TryRead(names.TokenTypeEmbeddings, out var tokenTypes)) return null;
+        if (tokenTypes.Rank != 2 || tokenTypes.Shape[0] < 2 || tokenTypes.Shape[1] != hiddenSize) return null;
+
+        var delta = NdArray.Zeros(hiddenSize);
+        for (var d = 0; d < hiddenSize; d++) delta[d] = tokenTypes[1, d] - tokenTypes[0, d];
+
+        return delta;
     }
 
     /// <summary>

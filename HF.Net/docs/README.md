@@ -7,6 +7,7 @@
 ## Start here
 
 - [Getting started](getting-started.md) — install, first model, first prediction
+- [HF Gallery](hf-gallery.md) — nine use cases running against real models, in one window
 - [HFAppGen](HFAppGen.md) — the IDE that writes HF.Net applications for you
 - [Benchmarks](benchmarks.md) — HF.Net measured against the Python reference
 - Notebooks: [01 getting started](../notebooks/01-hugging-face-from-dotnet.ipynb) · [02 performance](../notebooks/02-where-the-time-goes.ipynb)

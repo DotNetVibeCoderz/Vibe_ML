@@ -51,3 +51,33 @@ if (model.HasClassificationHead)
     }
 }
 else Console.WriteLine("(no classification head in this checkpoint)");
+
+// --- named entities -----------------------------------------------------------
+if (model.HasTokenClassificationHead)
+{
+    const string Story = "Kang Fadhil founded Gravicode Studios in Bandung, and later worked with Microsoft.";
+
+    Console.WriteLine($"\nentities in: {Story}");
+    foreach (var entity in model.FindEntities(Story))
+        Console.WriteLine($"    {entity.Label,-8} {entity.Text,-20} {entity.Score:P1}  [{entity.Start}..{entity.End})");
+}
+
+// --- question answering -------------------------------------------------------
+if (model.HasQuestionAnsweringHead)
+{
+    const string Context =
+        "HF.Net is a Hugging Face style machine learning stack for .NET, built by Gravicode Studios. "
+        + "It reads both safetensors and PyTorch checkpoints, and its tokenizers produce the same ids "
+        + "as the reference implementation.";
+
+    foreach (var question in (string[])
+    [
+        "What does HF.Net read?",
+        "Who built HF.Net?",
+    ])
+    {
+        Console.WriteLine($"\nQ: {question}");
+        foreach (var answer in model.Answer(question, Context, topK: 2))
+            Console.WriteLine($"    {answer}");
+    }
+}

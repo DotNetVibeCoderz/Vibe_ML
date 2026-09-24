@@ -7,6 +7,7 @@
 ## Mulai dari sini
 
 - [Memulai](memulai.md) — pasang, model pertama, prediksi pertama
+- [HF Gallery](hf-gallery.md) — sembilan use case berjalan terhadap model sungguhan, dalam satu jendela
 - [HFAppGen](HFAppGen.md) — IDE yang menuliskan aplikasi HF.Net untuk Anda
 - [Benchmark](benchmarks.md) — HF.Net diukur terhadap rujukan Python
 - Notebook: [01 memulai](../../notebooks/01-hugging-face-from-dotnet.ipynb) · [02 kinerja](../../notebooks/02-where-the-time-goes.ipynb)
