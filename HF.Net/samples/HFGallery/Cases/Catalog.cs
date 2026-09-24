@@ -93,6 +93,7 @@ public static class Catalog
         new AnswerCase(),
         new SearchCase(),
         new EmbeddingMapCase(),
+        new LoraCase(),
         new TokenizerCase(),
         new CheckpointCase(),
         new SchedulerCase(),

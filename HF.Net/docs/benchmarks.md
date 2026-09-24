@@ -222,7 +222,8 @@ model you actually have.
 | Loading and inspecting a checkpoint | **HF.Net** — level on headers, and it reads formats Python's fast path refuses |
 | Running an encoder in production | **ONNX through GraviOptimum** — faster than torch, from .NET |
 | Running an encoder to understand it, or checking an export | **HF.Net managed** — 3x torch on a sentence, and exact to 1e-13 in float64 |
-| Training | **Python.** HF.Net does not backpropagate into a pretrained encoder; see [PLAN.md](../PLAN.md) |
+| Training LoRA on hundreds of examples | **HF.Net** — `PeftModel.Train`, exact, and the adapter loads in Python PEFT; see [GraviPEFT](GraviPEFT.md) |
+| Training at scale | **Python.** HF.Net trains on the CPU one sequence at a time; train there and serve the adapter here |
 
 ## Reproducing this
 

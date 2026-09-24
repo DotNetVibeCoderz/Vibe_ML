@@ -35,7 +35,7 @@ Each mirrors a package in the Python Hugging Face stack.
 | **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE and Unigram, loading `tokenizer.json` — with character offsets that point back into the original text |
 | **GraviDatasets** | `datasets` | CSV, Parquet, JSON and JSON Lines, Hub datasets, splits, streaming and memory-mapped reads |
 | **GraviTransformers** | `transformers` | Load pretrained BERT-family encoders and ViT vision encoders and run them: classification, fill-mask, named entities, question answering, embeddings, similarity, image classification |
-| **GraviPEFT** | `peft` | LoRA adapters in the Hugging Face PEFT format — apply, merge, save, load |
+| **GraviPEFT** | `peft` | LoRA adapters in the Hugging Face PEFT format — train, apply, merge, save, load |
 | **GraviAccelerate** | `accelerate` | Device selection across CPU SIMD and ILGPU, sharding, weighted gradient averaging, honest throughput measurement |
 | **GraviOptimum** | `optimum` | ONNX Runtime inference with an explicitly chosen execution provider, and weight quantisation that reports its measured error |
 | **GraviDiffusers** | `diffusers` | DDPM, DDIM and Euler schedulers, and a Stable Diffusion text-to-image pipeline over ONNX |
@@ -112,9 +112,10 @@ Stated plainly, because a library that fails quietly is worse than one that says
 
 - **Decoder-only models** — GPT, Llama, Mistral — are **refused**, not half-loaded. They need causal
   masking and rotary positions this encoder does not have.
-- **LoRA adapter matrices are not trainable here.** They can be applied, merged, saved and loaded,
-  and a task head trains over a frozen encoder. Train the adapters themselves with PEFT in Python
-  and serve them here.
+- **LoRA training is CPU-bound and one sequence at a time.** `PeftModel.Train` fits adapters and a
+  sequence classification head exactly, which is checked against numerical gradients and against
+  PEFT in Python. It suits hundreds of examples. For tens of thousands, train with PEFT in Python
+  and serve the adapter here. Token classification and question answering heads are not trained.
 - **CLIP is not implemented.** Its text tower is causal, which this encoder is not. ViT and DeiT
   are; a windowed or convolutional backbone — Swin, ConvNeXt — is refused by name.
 - **Diffusion needs an ONNX export**, not the PyTorch weights.

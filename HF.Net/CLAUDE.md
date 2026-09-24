@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.2.0 is published: **26 projects, 250 tests passing**, the whole solution builds clean, and the
-eight libraries are published on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the
-specification of record; [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says
-where it is going.
+v0.2.0 is published: the whole solution builds clean, and the eight libraries are on nuget.org as
+`Gravicode.HFNet.*`. Main is ahead of it with v0.3's LoRA training (unreleased), at **26 projects,
+277 tests passing**. `requirements.md` remains the specification of record;
+[Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`
 defaults to `.slnx` on .NET 10, so pass `--format sln` if regenerating).
@@ -90,6 +90,21 @@ root rather than here — see below.
   foundation's packed `MatMul` rate (about 13 GMAC/s here). It beats `MatMul` below about 200 rows
   and loses by 1.3x at 577 (ViT at 384 px). For throughput the answer is an ONNX export through
   GraviOptimum — see [docs/benchmarks.md](docs/benchmarks.md).
+- **LoRA training has its own forward pass.** `GraviPEFT/LoraEncoder.cs` re-implements the text
+  encoder's forward pass, with adapters in the loop and a tape for its hand-written backward pass.
+  It reuses `Linear`, `Activation` and `Simd` from `Kernels.cs` through `InternalsVisibleTo`.
+  Change the inference forward pass (`CompiledEncoder`, `EncoderBlock`) and this one has to change
+  too. `Without_adapters_the_forward_pass_is_the_inference_encoder_s` catches the drift at 1e-12.
+  Any change to the backward pass must keep `Every_adapter_gradient_agrees_with_numerical_differentiation`
+  passing. That test is the milestone, not a formality.
+- **Adapters must be keyed by the checkpoint's module path** (`bert.encoder.layer.0.attention.self.
+  query`). PEFT in Python places tensors by name and skips, without an error, any it cannot place.
+  The old `layer.0.query` keys loaded in Python as no adapter at all.
+- **Never seed from `HashCode.Combine` or `string.GetHashCode`.** .NET randomises both per process.
+  Adapter initialisation did this, and two runs of one configuration trained differently.
+- **HF Gallery screenshots: `--open <case> --capture <png>`.** The window renders itself. A screen
+  grab needs the window in front, and Windows can refuse that to a background process. The grab
+  then silently captures whatever else is on the desktop.
 - **The GPU is not a win here.** Everything is double precision, which consumer and integrated GPUs
   run at a fraction of their single-precision rate; the foundation measured its ILGPU path 5–8x
   *slower* than the CPU.
@@ -185,7 +200,7 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 250
+dotnet test                                                     # all 277
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

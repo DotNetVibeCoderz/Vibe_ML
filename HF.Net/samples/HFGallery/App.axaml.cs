@@ -39,6 +39,13 @@ public sealed partial class App : Application
             }
 
             desktop.MainWindow = new MainWindow { DataContext = model };
+
+            // The size the documentation's screenshots are taken at.
+            if (Program.CapturePath is not null)
+            {
+                desktop.MainWindow.Width = 1366;
+                desktop.MainWindow.Height = 720;
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

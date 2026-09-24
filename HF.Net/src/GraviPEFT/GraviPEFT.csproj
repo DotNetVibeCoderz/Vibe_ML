@@ -8,6 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The backward pass is checked against numerical differentiation from the tests. -->
+    <InternalsVisibleTo Include="GraviPEFT.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Gravicode.Science.GraviNum" />
     <PackageReference Include="Gravicode.Science.GraviLearn" />
     <PackageReference Include="Gravicode.Science.GraviText" />

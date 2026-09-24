@@ -59,23 +59,33 @@ So the order of work is formats first, models second, training last.
 
 **The goal:** make LoRA adapters trainable, not merely loadable.
 
-The blocker is specific and worth stating. The foundation's autodiff encoder
-(`TransformerTape.MultiHeadAttention`) takes no biases on its Q/K/V projections, while every
-pretrained BERT has them. A gradient taken through it would therefore be the gradient of a
-*slightly different model* — which trains, converges, and produces weights that are quietly wrong.
+**The milestone is met, by route (b).** The blocker was specific: the foundation's autodiff encoder
+(`TransformerTape.MultiHeadAttention`) has no biases on its Q/K/V projections, while every pretrained
+BERT has them. A gradient taken through it would have been the gradient of a *slightly different
+model*. `GraviPEFT` now has its own backward pass (`LoraEncoder`), written by hand over the same
+kernels inference runs on. Route (a), contributing biased attention to `GraviText`'s tape, is still
+worth doing for the ecosystem, but nothing here waits on it.
 
-Two routes, to be decided by measurement:
-
-- **(a)** Contribute biased attention to `GraviText`'s tape and train through it.
-- **(b)** Write a tape encoder inside GraviPEFT from the foundation's `Tensor` primitives, matching
-  the pretrained architecture exactly.
-
-(a) is better for the ecosystem; (b) does not require a release of the foundation. Either way the
-first milestone is **gradient agreement**: a numerically differentiated loss and the tape's gradient
-agreeing to 1e-6 on a two-layer model. Nothing else is worth building until that passes.
-
-Then: Adam with weight decay, gradient accumulation, a learning-rate schedule, and adapters that
-round-trip through the PEFT format and give the same predictions in Python.
+1. ~~**Gradient agreement.**~~ **Done.** Every adapter entry, on all six projections of a two-layer
+   model with every bias and norm perturbed, agrees with central differences to 1e-6. That holds
+   for both GELUs and with dropout. Breaking the backward pass on purpose fails the check by 2x.
+2. ~~**AdamW, gradient accumulation, a learning-rate schedule.**~~ **Done**, as `torch.optim.AdamW`,
+   `get_linear_schedule_with_warmup` and `clip_grad_norm_` compute them, and pinned to those
+   formulas. That includes the reference's zero learning rate on the first step of any warm-up.
+3. ~~**Adapters that round-trip through the PEFT format.**~~ **Done.** Adapters now take the
+   checkpoint's own module paths. An adapter trained here, loaded into PEFT 0.21 in Python, gives
+   the same hidden states as HF.Net's merged model to 7e-7. Before this, `ApplyLoRA` named them
+   `layer.0.query`, and Python loaded none of them without saying so.
+4. **What is left:**
+   - **Saving the head.** `Train` fits a mean-pooled linear head that lives only in memory. PEFT's
+     answer is `modules_to_save`, which needs a head shaped like Transformers' own (pooler plus
+     classifier), not this one.
+   - **Token classification and question answering heads.** The encoder's backward pass already
+     supports them; only the loss and the head differ.
+   - **Batched steps.** Sequences go through one at a time, unpadded, so a step is about three
+     forward passes per example. Padding with a mask would let the linear kernel see many rows
+     at once. It needs the attention backward pass to respect the mask, and a gradient check that
+     covers padded positions.
 
 ## v0.4 — performance
 

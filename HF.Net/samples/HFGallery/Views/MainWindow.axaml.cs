@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using HFGallery.ViewModels;
 
@@ -36,5 +38,21 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(
             () => this.FindControl<Border>("ResultPanel")?.BringIntoView(),
             DispatcherPriority.Loaded);
+
+        // Late enough for the scroll and the charts' first frame to have happened.
+        if (Program.CapturePath is { } path) DispatcherTimer.RunOnce(() => Capture(path), TimeSpan.FromSeconds(1.5));
+    }
+
+    /// <summary>Renders the window into a PNG and closes it, for <c>--capture</c>.</summary>
+    private void Capture(string path)
+    {
+        var size = new PixelSize((int)Bounds.Width, (int)Bounds.Height);
+        using (var bitmap = new RenderTargetBitmap(size, new Vector(96, 96)))
+        {
+            bitmap.Render(this);
+            bitmap.Save(path, new PngBitmapEncoderOptions());
+        }
+
+        Close();
     }
 }

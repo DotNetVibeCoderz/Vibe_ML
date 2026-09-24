@@ -35,6 +35,9 @@ public static class Program
         var opened = Array.FindIndex(args, a => a.Equals("--open", StringComparison.OrdinalIgnoreCase));
         if (opened >= 0 && opened + 1 < args.Length) StartOn = args[opened + 1];
 
+        var capture = Array.FindIndex(args, a => a.Equals("--capture", StringComparison.OrdinalIgnoreCase));
+        if (capture >= 0 && capture + 1 < args.Length) CapturePath = Path.GetFullPath(args[capture + 1]);
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         return 0;
     }
@@ -48,6 +51,17 @@ public static class Program
     /// from the command line.
     /// </remarks>
     public static string? StartOn { get; private set; }
+
+    /// <summary>
+    /// Where <c>--capture</c> asked for a picture of the window once the <c>--open</c> case has
+    /// finished, after which the gallery exits.
+    /// </summary>
+    /// <remarks>
+    /// The window renders itself rather than being copied off the screen. A screen grab needs the
+    /// window in front, and Windows is free to refuse that to a process the user is not using,
+    /// in which case the grab silently gets whatever else is on the desktop.
+    /// </remarks>
+    public static string? CapturePath { get; private set; }
 
     /// <summary>Whether <c>--light</c> asked for the light theme.</summary>
     /// <remarks>

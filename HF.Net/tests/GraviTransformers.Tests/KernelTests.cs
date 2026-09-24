@@ -245,4 +245,61 @@ public sealed class KernelTests
             1e-11,
             "block");
     }
+
+    // ------------------------------------------------------------------ backward
+
+    [Theory]
+    [InlineData(1, 7, 1)]
+    [InlineData(3, 13, 3)]
+    [InlineData(5, 130, 65)]   // past an input tile, with a partial vector at its end
+    [InlineData(9, 256, 40)]   // two whole input tiles and a partial block of rows
+    public void Transposed_linear_agrees_with_a_naive_product(int rows, int inputs, int outputs)
+    {
+        // dx = dy W: the input gradient of a layer whose weights are frozen. A tile boundary that
+        // drops a column or a block that reuses the wrong row is invisible in training - the loss
+        // still falls - so it is pinned here against the loop it replaces.
+        var weight = Matrix(outputs, inputs, 21);
+        var gradient = Values(rows * outputs, 22);
+
+        var actual = Linear.From(weight, null).ApplyTransposed(gradient, rows);
+
+        var expected = new double[rows * inputs];
+        for (var r = 0; r < rows; r++)
+        {
+            for (var i = 0; i < inputs; i++)
+            {
+                var sum = 0.0;
+                for (var o = 0; o < outputs; o++) sum += gradient[r * outputs + o] * weight[o, i];
+                expected[r * inputs + i] = sum;
+            }
+        }
+
+        Close(expected, actual, 1e-12, "dx");
+    }
+
+    [Theory]
+    [InlineData("gelu")]
+    [InlineData("gelu_new")]
+    [InlineData("relu")]
+    public void Each_activation_s_derivative_is_the_slope_of_the_function_itself(string name)
+    {
+        // Pinned to the forward function that inference runs, not to a formula for it: a derivative
+        // of the exact GELU paired with the tanh GELU would train, and train the wrong model.
+        var function = Activation.For(name);
+        var derivative = Activation.DerivativeFor(name);
+        const double H = 1e-6;
+
+        for (var x = -5.0; x <= 5.0; x += 0.173)
+        {
+            var slope = (function(x + H) - function(x - H)) / (2 * H);
+            Assert.True(Math.Abs(derivative(x) - slope) < 1e-8, $"{name}'({x}) = {derivative(x)} against {slope}");
+        }
+    }
+
+    [Fact]
+    public void An_activation_with_no_derivative_is_refused_by_name()
+    {
+        var error = Assert.Throws<NotSupportedException>(() => Activation.DerivativeFor("swish"));
+        Assert.Contains("swish", error.Message);
+    }
 }

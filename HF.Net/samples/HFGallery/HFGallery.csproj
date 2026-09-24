@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\GraviTransformers\GraviTransformers.csproj" />
     <ProjectReference Include="..\..\src\GraviDiffusers\GraviDiffusers.csproj" />
     <ProjectReference Include="..\..\src\GraviDatasets\GraviDatasets.csproj" />
+    <ProjectReference Include="..\..\src\GraviPEFT\GraviPEFT.csproj" />
   </ItemGroup>
 
 </Project>

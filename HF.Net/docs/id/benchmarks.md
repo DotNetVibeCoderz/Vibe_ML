@@ -224,7 +224,8 @@ bisa membuka model yang benar-benar Anda miliki.
 | Memuat dan memeriksa checkpoint | **HF.Net** — seimbang pada header, dan membaca format yang ditolak jalur cepat Python |
 | Menjalankan encoder di produksi | **ONNX melalui GraviOptimum** — lebih cepat daripada torch, dari .NET |
 | Menjalankan encoder untuk memahaminya, atau memeriksa sebuah ekspor | **HF.Net managed** — 3x torch untuk satu kalimat, dan eksak hingga 1e-13 dalam float64 |
-| Pelatihan | **Python.** HF.Net tidak melakukan backpropagation ke encoder pralatih; lihat [PLAN.md](../../PLAN.md) |
+| Melatih LoRA pada ratusan contoh | **HF.Net** — `PeftModel.Train`, eksak, dan adapternya bisa dimuat di PEFT Python; lihat [GraviPEFT](GraviPEFT.md) |
+| Pelatihan skala besar | **Python.** HF.Net melatih di CPU satu sekuens sekali jalan; latih di sana lalu layani adapternya di sini |
 
 ## Mereproduksi ini
 

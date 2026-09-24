@@ -11,6 +11,11 @@
     <!-- Softmax is internal and is pinned against overflow; the tests reach it directly because a
          NaN there only shows up as a model that silently predicts nothing. -->
     <InternalsVisibleTo Include="GraviTransformers.Tests" />
+
+    <!-- GraviPEFT trains adapters through these same kernels, so the function it differentiates is
+         the function inference runs. The two packages are versioned and released together. -->
+    <InternalsVisibleTo Include="Gravicode.HFNet.GraviPEFT" />
+    <InternalsVisibleTo Include="GraviPEFT.Tests" />
   </ItemGroup>
 
   <ItemGroup>

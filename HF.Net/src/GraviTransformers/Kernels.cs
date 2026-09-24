@@ -157,7 +157,39 @@ internal static class Activation
             + "for anything else."),
     };
 
+    /// <summary>The derivative of the activation <paramref name="name"/> refers to.</summary>
+    /// <remarks>
+    /// Paired with <see cref="For"/> name for name, so a backward pass differentiates the function
+    /// the forward pass actually ran rather than a neighbour of it. The tanh GELU's derivative is
+    /// written against the foundation's own formula, which is what <c>gelu_new</c> runs.
+    /// </remarks>
+    internal static Func<double, double> DerivativeFor(string name) => name.ToLowerInvariant() switch
+    {
+        "gelu" or "gelu_python" => ExactGeluDerivative,
+        "gelu_new" or "gelu_pytorch_tanh" or "gelu_fast" => TanhGeluDerivative,
+        "relu" => x => x > 0 ? 1.0 : 0.0,
+        _ => throw new NotSupportedException(
+            $"The config asks for the activation '{name}', which has no derivative here; only gelu, "
+            + "gelu_new, gelu_pytorch_tanh, gelu_fast and relu can be trained through."),
+    };
+
     internal static double ExactGelu(double x) => 0.5 * x * (1 + Erf(x * InverseSqrtTwo));
+
+    /// <summary><c>Phi(x) + x phi(x)</c>: the normal CDF plus x times the normal density.</summary>
+    internal static double ExactGeluDerivative(double x)
+        => 0.5 * (1 + Erf(x * InverseSqrtTwo)) + x * InverseSqrtTwoPi * Math.Exp(-0.5 * x * x);
+
+    /// <summary>The derivative of <c>0.5 x (1 + tanh(sqrt(2/pi) (x + 0.044715 x^3)))</c>.</summary>
+    internal static double TanhGeluDerivative(double x)
+    {
+        const double c = 0.79788456080286535588;   // sqrt(2/pi)
+        const double k = 0.044715;
+
+        var t = Math.Tanh(c * (x + k * x * x * x));
+        return 0.5 * (1 + t) + 0.5 * x * (1 - t * t) * c * (1 + 3 * k * x * x);
+    }
+
+    private const double InverseSqrtTwoPi = 0.39894228040143267794;
 
     private const double InverseSqrtTwo = 0.70710678118654752440;
 
@@ -410,6 +442,92 @@ internal sealed class Linear
                         result[(r + k) * outputs + o + 1] = activation is null ? value : activation(value);
                     }
                 }
+            }
+        });
+
+        return result;
+    }
+
+    /// <summary>
+    /// The gradient with respect to the input: <c>dx = dy W</c>, for <paramref name="rows"/> rows
+    /// of <paramref name="gradient"/> shaped <c>[rows, outputs]</c>.
+    /// </summary>
+    /// <remarks>
+    /// The backward pass of <see cref="Apply"/> without a transposed copy of the weights, which for
+    /// bert-base would be another 340 MB. Each weight row is a contiguous run of inputs, so it is
+    /// streamed once per block of four gradient rows and added, scaled, into four accumulators; a
+    /// block of inputs keeps those accumulators in the first-level cache.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal double[] ApplyTransposed(double[] gradient, int rows)
+    {
+        const int InputTile = 128;
+
+        var inputs = Inputs;
+        var outputs = Outputs;
+        var result = new double[rows * inputs];
+
+        var inputTiles = (inputs + InputTile - 1) / InputTile;
+        var rowBlocks = (rows + 3) / 4;
+
+        Parallel.For(0, inputTiles * rowBlocks, tile =>
+        {
+            var first = (tile % inputTiles) * InputTile;
+            var width = Math.Min(InputTile, inputs - first);
+            var row = (tile / inputTiles) * 4;
+            var count = Math.Min(4, rows - row);
+
+            var floats = Vector<float>.Count;
+            var doubles = Vector<double>.Count;
+            var sums = new double[4 * InputTile];
+
+            for (var o = 0; o < outputs; o++)
+            {
+                var w = _weights.AsSpan(o * inputs + first, width);
+                var c0 = gradient[row * outputs + o];
+                var c1 = count > 1 ? gradient[(row + 1) * outputs + o] : 0.0;
+                var c2 = count > 2 ? gradient[(row + 2) * outputs + o] : 0.0;
+                var c3 = count > 3 ? gradient[(row + 3) * outputs + o] : 0.0;
+                if (c0 == 0 && c1 == 0 && c2 == 0 && c3 == 0) continue;
+
+                var s0 = sums.AsSpan(0, width);
+                var s1 = sums.AsSpan(InputTile, width);
+                var s2 = sums.AsSpan(2 * InputTile, width);
+                var s3 = sums.AsSpan(3 * InputTile, width);
+
+                var v0 = new Vector<double>(c0);
+                var v1 = new Vector<double>(c1);
+                var v2 = new Vector<double>(c2);
+                var v3 = new Vector<double>(c3);
+
+                var i = 0;
+                for (; i <= width - floats; i += floats)
+                {
+                    Vector.Widen(new Vector<float>(w[i..]), out var low, out var high);
+                    var j = i + doubles;
+
+                    Vector.FusedMultiplyAdd(v0, low, new Vector<double>(s0[i..])).CopyTo(s0[i..]);
+                    Vector.FusedMultiplyAdd(v0, high, new Vector<double>(s0[j..])).CopyTo(s0[j..]);
+                    Vector.FusedMultiplyAdd(v1, low, new Vector<double>(s1[i..])).CopyTo(s1[i..]);
+                    Vector.FusedMultiplyAdd(v1, high, new Vector<double>(s1[j..])).CopyTo(s1[j..]);
+                    Vector.FusedMultiplyAdd(v2, low, new Vector<double>(s2[i..])).CopyTo(s2[i..]);
+                    Vector.FusedMultiplyAdd(v2, high, new Vector<double>(s2[j..])).CopyTo(s2[j..]);
+                    Vector.FusedMultiplyAdd(v3, low, new Vector<double>(s3[i..])).CopyTo(s3[i..]);
+                    Vector.FusedMultiplyAdd(v3, high, new Vector<double>(s3[j..])).CopyTo(s3[j..]);
+                }
+
+                for (; i < width; i++)
+                {
+                    s0[i] += c0 * w[i];
+                    s1[i] += c1 * w[i];
+                    s2[i] += c2 * w[i];
+                    s3[i] += c3 * w[i];
+                }
+            }
+
+            for (var k = 0; k < count; k++)
+            {
+                Array.Copy(sums, k * InputTile, result, (row + k) * inputs + first, width);
             }
         });
 

@@ -7,9 +7,9 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.2.0 — current
+## v0.2.0 — current, with v0.3's LoRA training on main (unreleased)
 
-**26 projects, 250 tests passing, whole solution builds clean with no warnings.**
+**26 projects, 277 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -23,8 +23,8 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | GraviHub | **Complete** | 27 | Hub client, cache, safetensors, PyTorch pickle reader |
 | GraviTokenizers | **Complete** | 29 | WordPiece, BPE, Unigram, `tokenizer.json`, offsets |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
-| GraviTransformers | **Core complete** | 91 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
-| GraviPEFT | **Partial** | 15 | LoRA apply/merge/save/load; adapter training not implemented |
+| GraviTransformers | **Core complete** | 99 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
+| GraviPEFT | **Core complete** | 34 | LoRA training (adapters and a head), apply, merge, save, load; saved adapters load in Python PEFT |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Core complete** | 22 | ONNX Runtime, provider choice, quantisation with measured error |
 | GraviDiffusers | **Core complete** | 22 | DDPM/DDIM/Euler; SD pipeline needs an ONNX export to exercise |
@@ -61,6 +61,13 @@ These are the checks that establish the stack is actually correct, not merely ru
   clean, and ran — downloading DistilBERT and classifying three sentences correctly.
 - **`bert-base-uncased` agrees with torch in float64 to about 1e-13** on hidden states, for a single
   sentence and for a pair (segment 1). Fill-mask probabilities agree to ten decimal places.
+- **LoRA training is exact.** Every adapter gradient agrees with central differences to 1e-6 on a
+  two-layer model with every bias and norm perturbed, all six projections adapted, with and without
+  dropout. A deliberately wrong backward pass fails by 2x. On `bert-base-uncased`, 32 sentences
+  that differ mostly by a negation train from loss 0.70 to 0.003 in about a minute. Predictions
+  from the adapters in the loop and from the merged weights agree to 1e-11. **An adapter trained
+  here and loaded into PEFT 0.21 in Python** gives the same hidden states as HF.Net's merged model
+  to 7e-7, the float32 rounding of the merged weights, while the adapter moves them by up to 4.
 - **Measured against the Python reference** on the same machine in the same session. Tokenization is
   **1.78x faster than the Rust `tokenizers` crate** with byte-identical ids. bert-base takes 111 ms
   managed against torch's 36 ms, and **23.8 ms through ONNX Runtime from .NET, 1.53x faster than
@@ -101,6 +108,13 @@ Each of these was caught by a test or by a live run, not by reading the code.
   5e-9 instead of ten digits until it read the stored word embeddings.
 - **The benchmark's ONNX row was measured on a tiny test model** and so could not be compared with
   anything. It now exports bert-base itself, and the production path turns out to beat torch.
+- **`ApplyLoRA` named its adapters `layer.0.query`.** Saved, they were valid safetensors in the
+  PEFT layout, and PEFT in Python placed none of them. It matches tensors to modules by name and
+  skips, without an error, any it cannot place. Adapters now take the checkpoint's own module paths
+  (`bert.encoder.layer.0.attention.self.query`), and the round trip was checked in Python.
+- **Adapter initialisation was seeded from `HashCode.Combine`**, which .NET randomises per process,
+  so "the same configuration always initialises the same way" was false: two runs of the same
+  training gave two loss curves. It is an FNV-1a hash now.
 - HFAppGen's assistant, asked to build a project, **invented a NuGet package** for HF.Net, hit
   NU1101, and wrote a fake shim to get a green build. It now has an `HFNetProjectReferences` tool
   and a system prompt that forbids shims outright.
@@ -122,14 +136,16 @@ Each of these was caught by a test or by a live run, not by reading the code.
 
 ### HF Gallery
 
-`samples/HFGallery` — an Avalonia application holding ten use cases, each running against a real
+`samples/HFGallery` — an Avalonia application holding eleven use cases, each running against a real
 model and shown next to the code that produced it.
 
 - Image classification, sentiment, fill-mask, named entities, question answering, semantic search,
-  an embedding map, the tokenizer, a checkpoint's byte layout, and the diffusion noise schedules
+  an embedding map, LoRA training, the tokenizer, a checkpoint's byte layout, and the diffusion noise schedules
 - Charts drawn straight into a `DrawingContext`: bars, scatter, lines, treemap, plus a span view
   built from text inlines so wrapping and selection come from the text stack
-- `--list`, `--run <case>` (headless), `--open <case>`, `--light`
+- `--list`, `--run <case>` (headless), `--open <case>`, `--light`, and `--capture <png>`, which
+  renders the window itself. A screen grab needs the window in front, and Windows may refuse that
+  to a process in the background, so the grab silently gets whatever else is on the desktop
 - Palettes searched in OKLCH and checked with the dataviz validator, which is what established that
   **the eight-band library ramp fails as a categorical palette** — its adjacent pairs measure ΔE 6.8
   under normal vision against a floor of 15. Correct for the offset rail, where adjacency carries
@@ -141,7 +157,7 @@ model and shown next to the code that produced it.
 Complete and bilingual. Every page under `docs/` has a counterpart under `docs/id/`:
 
 - `README`, `getting-started`, `benchmarks`, `HFAppGen`, `hf-gallery`, and one page per library
-- Three screenshots of HFAppGen and ten of HF Gallery, captured from the real windows
+- Three screenshots of HFAppGen and eleven of HF Gallery, captured from the real windows
 
 ### Continuous integration
 
@@ -165,7 +181,8 @@ Carried into [PLAN.md](PLAN.md):
   are thin)
 - Notebooks under `notebooks/` beyond the two shipped as HFAppGen templates
 - CLIP (its text tower is causal, which this encoder is not)
-- LoRA adapter training (the foundation's tape omits attention biases)
+- LoRA training beyond sequence classification: token classification and question answering
+  heads, saving the trained head, and batched (padded) training steps
 - A faster GEMM. The linear kernel runs at about 13 GMAC/s, roughly the foundation's packed
   `MatMul`, and loses to it by 1.3x at 577 rows. torch's MKL does about four times that. This is
   the remaining managed-versus-torch gap.
@@ -173,6 +190,13 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-09-25** — LoRA training. `PeftModel.Train` fits adapters and a mean-pooled classification
+head with AdamW, the Hugging Face linear schedule and gradient clipping. It uses a hand-written
+backward pass over the inference kernels, because the foundation's autodiff encoder has no Q/K/V
+biases. The gradients are checked against central differences to 1e-6. Adapters now carry the
+checkpoint's module paths, so an adapter trained here loads in Python PEFT and agrees with it to
+7e-7. HF Gallery gained an eleventh case and `--capture`. 277 tests.
 
 **2026-09-24** — Performance. Text and vision inference moved onto shared kernels: a vectorised
 attention, a 4x2 float32-weight linear kernel, a table-plus-Taylor erf, and `AggressiveOptimization`

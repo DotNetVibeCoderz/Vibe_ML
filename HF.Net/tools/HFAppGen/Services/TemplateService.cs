@@ -679,6 +679,13 @@ public static class TemplateService
 
                     Console.WriteLine($"training accuracy {peft.Score(texts, labels):P0}");
 
+                    // Now train the adapters themselves, with a head, by backpropagating through
+                    // the frozen encoder. This replaces the head FitHead trained.
+                    Console.WriteLine("\nTraining the adapters ...");
+                    var report = peft.Train(texts, labels, new TrainingOptions { Epochs = 10, BatchSize = 2, LearningRate = 2e-3 });
+                    Console.WriteLine(report);
+                    Console.WriteLine($"training accuracy {peft.Score(texts, labels):P0}");
+
                     foreach (var text in new[] { "this is excellent", "what a disappointment" })
                         Console.WriteLine($"  {text,-24} -> {peft.Predict(text)[0]}");
 
@@ -694,10 +701,11 @@ public static class TemplateService
 
                     Parameter-efficient fine tuning with GraviPEFT.
 
-                    HF.Net can **apply, merge, save and load** LoRA adapters - including adapters
-                    trained with PEFT in Python - and can train a task head over a frozen encoder.
-                    It does not yet backpropagate into the adapter matrices themselves; see
-                    `PeftModel.SupportsAdapterTraining`.
+                    HF.Net can **train, apply, merge, save and load** LoRA adapters - including
+                    adapters trained with PEFT in Python. `Train` fits the adapters and a
+                    classification head together; `FitHead` fits a head alone over the frozen
+                    encoder, which is the cheap baseline. Saved adapters use the PEFT layout, so
+                    they load in Python too.
 
                     ```bash
                     dotnet run

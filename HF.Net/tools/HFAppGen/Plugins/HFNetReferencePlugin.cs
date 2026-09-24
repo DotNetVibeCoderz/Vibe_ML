@@ -246,15 +246,29 @@ public sealed class HFNetReferencePlugin
               .Adapters .ParameterCount .Config
 
             PeftModel
+              .Train(texts, labels, options) trains the adapters AND a classifier head together
+                                      (backprop through the frozen encoder); returns TrainingReport
               .Merge()                folds adapters into the weights, in place and exactly
-              .FitHead(texts, labels) trains a classifier on the frozen embeddings
+              .FitHead(texts, labels) trains a classifier on the frozen embeddings only - the cheap baseline
               .Predict(text) .Score(texts, labels) .HeadLabels
               .SaveAdapter(directory) .ParameterEfficiency() .IsMerged .Model
 
+            TrainingOptions (a record CLASS: use object initialiser syntax)
+              new TrainingOptions { Epochs = 3, BatchSize = 8, GradientAccumulation = 1,
+                                    LearningRate = 5e-4, WeightDecay = 0, WarmupFraction = 0,
+                                    MaxGradientNorm = 1, MaxLength = 128, Seed = 42,
+                                    Progress = new Progress<TrainingProgress>(p => ...) }
+              TrainingProgress(Epoch, Step, TotalSteps, Loss, LearningRate)
+              TrainingReport .StepLosses .EpochLosses .Steps .Elapsed
+
             GOTCHAS
-              PeftModel.SupportsAdapterTraining is FALSE. Adapters can be applied, merged, saved and
-                loaded here, and the task head can be trained - but the adapter matrices themselves
-                are not backpropagated into. Train those with PEFT in Python and serve them here.
+              PeftModel.SupportsAdapterTraining is TRUE (since 0.3). Train() uses AdamW and a linear
+                schedule, as the Hugging Face Trainer does, on the CPU, one sequence at a time -
+                about three forward passes per example. Fine for hundreds of examples; for tens of
+                thousands, train with PEFT in Python and load the adapter here.
+              Train() after Merge() throws: the update would be counted twice.
+              SaveAdapter writes the adapters only, in the PEFT layout Python loads. The head trained
+                by Train() or FitHead() lives in memory and is not saved.
               Merge cannot be undone from the merged weights. Merge to serve, not to swap adapters.
             """,
 
@@ -681,6 +695,12 @@ public sealed class HFNetReferencePlugin
 
                 var (adapter, encoder, fraction) = peft.ParameterEfficiency();
                 Console.WriteLine($"{adapter:N0} of {encoder:N0} parameters = {fraction:P3}");
+
+                // Train the adapters and a classification head together.
+                string[] texts = ["the food was good", "the food was not good", "I liked it", "I did not like it"];
+                string[] labels = ["positive", "negative", "positive", "negative"];
+                var report = peft.Train(texts, labels, new TrainingOptions { Epochs = 5, LearningRate = 1e-3 });
+                Console.WriteLine(report);
 
                 // Load an adapter trained with PEFT in Python and fold it in exactly.
                 // var served = PEFT.LoadAdapter(model, "some-user/some-lora", merge: true);

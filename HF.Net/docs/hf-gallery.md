@@ -2,7 +2,7 @@
 
 *[Bahasa Indonesia](id/hf-gallery.md)*
 
-`samples/HFGallery` is a desktop application that runs ten HF.Net use cases against real models
+`samples/HFGallery` is a desktop application that runs eleven HF.Net use cases against real models
 and shows both the answer and the code that produced it. Nothing in it is mocked: every panel you
 see is the output of a checkpoint downloaded from the Hub during that run.
 
@@ -17,12 +17,13 @@ dotnet run --project samples/HFGallery
 | `--run <case>` | Runs one case in the terminal and prints what it produced. |
 | `--open <case>` | Opens the window and runs that case immediately. |
 | `--light` | Uses the light theme. |
+| `--capture <png>` | With `--open`: renders the window to a PNG once the case finishes, then exits. |
 
 `<case>` is a prefix of the case title, so `--run Named` is enough.
 
 ---
 
-## The ten cases
+## The eleven cases
 
 | Case | Library | Model | What it shows |
 |---|---|---|---|
@@ -33,6 +34,7 @@ dotnet run --project samples/HFGallery
 | Question answering | GraviTransformers | `distilbert-base-cased-distilled-squad` | Span extraction over a sentence pair |
 | Semantic search | GraviTransformers | `bert-base-uncased` | Embed a corpus once, rank it per query |
 | Embedding map | GraviTransformers | `bert-base-uncased` | 768 dimensions projected to two |
+| Teach it a task | GraviPEFT | `bert-base-uncased` | LoRA adapters trained, then merged into the weights |
 | Tokenizer | GraviTokenizers | `bert-base-uncased` | Which characters became which piece |
 | Inside a checkpoint | GraviHub | any repo with safetensors | Where a 420 MB model's bytes actually are |
 | Diffusion schedules | GraviDiffusers | *none* | Signal remaining at each training timestep |
@@ -72,6 +74,17 @@ two principal components. The groups separate without being told to — that sep
 claim behind semantic search, shown rather than asserted.
 
 ![Embedding map](screenshots/hfgallery-embedding-map.png)
+
+## Teach it a task
+
+LoRA adapters and a classification head, trained on 32 sentences that differ mostly by a negation.
+"good" and "not good" share almost every token, so the frozen encoder's pooled features have little
+to separate them by, and the adapters inside attention do the work. 0.27% of the encoder's
+parameters are trained. Once the case has classified the input, it merges the adapters into the
+weights and classifies the input again on the base model's own inference path. "merged vs not" is
+the largest difference between the two sets of probabilities.
+
+![Teach it a task](screenshots/hfgallery-lora.png)
 
 ## Inside a checkpoint
 

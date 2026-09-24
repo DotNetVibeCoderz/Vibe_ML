@@ -2,7 +2,7 @@
 
 *[English](../hf-gallery.md)*
 
-`samples/HFGallery` adalah aplikasi desktop yang menjalankan sepuluh use case HF.Net terhadap model
+`samples/HFGallery` adalah aplikasi desktop yang menjalankan sebelas use case HF.Net terhadap model
 sungguhan, dan menampilkan hasilnya bersama kode yang menghasilkannya. Tidak ada yang dipalsukan:
 setiap panel yang terlihat adalah keluaran checkpoint yang diunduh dari Hub saat itu juga.
 
@@ -17,12 +17,13 @@ dotnet run --project samples/HFGallery
 | `--run <case>` | Menjalankan satu use case di terminal dan mencetak hasilnya. |
 | `--open <case>` | Membuka jendela dan langsung menjalankan use case itu. |
 | `--light` | Memakai tema terang. |
+| `--capture <png>` | Bersama `--open`: merender jendela ke PNG begitu use case selesai, lalu keluar. |
 
 `<case>` cukup awalan judulnya, jadi `--run Named` sudah memadai.
 
 ---
 
-## Sepuluh use case
+## Sebelas use case
 
 | Use case | Library | Model | Yang ditunjukkan |
 |---|---|---|---|
@@ -33,6 +34,7 @@ dotnet run --project samples/HFGallery
 | Question answering | GraviTransformers | `distilbert-base-cased-distilled-squad` | Ekstraksi rentang atas pasangan kalimat |
 | Semantic search | GraviTransformers | `bert-base-uncased` | Sekali embed korpus, lalu diperingkat per kueri |
 | Embedding map | GraviTransformers | `bert-base-uncased` | 768 dimensi diproyeksikan ke dua dimensi |
+| Teach it a task | GraviPEFT | `bert-base-uncased` | Adapter LoRA dilatih, lalu dilipat ke dalam bobot |
 | Tokenizer | GraviTokenizers | `bert-base-uncased` | Karakter mana menjadi potongan yang mana |
 | Inside a checkpoint | GraviHub | repo apa pun yang punya safetensors | Ke mana sebenarnya 420 MB sebuah model pergi |
 | Diffusion schedules | GraviDiffusers | *tidak ada* | Sisa sinyal pada setiap timestep pelatihan |
@@ -72,6 +74,17 @@ komponen utama pertamanya. Kelompoknya memisah tanpa diberi tahu — pemisahan i
 semantic search, ditunjukkan alih-alih sekadar dinyatakan.
 
 ![Embedding map](../screenshots/hfgallery-embedding-map.png)
+
+## Teach it a task
+
+Adapter LoRA dan sebuah classification head, dilatih pada 32 kalimat yang kebanyakan hanya
+berbeda karena sebuah negasi. "good" dan "not good" berbagi hampir semua token, sehingga fitur pool
+dari encoder yang dibekukan nyaris tak punya pembeda, dan adapter di dalam atensilah yang bekerja.
+Hanya 0,27% parameter encoder yang dilatih. Setelah mengklasifikasikan masukan, use case ini melipat
+adapter ke dalam bobot lalu mengklasifikasikan masukan itu sekali lagi lewat jalur inferensi model
+dasar. "merged vs not" adalah selisih terbesar antara kedua set probabilitas itu.
+
+![Teach it a task](../screenshots/hfgallery-lora.png)
 
 ## Inside a checkpoint
 
