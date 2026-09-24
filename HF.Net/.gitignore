@@ -17,3 +17,6 @@ PackageCredentials.txt
 # Model/dataset cache produced by GraviHub at runtime.
 .hfcache/
 datasets/cache/
+
+# ONNX export written by benchmarks/comparison/python/bench.py.
+benchmarks/comparison/onnx/

@@ -21,10 +21,10 @@ binding; GraviTokenizers is managed C#.
 
 | Measure | Python | HF.Net | |
 |---|---:|---:|---|
-| One document | 0.03 ms | 0.01 ms | **2.81x faster** |
-| 1,000 documents | 18.13 ms | 10.94 ms | **1.66x faster** |
+| One document | 0.03 ms | 0.01 ms | **2.62x faster** |
+| 1,000 documents | 15.52 ms | 8.70 ms | **1.78x faster** |
 
-Throughput: **55,144 docs/s** (Python) against **91,423 docs/s** (HF.Net).
+Throughput: **64,441 docs/s** (Python) against **114,887 docs/s** (HF.Net).
 
 **Ids identical to the reference: yes.**
 
@@ -40,8 +40,8 @@ hf.net  101 7592 1010 2088 999 19204 17629 2015 2024 23653 1012 102
 
 | Measure | Python | HF.Net | |
 |---|---:|---:|---|
-| Open and list tensors | 0.65 ms | 0.71 ms | 1.09x slower |
-| Read one 30522x768 tensor | 1.14 ms | 196.96 ms | 172.59x slower |
+| Open and list tensors | 0.49 ms | 0.79 ms | 1.60x slower |
+| Read one 30522x768 tensor | 0.49 ms | 149.25 ms | 306.53x slower |
 
 Reading one tensor costs HF.Net more because every value is widened to `double` on the
 way out, where PyTorch hands back the F32 buffer as it lies on disk. Listing the
@@ -53,24 +53,47 @@ One forward pass over 12 tokens.
 
 | Model | Python (torch) | HF.Net (managed) | |
 |---|---:|---:|---|
-| bert-base-uncased, 1 document | 50.83 ms | 597.94 ms | 11.76x slower |
-| bert-base-uncased, 8 documents | 261.62 ms | 1,736.40 ms | 6.64x slower |
-| bert-tiny, 1 document | 1.47 ms | 2.09 ms | 1.42x slower |
+| bert-base-uncased, 1 document | 36.44 ms | 111.28 ms | 3.05x slower |
+| bert-base-uncased, 8 documents | 161.10 ms | 1,104.40 ms | 6.86x slower |
+| bert-tiny, 1 document | 1.17 ms | 0.95 ms | **1.22x faster** |
 
-**This is the gap, and it is the expected one.** The managed encoder is `double` end to
-end and written for clarity; torch dispatches to hand-tuned single-precision kernels
-with fused attention. GraviTransformers exists so a model can be loaded, inspected and
-understood in pure .NET — for throughput the answer is an ONNX export.
+The managed encoder computes in `double` with float32 weights - which is exact, since
+every checkpoint stores float32 or narrower - and agrees with torch in float64 to about
+1e-13. torch runs float32 through hand-tuned kernels. For throughput the answer is the
+ONNX row below.
 
-### The same work through ONNX Runtime
+### The same model through ONNX Runtime
 
-`Cpu` provider, via GraviOptimum:
+`bert-base-uncased`, exported from the same checkpoint by the Python half and run from
+.NET through GraviOptimum on the `Cpu` provider.
 
-- **0.67 ms** best, 0.85 ms median
+| Path | Time | against torch |
+|---|---:|---|
+| torch (Python) | 36.44 ms | — |
+| HF.Net managed | 111.28 ms | 3.05x slower |
+| HF.Net through ONNX Runtime | 23.78 ms | **1.53x faster** |
 
-Measured on a small test model rather than on bert-base, so it is not comparable with
-the table above. It is here to show the shape of the production path: the same
-single-precision kernels torch uses, reached from .NET.
+Largest difference between the ONNX and managed hidden states: **4.7e-06** -
+float32 arithmetic, since the managed encoder matches torch in float64 to about 1e-13.
+
+## Vision
+
+`google/vit-base-patch16-224` on one 224x224 image. The image is a formula both halves
+compute, not a photograph, so no resampler sits between them.
+
+| Model | Python (torch) | HF.Net (managed) | |
+|---|---:|---:|---|
+| vit-base-patch16-224, 1 image | 226.22 ms | 1,963.85 ms | 8.68x slower |
+
+| Rank | torch (float64) | | HF.Net | |
+|---|---|---:|---|---:|
+| 1 | binder, ring-binder | 0.1186940263 | binder, ring-binder | 0.1186940263 |
+| 2 | coil, spiral, volute, whorl, helix | 0.0446382711 | coil, spiral, volute, whorl, helix | 0.0446382711 |
+| 3 | screen, CRT screen | 0.0433549419 | screen, CRT screen | 0.0433549419 |
+| 4 | television, television system | 0.0315982656 | television, television system | 0.0315982656 |
+| 5 | rubber eraser, rubber, pencil eraser | 0.0241216848 | rubber eraser, rubber, pencil eraser | 0.0241216848 |
+
+Largest difference in the top five: **1.3e-15**.
 
 ## Do they agree?
 
@@ -81,11 +104,11 @@ checkpoint, and whether HF.Net's encoder reaches the same conclusions.
 
 | Rank | Python | | HF.Net | |
 |---|---|---:|---|---:|
-| 1 | paris | 41.68% | paris | 41.53% |
-| 2 | lille | 7.14% | lille | 7.16% |
-| 3 | lyon | 6.34% | lyon | 6.31% |
-| 4 | marseille | 4.44% | marseille | 4.46% |
-| 5 | tours | 3.03% | tours | 3.02% |
+| 1 | paris | 41.6790% | paris | 41.6788% |
+| 2 | lille | 7.1416% | lille | 7.1416% |
+| 3 | lyon | 6.3393% | lyon | 6.3392% |
+| 4 | marseille | 4.4448% | marseille | 4.4447% |
+| 5 | tours | 3.0297% | tours | 3.0297% |
 
 Top prediction matches: **yes**. Overlap in the top five: **5/5**.
 
@@ -93,11 +116,11 @@ Top prediction matches: **yes**. Overlap in the top five: **5/5**.
 
 | Rank | Python | | HF.Net | |
 |---|---|---:|---|---:|
-| 1 | regular | 54.89% | regular | 55.00% |
-| 2 | key | 19.47% | key | 19.39% |
-| 3 | former | 5.82% | former | 5.83% |
-| 4 | capped | 2.16% | capped | 2.14% |
-| 5 | prominent | 1.36% | prominent | 1.36% |
+| 1 | regular | 54.8921% | regular | 54.8917% |
+| 2 | key | 19.4748% | key | 19.4747% |
+| 3 | former | 5.8151% | former | 5.8151% |
+| 4 | capped | 2.1575% | capped | 2.1575% |
+| 5 | prominent | 1.3643% | prominent | 1.3643% |
 
 Top prediction matches: **yes**. Overlap in the top five: **5/5**.
 
@@ -105,9 +128,9 @@ Top prediction matches: **yes**. Overlap in the top five: **5/5**.
 
 ```bash
 cd benchmarks/comparison
-pip install tokenizers transformers
+pip install tokenizers transformers onnx
 pip install torch --index-url https://download.pytorch.org/whl/cpu
-python python/bench.py --out python/python.json
+python python/bench.py --out python/python.json     # also exports onnx/bert-base-uncased.onnx
 dotnet run -c Release --project HFNet.Comparison -- dotnet.json
 python report.py
 ```

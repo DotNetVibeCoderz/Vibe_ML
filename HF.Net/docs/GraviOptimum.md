@@ -12,9 +12,11 @@ using Gravicode.HFNet.GraviOptimum;
 
 ## Why this exists
 
-The managed encoder in [GraviTransformers](GraviTransformers.md) is `double` end to end. It is there
-so a model can be loaded, inspected and understood in pure .NET. A production request should go
-through an ONNX export running on single-precision kernels that were written for the hardware.
+The managed encoder in [GraviTransformers](GraviTransformers.md) computes in `double` and agrees
+with torch to about 1e-13. It is there so a model can be loaded, inspected and understood in pure
+.NET. A production request should go through an ONNX export running on single-precision kernels
+that were written for the hardware. On `bert-base-uncased`, one 12-token sentence takes **23.8 ms**
+this way, against 36.4 ms in torch and 111 ms managed. See [benchmarks](benchmarks.md).
 
 ```csharp
 using var model = Optimum.Optimize("hf-internal-testing/tiny-random-BertModel", target: "auto");

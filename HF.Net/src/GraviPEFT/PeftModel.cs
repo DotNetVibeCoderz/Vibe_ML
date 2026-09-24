@@ -166,6 +166,10 @@ public sealed class PeftModel
                 + "The adapter was probably trained against a different architecture.");
         }
 
+        // Inference runs on a compiled copy of the encoder's weights. Without this the merge would
+        // change the model of record and leave every prediction exactly as it was.
+        if (applied > 0) _model.WeightsChanged();
+
         IsMerged = true;
         return this;
     }

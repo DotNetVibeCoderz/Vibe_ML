@@ -46,6 +46,14 @@ public sealed record VisionConfig
     /// <summary>Epsilon inside every layer norm.</summary>
     public double LayerNormEpsilon { get; init; } = 1e-12;
 
+    /// <summary>The feed-forward activation, as <c>hidden_act</c> names it.</summary>
+    /// <remarks>
+    /// <c>gelu</c> means the exact, erf-based GELU; the tanh approximation is a different name
+    /// (<c>gelu_new</c>, <c>gelu_pytorch_tanh</c>). The two differ by up to about 1e-3 per value,
+    /// which is enough to move a probability in the third decimal place.
+    /// </remarks>
+    public string Activation { get; init; } = "gelu";
+
     /// <summary>Class names by index, where the checkpoint publishes them.</summary>
     public IReadOnlyDictionary<int, string> IdToLabel { get; init; } = new Dictionary<int, string>();
 
@@ -110,6 +118,7 @@ public sealed record VisionConfig
             LayerNormEpsilon = root.TryGetProperty("layer_norm_eps", out var epsilon)
                 ? epsilon.GetDouble()
                 : 1e-12,
+            Activation = Text(root, "hidden_act") ?? "gelu",
 
             IdToLabel = ReadLabels(root),
         };

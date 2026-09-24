@@ -46,8 +46,14 @@ So the order of work is formats first, models second, training last.
    does not is running one — `CheckpointLoader.Load` materialises every parameter as `double`,
    which is 8 bytes per value whatever the file held. Streaming a forward pass layer by layer is the
    remaining work.
-5. **Position-embedding interpolation.** A vision model today runs only at the resolution it was
-   trained at. Interpolating the position grid is what lets one checkpoint serve several.
+5. ~~**Position-embedding interpolation.**~~ **Done.** `VisionTransformer.Load(id, imageSize: 384)`,
+   or any square or rectangle of whole patches passed to `Forward`. The resampler is torch's
+   bicubic, pinned to 1e-12, and the whole model matches torch to ten decimal places at 160, 224
+   and 384 px. Getting there turned up item 6.
+6. ~~**Exact GELU in the text encoder.**~~ **Done, without a foundation release.** Text inference
+   now runs on HF.Net's own kernels (`CompiledEncoder`), which take the activation from
+   `hidden_act`. The foundation's tanh GELU had left `bert-base-uncased` hidden states 2.8e-2 away
+   from torch; they now agree to about 1e-13 in float64, and fill-mask probabilities to ten digits.
 
 ## v0.3 — training
 
@@ -81,10 +87,17 @@ round-trip through the PEFT format and give the same predictions in Python.
 2. **Measure before optimising, and say which configuration a number came from.** The foundation's
    experience is instructive: its ILGPU path measured 5–8× *slower* than the CPU because everything
    is `double`. Any claim here needs the hardware and the configuration attached.
-3. **A single-precision path.** The most likely real win, and the largest change. `NdArray` is
-   `double`; an F32 encoder would halve the memory traffic and let SIMD do twice the work per
-   instruction. This depends on the foundation's generic `NdArray<T>` work.
-4. **KV caching** if and when decoder models arrive — generation is quadratic without it.
+3. **A single-precision path.** Half done, and the half that was free. Weights are now held as
+   float32 inside HF.Net's kernels. That is lossless, because every checkpoint stores F32 or
+   narrower, and it halves the bytes a short input streams. Activations and sums stay `double`,
+   which is why the managed encoder still agrees with torch in float64 to about 1e-13. Going fully
+   float32 would double SIMD width once more, at the cost of that agreement, and would move the
+   comparison target to torch's own float32. Worth doing only as an opt-in mode.
+4. **A better GEMM for long sequences.** The linear kernel (4 rows x 2 outputs, float32 weights
+   widened on the fly) runs at roughly the foundation's packed `MatMul` rate. It is faster below
+   about 200 rows and 1.3x slower at 577 (ViT at 384 px). A packed panel with a wider register tile
+   is the known next step.
+5. **KV caching** if and when decoder models arrive — generation is quadratic without it.
 
 ## v0.5 — diffusion in earnest
 

@@ -4,11 +4,11 @@
   "processor": "Intel64 Family 6 Model 142 Stepping 10, GenuineIntel",
   "transformers": "5.17.0",
   "tokenizers": "0.23.2",
-  "tokenizer_single_ms": 0.0347999157384038,
-  "tokenizer_single_median_ms": 0.035100034438073635,
-  "tokenizer_batch_1000_ms": 18.134500016458333,
-  "tokenizer_batch_1000_median_ms": 20.754149998538196,
-  "tokenizer_docs_per_second": 55143.51093729796,
+  "tokenizer_single_ms": 0.02829998265951872,
+  "tokenizer_single_median_ms": 0.028699985705316067,
+  "tokenizer_batch_1000_ms": 15.518100000917912,
+  "tokenizer_batch_1000_median_ms": 17.82594999531284,
+  "tokenizer_docs_per_second": 64440.878712010424,
   "tokenizer_reference_ids": [
     101,
     7592,
@@ -37,18 +37,18 @@
     ".",
     "[SEP]"
   ],
-  "safetensors_header_ms": 0.6536999717354774,
-  "safetensors_one_tensor_ms": 1.1411999585106969,
+  "safetensors_header_ms": 0.4911000141873956,
+  "safetensors_one_tensor_ms": 0.48690009862184525,
   "safetensors_tensor_count": 206,
   "safetensors_file_mb": 420.0456314086914,
   "torch": "2.14.0+cpu",
-  "inference_base_single_ms": 50.82799994852394,
-  "inference_base_single_median_ms": 54.66630001319572,
-  "inference_base_batch8_ms": 261.6196000017226,
+  "inference_base_single_ms": 36.44280007574707,
+  "inference_base_single_median_ms": 41.56074998900294,
+  "inference_base_batch8_ms": 161.10060003120452,
   "inference_base_tokens": 12,
-  "inference_tiny_single_ms": 1.4748999383300543,
-  "inference_tiny_single_median_ms": 2.296549966558814,
-  "inference_tiny_batch8_ms": 3.2971000764518976,
+  "inference_tiny_single_ms": 1.1657999129965901,
+  "inference_tiny_single_median_ms": 1.3019999605603516,
+  "inference_tiny_batch8_ms": 2.40019999910146,
   "inference_tiny_tokens": 12,
   "torch_threads": 4,
   "fillmask_france": [
@@ -94,5 +94,35 @@
       "token": "prominent",
       "score": 0.013642656616866589
     }
-  ]
+  ],
+  "vision_single_ms": 226.22049995698035,
+  "vision_single_median_ms": 238.05555002763867,
+  "vision_top5": [
+    {
+      "label": "binder, ring-binder",
+      "index": 446,
+      "score": 0.11869402629335638
+    },
+    {
+      "label": "coil, spiral, volute, whorl, helix",
+      "index": 506,
+      "score": 0.044638271069854796
+    },
+    {
+      "label": "screen, CRT screen",
+      "index": 782,
+      "score": 0.04335494193903427
+    },
+    {
+      "label": "television, television system",
+      "index": 851,
+      "score": 0.031598265611575554
+    },
+    {
+      "label": "rubber eraser, rubber, pencil eraser",
+      "index": 767,
+      "score": 0.024121684775199007
+    }
+  ],
+  "onnx_export": "C:\\experiment\\VibeCoding\\Vibe_ML\\HF.Net\\benchmarks\\comparison\\onnx\\bert-base-uncased.onnx"
 }

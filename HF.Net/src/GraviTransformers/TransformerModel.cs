@@ -48,6 +48,7 @@ public sealed class TransformerModel : IDisposable
     private readonly MaskedLanguageHead? _maskedLanguage;
     private readonly TokenClassificationHead? _tokenClassifier;
     private readonly QuestionAnsweringHead? _questionAnswering;
+    private CompiledEncoder _compiled;
     private bool _disposed;
 
     private TransformerModel(
@@ -72,6 +73,8 @@ public sealed class TransformerModel : IDisposable
         _classifier = _tokenClassifier is null ? ClassificationHead.TryLoad(weights, config) : null;
         _maskedLanguage = MaskedLanguageHead.TryLoad(weights, config, encoder);
         _questionAnswering = QuestionAnsweringHead.TryLoad(weights);
+
+        _compiled = CompiledEncoder.Build(encoder, config);
     }
 
     /// <summary>The Hub id this model came from.</summary>
@@ -84,7 +87,24 @@ public sealed class TransformerModel : IDisposable
     public HfTokenizer Tokenizer { get; }
 
     /// <summary>The encoder stack, from Gravicode.Science.GraviText.</summary>
+    /// <remarks>
+    /// This is the model of record and what to inspect, but inference runs on a compiled copy of
+    /// its parameters. After changing any of them, call <see cref="WeightsChanged"/>, or the next
+    /// forward pass still uses the old values.
+    /// </remarks>
     public Encoder Encoder { get; }
+
+    /// <summary>Rebuilds the inference copy after <see cref="Encoder"/>'s parameters were changed.</summary>
+    /// <remarks>
+    /// Inference runs on float32 copies of the weights laid out for the kernels, which is most of
+    /// why it is fast. <c>PeftModel.Merge</c> calls this itself; call it after changing weights
+    /// any other way.
+    /// </remarks>
+    public void WeightsChanged()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _compiled = CompiledEncoder.Build(Encoder, Config);
+    }
 
     /// <summary>What the checkpoint load found.</summary>
     public LoadReport Report { get; }
@@ -174,7 +194,7 @@ public sealed class TransformerModel : IDisposable
 
         // Every position is segment 0, and segment 0 is already folded into the word embeddings,
         // so the encoder's own forward pass is exact here and cheaper than rebuilding it.
-        return Encoder.Forward(ids, mask);
+        return _compiled.Forward(ids, mask);
     }
 
     /// <summary>The final hidden states for a sentence pair, one row per token.</summary>
@@ -216,31 +236,9 @@ public sealed class TransformerModel : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var delta = Report.SegmentDelta;
-        var needsSegments = delta is not null && typeIds.Any(t => t != 0);
-
-        if (!needsSegments) return Encoder.Forward(ids, attentionMask);
-
-        var width = Config.HiddenSize;
-        var hidden = NdArray.Zeros(ids.Length, width);
-
-        for (var i = 0; i < ids.Length; i++)
-        {
-            var id = Math.Clamp(ids[i], 0, Config.VocabularySize - 1);
-            var segment = typeIds[i] == 0 ? 0.0 : 1.0;
-
-            for (var d = 0; d < width; d++)
-            {
-                hidden[i, d] = Encoder.TokenEmbeddings[id, d]
-                    + Encoder.PositionEmbeddings[i, d]
-                    + segment * delta!.At(d);
-            }
-        }
-
-        hidden = Encoder.EmbeddingNorm.Forward(hidden);
-        foreach (var layer in Encoder.Layers) hidden = layer.Forward(hidden, attentionMask);
-
-        return hidden;
+        // Segment 0 is folded into the word embeddings; segment 1 adds the difference between the
+        // two segment vectors, before the embedding norm, as the reference does.
+        return _compiled.Forward(ids, attentionMask, typeIds, Report.SegmentDelta);
     }
 
     /// <summary>A single vector for a text, mean-pooled over its tokens.</summary>
@@ -343,7 +341,7 @@ public sealed class TransformerModel : IDisposable
             throw new ArgumentException($"The input contains no mask token ('{maskToken}').", nameof(text));
         }
 
-        var hidden = Encoder.Forward(encoding.ToIdArray(), encoding.ToMaskArray());
+        var hidden = _compiled.Forward(encoding.ToIdArray(), encoding.ToMaskArray());
         var scores = _maskedLanguage.Apply(hidden.Row(position));
         var probabilities = Softmax(scores);
 

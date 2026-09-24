@@ -140,24 +140,56 @@ def main():
         add(row("bert-base-uncased, 8 documents", "inference_base_batch8_ms", py, net))
         add(row("bert-tiny, 1 document", "inference_tiny_single_ms", py, net))
         add("")
-        add("**This is the gap, and it is the expected one.** The managed encoder is `double` end to")
-        add("end and written for clarity; torch dispatches to hand-tuned single-precision kernels")
-        add("with fused attention. GraviTransformers exists so a model can be loaded, inspected and")
-        add("understood in pure .NET — for throughput the answer is an ONNX export.")
+        add("The managed encoder computes in `double` with float32 weights - which is exact, since")
+        add("every checkpoint stores float32 or narrower - and agrees with torch in float64 to about")
+        add("1e-13. torch runs float32 through hand-tuned kernels. For throughput the answer is the")
+        add("ONNX row below.")
         add("")
 
-    if "onnx_single_ms" in net:
-        add("### The same work through ONNX Runtime")
+    if "onnx_base_single_ms" in net:
+        add("### The same model through ONNX Runtime")
         add("")
-        add(f"`{net.get('onnx_provider', 'Cpu')}` provider, via GraviOptimum:")
+        add("`bert-base-uncased`, exported from the same checkpoint by the Python half and run from")
+        add(f".NET through GraviOptimum on the `{net.get('onnx_provider', 'Cpu')}` provider.")
         add("")
-        add(f"- **{fmt(net.get('onnx_single_ms'), ' ms')}** best, "
-            f"{fmt(net.get('onnx_single_median_ms'), ' ms')} median")
+        add("| Path | Time | against torch |")
+        add("|---|---:|---|")
+        p = py.get("inference_base_single_ms")
+        for label, key in (("torch (Python)", None),
+                           ("HF.Net managed", "inference_base_single_ms"),
+                           ("HF.Net through ONNX Runtime", "onnx_base_single_ms")):
+            value = p if key is None else net.get(key)
+            against = "—" if key is None else ratio_text(ratio(value, p))
+            add(f"| {label} | {fmt(value, ' ms')} | {against} |")
         add("")
-        add("Measured on a small test model rather than on bert-base, so it is not comparable with")
-        add("the table above. It is here to show the shape of the production path: the same")
-        add("single-precision kernels torch uses, reached from .NET.")
+        error = net.get("onnx_base_max_abs_error")
+        if error is not None:
+            add(f"Largest difference between the ONNX and managed hidden states: **{error:.1e}** -")
+            add("float32 arithmetic, since the managed encoder matches torch in float64 to about 1e-13.")
+            add("")
+
+    if "vision_single_ms" in py or "vision_single_ms" in net:
+        add("## Vision")
         add("")
+        add("`google/vit-base-patch16-224` on one 224x224 image. The image is a formula both halves")
+        add("compute, not a photograph, so no resampler sits between them.")
+        add("")
+        add("| Model | Python (torch) | HF.Net (managed) | |")
+        add("|---|---:|---:|---|")
+        add(row("vit-base-patch16-224, 1 image", "vision_single_ms", py, net))
+        add("")
+        p = py.get("vision_top5")
+        n = net.get("vision_top5")
+        if p and n:
+            add("| Rank | torch (float64) | | HF.Net | |")
+            add("|---|---|---:|---|---:|")
+            for i in range(min(5, len(p), len(n))):
+                add(f"| {i + 1} | {p[i]['label']} | {p[i]['score']:.10f} "
+                    f"| {n[i]['label']} | {n[i]['score']:.10f} |")
+            add("")
+            worst = max(abs(a["score"] - b["score"]) for a, b in zip(p, n))
+            add(f"Largest difference in the top five: **{worst:.1e}**.")
+            add("")
 
     # ------------------------------------------------------------------ fill-mask
     for key, prompt in (("france", "The capital of France is [MASK]."),
@@ -179,8 +211,8 @@ def main():
         add("| Rank | Python | | HF.Net | |")
         add("|---|---|---:|---|---:|")
         for i in range(min(5, len(p), len(n))):
-            add(f"| {i + 1} | {p[i]['token']} | {p[i]['score']:.2%} "
-                f"| {n[i]['token']} | {n[i]['score']:.2%} |")
+            add(f"| {i + 1} | {p[i]['token']} | {p[i]['score']:.4%} "
+                f"| {n[i]['token']} | {n[i]['score']:.4%} |")
         add("")
 
         top_match = p[0]["token"] == n[0]["token"]
@@ -193,9 +225,9 @@ def main():
     add("")
     add("```bash")
     add("cd benchmarks/comparison")
-    add("pip install tokenizers transformers")
+    add("pip install tokenizers transformers onnx")
     add("pip install torch --index-url https://download.pytorch.org/whl/cpu")
-    add("python python/bench.py --out python/python.json")
+    add("python python/bench.py --out python/python.json     # also exports onnx/bert-base-uncased.onnx")
     add("dotnet run -c Release --project HFNet.Comparison -- dotnet.json")
     add("python report.py")
     add("```")

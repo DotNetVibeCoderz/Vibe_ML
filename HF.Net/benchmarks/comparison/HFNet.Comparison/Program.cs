@@ -4,6 +4,8 @@ using Gravicode.HFNet.GraviHub;
 using Gravicode.HFNet.GraviHub.Io;
 using Gravicode.HFNet.GraviTokenizers;
 using Gravicode.HFNet.GraviTransformers;
+using Gravicode.HFNet.GraviTransformers.Vision;
+using Gravicode.Science.GraviNum;
 
 // The .NET half of the HF.Net comparison benchmark.
 //
@@ -14,6 +16,10 @@ using Gravicode.HFNet.GraviTransformers;
 
 const string Model = "bert-base-uncased";
 const string Tiny = "prajjwal1/bert-tiny";
+const string Vision = "google/vit-base-patch16-224";
+
+// Written by the Python half, from the same checkpoint the managed encoder loads.
+var onnxPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "onnx", $"{Model}.onnx");
 
 // The same corpus as the Python half, written out here rather than loaded, so the two runtimes
 // cannot disagree about what they measured.
@@ -133,25 +139,56 @@ if (!skipInference)
     }
 }
 
-// ---------------------------------------------------------------- onnx
-Console.WriteLine("onnx ...");
-try
+// ---------------------------------------------------------------- vision
+if (!skipInference)
 {
-    const string OnnxModel = "hf-internal-testing/tiny-random-BertModel";
+    Console.WriteLine("vision ...");
 
-    using var session = Gravicode.HFNet.GraviOptimum.Optimum.Optimize(OnnxModel, "auto");
-    var tokenizer = HfTokenizer.FromPretrained(OnnxModel);
-    var feeds = Gravicode.HFNet.GraviOptimum.Optimum.BuildEncoderInputs(tokenizer, corpus[0], session.Session);
+    using var vit = VisionTransformer.Load(Vision);
+    var pixels = VitPixels(224);
 
-    var report = session.Measure(feeds, iterations: 50);
+    var (single, median) = Best(() => vit.Forward(pixels), iterations: 10, warmup: 3);
+    results["vision_single_ms"] = single;
+    results["vision_single_median_ms"] = median;
 
-    results["onnx_provider"] = session.Target.ToString();
-    results["onnx_single_ms"] = report.Best.TotalMilliseconds;
-    results["onnx_single_median_ms"] = report.Median.TotalMilliseconds;
+    results["vision_top5"] = vit.Classify(pixels, topK: 5)
+        .Select(c => new Dictionary<string, object> { ["label"] = c.Label, ["index"] = c.Index, ["score"] = c.Score })
+        .ToList();
 }
-catch (Exception error)
+
+// ---------------------------------------------------------------- onnx
+// The production path: the same bert-base checkpoint, exported by the Python half and run through
+// ONNX Runtime from .NET. Comparable row for row with the managed and torch figures above.
+Console.WriteLine("onnx ...");
+if (!File.Exists(onnxPath))
 {
-    Console.WriteLine($"  skipped: {error.Message}");
+    Console.WriteLine($"  skipped: {Path.GetFullPath(onnxPath)} not found - run python/bench.py first");
+}
+else
+{
+    try
+    {
+        using var session = Gravicode.HFNet.GraviOptimum.Optimum.OptimizeFile(onnxPath, "cpu");
+        using var reference = TransformerModel.Load(Model);
+
+        var feeds = Gravicode.HFNet.GraviOptimum.Optimum.BuildEncoderInputs(
+            reference.Tokenizer, corpus[0], session.Session);
+
+        var report = session.Measure(feeds, iterations: 50);
+        results["onnx_provider"] = session.Target.ToString();
+        results["onnx_base_single_ms"] = report.Best.TotalMilliseconds;
+        results["onnx_base_single_median_ms"] = report.Median.TotalMilliseconds;
+
+        // How far float32 ONNX lands from the managed encoder, which matches torch in float64 to
+        // about 1e-13 - so this is ONNX's own precision, not a disagreement about the model.
+        var onnx = session.Run(feeds)["last_hidden_state"].ToArray();
+        var managed = reference.Hidden(corpus[0]).ToArray();
+        results["onnx_base_max_abs_error"] = onnx.Zip(managed, (a, b) => Math.Abs(a - b)).Max();
+    }
+    catch (Exception error)
+    {
+        Console.WriteLine($"  skipped: {error.Message}");
+    }
 }
 
 File.WriteAllText(output, JsonSerializer.Serialize(results, new JsonSerializerOptions
@@ -160,6 +197,24 @@ File.WriteAllText(output, JsonSerializer.Serialize(results, new JsonSerializerOp
 }));
 
 Console.WriteLine($"wrote {output}");
+
+/// <summary>The same formula as vit_pixels in the Python half, so no resampler sits between them.</summary>
+static NdArray VitPixels(int size)
+{
+    var pixels = NdArray.Zeros(3, size, size);
+    for (var c = 0; c < 3; c++)
+    {
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                pixels[c, y, x] = 0.9 * Math.Sin(0.05 * x + 0.07 * y + c) * Math.Cos(0.013 * x * (c + 1));
+            }
+        }
+    }
+
+    return pixels;
+}
 
 /// <summary>
 /// Runs an operation, discards the warm-up, and returns the best and median time in milliseconds.

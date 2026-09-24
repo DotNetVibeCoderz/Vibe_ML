@@ -7,9 +7,9 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.1.0 — current
+## v0.2.0 — current
 
-**26 projects, 212 tests passing, whole solution builds clean with no warnings.**
+**26 projects, 250 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -23,7 +23,7 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | GraviHub | **Complete** | 27 | Hub client, cache, safetensors, PyTorch pickle reader |
 | GraviTokenizers | **Complete** | 29 | WordPiece, BPE, Unigram, `tokenizer.json`, offsets |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
-| GraviTransformers | **Core complete** | 53 | BERT-family encoders and ViT; classification, fill-mask, named entities, question answering, embeddings, image classification |
+| GraviTransformers | **Core complete** | 91 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
 | GraviPEFT | **Partial** | 15 | LoRA apply/merge/save/load; adapter training not implemented |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Core complete** | 22 | ONNX Runtime, provider choice, quantisation with measured error |
@@ -46,10 +46,11 @@ These are the checks that establish the stack is actually correct, not merely ru
 - **Named entities on `dslim/bert-base-NER`** tag *"Kang Fadhil founded Gravicode Studios in
   Bandung… a Microsoft event"* as `PER Kang Fadhil` 98.8%, `ORG Gravicode Studios` 99.5%,
   `LOC Bandung` 99.7%, `ORG Microsoft` 99.9%, each with exact character offsets into the input.
-- **`google/vit-base-patch16-224`** answers **bee 94.46%** on the Hub's own sample photograph and
-  **Egyptian cat 93.81%** on the canonical two-cats image, against torch's 94.38% and 93.74%. Same
-  ranking, five for five, within 0.08 of a percentage point; the residual is the resampler, not the
-  model.
+- **`google/vit-base-patch16-224`** answers **bee 94.48%** on the Hub's own sample photograph,
+  against torch's 94.38%, with the same top-five ranking. **Given identical pixels, the top-five
+  probabilities match torch to ten decimal places** at 160, 224 and 384 px, so the remaining
+  residual on a photograph is the image resampler alone. Until the GELU fix below, part of it was
+  the model.
 - **Question answering on `distilbert-base-cased-distilled-squad`** extracts *"safetensors and
   PyTorch checkpoints"* and *"Gravicode Studios"* from a passage about HF.Net. This is also the
   check on sentence pairs: segment 1 is carried as a difference and applied per position, so both
@@ -58,9 +59,12 @@ These are the checks that establish the stack is actually correct, not merely ru
   reverse step.
 - **HFAppGen end to end**: a prompt produced a project that referenced the real libraries, built
   clean, and ran — downloading DistilBERT and classifying three sentences correctly.
+- **`bert-base-uncased` agrees with torch in float64 to about 1e-13** on hidden states, for a single
+  sentence and for a pair (segment 1). Fill-mask probabilities agree to ten decimal places.
 - **Measured against the Python reference** on the same machine in the same session. Tokenization is
-  **1.66x faster than the Rust `tokenizers` crate** with byte-identical ids; fill-mask agrees to a
-  tenth of a percentage point across the top five. See [docs/benchmarks.md](docs/benchmarks.md).
+  **1.78x faster than the Rust `tokenizers` crate** with byte-identical ids. bert-base takes 111 ms
+  managed against torch's 36 ms, and **23.8 ms through ONNX Runtime from .NET, 1.53x faster than
+  torch**. ViT-base takes 1.96 s against 226 ms. See [docs/benchmarks.md](docs/benchmarks.md).
 
 ### Found and fixed during development
 
@@ -81,6 +85,22 @@ Each of these was caught by a test or by a live run, not by reading the code.
   than running the primary constructor's defaults — so the default meant "no padding".
 - Quantising a checkpoint **corrupted its integer index buffers**: bfloat16 has eight mantissa bits,
   so `position_ids` value 511 became 512. Integer tensors are now kept at full precision.
+- The vision encoder ran the **tanh approximation of GELU** where ViT's config says `gelu`, which
+  transformers reads as the exact erf form. The top five still ranked correctly and agreed to the
+  third decimal place, so it passed for resampler noise. It came out only when both sides were fed
+  identical pixels. The text encoder had the same problem, and there it left bert-base's hidden
+  states **2.8e-2** away from torch. Both encoders now follow `hidden_act`.
+- **The foundation's attention was a sequential indexer loop**, about 20x slower than a vectorised
+  one, and it was two thirds of a ViT forward pass. Text and vision inference now run on HF.Net's
+  own kernels. bert-base went from 300–600 ms to 111 ms and ViT-base from about 12 s to 2 s.
+- **A loop-heavy method called a handful of times runs as tier-0 code.** The linear kernel measured
+  12x slower before the JIT caught up, and one forward pass is exactly a handful of calls. The hot
+  kernels are now `AggressiveOptimization`.
+- **The tied MLM decoder was rounded.** It was taken from `Encoder.TokenEmbeddings`, which has
+  segment 0 folded in, and that double sum is not a float32 value. Fill-mask agreed with torch to
+  5e-9 instead of ten digits until it read the stored word embeddings.
+- **The benchmark's ONNX row was measured on a tiny test model** and so could not be compared with
+  anything. It now exports bert-base itself, and the production path turns out to beat torch.
 - HFAppGen's assistant, asked to build a project, **invented a NuGet package** for HF.Net, hit
   NU1101, and wrote a fake shim to get a green build. It now has an `HFNetProjectReferences` tool
   and a system prompt that forbids shims outright.
@@ -146,10 +166,25 @@ Carried into [PLAN.md](PLAN.md):
 - Notebooks under `notebooks/` beyond the two shipped as HFAppGen templates
 - CLIP (its text tower is causal, which this encoder is not)
 - LoRA adapter training (the foundation's tape omits attention biases)
+- A faster GEMM. The linear kernel runs at about 13 GMAC/s, roughly the foundation's packed
+  `MatMul`, and loses to it by 1.3x at 577 rows. torch's MKL does about four times that. This is
+  the remaining managed-versus-torch gap.
 
 ---
 
 ## Log
+
+**2026-09-24** — Performance. Text and vision inference moved onto shared kernels: a vectorised
+attention, a 4x2 float32-weight linear kernel, a table-plus-Taylor erf, and `AggressiveOptimization`
+on the hot loops. bert-base went from 300–600 ms to 111 ms (torch: 36 ms), and ViT-base from 12 s
+to 2 s. The text encoder picked up the exact GELU on the way and now matches torch in float64 to
+1e-13. The comparison benchmark gained a real bert-base ONNX row: 23.8 ms from .NET, faster than
+torch. 250 tests.
+
+**2026-09-24** — Vision models at any resolution. Position embeddings are interpolated with torch's
+own bicubic, pinned to 1e-12. Checking against torch at 384 px found that the vision block used
+the tanh GELU instead of the exact one; with that fixed, ViT matches torch to ten decimal places at
+160, 224 and 384 px. 229 tests.
 
 **2026-09-24** — Vision. ViT and DeiT load and classify; a pre-norm encoder block written here
 because the foundation's is post-norm, and the two accept each other's parameters in silence. The

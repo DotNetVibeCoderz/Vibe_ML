@@ -27,10 +27,10 @@ the fastest thing Python has; GraviTokenizers is managed C#.
 
 | Measure | Python (Rust) | HF.Net (C#) | |
 |---|---:|---:|---|
-| One document | 0.03 ms | 0.01 ms | **2.8x faster** |
-| 1,000 documents | 18.13 ms | 10.94 ms | **1.66x faster** |
+| One document | 0.03 ms | 0.01 ms | **2.6x faster** |
+| 1,000 documents | 15.52 ms | 8.70 ms | **1.78x faster** |
 
-**55,144 docs/s** against **91,423 docs/s**.
+**64,441 docs/s** against **114,887 docs/s**.
 
 The result is less surprising than it looks. Both implementations do the same greedy longest-match
 walk; the Rust crate pays a Python-boundary crossing per call, and the managed version caches
@@ -46,78 +46,114 @@ python  101 7592 1010 2088 999 19204 17629 2015 2024 23653 1012 102
 hf.net  101 7592 1010 2088 999 19204 17629 2015 2024 23653 1012 102
 ```
 
-## Reading safetensors — level
+## Reading safetensors — listing is level, reading is not
 
 `model.safetensors` for `bert-base-uncased`: 420 MB, 206 tensors.
 
 | Measure | Python | HF.Net | |
 |---|---:|---:|---|
-| Open and list every tensor | 0.65 ms | 0.71 ms | 1.09x slower |
-| Read one 30,522 × 768 tensor | 1.14 ms | 196.96 ms | 173x slower |
+| Open and list every tensor | 0.49 ms | 0.79 ms | 1.6x slower |
+| Read one 30,522 × 768 tensor | 0.49 ms | 149 ms | 306x slower |
 
 Listing is level, because both read only the header.
 
-**Reading a tensor is not, and the reason is structural rather than fixable.** PyTorch hands back a
-zero-copy view over the F32 bytes as they lie on disk. HF.Net widens every value to `double`,
-because that is what `NdArray` holds — 23.4 million values, 187 MB materialised. The cost is real
-and it is the price of uniformity with the rest of the Gravicode stack.
+**Reading a tensor is not, and the reason is structural.** PyTorch hands back a zero-copy view over
+the F32 bytes as they lie on disk. HF.Net widens every value to `double`, because that is what
+`NdArray` holds — 23.4 million values, 187 MB materialised. It is paid once per tensor at load
+time, not per forward pass.
 
 > This table is also where a **600x performance bug** was found. The reader was allocating and
 > copying a fixed 256 MB prefix to parse a header of about twenty kilobytes, which made listing
 > tensors take 429 ms. Reading the declared header length first and then exactly that many bytes
-> brought it to 0.71 ms. Nothing but a comparison against a reference implementation would have
-> made that visible — it looked fast enough on its own.
+> brought it under a millisecond. Nothing but a comparison against a reference implementation would
+> have made that visible — it looked fast enough on its own.
 
-## Encoder inference — Python wins, by a lot
+## Encoder inference
 
 One forward pass over 12 tokens.
 
 | Model | Python (torch) | HF.Net (managed) | |
 |---|---:|---:|---|
-| bert-base-uncased, 1 document | 50.8 ms | 300–600 ms | **6–12x slower** |
-| bert-base-uncased, 8 documents | 261.6 ms | 1,736 ms | 6.6x slower |
-| bert-tiny, 1 document | 1.5 ms | 2.1 ms | 1.4x slower |
+| bert-base-uncased, 1 document | 36.4 ms | 111 ms | 3.1x slower |
+| bert-base-uncased, 8 documents | 161 ms | 1,104 ms | 6.9x slower |
+| bert-tiny, 1 document | 1.17 ms | 0.95 ms | **1.22x faster** |
 
-The bert-base single-document figure moved between 304 ms and 598 ms across two runs an hour apart
-on the same build — thermal throttling, and a good illustration of why a single number quoted
-without its conditions is worth very little. The range is given rather than a false precision.
+The previous version of this page recorded **300–600 ms** for one bert-base document and 1,736 ms
+for eight. What changed is described below; what did not change is the precision. The managed
+encoder agrees with torch **in float64 to about 1e-13** on bert-base's hidden states, which is the
+number that says the speed was not bought with correctness.
 
-**This gap is expected and not a defect.** The managed encoder is `double` end to end and written to
-be read; torch dispatches to hand-tuned single-precision kernels with fused attention.
-GraviTransformers exists so a model can be **loaded, inspected and understood** in pure .NET.
+### Where the time went, and what was done about it
 
-Note that the gap narrows sharply on the small model — 1.4x on bert-tiny against 6–12x on bert-base.
-Most of what torch wins is in the large matrix multiplies, not in the framework.
+Measured per encoder block before touching anything:
+
+| | 12 tokens | 197 positions (ViT) | 577 positions (ViT at 384 px) |
+|---|---:|---:|---:|
+| Foundation attention, inner loop | ~2 ms | **~298 ms** | **~2,760 ms** |
+| Four Q/K/V/O projections | 4.2 ms | 38 ms | 76 ms |
+| Feed-forward pair | 9.6–15 ms | 91–165 ms | 178–618 ms |
+
+Four changes, each measured before it was kept:
+
+1. **Attention.** The foundation's `MultiHeadAttention` is a sequential indexer loop. HF.Net's own
+   copies each head's keys and values into contiguous blocks, makes every score one vectorised dot
+   product, and splits the work by head and block of queries. The inner loop is **about 20x
+   faster**, with results equal to 1e-15.
+2. **One linear kernel for everything.** It computes four input rows against two weight rows per
+   pass, over tiles of outputs and rows run in parallel. For a 12-token input it is **4.4x faster**
+   than the foundation's packed `MatMul`, and 1.35x faster at 197 rows. At 577 rows it is still
+   1.3x slower, which is the next item on the list.
+3. **Weights in float32, activations in double.** Every checkpoint stores F32 or narrower, so
+   float32 holds the weights exactly while halving the bytes streamed per forward pass.
+   Activations and every sum stay `double`, which is why the 1e-13 agreement survived.
+4. **The JIT.** A loop-heavy method called a handful of times runs as unoptimised tier-0 code, and
+   one forward pass is exactly a handful of times: the linear kernel measured **12x slower** before
+   tiering caught up. The hot methods are marked `AggressiveOptimization`.
+
+Two smaller ones fell out of profiling. The exact GELU spent 40% of a feed-forward layer inside
+the foundation's 50-term erf series; a table-plus-Taylor erf is 3x faster and closer to a correctly
+rounded erf. The ViT patch embedding was reading pixels through an indexer that allocated per call:
+74 ms, now 8.
+
+### What is left
+
+The single-document gap is the arithmetic rate. The kernel runs at about 13 GMAC/s on this machine,
+roughly what the foundation's packed `MatMul` manages; torch's float32 MKL kernels do about four
+times that. Eight documents at once is almost pure arithmetic, so that row moved least (1.6x). The
+two known steps are a packed GEMM with a wider register tile and, as an opt-in, float32
+activations. Both are in [PLAN.md](../PLAN.md).
 
 ### Vision
 
-One image at 224x224, which is 197 positions rather than 12.
+`google/vit-base-patch16-224` on one 224 × 224 image. The image is a formula both halves compute
+rather than a photograph, so no resampler sits between them.
 
 | Model | Python (torch) | HF.Net (managed) | |
 |---|---:|---:|---|
-| vit-base-patch16-224, 1 image | 441 ms | 12.0 s | 26x slower |
+| vit-base-patch16-224, 1 image | 226 ms | 1,964 ms | 8.7x slower |
 
-Two thirds of the managed figure is attention, which is the foundation's. The feed-forward pair and
-the patch projection are HF.Net's, and both were made faster by changing their memory layout rather
-than their arithmetic: they keep their weights in the checkpoint's own `(outputs, inputs)` order so
-each dot product walks contiguous memory and can be vectorised.
+The previous version of this page recorded **12 seconds**. At 384 px, which needs the position
+embeddings interpolated, it is 6.8 s against 45.8 s before.
 
-That direction is counter-intuitive enough to be worth stating plainly. Transposing them into the
-`(inputs, outputs)` order the obvious loop wants, and parallelising across rows, measured **five
-times slower than the sequential version it replaced** — at 3072 columns every step of the inner
-loop is a fresh cache line, and a strided operand cannot be loaded into a vector register at all.
+### The production path — faster than torch
 
-### The production path
+The same `bert-base-uncased` checkpoint, exported to ONNX by the Python half and run from .NET
+through GraviOptimum on ONNX Runtime's CPU provider:
 
-The same work through ONNX Runtime, via GraviOptimum, on a small test model:
+| Path | One document, 12 tokens | against torch |
+|---|---:|---|
+| torch (Python) | 36.4 ms | — |
+| HF.Net managed | 111 ms | 3.1x slower |
+| **HF.Net through ONNX Runtime** | **23.8 ms** | **1.53x faster** |
 
-**0.67 ms** best, 0.85 ms median.
+The ONNX hidden states differ from the managed ones by at most **4.7e-6**, the size of float32
+arithmetic. The previous version of this page measured this path on a tiny test model because no
+export of the real one was at hand; the benchmark now exports it itself.
 
-Not comparable with the table above — a different model — but it shows the shape of the answer: the
-same class of single-precision kernels torch uses, reached from .NET. **When you need throughput,
-export to ONNX.** See [GraviOptimum](GraviOptimum.md).
+**When you need throughput, this is the answer**, and it is not a compromise: it is faster than the
+reference implementation, from .NET. See [GraviOptimum](GraviOptimum.md).
 
-## Do they agree? — yes
+## Do they agree? — to the last digit that means anything
 
 Speed is the easy half. This is the half that decides whether any of it is usable.
 
@@ -125,35 +161,44 @@ Speed is the easy half. This is the half that decides whether any of it is usabl
 
 | Rank | Python | | HF.Net | |
 |---|---|---:|---|---:|
-| 1 | paris | 41.68% | paris | 41.53% |
-| 2 | lille | 7.14% | lille | 7.16% |
-| 3 | lyon | 6.34% | lyon | 6.31% |
-| 4 | marseille | 4.44% | marseille | 4.46% |
-| 5 | tours | 3.03% | tours | 3.02% |
+| 1 | paris | 41.6790% | paris | 41.6788% |
+| 2 | lille | 7.1416% | lille | 7.1416% |
+| 3 | lyon | 6.3393% | lyon | 6.3392% |
+| 4 | marseille | 4.4448% | marseille | 4.4447% |
+| 5 | tours | 3.0297% | tours | 3.0297% |
 
 **`He was a [MASK] player in the national team.`**
 
 | Rank | Python | | HF.Net | |
 |---|---|---:|---|---:|
-| 1 | regular | 54.89% | regular | 55.00% |
-| 2 | key | 19.47% | key | 19.39% |
-| 3 | former | 5.82% | former | 5.83% |
-| 4 | capped | 2.16% | capped | 2.14% |
-| 5 | prominent | 1.36% | prominent | 1.36% |
+| 1 | regular | 54.8921% | regular | 54.8917% |
+| 2 | key | 19.4748% | key | 19.4747% |
+| 3 | former | 5.8151% | former | 5.8151% |
+| 4 | capped | 2.1575% | capped | 2.1575% |
+| 5 | prominent | 1.3643% | prominent | 1.3643% |
 
-**`google/vit-base-patch16-224`**, on the Hub's own sample photograph and on the canonical two-cats
-image. The small residual is the resampler — PIL's bilinear against ImageSharp's — not the model.
+The Python column is the `pipeline`, which runs torch in float32; the differences in the fourth
+decimal of a percentage are float32's. Against torch in **float64**, HF.Net's fill-mask
+probabilities agree to ten decimal places and bert-base's hidden states to about 1e-13.
 
-| Image | Python | | HF.Net | |
+**`google/vit-base-patch16-224`**, torch in float64 against HF.Net on the same pixels:
+
+| Rank | torch | | HF.Net | |
 |---|---|---:|---|---:|
-| bee.jpg | bee | 94.38% | bee | 94.46% |
-| | pot, flowerpot | 1.36% | pot, flowerpot | 1.32% |
-| cats.jpg | Egyptian cat | 93.74% | Egyptian cat | 93.81% |
-| | tabby, tabby cat | 3.84% | tabby, tabby cat | 3.80% |
+| 1 | binder, ring-binder | 0.1186940263 | binder, ring-binder | 0.1186940263 |
+| 2 | coil, spiral, volute, whorl, helix | 0.0446382711 | coil, spiral, volute, whorl, helix | 0.0446382711 |
+| 3 | screen, CRT screen | 0.0433549419 | screen, CRT screen | 0.0433549419 |
+| 4 | television, television system | 0.0315982656 | television, television system | 0.0315982656 |
+| 5 | rubber eraser, rubber, pencil eraser | 0.0241216848 | rubber eraser, rubber, pencil eraser | 0.0241216848 |
 
-Same order, same five candidates, probabilities agreeing to about a tenth of a percentage point.
-The residual difference is `double` against `float` arithmetic, which is HF.Net being *more*
-precise rather than less.
+Largest difference: **1.3e-15**.
+
+> **What the precision check found.** An earlier version of this page said the managed encoder
+> agreed with torch "to about a tenth of a percentage point" and put the residual down to
+> `double` against `float`. That was wrong. Both encoders ran the **tanh approximation** of GELU,
+> and every one of these checkpoints asks for the exact, erf-based one. It left bert-base's hidden
+> states **2.8e-2** from torch. It was found by feeding both sides identical inputs in the same
+> precision, which removes every other explanation.
 
 ## Two things Python could not open
 
@@ -175,18 +220,18 @@ model you actually have.
 |---|---|
 | Tokenizing large volumes of text | **HF.Net** — faster, identical output |
 | Loading and inspecting a checkpoint | **HF.Net** — level on headers, and it reads formats Python's fast path refuses |
-| Running an encoder in production | **ONNX through GraviOptimum**, not the managed path |
-| Running an encoder to understand it | **HF.Net managed** — slower, and readable |
+| Running an encoder in production | **ONNX through GraviOptimum** — faster than torch, from .NET |
+| Running an encoder to understand it, or checking an export | **HF.Net managed** — 3x torch on a sentence, and exact to 1e-13 in float64 |
 | Training | **Python.** HF.Net does not backpropagate into a pretrained encoder; see [PLAN.md](../PLAN.md) |
 
 ## Reproducing this
 
 ```bash
 cd benchmarks/comparison
-pip install tokenizers transformers
+pip install tokenizers transformers onnx
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-python python/bench.py --out python/python.json
+python python/bench.py --out python/python.json     # also exports onnx/bert-base-uncased.onnx
 dotnet run -c Release --project HFNet.Comparison -- dotnet.json
 python report.py
 ```

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.1.0 is implemented: **26 projects, 212 tests passing**, the whole solution builds clean, and the
+v0.2.0 is published: **26 projects, 250 tests passing**, the whole solution builds clean, and the
 eight libraries are published on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the
 specification of record; [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says
 where it is going.
@@ -36,10 +36,30 @@ root rather than here — see below.
   in silence and returns confident nonsense. That is why `GraviTransformers.Vision` has its own
   block rather than reusing the foundation's. The test that catches it: zero every projection — a
   pre-norm block is then the identity, a post-norm block returns `LayerNorm(input)`.
-- **Vision weight matrices stay in the checkpoint's `(outputs, inputs)` order.** Transposing them
-  into the order the obvious loop wants, even with `Parallel.For`, measured **five times slower**:
-  at 3072 columns each step of the inner loop is a fresh cache line, and a strided operand cannot be
-  vectorised at all. `Simd.Dot` depends on both operands being contiguous.
+- **Inference runs on `Kernels.cs`, not on the foundation's layers.** Both encoders, text and
+  vision, go through the same `Linear` / `Attention` / `Norm` / `EncoderBlock`. The foundation's
+  `MultiHeadAttention` is a naive indexer loop about 20x slower than the kernel. `NormOrder` is a
+  required argument with no default, because pre-norm and post-norm load each other's weights in
+  silence.
+- **Weights are float32 and activations double.** That is lossless, because every checkpoint stores
+  F32 or narrower, and it halves the bytes a short input streams. The float32 copy must come from
+  the *stored* tensor. The MLM decoder used to be tied to `Encoder.TokenEmbeddings`, which has
+  segment 0 folded in; that double sum is not a float32 value, and rounding it cost fill-mask five
+  orders of magnitude of agreement with torch.
+- **The text encoder's inference weights are a copy.** `TransformerModel.Encoder` is the model of
+  record, but `Hidden`/`Forward`/`FillMask` run on a `CompiledEncoder` built from it. Anything that
+  changes the encoder's parameters must call `WeightsChanged()`, or predictions silently stay the
+  same. `PeftModel.Merge` does.
+- **Weight matrices stay in the checkpoint's `(outputs, inputs)` order.** The linear kernel is
+  4 input rows x 2 weight rows per pass, and it depends on both being contiguous. Transposing
+  measured five times slower.
+- **Hot loops need `[MethodImpl(AggressiveOptimization)]`.** A loop-heavy method called only a
+  handful of times runs as tier-0 code, and one forward pass is exactly that: the linear layer
+  measured **12x slower** before tiering caught up. Benchmark kernels with a warm-up of 30+ calls,
+  or with `DOTNET_TieredCompilation=0`, or you are timing the wrong code.
+- **Do not use `MathUtil.Erf` in a hot loop.** Its Maclaurin series takes up to 50 terms and loses
+  about 5e-14 near x = 3. `Activation.Erf` combines a table stepped out from 0 with a 9-term
+  Hermite/Taylor correction. It is 3x faster and within 5e-16 of a correctly rounded erf.
 - **`BatchOptions.Default` must not be written `new()`.** It is a record struct, so the
   parameterless constructor zeroes the fields rather than running the primary constructor's
   defaults — the result means "no padding", and the first ragged batch throws about rectangularity.
@@ -57,9 +77,19 @@ root rather than here — see below.
   weights.
 - **Decoder-only models are refused, not half-loaded.** Filling an encoder from a decoder's weights
   produces a model that runs and returns nonsense.
-- **The managed encoder is `double` and slow on purpose.** It is for loading, inspecting and
-  understanding a model. For throughput the answer is an ONNX export through GraviOptimum — see
-  [docs/benchmarks.md](docs/benchmarks.md) for the measured gap.
+- **`hidden_act: "gelu"` is the exact erf GELU; the foundation's `Activations.Gelu` is the tanh
+  approximation.** They differ by up to 4e-4, and on ViT that moved probabilities in the third
+  decimal place, which is easy to mistake for resampler noise. On BERT hidden states it was 2.8e-2.
+  Both encoders now resolve the activation from the config (`Activation.For`), and both match torch
+  in float64: ViT to ten digits of a probability, BERT hidden states to about 1e-13. The
+  foundation's own layers still use the tanh form, so do not route inference back through them.
+- **Position interpolation must be torch's bicubic exactly**: `a = -0.75` (not `-0.5`), half-pixel
+  source coordinate *not* clamped at zero, edge taps clamped. Each wrong choice moves values by
+  hundredths and still gives confident answers.
+- **The managed encoder is accurate first and fast second.** Its linear kernel runs at roughly the
+  foundation's packed `MatMul` rate (about 13 GMAC/s here). It beats `MatMul` below about 200 rows
+  and loses by 1.3x at 577 (ViT at 384 px). For throughput the answer is an ONNX export through
+  GraviOptimum — see [docs/benchmarks.md](docs/benchmarks.md).
 - **The GPU is not a win here.** Everything is double precision, which consumer and integrated GPUs
   run at a fraction of their single-precision rate; the foundation measured its ILGPU path 5–8x
   *slower* than the CPU.
@@ -155,7 +185,7 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 212
+dotnet test                                                     # all 250
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

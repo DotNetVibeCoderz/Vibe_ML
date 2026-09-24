@@ -192,8 +192,39 @@ masukan di `[0, 1]` tetap menjawab, tetap menjawab dengan yakin, dan tidak ada a
 keluarannya yang memberi tahu bahwa masukannya salah.
 
 Bila prosesor dan model berselisih soal panjang sisi — atau bila repositori tidak menyertakan konfig
-prosesor sama sekali — `image_size` **milik model** yang menang. Angka itu tertanam pada berapa
-banyak position embedding yang dimiliki checkpoint, jadi ia satu-satunya yang tidak bisa ditawar.
+prosesor sama sekali — `image_size` **milik model** yang menang, kecuali Anda meminta ukuran lain.
+Itulah kisi tempat position embedding dipelajari, jadi itulah satu-satunya resolusi yang tidak perlu
+diinterpolasi.
+
+### Resolusi lain
+
+```csharp
+using var model = VisionTransformer.Load("google/vit-base-patch16-224", imageSize: 384);
+
+model.Processor.Size;                            // 384
+model.Classify("bee.jpg");                       // kisi patch 24x24, bukan 14x14
+```
+
+Kelipatan berapa pun dari ukuran patch bisa dipakai, begitu pula persegi panjang yang diberikan
+langsung ke `Forward(pixels)` atau `Classify(pixels)`. Checkpoint hanya menyimpan posisi untuk kisi
+14x14; untuk kisi lain, posisi itu diubah ukurannya sebagai gambar 768 kanal, persis seperti yang
+dilakukan transformers dengan `interpolate_pos_encoding=True`. Posisi token kelas bukan bagian dari
+kisi dan dibiarkan apa adanya. Tabel untuk tiap kisi dihitung sekali lalu disimpan.
+
+Resampler-nya harus sama persis dengan milik torch, karena resampler lain menghasilkan model yang
+tetap berjalan namun diam-diam menggeser setiap patch. Tiga detail menentukannya, dan masing-masing
+menggeser hasil beberapa perseratus: kernelnya kubik Keys dengan `a = -0.75`, bukan `-0.5` yang
+dipakai sebagian besar pustaka gambar; koordinat sumbernya setengah piksel,
+`(i + 0.5) * in / out - 0.5`; dan tap yang jatuh di luar kisi mengulang tepinya. Uji-ujinya
+mengunci ketiganya terhadap `torch.nn.functional.interpolate` hingga 1e-12.
+
+Dengan piksel yang identik, `google/vit-base-patch16-224` mengembalikan probabilitas lima teratas
+yang sama dengan torch hingga sepuluh angka desimal pada 160, 224, dan 384 piksel. Ukuran yang
+bukan kelipatan utuh dari patch ditolak, bukan dipotong.
+
+Resolusi yang lebih tinggi ada harganya: 384 piksel (577 token) memakan waktu sekitar 3,5 kali 224
+piksel (197 token) — 6,8 detik melawan 2,0 detik. Sebagian besar ada di lapisan linear, yang tumbuh
+sebanding jumlah patch; attention tumbuh kuadratik tetapi bukan lagi bagian yang terbesar.
 
 ### Apa yang bisa dijalankan
 
@@ -202,18 +233,16 @@ namanya, disertai arahan ke ONNX. ViT dengan head yang belum dikenal tetap termu
 dan fiturnya tetap terbaca, `HasClassificationHead` bernilai `false`, dan `Classify` mengatakannya
 alih-alih mengarang kelas.
 
+Aktivasi feed-forward mengikuti `hidden_act` di konfig. `gelu` di sana berarti GELU **eksak**
+berbasis erf, sedangkan `gelu_new` berarti aproksimasi tanh. Keduanya berbeda hingga 4e-4 per nilai,
+cukup untuk menggeser probabilitas pada angka desimal ketiga. Aktivasi yang tidak dikenal encoder
+ini ditolak dengan menyebut namanya.
+
 ### Kecepatan
 
-`google/vit-base-patch16-224` memakan sekitar **12 detik** per gambar di sini melawan 441 ms milik
-torch, dan lima teratasnya sepakat dalam rentang 0,07 poin persentase. Dua pertiga waktu itu ada di
-attention milik fondasi; pasangan feed-forward dan proyeksi patch sudah divektorkan dan berjalan
-lintas core.
-
-Yang membuat keduanya cepat adalah tata letaknya, bukan perulangannya. Keduanya menyimpan bobot
-dalam urutan `(outputs, inputs)` milik checkpoint sendiri sehingga tiap dot product menyusuri memori
-yang bersebelahan. Menransposnya ke bentuk yang "diinginkan" perulangan biasa terukur **lima kali
-lebih lambat** — operand berlangkah tidak bisa dimuat ke register vektor sama sekali, dan pada 3072
-kolom setiap langkah adalah satu cache line baru.
+`google/vit-base-patch16-224` memakan sekitar **2 detik** per gambar pada 224 piksel melawan 226 ms
+milik torch. Dengan piksel yang sama, probabilitas lima teratasnya sepakat dengan torch dalam float64
+hingga 1,3e-15. Dulu ia memakan 12 detik; lihat [benchmark](benchmarks.md) untuk apa yang berubah.
 
 ## Konfigurasi
 
@@ -310,9 +339,22 @@ sebagian besar checkpoint dasar, yang justru merekalah yang memilikinya.
 
 ## Kinerja
 
-Inferensi berjalan dengan `double` di CPU. Pustaka ini ada supaya sebuah model bisa **dimuat,
-diperiksa dan dipahami** dalam .NET murni — bukan untuk melayani permintaan. Untuk throughput,
-ekspor ke ONNX dan pakai [GraviOptimum](GraviOptimum.md).
+Inferensi berjalan di atas kernel milik HF.Net sendiri, yang dipakai bersama oleh encoder teks dan
+vision. Bobot disimpan sebagai float32 — eksak, karena setiap checkpoint menyimpan F32 atau lebih
+sempit — sedangkan aktivasi dan penjumlahan dalam `double`. Untuk satu kalimat 12 token,
+`bert-base-uncased` memakan sekitar **111 ms** melawan 36 ms milik torch, dan hidden state-nya
+sepakat dengan torch dalam float64 hingga sekitar **1e-13**. Untuk throughput, ekspor ke ONNX dan
+pakai [GraviOptimum](GraviOptimum.md): model yang sama di sana memakan 24 ms, lebih cepat daripada
+torch.
+
+`Encoder` adalah model acuan, tetapi inferensi berjalan pada salinan terkompilasi dari parameternya.
+Bila Anda mengubahnya — secara manual, atau lewat apa pun selain `PeftModel.Merge` yang sudah
+melakukannya sendiri — panggil `WeightsChanged()`, atau prediksi berikutnya masih memakai nilai lama:
+
+```csharp
+model.Encoder.Layers[0].Intermediate.Weights[0, 0] = 0.5;
+model.WeightsChanged();
+```
 
 Tidak ada KV cache karena ini encoder: setiap posisi toh memperhatikan semua posisi lain.
 
@@ -320,7 +362,8 @@ Tidak ada KV cache karena ini encoder: setiap posisi toh memperhatikan semua pos
 
 - Arsitektur decoder-only dan encoder-decoder ditolak.
 - CLIP belum tersedia: menara teksnya kausal, sedangkan encoder ini tidak. ViT dan DeiT tersedia.
-- Model vision berjalan pada resolusi saat ia dilatih; position embedding tidak diinterpolasi.
+- Aktivasi selain `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python` dan `relu`
+  ditolak saat memuat, dengan menyebut namanya.
 
 ## Lihat juga
 

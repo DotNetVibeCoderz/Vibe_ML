@@ -190,8 +190,38 @@ into HF.Net. A model trained on inputs in `[-1, 1]` and fed inputs in `[0, 1]` s
 still answers confidently, with nothing in the output to say the input was wrong.
 
 Where the processor and the model disagree about the edge length - or where a repository ships no
-processor config at all - the **model's** `image_size` wins. It is baked into how many position
-embeddings the checkpoint has, so it is the one number that cannot be negotiated.
+processor config at all - the **model's** `image_size` wins, unless you ask for another one. It is
+the grid the position embeddings were learned on, so it is the one resolution that needs no
+interpolation.
+
+### Other resolutions
+
+```csharp
+using var model = VisionTransformer.Load("google/vit-base-patch16-224", imageSize: 384);
+
+model.Processor.Size;                            // 384
+model.Classify("bee.jpg");                       // a 24x24 grid of patches, not 14x14
+```
+
+Any multiple of the patch size works, and so does a rectangle passed straight to
+`Forward(pixels)` or `Classify(pixels)`. The checkpoint holds positions for a 14x14 grid only; for
+any other grid they are resized as a 768-channel image, the way transformers does it with
+`interpolate_pos_encoding=True`. The class token's position is not part of the grid and is kept as
+it is. Each grid's table is computed once and cached.
+
+The resampler has to be torch's exactly, because any other one gives a model that runs and has
+quietly moved every patch. Three details decide that, and each moves the result by a few
+hundredths: the kernel is Keys' cubic with `a = -0.75`, not the `-0.5` most image libraries use; the
+source coordinate is the half-pixel `(i + 0.5) * in / out - 0.5`; and a tap that falls off the grid
+repeats the edge. The tests pin all three against `torch.nn.functional.interpolate` to 1e-12.
+
+Given identical pixels, `google/vit-base-patch16-224` returns the same top-five probabilities as
+torch to ten decimal places at 160, 224 and 384 px. A size that is not a whole number of patches is
+refused rather than cropped.
+
+A higher resolution is not free. 384 px is 577 tokens against 224 px's 197, and it takes about
+3.5 times as long (6.8 s against 2.0 s). Most of that is the linear layers, which grow with the
+patch count. Attention grows with its square but is no longer the larger part.
 
 ### What it runs
 
@@ -200,16 +230,16 @@ pointer to ONNX. A ViT with a head this does not know still loads: the encoder i
 features are still readable, `HasClassificationHead` is `false`, and `Classify` says so instead of
 inventing classes.
 
+The feed-forward activation follows the config's `hidden_act`. `gelu` there means the **exact**,
+erf-based GELU, and `gelu_new` means the tanh approximation. The two differ by up to 4e-4 per value,
+which is enough to move a probability in the third decimal place. An activation this encoder does
+not know is refused by name.
+
 ### Speed
 
-`google/vit-base-patch16-224` takes about **12 seconds** per image here against torch's 441 ms, and
-the top five agree to within 0.07 of a percentage point. Two thirds of that is the foundation's
-attention; the feed-forward pair and the patch projection are vectorised and run across cores.
-
-The layout is what makes them fast, not the loop. Both keep their weights in the checkpoint's own
-`(outputs, inputs)` order so each dot product walks contiguous memory. Transposing them to the shape
-the obvious loop wants measured **five times slower** - a strided operand cannot be loaded into a
-vector register at all, and at 3072 columns each step is a fresh cache line.
+`google/vit-base-patch16-224` takes about **2 seconds** per image at 224 px against torch's 226 ms.
+Given the same pixels, its top-five probabilities agree with torch in float64 to 1.3e-15. It used to
+take 12 seconds; see [benchmarks](benchmarks.md) for what changed.
 
 ## Configuration
 
@@ -307,9 +337,20 @@ checkpoints, which are exactly the ones that have it.
 
 ## Performance
 
-Inference is `double` on the CPU. This library exists so a model can be **loaded, inspected and
-understood** in pure .NET - not to serve requests. For throughput, export to ONNX and use
-[GraviOptimum](GraviOptimum.md).
+Inference runs on HF.Net's own kernels, shared by the text and vision encoders. Weights are held as
+float32, which is exact because every checkpoint stores F32 or narrower. Activations and sums are
+`double`. On one 12-token sentence `bert-base-uncased` takes about **111 ms** against torch's 36 ms,
+and its hidden states agree with torch in float64 to about **1e-13**. For throughput, export to ONNX
+and use [GraviOptimum](GraviOptimum.md): the same model there takes 24 ms, faster than torch.
+
+`Encoder` is the model of record, but inference runs on a compiled copy of its parameters. If you
+change them - by hand, or through anything other than `PeftModel.Merge`, which does it for you -
+call `WeightsChanged()`, or the next prediction still uses the old values:
+
+```csharp
+model.Encoder.Layers[0].Intermediate.Weights[0, 0] = 0.5;
+model.WeightsChanged();
+```
 
 There is no KV cache because this is an encoder: every position attends to every other one anyway.
 
@@ -317,7 +358,8 @@ There is no KV cache because this is an encoder: every position attends to every
 
 - Decoder-only and encoder-decoder architectures are refused.
 - CLIP is not implemented: its text tower is causal, which this encoder is not. ViT and DeiT are.
-- Vision models run at the resolution they were trained at; position embeddings are not interpolated.
+- Activations other than `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python` and
+  `relu` are refused at load time, by name.
 
 ## See also
 

@@ -100,6 +100,7 @@ internal sealed class TinyVit : IDisposable
             patch_size = PatchSize,
             num_channels = 3,
             layer_norm_eps = 1e-12,
+            hidden_act = "gelu_new",
             id2label = labels,
         }));
 
@@ -148,6 +149,7 @@ public sealed class VisionTests
         Assert.Equal(TinyVit.Patches, config.Patches);
         Assert.Equal(3, config.LabelCount);
         Assert.Equal("class 1", config.Label(1));
+        Assert.Equal("gelu_new", config.Activation);
     }
 
     [Fact]
@@ -366,6 +368,233 @@ public sealed class VisionTests
         var sequence = model.Embeddings(TinyVit.Ramp());
 
         for (var d = 0; d < TinyVit.Hidden; d++) Assert.Equal(7.0 + d, sequence[0, d], 9);
+    }
+
+    // ------------------------------------------------------------------ other resolutions
+
+    /// <summary>
+    /// A square grid of <paramref name="side"/> x <paramref name="side"/> vectors, row-major from
+    /// row <paramref name="first"/>, holding <c>sin(1.3r + 0.7c + d) + 0.1rc</c>.
+    /// </summary>
+    /// <remarks>The same formula the torch script that produced the expected values used.</remarks>
+    private static NdArray Grid(int side, int hidden, int first = 0)
+    {
+        var table = NdArray.Zeros(first + side * side, hidden);
+        for (var r = 0; r < side; r++)
+        {
+            for (var c = 0; c < side; c++)
+            {
+                for (var d = 0; d < hidden; d++)
+                {
+                    table[first + r * side + c, d] = Math.Sin(1.3 * r + 0.7 * c + d) + 0.1 * r * c;
+                }
+            }
+        }
+
+        return table;
+    }
+
+    // torch.nn.functional.interpolate(mode="bicubic", align_corners=False) in float64, on Grid(4, 2).
+    private static readonly double[][] TorchFourToSevenByFive =
+    [
+        [-0.138344337914452, 0.837901636450479], [0.366161221473413, 1.038176511050195],
+        [0.887623135172901, 1.003169105045596], [1.045154466917928, 0.557637819739853],
+        [0.939793504456064, 0.069966193495694], [0.327194093982027, 0.887205252973058],
+        [0.685771103702955, 0.868467960851306], [0.949583927725750, 0.617547890073066],
+        [0.847372734050131, 0.134495566486271], [0.592575090318251, -0.273243630529556],
+        [0.922808754348798, 0.835096357951033], [1.041532645704685, 0.526634142754484],
+        [0.927464402646189, 0.024347588117142], [0.493633002720283, -0.433525074854440],
+        [0.076505130129552, -0.667559509108421], [0.961725307568081, 0.225868116984342],
+        [0.775931166049338, -0.160477780366145], [0.371383323443420, -0.560028756563350],
+        [-0.092192815201812, -0.643021065067064], [-0.376905221305188, -0.498885207927974],
+        [0.454540788875486, -0.515537884070937], [0.125397049710861, -0.705787673061764],
+        [-0.267039099719494, -0.702822540182702], [-0.424564975678817, -0.289219780964883],
+        [-0.360051466641985, 0.208667545564811], [-0.293342645766566, -0.892825721261757],
+        [-0.465838751251713, -0.698765267387754], [-0.491731819470918, -0.209657405246590],
+        [-0.154767190851871, 0.528563147564928], [0.280805309243480, 1.140080934625529],
+        [-0.809606922828562, -1.081156655546249], [-0.838276412783467, -0.613536362291646],
+        [-0.577807642697494, 0.198616460705764], [0.103120365856776, 1.118139635065698],
+        [0.779046823753084, 1.765688700405297],
+    ];
+
+    private static readonly double[][] TorchFourToTwoByThree =
+    [
+        [0.580603382642157, 0.885332369331180], [0.982751786288936, 0.484542300326449],
+        [0.553034475344842, -0.298518162150177], [-0.170019112194266, -0.804463424708930],
+        [-0.471313427385433, -0.364025723442963], [0.003814630451076, 0.756015540560574],
+    ];
+
+    // The same, on Grid(2, 8) - TinyVit's own position grid - resized to 3x3.
+    private static readonly double[][] TorchTwoToThree =
+    [
+        [-0.144073535298013, 0.831812433552864, 1.043626670319237, 0.296628142549504, -0.722396148285054, -1.076559968662437, -0.440246735437817, 0.601520099270912],
+        [0.264442267012718, 0.953300127448922, 0.761707815704698, -0.134185580375530, -0.910699804059677, -0.853911259171356, -0.016031071987096, 0.832597577478352],
+        [0.672958069323449, 1.074787821344980, 0.479788961090158, -0.564999303300564, -1.099003459834299, -0.631262549680274, 0.408184591463626, 1.063675055685791],
+        [0.451833045458328, 0.808969668738501, 0.418352877962594, -0.360886050851649, -0.812318440196852, -0.520899433196162, 0.245441679061593, 0.782134412129742],
+        [0.654268324870141, 0.704990253874238, 0.130532279402084, -0.540951586065305, -0.692102173323714, -0.183952329514409, 0.516307322417405, 0.764861287898460],
+        [0.856703604281955, 0.601010839009975, -0.157288319158427, -0.721017121278960, -0.571885906450576, 0.152994774167344, 0.787172965773217, 0.747588163667177],
+        [1.047739626214670, 0.786126903924137, -0.206920914394051, -1.018400244252804, -0.902240732108649, 0.034761102270114, 0.931130093561003, 0.962748724988572],
+        [1.044094382727565, 0.456680380299553, -0.500643256900532, -0.947717591755080, -0.473504542587750, 0.486006600142538, 1.048645716821906, 0.697124998318568],
+        [1.040449139240461, 0.127233856674969, -0.794365599407012, -0.877034939257357, -0.044768353066851, 0.937252098014963, 1.166161340082807, 0.431501271648562],
+    ];
+
+    [Theory]
+    [InlineData(7, 5)]
+    [InlineData(2, 3)]
+    public void Bicubic_resizing_agrees_with_torch(int rows, int columns)
+    {
+        // Pinned to torch rather than to a formula: the kernel constant (-0.75, not -0.5), the
+        // half-pixel source coordinate and the edge clamping each move these values by a few
+        // hundredths, which is exactly the size of error that would otherwise pass for "close".
+        // A non-square target catches rows and columns swapped; 2x3 is a downscale.
+        var expected = rows == 7 ? TorchFourToSevenByFive : TorchFourToTwoByThree;
+        var actual = VisionTransformer.Bicubic(Grid(4, 2), 0, 4, 2, rows, columns);
+
+        Assert.Equal(expected.Length * 2, actual.Length);
+
+        for (var i = 0; i < expected.Length; i++)
+        {
+            for (var d = 0; d < 2; d++)
+            {
+                var error = Math.Abs(expected[i][d] - actual[i * 2 + d]);
+                Assert.True(error < 1e-12, $"position {i}, dimension {d}: {actual[i * 2 + d]} vs torch {expected[i][d]}");
+            }
+        }
+    }
+
+    [Fact]
+    public void Resizing_to_the_same_grid_changes_nothing()
+    {
+        // With the half-pixel convention every tap lands exactly on a source point, so the kernel
+        // weights are [0, 1, 0, 0]. The trained resolution must never pay for an interpolation
+        // that could shift a value in the last bit.
+        var grid = Grid(4, 2);
+        var actual = VisionTransformer.Bicubic(grid, 0, 4, 2, 4, 4);
+
+        for (var i = 0; i < actual.Length; i++) Assert.Equal(grid.At(i), actual[i], 12);
+    }
+
+    [Fact]
+    public void A_larger_image_gets_interpolated_positions_and_keeps_the_class_position()
+    {
+        using var directory = TinyVit.Write(mutate: tensors =>
+        {
+            var positions = NdArray.Zeros(1, 1 + TinyVit.Patches, TinyVit.Hidden);
+            var patches = Grid(2, TinyVit.Hidden, first: 1);
+
+            for (var d = 0; d < TinyVit.Hidden; d++) positions[0, 0, d] = 40 + d;
+            for (var i = TinyVit.Hidden; i < patches.Size; i++) positions.SetAt(i, patches.At(i));
+
+            tensors["vit.embeddings.position_embeddings"] = positions;
+        });
+
+        using var model = VisionTransformer.Open(directory.Directory);
+
+        // 12px in 4px patches is a 3x3 grid against the 2x2 the checkpoint was trained on. The
+        // projection is zero, so what comes out is the position table alone.
+        var sequence = model.Embeddings(NdArray.Zeros(3, 12, 12));
+
+        Assert.Equal(1 + 9, sequence.Shape[0]);
+
+        // The class token's position is not part of the grid and must not be resampled with it.
+        for (var d = 0; d < TinyVit.Hidden; d++) Assert.Equal(40 + d, sequence[0, d], 12);
+
+        for (var i = 0; i < 9; i++)
+        {
+            for (var d = 0; d < TinyVit.Hidden; d++)
+            {
+                // 1e-6, not 1e-12: the grid went through a float32 checkpoint on the way in. The
+                // arithmetic itself is pinned to 1e-12 by the test above.
+                var error = Math.Abs(TorchTwoToThree[i][d] - sequence[1 + i, d]);
+                Assert.True(error < 1e-6,$"patch {i}, dimension {d}: {sequence[1 + i, d]} vs torch {TorchTwoToThree[i][d]}");
+            }
+        }
+    }
+
+    [Fact]
+    public void A_rectangular_image_runs_with_patches_in_row_major_order()
+    {
+        using var directory = TinyVit.Write(classes: 0);
+        using var model = VisionTransformer.Open(directory.Directory);
+
+        // 8 tall, 16 wide: two rows of four patches.
+        var output = model.Forward(NdArray.Zeros(3, 8, 16));
+
+        Assert.Equal(1 + 2 * 4, output.Shape[0]);
+        Assert.Equal(TinyVit.Hidden, output.Shape[1]);
+    }
+
+    [Fact]
+    public void An_image_size_is_chosen_at_load_and_reaches_the_processor()
+    {
+        using var directory = TinyVit.Write();
+        using var model = VisionTransformer.Open(directory.Directory, imageSize: 16);
+
+        Assert.Equal(16, model.Processor.Size);
+
+        var image = Path.Combine(Path.GetTempPath(), $"hfnet-grey-{Guid.NewGuid():N}.png");
+        using (var picture = new Image<Rgb24>(5, 7)) picture.Save(image);
+
+        try
+        {
+            // A 5x7 picture is stretched to 16x16, a 4x4 grid - which only runs if the positions
+            // were interpolated from the checkpoint's 2x2.
+            Assert.Equal(3, model.Classify(image, topK: 0).Count);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(0)]
+    public void An_image_size_that_is_not_a_whole_number_of_patches_is_refused(int size)
+    {
+        using var directory = TinyVit.Write();
+
+        var error = Assert.Throws<ArgumentOutOfRangeException>(
+            () => VisionTransformer.Open(directory.Directory, imageSize: size));
+        Assert.Contains("multiple of the 4px patch", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Pixels_that_do_not_divide_into_patches_are_refused_at_the_forward_pass()
+    {
+        using var directory = TinyVit.Write(classes: 0);
+        using var model = VisionTransformer.Open(directory.Directory);
+
+        var error = Assert.Throws<ArgumentException>(() => model.Forward(NdArray.Zeros(3, 8, 10)));
+        Assert.Contains("multiple of 4px", error.Message, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------------ activation
+
+    [Theory]
+    // x, torch.nn.functional.gelu(x), gelu(x, approximate="tanh") - float64.
+    [InlineData(-3.0, -0.0040496940948903104, -0.0036373920817729943)]
+    [InlineData(-1.0, -0.15865525393145702, -0.15880800939172329)]
+    [InlineData(-0.5, -0.15426876936299344, -0.15428599017485606)]
+    [InlineData(0.3, 0.1853734266566858, 0.18537092354275922)]
+    [InlineData(1.0, 0.84134474606854304, 0.84119199060827676)]
+    [InlineData(2.5, 2.4844758366855597, 2.4849157339100012)]
+    [InlineData(4.0, 3.9998733150326675, 3.9999297540518075)]
+    public void Gelu_is_the_exact_one_and_gelu_new_the_tanh_one(double x, double exact, double tanh)
+    {
+        // The two differ by up to 4e-4 here - the size of a rounding error to the eye, and enough
+        // over twelve blocks to move a probability in the third decimal place.
+        Assert.True(Math.Abs(Activation.For("gelu")(x) - exact) < 1e-13, "gelu");
+        Assert.True(Math.Abs(Activation.For("gelu_new")(x) - tanh) < 1e-13, "gelu_new");
+        Assert.True(Math.Abs(Activation.For("gelu_pytorch_tanh")(x) - tanh) < 1e-13, "tanh");
+    }
+
+    [Fact]
+    public void An_unknown_activation_is_refused_by_name()
+    {
+        var error = Assert.Throws<NotSupportedException>(() => Activation.For("swish"));
+        Assert.Contains("'swish'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("ONNX", error.Message, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------ the block

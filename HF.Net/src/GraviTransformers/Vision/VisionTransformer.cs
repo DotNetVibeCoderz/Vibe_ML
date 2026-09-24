@@ -1,6 +1,5 @@
-using System.Numerics;
+using System.Collections.Concurrent;
 using Gravicode.Science.GraviNum;
-using Gravicode.Science.GraviText.Transformers;
 
 namespace Gravicode.HFNet.GraviTransformers.Vision;
 
@@ -35,19 +34,19 @@ public readonly record struct Classification(string Label, double Score, int Ind
 public sealed class VisionTransformer : IDisposable
 {
     private readonly WeightStore _weights;
-    private readonly Block[] _blocks;
-    private readonly LayerNorm _finalNorm;
-    private readonly double[] _patchProjection;  // [hidden, patchValues], as the checkpoint stores it
-    private readonly NdArray _patchBias;         // [hidden]
+    private readonly EncoderBlock[] _blocks;
+    private readonly Norm _finalNorm;
+    private readonly Linear _patchProjection;    // [hidden, patchValues], as the checkpoint stores it
     private readonly NdArray _classToken;        // [hidden]
-    private readonly NdArray _positions;         // [1 + patches, hidden]
+    private readonly NdArray _positions;         // [1 + patches, hidden], at the trained grid
+    private readonly ConcurrentDictionary<(int Rows, int Columns), NdArray> _resized = new();
     private readonly NdArray? _classifierWeight; // [hidden, classes]
     private readonly NdArray? _classifierBias;   // [classes]
     private bool _disposed;
 
     private VisionTransformer(
         string id, VisionConfig config, ImageProcessor processor, WeightStore weights,
-        Block[] blocks, LayerNorm finalNorm, double[] patchProjection, NdArray patchBias,
+        EncoderBlock[] blocks, Norm finalNorm, Linear patchProjection,
         NdArray classToken, NdArray positions, NdArray? classifierWeight, NdArray? classifierBias)
     {
         Id = id;
@@ -57,7 +56,6 @@ public sealed class VisionTransformer : IDisposable
         _blocks = blocks;
         _finalNorm = finalNorm;
         _patchProjection = patchProjection;
-        _patchBias = patchBias;
         _classToken = classToken;
         _positions = positions;
         _classifierWeight = classifierWeight;
@@ -83,13 +81,17 @@ public sealed class VisionTransformer : IDisposable
     /// <summary>Downloads a vision model from the Hub and loads it.</summary>
     /// <param name="repoId">A model id such as <c>google/vit-base-patch16-224</c>.</param>
     /// <param name="revision">A branch, tag or commit.</param>
+    /// <param name="imageSize">
+    /// The edge length to run at, or <c>null</c> for the one the model was trained at. Any multiple
+    /// of the patch size works; the position embeddings are interpolated to the new grid.
+    /// </param>
     /// <exception cref="NotSupportedException">The architecture is not a ViT-style encoder.</exception>
-    public static VisionTransformer Load(string repoId, string revision = "main")
+    public static VisionTransformer Load(string repoId, string revision = "main", int? imageSize = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoId);
 
         var config = VisionConfig.FromPretrained(repoId, revision);
-        var processor = Align(ImageProcessor.FromPretrained(repoId, revision), config);
+        var processor = Align(ImageProcessor.FromPretrained(repoId, revision), config, imageSize);
         var weights = WeightStore.FromPretrained(repoId, revision);
 
         try { return Build(repoId, config, processor, weights); }
@@ -101,11 +103,14 @@ public sealed class VisionTransformer : IDisposable
     /// A folder containing <c>config.json</c>, the weights, and optionally
     /// <c>preprocessor_config.json</c>.
     /// </param>
+    /// <param name="imageSize">
+    /// The edge length to run at, or <c>null</c> for the one the model was trained at.
+    /// </param>
     /// <remarks>
     /// The path a model that was never on the Hub takes - a fine-tune of your own, or a cached copy
     /// being inspected offline.
     /// </remarks>
-    public static VisionTransformer Open(string directory)
+    public static VisionTransformer Open(string directory, int? imageSize = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
 
@@ -114,7 +119,9 @@ public sealed class VisionTransformer : IDisposable
 
         var preprocessor = Path.Combine(directory, "preprocessor_config.json");
         var processor = Align(
-            File.Exists(preprocessor) ? ImageProcessor.Load(preprocessor) : ImageProcessor.ViT, config);
+            File.Exists(preprocessor) ? ImageProcessor.Load(preprocessor) : ImageProcessor.ViT,
+            config,
+            imageSize);
 
         var weights = WeightStore.Open(directory);
 
@@ -122,15 +129,29 @@ public sealed class VisionTransformer : IDisposable
         catch { weights.Dispose(); throw; }
     }
 
-    /// <summary>Makes the processor produce the edge length the model's positions were learned at.</summary>
+    /// <summary>Makes the processor produce the edge length the model will run at.</summary>
     /// <remarks>
-    /// The two can disagree: a repository may ship no <c>preprocessor_config.json</c> at all, or one
-    /// written for a pipeline that crops after resizing. The model's own <c>image_size</c> is the
-    /// one that cannot be negotiated - it is baked into how many position embeddings the checkpoint
-    /// has - so it wins, and the alternative is a shape error at the first forward pass.
+    /// The processor and the model can disagree: a repository may ship no
+    /// <c>preprocessor_config.json</c> at all, or one written for a pipeline that crops after
+    /// resizing. Unless the caller asked for a size, the model's own <c>image_size</c> wins - it is
+    /// the grid the position embeddings were learned on, so it is the one resolution that needs no
+    /// interpolation.
     /// </remarks>
-    private static ImageProcessor Align(ImageProcessor processor, VisionConfig config)
-        => processor.Size == config.ImageSize ? processor : processor with { Size = config.ImageSize };
+    private static ImageProcessor Align(ImageProcessor processor, VisionConfig config, int? imageSize)
+    {
+        var size = imageSize ?? config.ImageSize;
+
+        if (size <= 0 || size % config.PatchSize != 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(imageSize), size,
+                $"The image size has to be a positive multiple of the {config.PatchSize}px patch - "
+                + $"{config.ImageSize} for the resolution this model was trained at. "
+                + "A remainder would be a strip of pixels no patch covers.");
+        }
+
+        return processor.Size == size ? processor : processor with { Size = size };
+    }
 
     private static VisionTransformer Build(
         string id, VisionConfig config, ImageProcessor processor, WeightStore weights)
@@ -155,29 +176,32 @@ public sealed class VisionTransformer : IDisposable
                 + $"{hidden} dimensions needs {(long)hidden * patchValues}.");
         }
 
-        // Left in the checkpoint's own (outputs, inputs) order. Transposing it to the shape the
-        // loop "wants" makes the inner stride 768 doubles, and that cache miss per multiply costs
-        // more than the whole projection.
-        var patchProjection = new double[(int)projection.Size];
-        for (var i = 0; i < patchProjection.Length; i++) patchProjection[i] = projection.At(i);
+        // In the checkpoint's own (outputs, inputs) order, which is also the linear kernel's.
+        var patchProjection = Linear.Load(
+            weights, $"{prefix}embeddings.patch_embeddings.projection", patchValues, hidden);
 
-        var patchBias = Flat(weights.Read($"{prefix}embeddings.patch_embeddings.projection.bias"));
         var classToken = Flat(weights.Read($"{prefix}embeddings.cls_token"));
         var positions = Rows(weights.Read($"{prefix}embeddings.position_embeddings"), hidden);
 
         var expected = 1 + config.Patches;
         if (positions.Shape[0] != expected)
         {
+            // Interpolation starts from the grid the config names, so a table of any other length
+            // means the config and the weights describe two different models - and guessing which
+            // one is right shifts every patch's position.
             throw new InvalidDataException(
-                $"The checkpoint has {positions.Shape[0]} position embeddings but a "
-                + $"{config.ImageSize}px image in {config.PatchSize}px patches needs {expected}. "
-                + "Interpolating them is not implemented; use the resolution the model was trained at.");
+                $"The checkpoint has {positions.Shape[0]} position embeddings but its config says "
+                + $"{config.ImageSize}px images in {config.PatchSize}px patches, which needs {expected}. "
+                + "The config and the weights disagree; check that both came from the same repository.");
         }
 
-        var blocks = new Block[config.Layers];
-        for (var i = 0; i < config.Layers; i++) blocks[i] = Block.Load(weights, prefix, i, config);
+        // Resolved before any block is loaded, so an unknown activation is refused up front.
+        Activation.For(config.Activation);
 
-        var finalNorm = ReadNorm(weights, $"{prefix}layernorm", hidden, config.LayerNormEpsilon);
+        var blocks = new EncoderBlock[config.Layers];
+        for (var i = 0; i < config.Layers; i++) blocks[i] = LoadBlock(weights, prefix, i, config);
+
+        var finalNorm = Norm.Load(weights, $"{prefix}layernorm", hidden, config.LayerNormEpsilon);
 
         NdArray? classifierWeight = null;
         NdArray? classifierBias = null;
@@ -197,7 +221,7 @@ public sealed class VisionTransformer : IDisposable
 
         return new VisionTransformer(
             id, config, processor, weights, blocks, finalNorm,
-            patchProjection, patchBias, classToken, positions, classifierWeight, classifierBias);
+            patchProjection, classToken, positions, classifierWeight, classifierBias);
     }
 
     /// <summary>Classifies an image file.</summary>
@@ -207,17 +231,24 @@ public sealed class VisionTransformer : IDisposable
     public IReadOnlyList<Classification> Classify(string path, int topK = 5)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        RequireHead();
 
-        if (_classifierWeight is null)
-        {
-            throw new NotSupportedException(
-                $"'{Id}' has no classification head - it is a feature extractor. Use Embed instead.");
-        }
+        return Classify(Processor.Read(path), topK);
+    }
 
-        var hidden = Forward(Processor.Read(path));
+    /// <summary>Classifies pixels that have already been prepared.</summary>
+    /// <param name="pixels">Normalised pixels, shaped <c>[channels, height, width]</c>.</param>
+    /// <param name="topK">How many classes to return; 0 for all of them.</param>
+    /// <exception cref="NotSupportedException">The checkpoint has no classification head.</exception>
+    public IReadOnlyList<Classification> Classify(NdArray pixels, int topK = 5)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        RequireHead();
+
+        var hidden = Forward(pixels);
         var pooled = hidden.Row(0);   // the [CLS] vector, which is what the head was trained on
 
-        var classes = _classifierWeight.Shape[1];
+        var classes = _classifierWeight!.Shape[1];
         var logits = new double[classes];
 
         for (var c = 0; c < classes; c++)
@@ -233,6 +264,15 @@ public sealed class VisionTransformer : IDisposable
             .OrderByDescending(p => p.Score);
 
         return topK > 0 ? [.. ranked.Take(topK)] : [.. ranked];
+    }
+
+    private void RequireHead()
+    {
+        if (_classifierWeight is null)
+        {
+            throw new NotSupportedException(
+                $"'{Id}' has no classification head - it is a feature extractor. Use Embed instead.");
+        }
     }
 
     /// <summary>A single vector for an image, taken from the <c>[CLS]</c> position.</summary>
@@ -267,22 +307,23 @@ public sealed class VisionTransformer : IDisposable
     }
 
     /// <summary>Runs the encoder over a prepared image and returns every position's hidden state.</summary>
-    /// <param name="pixels">Normalised pixels, shaped <c>[channels, size, size]</c>.</param>
+    /// <param name="pixels">
+    /// Normalised pixels, shaped <c>[channels, height, width]</c>. Height and width need not be the
+    /// trained size, only multiples of the patch size.
+    /// </param>
     public NdArray Forward(NdArray pixels)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(pixels);
 
-        var hidden = Embeddings(pixels);
+        var sequence = Embeddings(pixels);
+        var rows = sequence.Shape[0];
+        var hidden = sequence.ToArray();
 
-        // Every position is real - an image has no padding - so the mask is all ones rather than
-        // an optimisation the attention could skip.
-        var mask = new int[hidden.Shape[0]];
-        Array.Fill(mask, 1);
+        // Every position is real - an image has no padding - so there is no mask.
+        foreach (var block in _blocks) hidden = block.Forward(hidden, rows, mask: null);
 
-        foreach (var block in _blocks) hidden = block.Forward(hidden, mask);
-
-        return _finalNorm.Forward(hidden);
+        return new NdArray(_finalNorm.Apply(hidden, rows), [rows, Config.HiddenSize]);
     }
 
     /// <summary>Builds the token sequence: the class token, then one vector per patch.</summary>
@@ -293,53 +334,165 @@ public sealed class VisionTransformer : IDisposable
     /// </remarks>
     internal NdArray Embeddings(NdArray pixels)
     {
-        var size = Config.ImageSize;
         var patch = Config.PatchSize;
-        var grid = Config.Grid;
         var hidden = Config.HiddenSize;
 
-        if (pixels.Rank != 3 || pixels.Shape[1] != size || pixels.Shape[2] != size)
+        if (pixels.Rank != 3 || pixels.Shape[0] != Config.Channels
+            || pixels.Shape[1] <= 0 || pixels.Shape[1] % patch != 0
+            || pixels.Shape[2] <= 0 || pixels.Shape[2] % patch != 0)
         {
             throw new ArgumentException(
-                $"The model wants [{Config.Channels}x{size}x{size}] but got "
+                $"The model wants [{Config.Channels} x height x width] with both sides a multiple of "
+                + $"{patch}px ({Config.ImageSize}x{Config.ImageSize} is what it was trained at) but got "
                 + $"[{string.Join("x", pixels.Shape.ToArray())}].", nameof(pixels));
         }
 
-        var sequence = NdArray.Zeros(1 + Config.Patches, hidden);
+        var rows = pixels.Shape[1] / patch;
+        var columns = pixels.Shape[2] / patch;
+        var positions = Positions(rows, columns);
 
-        for (var d = 0; d < hidden; d++) sequence[0, d] = _classToken.At(d) + _positions[0, d];
+        var height = pixels.Shape[1];
+        var width = pixels.Shape[2];
+        var source = pixels.ToArray();          // [channels, height, width], contiguous
+        var count = rows * columns;
+        var values = _patchProjection.Inputs;   // channels * patch * patch
 
-        var values = new double[Config.Channels * patch * patch];
+        // Every patch flattened into one row of a [patches, values] matrix, so the projection is a
+        // single call into the linear kernel. The flattening is channel-major, matching the
+        // convolution weight's own [channels, ky, kx] layout - any other order silently scrambles
+        // the projection. Each run of `patch` pixels along x is contiguous in both, so it is one copy.
+        var gathered = new double[count * values];
 
-        for (var py = 0; py < grid; py++)
+        Parallel.For(0, count, p =>
         {
-            for (var px = 0; px < grid; px++)
-            {
-                // The patch is flattened channel-major, matching the convolution weight's own
-                // [channels, ky, kx] layout - any other order silently scrambles the projection.
-                var v = 0;
-                for (var c = 0; c < Config.Channels; c++)
-                {
-                    for (var ky = 0; ky < patch; ky++)
-                    {
-                        for (var kx = 0; kx < patch; kx++)
-                        {
-                            values[v++] = pixels[c, py * patch + ky, px * patch + kx];
-                        }
-                    }
-                }
+            var top = (p / columns) * patch;
+            var left = (p % columns) * patch;
+            var target = p * values;
 
-                var row = 1 + py * grid + px;
-                for (var d = 0; d < hidden; d++)
+            for (var c = 0; c < Config.Channels; c++)
+            {
+                for (var ky = 0; ky < patch; ky++)
                 {
-                    sequence[row, d] = _patchBias.At(d)
-                        + Simd.Dot(values, _patchProjection.AsSpan(d * values.Length, values.Length))
-                        + _positions[row, d];
+                    Array.Copy(source, (c * height + top + ky) * width + left, gathered, target, patch);
+                    target += patch;
+                }
+            }
+        });
+
+        var projected = _patchProjection.Apply(gathered, count);
+        var table = positions.ToArray();
+        var sequence = new double[(1 + count) * hidden];
+
+        for (var d = 0; d < hidden; d++) sequence[d] = _classToken.At(d) + table[d];
+
+        for (var i = 0; i < count * hidden; i++) sequence[hidden + i] = projected[i] + table[hidden + i];
+
+        return new NdArray(sequence, [1 + count, hidden]);
+    }
+
+    /// <summary>The position table for a grid of patches, interpolated if it is not the trained one.</summary>
+    /// <remarks>
+    /// Does what <c>interpolate_pos_encoding=True</c> does in transformers: the class token's
+    /// position is kept as it is, and the patch positions are treated as a <c>hidden</c>-channel
+    /// image and resized bicubically. Cached per grid, since every image at one resolution needs
+    /// the same table.
+    /// </remarks>
+    internal NdArray Positions(int rows, int columns)
+    {
+        var grid = Config.Grid;
+        if (rows == grid && columns == grid) return _positions;
+
+        return _resized.GetOrAdd((rows, columns), key =>
+        {
+            var hidden = Config.HiddenSize;
+            var patches = Bicubic(_positions, 1, grid, hidden, key.Rows, key.Columns);
+
+            var table = NdArray.Zeros(1 + key.Rows * key.Columns, hidden);
+            for (var d = 0; d < hidden; d++) table[0, d] = _positions[0, d];
+            for (var i = 0; i < patches.Length; i++) table.SetAt(hidden + i, patches[i]);
+
+            return table;
+        });
+    }
+
+    /// <summary>
+    /// Resizes a square grid of vectors, stored row-major from row <paramref name="first"/> of
+    /// <paramref name="table"/>, to <paramref name="rows"/> by <paramref name="columns"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Matches <c>torch.nn.functional.interpolate(mode="bicubic", align_corners=False)</c>, which
+    /// is what the reference uses. Any other resampler gives a model that runs and has quietly moved
+    /// every patch. Three details decide agreement: the source coordinate is
+    /// <c>(i + 0.5) * in / out - 0.5</c>; the kernel is Keys' cubic convolution with
+    /// <c>a = -0.75</c>, not the <c>-0.5</c> most image libraries use; and a tap that falls off the
+    /// grid repeats the edge rather than reading zero.
+    /// </para>
+    /// <para>
+    /// No antialiasing, so shrinking the grid samples it rather than averaging it. That is also
+    /// what the reference does.
+    /// </para>
+    /// </remarks>
+    internal static double[] Bicubic(NdArray table, int first, int side, int hidden, int rows, int columns)
+    {
+        var (rowTaps, rowWeights) = CubicTaps(side, rows);
+        var (columnTaps, columnWeights) = CubicTaps(side, columns);
+
+        var result = new double[rows * columns * hidden];
+
+        for (var r = 0; r < rows; r++)
+        {
+            for (var c = 0; c < columns; c++)
+            {
+                var target = (r * columns + c) * hidden;
+
+                for (var i = 0; i < 4; i++)
+                {
+                    var sourceRow = first + rowTaps[r * 4 + i] * side;
+
+                    for (var j = 0; j < 4; j++)
+                    {
+                        var weight = rowWeights[r * 4 + i] * columnWeights[c * 4 + j];
+                        var source = sourceRow + columnTaps[c * 4 + j];
+
+                        for (var d = 0; d < hidden; d++) result[target + d] += weight * table[source, d];
+                    }
                 }
             }
         }
 
-        return sequence;
+        return result;
+    }
+
+    /// <summary>For each output index, the four source indices it reads and their weights.</summary>
+    private static (int[] Taps, double[] Weights) CubicTaps(int input, int output)
+    {
+        const double A = -0.75;
+
+        var taps = new int[output * 4];
+        var weights = new double[output * 4];
+        var scale = (double)input / output;
+
+        for (var o = 0; o < output; o++)
+        {
+            // Deliberately not clamped at zero: torch clamps the source coordinate for the linear
+            // modes only, and clamping it here shifts the first row of every upscaled grid.
+            var real = scale * (o + 0.5) - 0.5;
+            var floor = (int)Math.Floor(real);
+            var t = real - floor;
+
+            weights[o * 4 + 0] = Far(t + 1);
+            weights[o * 4 + 1] = Near(t);
+            weights[o * 4 + 2] = Near(1 - t);
+            weights[o * 4 + 3] = Far(2 - t);
+
+            for (var k = 0; k < 4; k++) taps[o * 4 + k] = Math.Clamp(floor - 1 + k, 0, input - 1);
+        }
+
+        return (taps, weights);
+
+        static double Near(double x) => ((A + 2) * x - (A + 3)) * x * x + 1;         // |x| <= 1
+        static double Far(double x) => ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;    // 1 < |x| < 2
     }
 
     /// <inheritdoc />
@@ -397,209 +550,28 @@ public sealed class VisionTransformer : IDisposable
         return result;
     }
 
-    private static LayerNorm ReadNorm(WeightStore weights, string prefix, int size, double epsilon)
-    {
-        var norm = new LayerNorm(size, epsilon);
-        var scale = weights.Read($"{prefix}.weight");
-        var shift = weights.Read($"{prefix}.bias");
-
-        for (var i = 0; i < size; i++)
-        {
-            norm.Gamma.SetAt(i, scale.At(i));
-            norm.Beta.SetAt(i, shift.At(i));
-        }
-
-        return norm;
-    }
-
-    /// <summary>
-    /// One pre-norm encoder block.
-    /// </summary>
+    /// <summary>Loads one pre-norm encoder block.</summary>
     /// <remarks>
-    /// Written here rather than reusing the foundation's <c>TransformerEncoderLayer</c>, which is
-    /// post-norm. The attention and the projections are the foundation's; only the order of the
-    /// norms and the residuals differs, and that order is the whole difference between a working
-    /// ViT and a confident wrong answer.
+    /// Pre-norm is why ViT cannot share BERT's block. Only the order of the norms and the residuals
+    /// differs, and that order is the whole difference between a working ViT and a confident wrong
+    /// answer: every parameter has the same shape either way.
     /// </remarks>
-    private sealed class Block
+    private static EncoderBlock LoadBlock(WeightStore weights, string prefix, int index, VisionConfig config)
     {
-        private readonly LayerNorm _beforeAttention;
-        private readonly MultiHeadAttention _attention;
-        private readonly LayerNorm _beforeFeedForward;
-        private readonly Linear _intermediate;
-        private readonly Linear _output;
+        var block = $"{prefix}encoder.layer.{index}";
+        var hidden = config.HiddenSize;
 
-        private Block(
-            LayerNorm beforeAttention, MultiHeadAttention attention,
-            LayerNorm beforeFeedForward, Linear intermediate, Linear output)
-        {
-            _beforeAttention = beforeAttention;
-            _attention = attention;
-            _beforeFeedForward = beforeFeedForward;
-            _intermediate = intermediate;
-            _output = output;
-        }
-
-        internal static Block Load(WeightStore weights, string prefix, int index, VisionConfig config)
-        {
-            var block = $"{prefix}encoder.layer.{index}";
-            var random = new GraviRandom(0);
-
-            var attention = new MultiHeadAttention(
-                new TransformerConfig(
-                    VocabularySize: 1,
-                    HiddenSize: config.HiddenSize,
-                    Layers: config.Layers,
-                    Heads: config.Heads,
-                    IntermediateSize: config.IntermediateSize,
-                    MaxPositions: 1 + config.Patches),
-                random);
-
-            Fill(weights, attention.Query, $"{block}.attention.attention.query");
-            Fill(weights, attention.Key, $"{block}.attention.attention.key");
-            Fill(weights, attention.Value, $"{block}.attention.attention.value");
-            Fill(weights, attention.Output, $"{block}.attention.output.dense");
-
-            return new Block(
-                ReadNorm(weights, $"{block}.layernorm_before", config.HiddenSize, config.LayerNormEpsilon),
-                attention,
-                ReadNorm(weights, $"{block}.layernorm_after", config.HiddenSize, config.LayerNormEpsilon),
-                Linear.Load(weights, $"{block}.intermediate.dense", config.HiddenSize, config.IntermediateSize),
-                Linear.Load(weights, $"{block}.output.dense", config.IntermediateSize, config.HiddenSize));
-        }
-
-        internal NdArray Forward(NdArray hidden, int[] mask)
-        {
-            var attended = _attention.Forward(_beforeAttention.Forward(hidden), mask);
-            var residual = Add(hidden, attended);
-
-            var normed = _beforeFeedForward.Forward(residual);
-            var projected = _output.Apply(_intermediate.Apply(normed, Activations.Gelu), null);
-
-            return Add(residual, projected);
-        }
-
-        private static NdArray Add(NdArray a, NdArray b)
-        {
-            var result = NdArray.Zeros(a.Shape[0], a.Shape[1]);
-            for (var i = 0; i < a.Size; i++) result.SetAt(i, a.At(i) + b.At(i));
-
-            return result;
-        }
-
-        /// <summary>Copies a checkpoint matrix and bias into one of attention's projections.</summary>
-        /// <remarks>
-        /// Hugging Face stores a linear layer as (outputs, inputs) and the foundation's
-        /// <see cref="DenseLayer"/> holds (inputs, outputs), so every one of these is transposed.
-        /// All four are square here and would accept either reading in silence - the convention is
-        /// settled by the non-square feed-forward pair, which <see cref="Linear"/> keeps in the
-        /// checkpoint's own order instead.
-        /// </remarks>
-        private static void Fill(WeightStore weights, DenseLayer target, string name)
-        {
-            CheckpointLoader.CopyMatrix(
-                weights.Read($"{name}.weight"), target.Weights, transposed: true, name);
-
-            var bias = weights.Read($"{name}.bias");
-            for (var i = 0; i < target.Bias.Size; i++) target.Bias.SetAt(i, bias.At(i));
-        }
-
-    }
-}
-
-/// <summary>
-/// A fully connected layer held in the checkpoint's own memory layout.
-/// </summary>
-/// <remarks>
-/// The feed-forward pair is where a ViT forward pass spends most of its time - 197 positions
-/// through 768x3072 and back, twelve times - so it is worth not going through a general array type
-/// for it. Two things make the difference. The weights stay in Hugging Face's <c>(outputs,
-/// inputs)</c> order, so the inner loop walks one output's weights contiguously instead of striding
-/// a row-major array by 24 KB per step; and the rows are independent, so they run in parallel.
-/// Transposing to <c>(inputs, outputs)</c> and iterating the obvious way measured <b>five times
-/// slower</b> than the sequential version it was meant to replace - the cache, not the arithmetic,
-/// is what this loop is bound by.
-/// </remarks>
-internal sealed class Linear
-{
-    private readonly double[] _weights;   // [outputs, inputs], as the checkpoint stores it
-    private readonly double[] _bias;
-    private readonly int _inputs;
-    private readonly int _outputs;
-
-    private Linear(double[] weights, double[] bias, int inputs, int outputs)
-    {
-        _weights = weights;
-        _bias = bias;
-        _inputs = inputs;
-        _outputs = outputs;
-    }
-
-    internal static Linear Load(WeightStore weights, string name, int inputs, int outputs)
-    {
-        var matrix = weights.Read($"{name}.weight");
-        if (matrix.Size != (long)inputs * outputs)
-        {
-            throw new InvalidDataException(
-                $"'{name}.weight' holds {matrix.Size} values but the layer is {inputs}x{outputs}.");
-        }
-
-        var flat = new double[inputs * outputs];
-        for (var i = 0; i < flat.Length; i++) flat[i] = matrix.At(i);
-
-        var biasTensor = weights.Read($"{name}.bias");
-        var bias = new double[outputs];
-        for (var i = 0; i < outputs; i++) bias[i] = biasTensor.At(i);
-
-        return new Linear(flat, bias, inputs, outputs);
-    }
-
-    internal NdArray Apply(NdArray input, Func<double, double>? activation)
-    {
-        var rows = input.Shape[0];
-        var source = input.ToArray();
-        var target = new double[rows * _outputs];
-
-        Parallel.For(0, rows, row =>
-        {
-            var x = source.AsSpan(row * _inputs, _inputs);
-            var y = row * _outputs;
-
-            for (var o = 0; o < _outputs; o++)
-            {
-                var sum = _bias[o] + Simd.Dot(x, _weights.AsSpan(o * _inputs, _inputs));
-                target[y + o] = activation is null ? sum : activation(sum);
-            }
-        });
-
-        return new NdArray(target, [rows, _outputs]);
-    }
-
-}
-
-/// <summary>Vectorised primitives the vision encoder's hot loops share.</summary>
-internal static class Simd
-{
-    /// <summary>Dot product of two equal-length spans, widened to whatever SIMD is available.</summary>
-    /// <remarks>
-    /// Both operands have to be contiguous, which is the point of keeping every weight matrix in
-    /// the checkpoint's own (outputs, inputs) order: a strided operand cannot be loaded into a
-    /// vector register at all, so the layout decision and this loop are one decision.
-    /// </remarks>
-    internal static double Dot(ReadOnlySpan<double> a, ReadOnlySpan<double> b)
-    {
-        var width = Vector<double>.Count;
-        var lanes = Vector<double>.Zero;
-        var i = 0;
-
-        for (; i <= a.Length - width; i += width)
-        {
-            lanes += new Vector<double>(a[i..]) * new Vector<double>(b[i..]);
-        }
-
-        var sum = Vector.Sum(lanes);
-        for (; i < a.Length; i++) sum += a[i] * b[i];
-
-        return sum;
+        return new EncoderBlock(
+            NormOrder.Pre,
+            config.Heads,
+            Linear.Load(weights, $"{block}.attention.attention.query", hidden, hidden),
+            Linear.Load(weights, $"{block}.attention.attention.key", hidden, hidden),
+            Linear.Load(weights, $"{block}.attention.attention.value", hidden, hidden),
+            Linear.Load(weights, $"{block}.attention.output.dense", hidden, hidden),
+            Norm.Load(weights, $"{block}.layernorm_before", hidden, config.LayerNormEpsilon),
+            Linear.Load(weights, $"{block}.intermediate.dense", hidden, config.IntermediateSize),
+            Linear.Load(weights, $"{block}.output.dense", config.IntermediateSize, hidden),
+            Norm.Load(weights, $"{block}.layernorm_after", hidden, config.LayerNormEpsilon),
+            Activation.For(config.Activation));
     }
 }

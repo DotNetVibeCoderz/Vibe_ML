@@ -19,6 +19,11 @@ from pathlib import Path
 
 MODEL = "bert-base-uncased"
 TINY = "prajjwal1/bert-tiny"
+VISION = "google/vit-base-patch16-224"
+
+# Where the ONNX export of MODEL is written for the .NET half to load. Gitignored: it is 420 MB and
+# rebuilt from the checkpoint on every run, so the graph and the torch weights cannot drift apart.
+ONNX_PATH = Path(__file__).resolve().parent.parent / "onnx" / f"{MODEL}.onnx"
 
 # The corpus both halves tokenize. Written out here rather than loaded, so the two runtimes cannot
 # disagree about what they measured.
@@ -180,6 +185,90 @@ def bench_inference(results):
     results["torch_threads"] = torch.get_num_threads()
 
 
+def vit_pixels(size):
+    """The picture both halves classify: a formula, not a file, so no resampler sits between them.
+
+    Any real photograph has to be resized first, and PIL and ImageSharp resize differently - which
+    would put a difference into the comparison that has nothing to do with the model.
+    """
+    import torch
+
+    ys = torch.arange(size, dtype=torch.float64).view(1, size, 1)
+    xs = torch.arange(size, dtype=torch.float64).view(1, 1, size)
+    cs = torch.arange(3, dtype=torch.float64).view(3, 1, 1)
+    return 0.9 * torch.sin(0.05 * xs + 0.07 * ys + cs) * torch.cos(0.013 * xs * (cs + 1))
+
+
+def bench_vision(results):
+    import torch
+    from transformers import ViTForImageClassification
+
+    model = ViTForImageClassification.from_pretrained(VISION).eval()
+    pixels = vit_pixels(224).float().unsqueeze(0)
+
+    def forward():
+        with torch.no_grad():
+            return model(pixel_values=pixels).logits
+
+    single, single_median = best(forward, iterations=10, warmup=3)
+    results["vision_single_ms"] = single * 1000
+    results["vision_single_median_ms"] = single_median * 1000
+
+    # The answers in float64, the precision the managed encoder computes in, so any disagreement
+    # is the implementation rather than float32 rounding.
+    exact = ViTForImageClassification.from_pretrained(VISION, torch_dtype=torch.float64).eval()
+    with torch.no_grad():
+        probabilities = torch.softmax(exact(pixel_values=vit_pixels(224).unsqueeze(0)).logits[0], -1)
+
+    top = torch.topk(probabilities, 5)
+    results["vision_top5"] = [
+        {"label": exact.config.id2label[int(i)], "index": int(i), "score": float(v)}
+        for v, i in zip(top.values, top.indices)
+    ]
+
+
+def export_onnx(results):
+    """Exports MODEL to ONNX for the .NET half's production-path measurement."""
+    import torch
+    from transformers import BertModel
+
+    ONNX_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    encoder = BertModel.from_pretrained(MODEL).eval()
+
+    class Graph(torch.nn.Module):
+        """Takes the three inputs by name; transformers 5 moved BertModel's positional ones."""
+
+        def __init__(self):
+            super().__init__()
+            self.encoder = encoder
+
+        def forward(self, input_ids, attention_mask, token_type_ids):
+            out = self.encoder(input_ids=input_ids, attention_mask=attention_mask,
+                               token_type_ids=token_type_ids)
+            return out.last_hidden_state, out.pooler_output
+
+    model = Graph().eval()
+
+    ids = torch.tensor([[101, 7592, 1010, 2088, 999, 102]])
+    names = ["input_ids", "attention_mask", "token_type_ids"]
+    dynamic = {name: {0: "batch", 1: "sequence"} for name in names}
+    dynamic["last_hidden_state"] = {0: "batch", 1: "sequence"}
+
+    torch.onnx.export(
+        model,
+        (ids, torch.ones_like(ids), torch.zeros_like(ids)),
+        str(ONNX_PATH),
+        input_names=names,
+        output_names=["last_hidden_state", "pooler_output"],
+        dynamic_axes=dynamic,
+        opset_version=17,
+        dynamo=False,
+    )
+
+    results["onnx_export"] = str(ONNX_PATH)
+
+
 def bench_fill_mask(results):
     """Records the reference answers, so the .NET half can be checked against them rather than
     against itself."""
@@ -240,6 +329,13 @@ def main():
             bench_inference(results)
             print("fill-mask ...")
             bench_fill_mask(results)
+            print("vision ...")
+            bench_vision(results)
+            print("onnx export ...")
+            try:
+                export_onnx(results)
+            except Exception as error:
+                print(f"  skipped: {error}")
         except ImportError:
             print("  torch not installed, skipping")
 

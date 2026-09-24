@@ -127,29 +127,30 @@ method and caveats in **[docs/benchmarks.md](docs/benchmarks.md)**.
 
 | | Python | HF.Net | |
 |---|---:|---:|---|
-| Tokenize 1,000 documents | 18.1 ms | **10.9 ms** | **1.66x faster** |
-| Open a 420 MB checkpoint, list 206 tensors | 0.65 ms | 0.71 ms | level |
-| Read one 30,522 × 768 tensor | 1.1 ms | 197 ms | 173x slower |
-| bert-base forward pass, 1 document | 50.8 ms | 300–600 ms | 6–12x slower |
-| ViT-base forward pass, 1 image | 441 ms | 12 s | 26x slower |
-| The same work through ONNX Runtime | — | **0.67 ms** | the production path |
+| Tokenize 1,000 documents | 15.5 ms | **8.7 ms** | **1.78x faster** |
+| Open a 420 MB checkpoint, list 206 tensors | 0.49 ms | 0.79 ms | level |
+| Read one 30,522 × 768 tensor | 0.49 ms | 149 ms | 306x slower |
+| bert-base forward pass, 1 document | 36.4 ms | 111 ms | 3.1x slower |
+| ViT-base forward pass, 1 image | 226 ms | 1.96 s | 8.7x slower |
+| **bert-base through ONNX Runtime, from .NET** | 36.4 ms | **23.8 ms** | **1.53x faster** |
 
 **Tokenization is faster than the Rust `tokenizers` crate, and the ids are identical.** Reading a
-tensor is slower because every value is widened to `double` — structural, not fixable. Managed
-inference is *much* slower than torch, and that is the expected shape: the managed encoder exists so
-a model can be **loaded, inspected and understood** in pure .NET. When you need throughput, export
-to ONNX and run it through `GraviOptimum`.
+tensor is slower because every value is widened to `double` — paid once at load time. Managed
+inference is slower than torch, and it exists so a model can be **loaded, inspected and
+understood** in pure .NET. When you need throughput, export to ONNX and run it through
+`GraviOptimum`, which is faster than torch.
 
-**And they agree.** Same prompt, same checkpoint, top five identical to a tenth of a percentage
-point:
+**And they agree — to the last digit that means anything.** Against torch in float64, on the same
+inputs, `bert-base-uncased`'s hidden states agree to about 1e-13 and ViT's top-five probabilities to
+1.3e-15:
 
 ```
 The capital of France is [MASK].
 
-        python            hf.net
-  1     paris   41.68%    paris   41.53%
-  2     lille    7.14%    lille    7.16%
-  3     lyon     6.34%    lyon     6.31%
+        torch (float64)       hf.net
+  1     paris   0.4167877541  paris   0.4167877541
+  2     lille   0.0714164028  lille   0.0714164028
+  3     lyon    0.0633924121  lyon    0.0633924121
 ```
 
 ## HF Gallery

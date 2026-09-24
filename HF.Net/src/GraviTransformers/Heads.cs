@@ -139,20 +139,20 @@ internal sealed class MaskedLanguageHead
     private readonly NdArray _transformBias;
     private readonly NdArray _normScale;
     private readonly NdArray _normShift;
-    private readonly NdArray _decoder;
-    private readonly NdArray? _decoderBias;
+    private readonly double _epsilon;
+    private readonly Linear _decoder;   // [vocabulary, hidden], float32
 
     private MaskedLanguageHead(
         NdArray transformWeight, NdArray transformBias,
-        NdArray normScale, NdArray normShift,
-        NdArray decoder, NdArray? decoderBias)
+        NdArray normScale, NdArray normShift, double epsilon,
+        Linear decoder)
     {
         _transformWeight = transformWeight;
         _transformBias = transformBias;
         _normScale = normScale;
         _normShift = normShift;
+        _epsilon = epsilon;
         _decoder = decoder;
-        _decoderBias = decoderBias;
     }
 
     /// <summary>Loads a masked language head, or returns null when the checkpoint has none.</summary>
@@ -190,15 +190,26 @@ internal sealed class MaskedLanguageHead
         if (!weights.TryReadAny(out var decoder,
             "cls.predictions.decoder.weight", "lm_head.decoder.weight", "vocab_projector.weight"))
         {
-            decoder = encoder.TokenEmbeddings;
+            // The stored word embeddings, not encoder.TokenEmbeddings: those have segment 0 folded
+            // in. That only adds the same constant to every logit, which softmax ignores - but the
+            // sum of two float32 values is not itself a float32 value, so the decoder's float32
+            // copy rounded it, and fill-mask agreed with torch to 5e-9 instead of 1e-13.
+            var stored = weights.Names.FirstOrDefault(
+                n => n.EndsWith("embeddings.word_embeddings.weight", StringComparison.Ordinal));
+
+            decoder = stored is not null ? weights.Read(stored) : encoder.TokenEmbeddings;
         }
 
         weights.TryReadAny(out var decoderBias,
             "cls.predictions.bias", "cls.predictions.decoder.bias", "lm_head.bias", "vocab_projector.bias");
 
+        // The decoder is a vocabulary-by-hidden matrix - 23 million values for BERT - read once per
+        // prediction, so it is held in the kernels' float32 layout like the encoder's weights.
         return new MaskedLanguageHead(
-            transformWeight, transformBias, normScale, normShift, decoder,
-            decoderBias is { Size: > 0 } && decoderBias.Size == config.VocabularySize ? decoderBias : null);
+            transformWeight, transformBias, normScale, normShift, config.LayerNormEpsilon,
+            Linear.From(
+                decoder,
+                decoderBias is { Size: > 0 } && decoderBias.Size == config.VocabularySize ? decoderBias : null));
     }
 
     /// <summary>Scores every vocabulary entry for one position's hidden state.</summary>
@@ -207,44 +218,19 @@ internal sealed class MaskedLanguageHead
     {
         var vector = ClassificationHead.Linear(hidden.ToArray(), _transformWeight, _transformBias);
 
-        for (var i = 0; i < vector.Length; i++) vector[i] = Gelu(vector[i]);
-        LayerNormalize(vector, _normScale, _normShift);
+        // The exact GELU, as BERT's head uses - with an erf accurate to 1e-14 rather than the
+        // 1.5e-7 approximation this used to carry.
+        for (var i = 0; i < vector.Length; i++) vector[i] = Activation.ExactGelu(vector[i]);
+        LayerNormalize(vector, _normScale, _normShift, _epsilon);
 
-        var vocabulary = _decoder.Shape[0];
-        var width = _decoder.Shape[1];
-        var logits = new double[vocabulary];
-
-        for (var v = 0; v < vocabulary; v++)
-        {
-            var sum = _decoderBias?.At(v) ?? 0.0;
-            for (var d = 0; d < width; d++) sum += _decoder[v, d] * vector[d];
-            logits[v] = sum;
-        }
-
-        return logits;
+        return _decoder.Apply(vector, rows: 1);
     }
 
-    /// <summary>The exact GELU, as BERT's head uses.</summary>
-    private static double Gelu(double x) => 0.5 * x * (1 + Erf(x / Math.Sqrt(2)));
-
-    /// <summary>Abramowitz and Stegun 7.1.26, accurate to about 1.5e-7.</summary>
-    private static double Erf(double x)
-    {
-        var sign = Math.Sign(x);
-        x = Math.Abs(x);
-
-        var t = 1.0 / (1.0 + 0.3275911 * x);
-        var y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
-            + 0.254829592) * t * Math.Exp(-x * x);
-
-        return sign * y;
-    }
-
-    private static void LayerNormalize(double[] vector, NdArray scale, NdArray shift)
+    private static void LayerNormalize(double[] vector, NdArray scale, NdArray shift, double epsilon)
     {
         var mean = vector.Average();
         var variance = vector.Sum(v => (v - mean) * (v - mean)) / vector.Length;
-        var denominator = Math.Sqrt(variance + 1e-12);
+        var denominator = Math.Sqrt(variance + epsilon);
 
         for (var i = 0; i < vector.Length; i++)
         {
