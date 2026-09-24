@@ -7,7 +7,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.2.0 — current, with v0.3's LoRA training on main (unreleased)
+## v0.3.0 — current
 
 **26 projects, 277 tests passing, whole solution builds clean with no warnings.**
 
@@ -191,7 +191,7 @@ Carried into [PLAN.md](PLAN.md):
 
 ## Log
 
-**2026-09-25** — LoRA training. `PeftModel.Train` fits adapters and a mean-pooled classification
+**2026-09-25** — v0.3.0, LoRA training. `PeftModel.Train` fits adapters and a mean-pooled classification
 head with AdamW, the Hugging Face linear schedule and gradient clipping. It uses a hand-written
 backward pass over the inference kernels, because the foundation's autodiff encoder has no Q/K/V
 biases. The gradients are checked against central differences to 1e-6. Adapters now carry the

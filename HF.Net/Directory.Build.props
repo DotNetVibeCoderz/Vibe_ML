@@ -34,11 +34,11 @@
 
   <!--
     Version for every shipping package. Override from the command line or from CI with
-    `-p:Version=0.2.0`; a tag-driven release passes the tag through so the tag and the package
+    `-p:Version=0.3.0`; a tag-driven release passes the tag through so the tag and the package
     version cannot disagree.
   -->
   <PropertyGroup>
-    <VersionPrefix>0.2.0</VersionPrefix>
+    <VersionPrefix>0.3.0</VersionPrefix>
   </PropertyGroup>
 
   <!-- NuGet metadata shared by the eight shipping libraries (src/**). -->
