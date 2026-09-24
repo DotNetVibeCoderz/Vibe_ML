@@ -40,8 +40,12 @@ So the order of work is formats first, models second, training last.
    `token_type_embeddings[1] - token_type_embeddings[0]` is carried on `LoadReport.SegmentDelta` and
    added per position to the rows of the second sequence. Segment 0 stays folded into the word
    embeddings, so both segments are now exact and `CheckpointLoader.SupportsPairs` is `true`.
-4. **Sharded checkpoints end to end.** The index reader exists; the loader should stream a model
-   that does not fit in memory rather than requiring it to.
+4. **Sharded checkpoints that do not fit in memory.** Half of this is already true and worth being
+   precise about: `WeightStore.Open` reads `model.safetensors.index.json`, memory-maps every shard
+   and reads a tensor only when asked, so *inspecting* a model larger than RAM already works. What
+   does not is running one — `CheckpointLoader.Load` materialises every parameter as `double`,
+   which is 8 bytes per value whatever the file held. Streaming a forward pass layer by layer is the
+   remaining work.
 5. **Position-embedding interpolation.** A vision model today runs only at the resolution it was
    trained at. Interpolating the position grid is what lets one checkpoint serve several.
 
