@@ -34,7 +34,7 @@ Each mirrors a package in the Python Hugging Face stack.
 | **GraviHub** | `huggingface_hub` | Hub download and upload, a readable local cache, and readers for the formats the Hub serves: **safetensors** and **`pytorch_model.bin`** |
 | **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE and Unigram, loading `tokenizer.json` — with character offsets that point back into the original text |
 | **GraviDatasets** | `datasets` | CSV, Parquet, JSON and JSON Lines, Hub datasets, splits, streaming and memory-mapped reads |
-| **GraviTransformers** | `transformers` | Load pretrained BERT-family encoders and run them: classification, fill-mask, named entities, question answering, embeddings, similarity |
+| **GraviTransformers** | `transformers` | Load pretrained BERT-family encoders and ViT vision encoders and run them: classification, fill-mask, named entities, question answering, embeddings, similarity, image classification |
 | **GraviPEFT** | `peft` | LoRA adapters in the Hugging Face PEFT format — apply, merge, save, load |
 | **GraviAccelerate** | `accelerate` | Device selection across CPU SIMD and ILGPU, sharding, weighted gradient averaging, honest throughput measurement |
 | **GraviOptimum** | `optimum` | ONNX Runtime inference with an explicitly chosen execution provider, and weight quantisation that reports its measured error |
@@ -91,6 +91,14 @@ against an allow-list of tensor constructors, so nothing in the file is executed
 `distilbert-base-uncased-finetuned-sst-2-english` (classification: 99.99% POSITIVE on
 *"I absolutely loved this film."*) and `prajjwal1/bert-tiny` (a pickle-only checkpoint).
 
+**Sees, as well as reads.** `google/vit-base-patch16-224` on the Hub's own sample photograph answers
+**bee 94.46%**, against torch's 94.38%; on the canonical two-cats image, **Egyptian cat 93.81%**
+against 93.74%. Same ranking, five for five, within 0.08 of a percentage point.
+A Vision Transformer is the same encoder block over a different embedding, so it lives in
+GraviTransformers rather than a library of its own; the preprocessing numbers come from the
+repository's `preprocessor_config.json` rather than from a default, because a model fed inputs
+normalised the wrong way still answers, and answers confidently.
+
 **Answers with spans of your text, not with new text.** `dslim/bert-base-NER` on
 *"Kang Fadhil founded Gravicode Studios in Bandung"* returns `PER Kang Fadhil` (98.8%),
 `ORG Gravicode Studios` (99.5%) and `LOC Bandung` (99.7%) with exact character offsets, and
@@ -107,8 +115,8 @@ Stated plainly, because a library that fails quietly is worse than one that says
 - **LoRA adapter matrices are not trainable here.** They can be applied, merged, saved and loaded,
   and a task head trains over a frozen encoder. Train the adapters themselves with PEFT in Python
   and serve them here.
-- **Vision models are not implemented.** ViT and CLIP need a patch embedding this encoder does not
-  have; text is the whole surface today.
+- **CLIP is not implemented.** Its text tower is causal, which this encoder is not. ViT and DeiT
+  are; a windowed or convolutional backbone — Swin, ConvNeXt — is refused by name.
 - **Diffusion needs an ONNX export**, not the PyTorch weights.
 - **Uploads are capped at 10 MB.** Real weights need Git LFS, which GraviHub does not implement.
 
@@ -123,6 +131,7 @@ method and caveats in **[docs/benchmarks.md](docs/benchmarks.md)**.
 | Open a 420 MB checkpoint, list 206 tensors | 0.65 ms | 0.71 ms | level |
 | Read one 30,522 × 768 tensor | 1.1 ms | 197 ms | 173x slower |
 | bert-base forward pass, 1 document | 50.8 ms | 300–600 ms | 6–12x slower |
+| ViT-base forward pass, 1 image | 441 ms | 12 s | 26x slower |
 | The same work through ONNX Runtime | — | **0.67 ms** | the production path |
 
 **Tokenization is faster than the Rust `tokenizers` crate, and the ids are identical.** Reading a
@@ -145,8 +154,10 @@ The capital of France is [MASK].
 
 ## HF Gallery
 
-`samples/HFGallery` is a desktop application that runs nine HF.Net use cases against real models and
+`samples/HFGallery` is a desktop application that runs ten HF.Net use cases against real models and
 shows the answer next to the code that produced it. Nothing in it is mocked.
+
+![HF Gallery — image classification](docs/screenshots/hfgallery-image.png)
 
 ![HF Gallery — named entities](docs/screenshots/hfgallery-entities.png)
 

@@ -4,7 +4,7 @@
     <RootNamespace>Gravicode.HFNet.GraviTransformers</RootNamespace>
     <AssemblyName>Gravicode.HFNet.GraviTransformers</AssemblyName>
     <PackageId>Gravicode.HFNet.GraviTransformers</PackageId>
-    <Description>GraviTransformers - run Hugging Face transformer models on .NET: load pretrained BERT-family checkpoints from safetensors or PyTorch weights and serve them through task pipelines. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <Description>GraviTransformers - run Hugging Face transformer models on .NET: load pretrained BERT-family encoders and ViT vision encoders from safetensors or PyTorch weights and serve them through task pipelines - classification, fill-mask, named entities, question answering, embeddings and image classification. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,6 +18,9 @@
     <PackageReference Include="Gravicode.Science.GraviFrame" />
     <PackageReference Include="Gravicode.Science.GraviLearn" />
     <PackageReference Include="Gravicode.Science.GraviText" />
+
+    <!-- Decoding and resampling for the vision encoder's image processor. -->
+    <PackageReference Include="SixLabors.ImageSharp" />
   </ItemGroup>
 
   <ItemGroup>

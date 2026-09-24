@@ -91,6 +91,25 @@ murni.
 Perhatikan bahwa selisihnya menyempit tajam pada model kecil — 1,4x pada bert-tiny melawan 6–12x pada
 bert-base. Sebagian besar kemenangan torch ada di perkalian matriks besar, bukan di framework-nya.
 
+### Vision
+
+Satu gambar pada 224x224, yang berarti 197 posisi, bukan 12.
+
+| Model | Python (torch) | HF.Net (managed) | |
+|---|---:|---:|---|
+| vit-base-patch16-224, 1 gambar | 441 ms | 12,0 d | 26x lebih lambat |
+
+Dua pertiga angka managed itu adalah attention, yang merupakan milik fondasi. Pasangan feed-forward
+dan proyeksi patch adalah milik HF.Net, dan keduanya dipercepat dengan mengubah tata letak memorinya,
+bukan aritmetikanya: bobotnya tetap dalam urutan `(outputs, inputs)` milik checkpoint sehingga tiap
+dot product menyusuri memori yang bersebelahan dan bisa divektorkan.
+
+Arah itu cukup berlawanan dengan dugaan sehingga layak dinyatakan terang-terangan. Menransposnya ke
+urutan `(inputs, outputs)` yang "diinginkan" perulangan biasa, lalu memparalelkannya per baris,
+terukur **lima kali lebih lambat daripada versi berurutan yang hendak digantikannya** — pada 3072
+kolom setiap langkah perulangan dalam adalah satu cache line baru, dan operand berlangkah tidak bisa
+dimuat ke register vektor sama sekali.
+
 ### Jalur produksi
 
 Pekerjaan yang sama lewat ONNX Runtime, via GraviOptimum, pada sebuah model uji kecil:
@@ -124,6 +143,17 @@ Kecepatan itu bagian yang mudah. Bagian inilah yang menentukan apakah semuanya b
 | 3 | former | 5,82% | former | 5,83% |
 | 4 | capped | 2,16% | capped | 2,14% |
 | 5 | prominent | 1,36% | prominent | 1,36% |
+
+**`google/vit-base-patch16-224`**, pada foto contoh milik Hub sendiri dan pada gambar dua kucing yang
+kanonik. Sisa selisih kecilnya berasal dari resampler — bilinear milik PIL melawan milik ImageSharp —
+bukan dari modelnya.
+
+| Gambar | Python | | HF.Net | |
+|---|---|---:|---|---:|
+| bee.jpg | bee | 94,38% | bee | 94,46% |
+| | pot, flowerpot | 1,36% | pot, flowerpot | 1,32% |
+| cats.jpg | Egyptian cat | 93,74% | Egyptian cat | 93,81% |
+| | tabby, tabby cat | 3,84% | tabby, tabby cat | 3,80% |
 
 Urutan sama, lima kandidat sama, probabilitas sepakat sampai sekitar sepersepuluh poin persen.
 Selisih sisanya adalah aritmetika `double` melawan `float` — yaitu HF.Net yang *lebih* presisi, bukan

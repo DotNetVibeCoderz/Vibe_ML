@@ -2,7 +2,7 @@
 
 *[English](../hf-gallery.md)*
 
-`samples/HFGallery` adalah aplikasi desktop yang menjalankan sembilan use case HF.Net terhadap model
+`samples/HFGallery` adalah aplikasi desktop yang menjalankan sepuluh use case HF.Net terhadap model
 sungguhan, dan menampilkan hasilnya bersama kode yang menghasilkannya. Tidak ada yang dipalsukan:
 setiap panel yang terlihat adalah keluaran checkpoint yang diunduh dari Hub saat itu juga.
 
@@ -22,10 +22,11 @@ dotnet run --project samples/HFGallery
 
 ---
 
-## Sembilan use case
+## Sepuluh use case
 
 | Use case | Library | Model | Yang ditunjukkan |
 |---|---|---|---|
+| What is in this picture | GraviTransformers | `google/vit-base-patch16-224` | Vision Transformer di atas patch gambar |
 | Sentiment | GraviTransformers | `distilbert-base-uncased-finetuned-sst-2-english` | Head hasil fine-tune beserta nama labelnya sendiri |
 | Fill in the blank | GraviTransformers | `bert-base-uncased` | Head masked language model |
 | Named entities | GraviTransformers | `dslim/bert-base-NER` | Klasifikasi token, sebagai rentang teks asli |
@@ -37,6 +38,15 @@ dotnet run --project samples/HFGallery
 | Diffusion schedules | GraviDiffusers | *tidak ada* | Sisa sinyal pada setiap timestep pelatihan |
 
 ---
+
+## What is in this picture
+
+Vision Transformer adalah blok encoder yang sama seperti BERT di atas embedding yang berbeda:
+gambar menjadi kisi 14x14 persegi berukuran 16 piksel, tiap persegi menjadi satu vektor, dan sebuah
+vektor `[CLS]` terlatih ditaruh di depan. Gambarnya diambil dari Hub, jadi tidak ada berkas yang
+perlu ikut disimpan di repositori.
+
+![What is in this picture](../screenshots/hfgallery-image.png)
 
 ## Named entities
 

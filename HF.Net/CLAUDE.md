@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.1.0 is implemented: **26 projects, 191 tests passing**, the whole solution builds clean, and the
+v0.1.0 is implemented: **26 projects, 212 tests passing**, the whole solution builds clean, and the
 eight libraries are published on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the
 specification of record; [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says
 where it is going.
@@ -26,8 +26,20 @@ root rather than here — see below.
 - **`bert-base-uncased` names its layer norms `gamma`/`beta`**, not `weight`/`bias` — a TensorFlow
   inheritance. Both spellings are handled in `CheckpointLoader` *and* in the masked-LM head; a
   loader that knows only the modern one fails on the most-downloaded model on the Hub.
-- **Token type embeddings are folded into the word embeddings.** Exact for a single sequence,
-  approximate for a pair. `CheckpointLoader.SupportsPairs` is false and says so.
+- **Token type embeddings are folded into the word embeddings.** Exact for a single sequence. A pair
+  also needs segment 1, which is carried as `LoadReport.SegmentDelta` — the *difference* between the
+  two segment vectors — and added per position. Both halves are exact; `SupportsPairs` is true.
+- **A token classifier and a sequence classifier both store `classifier.weight` at `[classes,
+  hidden]`.** The token head must be claimed first or every NER checkpoint loads as a sentence
+  classifier with several hundred nonsense classes.
+- **ViT is pre-norm; BERT is post-norm.** Same parameter shapes, so each loads the other's weights
+  in silence and returns confident nonsense. That is why `GraviTransformers.Vision` has its own
+  block rather than reusing the foundation's. The test that catches it: zero every projection — a
+  pre-norm block is then the identity, a post-norm block returns `LayerNorm(input)`.
+- **Vision weight matrices stay in the checkpoint's `(outputs, inputs)` order.** Transposing them
+  into the order the obvious loop wants, even with `Parallel.For`, measured **five times slower**:
+  at 3072 columns each step of the inner loop is a fresh cache line, and a strided operand cannot be
+  vectorised at all. `Simd.Dot` depends on both operands being contiguous.
 - **`BatchOptions.Default` must not be written `new()`.** It is a record struct, so the
   parameterless constructor zeroes the fields rather than running the primary constructor's
   defaults — the result means "no padding", and the first ragged batch throws about rectangularity.
@@ -100,7 +112,7 @@ Eight libraries mirroring the Python Hugging Face stack, built on Gravicode.Scie
 | `GraviHub` | `huggingface_hub` | Hub transfer, cache, **safetensors** and **PyTorch pickle** readers |
 | `GraviTokenizers` | `tokenizers` | WordPiece, BPE, Unigram, `tokenizer.json`, character offsets |
 | `GraviDatasets` | `datasets` | Files, Hub datasets, splits, streaming, memory mapping |
-| `GraviTransformers` | `transformers` | Pretrained BERT-family encoders and task heads |
+| `GraviTransformers` | `transformers` | Pretrained BERT-family encoders, ViT vision encoders, and task heads |
 | `GraviPEFT` | `peft` | LoRA adapters in the PEFT format |
 | `GraviAccelerate` | `accelerate` | Device selection, sharding, measurement |
 | `GraviOptimum` | `optimum` | ONNX Runtime, quantisation |
@@ -143,7 +155,7 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 191
+dotnet test                                                     # all 212
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

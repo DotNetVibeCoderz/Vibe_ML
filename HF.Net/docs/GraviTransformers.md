@@ -130,6 +130,87 @@ model.Similarity("the cat sat on the mat", "quarterly earnings beat");     // 0.
 fine-tuned for sentence similarity, `[CLS]` is close to constant and makes every pair of sentences
 look alike. `EmbedBatch` parallelises across inputs, which is where the throughput is.
 
+## Vision
+
+A Vision Transformer is the same encoder block over a different embedding, so it lives here rather
+than in a library of its own.
+
+```csharp
+using Gravicode.HFNet.GraviTransformers.Vision;
+
+using var model = VisionTransformer.Load("google/vit-base-patch16-224");
+
+foreach (var prediction in model.Classify("bee.jpg", topK: 5))
+    Console.WriteLine($"{prediction.Label,-24} {prediction.Score:P2}");
+```
+
+```
+bee                       94.46 %
+pot, flowerpot             1.32 %
+daisy                      0.86 %
+ant, emmet, pismire        0.30 %
+fly                        0.29 %
+```
+
+The image is cut into a grid of 16px squares, each square is projected to one vector, a learned
+`[CLS]` vector goes in front and the position embeddings are added. From there it is a 197-token
+sequence like any other.
+
+`Embed` returns the `[CLS]` vector rather than a mean over the patches: unlike a plain text encoder,
+ViT is pretrained with a classification objective on exactly that position, so it already holds the
+whole-image summary that mean pooling would have to reconstruct. `Similarity` compares two images
+with it.
+
+```csharp
+var vector = model.Embed("bee.jpg");             // [hidden]
+model.Similarity("bee.jpg", "wasp.jpg");
+```
+
+`VisionTransformer.Open(directory)` loads a model that was never on the Hub.
+
+### Pre-norm, and why this is its own type
+
+ViT normalises **before** each sublayer and adds the residual after it. BERT adds the residual first
+and normalises the sum. Every parameter has the same shape either way, so a ViT checkpoint loaded
+into a post-norm encoder loads without a single complaint and then returns confident nonsense.
+
+There is a clean test for it, and it is in the suite: zero every projection in a block. A pre-norm
+block is then the **identity** - the residual is added to nothing. A post-norm block returns
+`LayerNorm(input)`, which is not the input.
+
+### Preprocessing is part of the model
+
+```csharp
+model.Processor
+// ImageProcessor(224x224, mean [0.5, 0.5, 0.5], std [0.5, 0.5, 0.5])
+```
+
+The numbers come from the repository's own `preprocessor_config.json`, never from a default written
+into HF.Net. A model trained on inputs in `[-1, 1]` and fed inputs in `[0, 1]` still answers, and
+still answers confidently, with nothing in the output to say the input was wrong.
+
+Where the processor and the model disagree about the edge length - or where a repository ships no
+processor config at all - the **model's** `image_size` wins. It is baked into how many position
+embeddings the checkpoint has, so it is the one number that cannot be negotiated.
+
+### What it runs
+
+`vit` and `deit`. A windowed or convolutional backbone - Swin, ConvNeXt - is refused by name, with a
+pointer to ONNX. A ViT with a head this does not know still loads: the encoder is the same and its
+features are still readable, `HasClassificationHead` is `false`, and `Classify` says so instead of
+inventing classes.
+
+### Speed
+
+`google/vit-base-patch16-224` takes about **12 seconds** per image here against torch's 441 ms, and
+the top five agree to within 0.07 of a percentage point. Two thirds of that is the foundation's
+attention; the feed-forward pair and the patch projection are vectorised and run across cores.
+
+The layout is what makes them fast, not the loop. Both keep their weights in the checkpoint's own
+`(outputs, inputs)` order so each dot product walks contiguous memory. Transposing them to the shape
+the obvious loop wants measured **five times slower** - a strided operand cannot be loaded into a
+vector register at all, and at 3072 columns each step is a fresh cache line.
+
 ## Configuration
 
 ```csharp
@@ -235,7 +316,8 @@ There is no KV cache because this is an encoder: every position attends to every
 ## Limits
 
 - Decoder-only and encoder-decoder architectures are refused.
-- Vision models (ViT, CLIP) are on the roadmap; see [PLAN.md](../PLAN.md).
+- CLIP is not implemented: its text tower is causal, which this encoder is not. ViT and DeiT are.
+- Vision models run at the resolution they were trained at; position embeddings are not interpolated.
 
 ## See also
 

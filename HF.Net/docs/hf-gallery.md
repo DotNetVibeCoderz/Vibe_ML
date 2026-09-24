@@ -2,7 +2,7 @@
 
 *[Bahasa Indonesia](id/hf-gallery.md)*
 
-`samples/HFGallery` is a desktop application that runs nine HF.Net use cases against real models
+`samples/HFGallery` is a desktop application that runs ten HF.Net use cases against real models
 and shows both the answer and the code that produced it. Nothing in it is mocked: every panel you
 see is the output of a checkpoint downloaded from the Hub during that run.
 
@@ -22,10 +22,11 @@ dotnet run --project samples/HFGallery
 
 ---
 
-## The nine cases
+## The ten cases
 
 | Case | Library | Model | What it shows |
 |---|---|---|---|
+| What is in this picture | GraviTransformers | `google/vit-base-patch16-224` | A Vision Transformer over image patches |
 | Sentiment | GraviTransformers | `distilbert-base-uncased-finetuned-sst-2-english` | A fine-tuned head and its own label names |
 | Fill in the blank | GraviTransformers | `bert-base-uncased` | The masked-language head |
 | Named entities | GraviTransformers | `dslim/bert-base-NER` | Token classification, as spans of the input |
@@ -37,6 +38,14 @@ dotnet run --project samples/HFGallery
 | Diffusion schedules | GraviDiffusers | *none* | Signal remaining at each training timestep |
 
 ---
+
+## What is in this picture
+
+A Vision Transformer is the same encoder block as BERT over a different embedding: the image becomes
+a 14x14 grid of 16px squares, each square becomes one vector, and a learned `[CLS]` vector goes in
+front. The picture is fetched from the Hub, so nothing is checked in.
+
+![What is in this picture](screenshots/hfgallery-image.png)
 
 ## Named entities
 

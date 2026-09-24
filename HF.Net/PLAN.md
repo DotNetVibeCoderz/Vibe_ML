@@ -23,10 +23,13 @@ So the order of work is formats first, models second, training last.
 
 **The goal:** stop refusing so much.
 
-1. **Vision encoders.** ViT and CLIP. Both are transformer encoders over patch embeddings rather
-   than token embeddings, so the block is already there; what is missing is the patch embedding, the
-   image preprocessing pipeline (resize, centre crop, normalise) and CLIP's dual-tower contrastive
-   head. This is the largest single increase in what HF.Net can open.
+1. ~~**Vision encoders.**~~ **ViT and DeiT done; CLIP not.** The patch embedding, the image
+   processor and a pre-norm encoder block are in `GraviTransformers.Vision`, and
+   `google/vit-base-patch16-224` agrees with torch to within 0.08 of a percentage point on the top
+   five. Two things are worth carrying forward. The block had to be written rather than reused: ViT
+   is pre-norm, BERT is post-norm, and each loads the other's parameters without a word of
+   complaint. And CLIP still needs a **causal** text tower, which is the same gap that keeps
+   decoder-only models out — so it belongs with that work, not with this.
 2. ~~**Token classification and question answering.**~~ **Done.** `FindEntities` decodes BIO tags
    into whole entities and `Answer` searches a constrained start/end pair; both return real
    substrings of the input, taken from the tokenizer's offsets. The ordering trap worth recording:
@@ -39,6 +42,8 @@ So the order of work is formats first, models second, training last.
    embeddings, so both segments are now exact and `CheckpointLoader.SupportsPairs` is `true`.
 4. **Sharded checkpoints end to end.** The index reader exists; the loader should stream a model
    that does not fit in memory rather than requiring it to.
+5. **Position-embedding interpolation.** A vision model today runs only at the resolution it was
+   trained at. Interpolating the position grid is what lets one checkpoint serve several.
 
 ## v0.3 — training
 

@@ -89,6 +89,24 @@ GraviTransformers exists so a model can be **loaded, inspected and understood** 
 Note that the gap narrows sharply on the small model — 1.4x on bert-tiny against 6–12x on bert-base.
 Most of what torch wins is in the large matrix multiplies, not in the framework.
 
+### Vision
+
+One image at 224x224, which is 197 positions rather than 12.
+
+| Model | Python (torch) | HF.Net (managed) | |
+|---|---:|---:|---|
+| vit-base-patch16-224, 1 image | 441 ms | 12.0 s | 26x slower |
+
+Two thirds of the managed figure is attention, which is the foundation's. The feed-forward pair and
+the patch projection are HF.Net's, and both were made faster by changing their memory layout rather
+than their arithmetic: they keep their weights in the checkpoint's own `(outputs, inputs)` order so
+each dot product walks contiguous memory and can be vectorised.
+
+That direction is counter-intuitive enough to be worth stating plainly. Transposing them into the
+`(inputs, outputs)` order the obvious loop wants, and parallelising across rows, measured **five
+times slower than the sequential version it replaced** — at 3072 columns every step of the inner
+loop is a fresh cache line, and a strided operand cannot be loaded into a vector register at all.
+
 ### The production path
 
 The same work through ONNX Runtime, via GraviOptimum, on a small test model:
@@ -122,6 +140,16 @@ Speed is the easy half. This is the half that decides whether any of it is usabl
 | 3 | former | 5.82% | former | 5.83% |
 | 4 | capped | 2.16% | capped | 2.14% |
 | 5 | prominent | 1.36% | prominent | 1.36% |
+
+**`google/vit-base-patch16-224`**, on the Hub's own sample photograph and on the canonical two-cats
+image. The small residual is the resampler — PIL's bilinear against ImageSharp's — not the model.
+
+| Image | Python | | HF.Net | |
+|---|---|---:|---|---:|
+| bee.jpg | bee | 94.38% | bee | 94.46% |
+| | pot, flowerpot | 1.36% | pot, flowerpot | 1.32% |
+| cats.jpg | Egyptian cat | 93.74% | Egyptian cat | 93.81% |
+| | tabby, tabby cat | 3.84% | tabby, tabby cat | 3.80% |
 
 Same order, same five candidates, probabilities agreeing to about a tenth of a percentage point.
 The residual difference is `double` against `float` arithmetic, which is HF.Net being *more*

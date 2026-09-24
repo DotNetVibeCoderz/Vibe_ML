@@ -25,7 +25,7 @@
 
         <TextBlock Grid.Column="1" Margin="20,0" VerticalAlignment="Center"
                    Classes="muted"
-                   Text="Nine things HF.Net does, each one running against a real model." />
+                   Text="Ten things HF.Net does, each one running against a real model." />
 
         <TextBlock Grid.Column="2" Classes="mono muted" VerticalAlignment="Center"
                    Text="Gravicode Studios" />

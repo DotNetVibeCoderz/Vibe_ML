@@ -130,6 +130,91 @@ model.Similarity("the cat sat on the mat", "quarterly earnings beat");     // 0.
 di-fine-tune untuk kemiripan kalimat, `[CLS]` nyaris konstan sehingga setiap pasangan kalimat tampak
 mirip. `EmbedBatch` memparalelkan antar-masukan, dan di situlah throughput-nya berada.
 
+## Vision
+
+Vision Transformer adalah blok encoder yang sama di atas embedding yang berbeda, jadi ia tinggal di
+sini alih-alih di pustaka tersendiri.
+
+```csharp
+using Gravicode.HFNet.GraviTransformers.Vision;
+
+using var model = VisionTransformer.Load("google/vit-base-patch16-224");
+
+foreach (var prediction in model.Classify("bee.jpg", topK: 5))
+    Console.WriteLine($"{prediction.Label,-24} {prediction.Score:P2}");
+```
+
+```
+bee                       94,46 %
+pot, flowerpot             1,32 %
+daisy                      0,86 %
+ant, emmet, pismire        0,30 %
+fly                        0,29 %
+```
+
+Gambar dipotong menjadi kisi persegi 16 piksel, tiap persegi diproyeksikan menjadi satu vektor,
+sebuah vektor `[CLS]` terlatih ditaruh di depan, lalu position embedding ditambahkan. Setelah itu ia
+hanyalah urutan 197 token seperti urutan mana pun.
+
+`Embed` mengembalikan vektor `[CLS]`, bukan rata-rata seluruh patch: tidak seperti encoder teks
+biasa, ViT dilatih awal dengan tujuan klasifikasi tepat pada posisi itu, jadi ia sudah memuat
+ringkasan seluruh gambar yang justru harus disusun ulang oleh mean pooling. `Similarity`
+membandingkan dua gambar dengannya.
+
+```csharp
+var vector = model.Embed("bee.jpg");             // [hidden]
+model.Similarity("bee.jpg", "wasp.jpg");
+```
+
+`VisionTransformer.Open(directory)` memuat model yang tidak pernah ada di Hub.
+
+### Pre-norm, dan mengapa ini tipe tersendiri
+
+ViT melakukan normalisasi **sebelum** setiap sublapisan dan menambahkan residual sesudahnya. BERT
+menambahkan residual lebih dulu lalu menormalisasi jumlahnya. Setiap parameter berbentuk sama pada
+kedua cara itu, sehingga checkpoint ViT yang dimuat ke encoder post-norm akan termuat tanpa satu pun
+keluhan, lalu mengembalikan omong kosong yang terdengar yakin.
+
+Ada satu uji yang bersih untuk itu, dan ia ada di dalam suite: nolkan semua proyeksi dalam satu
+blok. Blok pre-norm lalu menjadi **identitas** — residual ditambahkan ke nol. Blok post-norm
+mengembalikan `LayerNorm(input)`, yang bukan input.
+
+### Prapemrosesan adalah bagian dari model
+
+```csharp
+model.Processor
+// ImageProcessor(224x224, mean [0.5, 0.5, 0.5], std [0.5, 0.5, 0.5])
+```
+
+Angkanya berasal dari `preprocessor_config.json` milik repositori itu sendiri, tidak pernah dari
+nilai bawaan yang ditulis di dalam HF.Net. Model yang dilatih pada masukan di `[-1, 1]` lalu diberi
+masukan di `[0, 1]` tetap menjawab, tetap menjawab dengan yakin, dan tidak ada apa pun dalam
+keluarannya yang memberi tahu bahwa masukannya salah.
+
+Bila prosesor dan model berselisih soal panjang sisi — atau bila repositori tidak menyertakan konfig
+prosesor sama sekali — `image_size` **milik model** yang menang. Angka itu tertanam pada berapa
+banyak position embedding yang dimiliki checkpoint, jadi ia satu-satunya yang tidak bisa ditawar.
+
+### Apa yang bisa dijalankan
+
+`vit` dan `deit`. Backbone berjendela atau konvolusional — Swin, ConvNeXt — ditolak dengan menyebut
+namanya, disertai arahan ke ONNX. ViT dengan head yang belum dikenal tetap termuat: encoder-nya sama
+dan fiturnya tetap terbaca, `HasClassificationHead` bernilai `false`, dan `Classify` mengatakannya
+alih-alih mengarang kelas.
+
+### Kecepatan
+
+`google/vit-base-patch16-224` memakan sekitar **12 detik** per gambar di sini melawan 441 ms milik
+torch, dan lima teratasnya sepakat dalam rentang 0,07 poin persentase. Dua pertiga waktu itu ada di
+attention milik fondasi; pasangan feed-forward dan proyeksi patch sudah divektorkan dan berjalan
+lintas core.
+
+Yang membuat keduanya cepat adalah tata letaknya, bukan perulangannya. Keduanya menyimpan bobot
+dalam urutan `(outputs, inputs)` milik checkpoint sendiri sehingga tiap dot product menyusuri memori
+yang bersebelahan. Menransposnya ke bentuk yang "diinginkan" perulangan biasa terukur **lima kali
+lebih lambat** — operand berlangkah tidak bisa dimuat ke register vektor sama sekali, dan pada 3072
+kolom setiap langkah adalah satu cache line baru.
+
 ## Konfigurasi
 
 ```csharp
@@ -234,8 +319,8 @@ Tidak ada KV cache karena ini encoder: setiap posisi toh memperhatikan semua pos
 ## Batasan
 
 - Arsitektur decoder-only dan encoder-decoder ditolak.
-- Model vision (ViT, CLIP) ada di peta jalan; lihat
-  [PLAN.md](../../PLAN.md).
+- CLIP belum tersedia: menara teksnya kausal, sedangkan encoder ini tidak. ViT dan DeiT tersedia.
+- Model vision berjalan pada resolusi saat ia dilatih; position embedding tidak diinterpolasi.
 
 ## Lihat juga
 

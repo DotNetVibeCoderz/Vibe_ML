@@ -3,6 +3,7 @@ using Gravicode.HFNet.GraviHub;
 using Gravicode.HFNet.GraviHub.Io;
 using Gravicode.HFNet.GraviTokenizers;
 using Gravicode.HFNet.GraviTransformers;
+using Gravicode.HFNet.GraviTransformers.Vision;
 using Gravicode.Science.GraviNum;
 using HFGallery.Controls;
 using Slice = HFGallery.Controls.Slice;
@@ -23,6 +24,7 @@ internal static class ModelCache
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static readonly Dictionary<string, TransformerModel> Models = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, HfTokenizer> Tokenizers = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, VisionTransformer> Vision = new(StringComparer.Ordinal);
 
     internal static async Task<TransformerModel> ModelAsync(
         string id, IProgress<string> progress, CancellationToken token)
@@ -37,6 +39,24 @@ internal static class ModelCache
 
             Models[id] = model;
             progress.Report($"{model.Config.Layers} layers, {model.Config.HiddenSize} hidden, ready.");
+            return model;
+        }
+        finally { Gate.Release(); }
+    }
+
+    internal static async Task<VisionTransformer> VisionAsync(
+        string id, IProgress<string> progress, CancellationToken token)
+    {
+        await Gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (Vision.TryGetValue(id, out var cached)) return cached;
+
+            progress.Report($"Loading {id} — the first run downloads it.");
+            var model = await Task.Run(() => VisionTransformer.Load(id), token).ConfigureAwait(false);
+
+            Vision[id] = model;
+            progress.Report($"{model.Config.Layers} layers, {model.Config.Patches} patches, ready.");
             return model;
         }
         finally { Gate.Release(); }
@@ -66,6 +86,7 @@ public static class Catalog
     /// <summary>The cases.</summary>
     public static IReadOnlyList<GalleryCase> All { get; } =
     [
+        new ImageCase(),
         new SentimentCase(),
         new FillMaskCase(),
         new EntitiesCase(),
@@ -76,6 +97,76 @@ public static class Catalog
         new CheckpointCase(),
         new SchedulerCase(),
     ];
+}
+
+// ====================================================================== image classification
+
+internal sealed class ImageCase : GalleryCase
+{
+    /// <summary>Where the sample pictures come from, so the case needs nothing checked in.</summary>
+    private const string Gallery = "huggingface/documentation-images";
+
+    public override string Title => "What is in this picture";
+    public override string Blurb => "Run a Vision Transformer over an image and read the label off it.";
+    public override string Library => "GraviTransformers";
+    public override string Model => "google/vit-base-patch16-224";
+    public override string InputLabel => "A local image path, or a file from huggingface/documentation-images";
+
+    public override string? DefaultInput => "bee.jpg";
+
+    public override string Code => """
+        using Gravicode.HFNet.GraviTransformers.Vision;
+
+        // ViT is the same encoder block as BERT over a different embedding: the image is cut into
+        // 16px squares, each square is projected to one vector, and a learned [CLS] vector goes in
+        // front. From there it is a 197-token sequence like any other.
+        using var model = VisionTransformer.Load("google/vit-base-patch16-224");
+
+        foreach (var prediction in model.Classify(path, topK: 5))
+            Console.WriteLine($"{prediction.Label,-30} {prediction.Score:P2}");
+
+        // bee                             94.46 %
+        // pot, flowerpot                   1.32 %
+        """;
+
+    public override async Task<CaseResult> RunAsync(
+        string input, string second, IProgress<string> progress, CancellationToken token)
+    {
+        var model = await ModelCache.VisionAsync(Model, progress, token).ConfigureAwait(false);
+
+        string path;
+        if (File.Exists(input))
+        {
+            path = input;
+        }
+        else
+        {
+            progress.Report($"Fetching {input} from {Gallery}.");
+            path = await Task.Run(() => Hub.DownloadDatasetFile(Gallery, input), token).ConfigureAwait(false);
+        }
+
+        progress.Report($"Running the encoder over {model.Config.Patches} patches.");
+        var predictions = await Task.Run(() => model.Classify(path, topK: 5), token).ConfigureAwait(false);
+
+        var best = predictions[0];
+
+        return new CaseResult
+        {
+            Summary = $"{best.Label} at {best.Score:P1}.",
+
+            // Sequential by rank: these are five candidates for one answer, so what the colour
+            // should say is which is more likely, not which class this is.
+            Bars = [.. predictions.Select(p => new Datum(p.Label, p.Score))],
+
+            Facts =
+            [
+                ("image", Path.GetFileName(path)),
+                ("resolution", $"{model.Processor.Size}x{model.Processor.Size}"),
+                ("patches", $"{model.Config.Grid}x{model.Config.Grid} of {model.Config.PatchSize}px"),
+                ("classes", $"{model.Config.LabelCount:N0}"),
+            ],
+        };
+    }
 }
 
 // ====================================================================== sentiment
