@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Content-only model package. The ONNX files land in the consuming application's output folder under
+    models/ (found automatically by BundledModelProvider) and are also what NuGetModelProvider
+    downloads on demand. Models: Copyright Google LLC, Apache-2.0 (converted from MediaPipe TFLite).
+  -->
+  <PropertyGroup>
+    <Description>Hand models for MediaPipe.NET: BlazePalm detector, 21-point hand landmark model, gesture embedder and canned gesture classifier. Converted from Google MediaPipe (Apache-2.0) and cross-validated against TFLite. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <PackageTags>$(PackageTags);models</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ContentTargetFolders>contentFiles</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(ModelsOnnxDir)palm_detection.onnx" Link="models\palm_detection.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)hand_landmarks_detector.onnx" Link="models\hand_landmarks_detector.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)gesture_embedder.onnx" Link="models\gesture_embedder.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)canned_gesture_classifier.onnx" Link="models\canned_gesture_classifier.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

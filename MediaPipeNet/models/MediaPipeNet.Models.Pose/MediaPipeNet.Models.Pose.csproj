@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Content-only model package. The ONNX files land in the consuming application's output folder under
+    models/ (found automatically by BundledModelProvider) and are also what NuGetModelProvider
+    downloads on demand. Models: Copyright Google LLC, Apache-2.0 (converted from MediaPipe TFLite).
+  -->
+  <PropertyGroup>
+    <Description>Pose models for MediaPipe.NET: BlazePose detector and BlazePose GHUM Lite/Full landmark models (33 landmarks + segmentation). Converted from Google MediaPipe (Apache-2.0) and cross-validated against TFLite. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <PackageTags>$(PackageTags);models</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ContentTargetFolders>contentFiles</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(ModelsOnnxDir)pose_detection.onnx" Link="models\pose_detection.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)pose_landmarks_detector_lite.onnx" Link="models\pose_landmarks_detector_lite.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)pose_landmarks_detector_full.onnx" Link="models\pose_landmarks_detector_full.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Framework</RootNamespace>
+    <Description>MediaPipe.NET graph engine: calculator graphs of nodes connected by timestamped Packet&lt;T&gt; streams, with MediaPipe-style input synchronization, timestamp bound propagation, parallel pipelined scheduling, flow limiting (packet dropping) for live streams, side packets and a .pbtxt-style graph config parser. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Core\MediaPipeNet.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaPipeNet.Framework.Tests" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

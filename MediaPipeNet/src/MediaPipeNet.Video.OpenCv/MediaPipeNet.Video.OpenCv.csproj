@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Video.OpenCv</RootNamespace>
+    <Description>MediaPipe.NET video input via OpenCvSharp: WebcamFrameSource and VideoFileFrameSource implementations of IFrameSource with zero-allocation frame reuse. Add an OpenCvSharp4 runtime package for your platform (e.g. OpenCvSharp4.runtime.win). Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Imaging\MediaPipeNet.Imaging.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

@@ -1,0 +1,168 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource PaperBrush}" />
+    <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
+    <Setter Property="FontSize" Value="{StaticResource BodySize}" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+
+  <!-- Type roles -->
+  <Style Selector="TextBlock.display">
+    <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
+    <Setter Property="FontSize" Value="{StaticResource DisplaySize}" />
+    <Setter Property="LetterSpacing" Value="-0.6" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="TextBlock.title">
+    <Setter Property="FontSize" Value="{StaticResource TitleSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.lede">
+    <Setter Property="FontSize" Value="14.5" />
+    <Setter Property="Foreground" Value="{DynamicResource InkMutedBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="21" />
+  </Style>
+  <Style Selector="TextBlock.muted">
+    <Setter Property="Foreground" Value="{DynamicResource InkMutedBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="TextBlock.eyebrow">
+    <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    <Setter Property="FontSize" Value="{StaticResource CaptionSize}" />
+    <Setter Property="Foreground" Value="{DynamicResource CobaltBrush}" />
+    <Setter Property="LetterSpacing" Value="0.6" />
+  </Style>
+  <Style Selector="TextBlock.mono, SelectableTextBlock.mono">
+    <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="TextBlock.section">
+    <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{DynamicResource InkMutedBrush}" />
+    <Setter Property="LetterSpacing" Value="0.8" />
+    <Setter Property="Margin" Value="0,14,0,6" />
+  </Style>
+
+  <!-- Panels -->
+  <Style Selector="Border.panel">
+    <Setter Property="Background" Value="{DynamicResource RaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource RuleBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource PanelRadius}" />
+    <Setter Property="Padding" Value="16" />
+  </Style>
+  <Style Selector="Border.stage">
+    <Setter Property="Background" Value="{StaticResource StageBrush}" />
+    <Setter Property="CornerRadius" Value="{StaticResource PanelRadius}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <!-- Sidebar navigation -->
+  <Style Selector="ListBox.nav">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem">
+    <Setter Property="Padding" Value="12,5" />
+    <Setter Property="Margin" Value="0,0" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource CobaltSoftBrush}" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem:selected">
+    <Setter Property="Foreground" Value="{DynamicResource CobaltBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource CobaltSoftBrush}" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem.header">
+    <Setter Property="IsEnabled" Value="False" />
+    <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    <Setter Property="FontSize" Value="10.5" />
+    <Setter Property="Padding" Value="12,10,12,3" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem.header:disabled /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem.header:disabled">
+    <Setter Property="Foreground" Value="{DynamicResource InkMutedBrush}" />
+  </Style>
+
+  <!-- Buttons -->
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="{DynamicResource CobaltBrush}" />
+    <Setter Property="Foreground" Value="White" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Padding" Value="16,8" />
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource CobaltBrush}" />
+    <Setter Property="Opacity" Value="0.88" />
+    <Setter Property="Foreground" Value="White" />
+  </Style>
+  <Style Selector="Button.quiet">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource RuleBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="12,7" />
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <Style Selector="Button:focus-visible /template/ ContentPresenter, ToggleButton:focus-visible /template/ ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource CobaltBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- Sample thumbnails -->
+  <Style Selector="Button.thumb">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Margin" Value="0,0,8,0" />
+  </Style>
+  <Style Selector="Button.thumb.active">
+    <Setter Property="BorderBrush" Value="{DynamicResource CobaltBrush}" />
+  </Style>
+
+  <!-- Task cards on the home page -->
+  <Style Selector="Button.card">
+    <Setter Property="Background" Value="{DynamicResource RaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource RuleBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="16,14" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Margin" Value="0,0,12,12" />
+  </Style>
+  <Style Selector="Button.card:pointerover /template/ ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource CobaltBrush}" />
+    <Setter Property="Background" Value="{DynamicResource RaisedBrush}" />
+  </Style>
+
+  <!-- Code panel -->
+  <Style Selector="Border.code">
+    <Setter Property="Background" Value="#141821" />
+    <Setter Property="CornerRadius" Value="{StaticResource PanelRadius}" />
+    <Setter Property="Padding" Value="18,14" />
+  </Style>
+
+  <Style Selector="TabControl.switch TabItem">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Padding" Value="12,4" />
+  </Style>
+
+  <Style Selector="Slider">
+    <Setter Property="Foreground" Value="{DynamicResource CobaltBrush}" />
+  </Style>
+</Styles>

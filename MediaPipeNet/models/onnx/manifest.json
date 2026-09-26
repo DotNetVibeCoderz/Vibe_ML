@@ -1,0 +1,504 @@
+[
+  {
+    "id": "face_detection_short_range",
+    "file": "face_detection_short_range.onnx",
+    "source": "blaze_face_short_range.tflite",
+    "bytes": 418458,
+    "sha256": "0f9ebac6ae85a09f5e37d46c3e018494932838b9aeb9e9bf2e6743d846764d3a",
+    "inputs": [
+      {
+        "name": "input",
+        "shape": [
+          1,
+          128,
+          128,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "regressors",
+        "shape": [
+          1,
+          896,
+          16
+        ]
+      },
+      {
+        "name": "classificators",
+        "shape": [
+          1,
+          896,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "id": "face_blendshapes",
+    "file": "face_blendshapes.onnx",
+    "source": "face_landmarker.task/face_blendshapes.tflite",
+    "bytes": 1883812,
+    "sha256": "de2b4ea38439a88d7f2b48d25794d742cee048413045a14f94813e6fec23e38a",
+    "inputs": [
+      {
+        "name": "serving_default_input_points:0",
+        "shape": [
+          1,
+          146,
+          2
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "StatefulPartitionedCall:0",
+        "shape": [
+          52
+        ]
+      }
+    ]
+  },
+  {
+    "id": "face_landmarks_detector",
+    "file": "face_landmarks_detector.onnx",
+    "source": "face_landmarker.task/face_landmarks_detector.tflite",
+    "bytes": 4921009,
+    "sha256": "f5140965778a7d7bb5e843ca10b344369ef0edc4c2c8e092385d2fe729f55281",
+    "inputs": [
+      {
+        "name": "input_12",
+        "shape": [
+          -1,
+          256,
+          256,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          -1,
+          1,
+          1,
+          1434
+        ]
+      },
+      {
+        "name": "Identity_1",
+        "shape": [
+          -1,
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "name": "Identity_2",
+        "shape": [
+          -1,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "id": "palm_detection",
+    "file": "palm_detection.onnx",
+    "source": "hand_landmarker.task/hand_detector.tflite",
+    "bytes": 4589700,
+    "sha256": "a07968a28db24b4818d8b85464f3ff258b527bc08fdee613555a2100d0f32231",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          192,
+          192,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          2016,
+          18
+        ]
+      },
+      {
+        "name": "Identity_1",
+        "shape": [
+          1,
+          2016,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hand_landmarks_detector",
+    "file": "hand_landmarks_detector.onnx",
+    "source": "hand_landmarker.task/hand_landmarks_detector.tflite",
+    "bytes": 10903815,
+    "sha256": "01df77bedaedfaa204cd186f89d2dd3988ea960d4335c1880a0d8824671e7fca",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          224,
+          224,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          63
+        ]
+      },
+      {
+        "name": "Identity_1",
+        "shape": [
+          1,
+          1
+        ]
+      },
+      {
+        "name": "Identity_2",
+        "shape": [
+          1,
+          1
+        ]
+      },
+      {
+        "name": "Identity_3",
+        "shape": [
+          1,
+          63
+        ]
+      }
+    ]
+  },
+  {
+    "id": "pose_landmarks_detector_lite",
+    "file": "pose_landmarks_detector_lite.onnx",
+    "source": "pose_landmarker_lite.task/pose_landmarks_detector.tflite",
+    "bytes": 5533837,
+    "sha256": "690f9fd395eba776a4ed8434fa65d8b9c8196488054b702274982620d291c1db",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          256,
+          256,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          195
+        ]
+      },
+      {
+        "name": "Identity_1",
+        "shape": [
+          1,
+          1
+        ]
+      },
+      {
+        "name": "Identity_2",
+        "shape": [
+          1,
+          256,
+          256,
+          1
+        ]
+      },
+      {
+        "name": "Identity_3",
+        "shape": [
+          1,
+          64,
+          64,
+          39
+        ]
+      },
+      {
+        "name": "Identity_4",
+        "shape": [
+          1,
+          117
+        ]
+      }
+    ]
+  },
+  {
+    "id": "pose_landmarks_detector_full",
+    "file": "pose_landmarks_detector_full.onnx",
+    "source": "pose_landmarker_full.task/pose_landmarks_detector.tflite",
+    "bytes": 12765338,
+    "sha256": "5437a4336695a81cb27c9619ff7bd609b7ed7ebddb3267850940cc90b75296b9",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          256,
+          256,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          195
+        ]
+      },
+      {
+        "name": "Identity_1",
+        "shape": [
+          1,
+          1
+        ]
+      },
+      {
+        "name": "Identity_2",
+        "shape": [
+          1,
+          256,
+          256,
+          1
+        ]
+      },
+      {
+        "name": "Identity_3",
+        "shape": [
+          1,
+          64,
+          64,
+          39
+        ]
+      },
+      {
+        "name": "Identity_4",
+        "shape": [
+          1,
+          117
+        ]
+      }
+    ]
+  },
+  {
+    "id": "pose_detection",
+    "file": "pose_detection.onnx",
+    "source": "pose_detection.tflite",
+    "bytes": 11925657,
+    "sha256": "5ab3870ca30b51b32b65d7c59322aed35b67f4dd5fcb02521966a85844f0880c",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          224,
+          224,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          2254,
+          12
+        ]
+      },
+      {
+        "name": "Identity_1",
+        "shape": [
+          1,
+          2254,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "id": "selfie_segmenter",
+    "file": "selfie_segmenter.onnx",
+    "source": "selfie_segmenter.tflite",
+    "bytes": 450202,
+    "sha256": "d9877981bfcfa556d846d4e5b757750e1c4ca04d694e64adcd9562c8dfdaa165",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          256,
+          256,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "activation_10",
+        "shape": [
+          1,
+          256,
+          256,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "id": "efficientdet_lite0",
+    "file": "efficientdet_lite0.onnx",
+    "source": "efficientdet_lite0.tflite",
+    "bytes": 13455619,
+    "sha256": "e15e6a31c697d933700986b59725dc45f2b273474850c38b69949faef9bba748",
+    "inputs": [
+      {
+        "name": "serving_default_images:0",
+        "shape": [
+          1,
+          320,
+          320,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "StatefulPartitionedCall:1",
+        "shape": [
+          1,
+          19206,
+          90
+        ]
+      },
+      {
+        "name": "StatefulPartitionedCall:0",
+        "shape": [
+          1,
+          19206,
+          4
+        ]
+      }
+    ]
+  },
+  {
+    "id": "efficientnet_lite0",
+    "file": "efficientnet_lite0.onnx",
+    "source": "efficientnet_lite0.tflite",
+    "bytes": 18599569,
+    "sha256": "fbcd11eee78c348a7d3ee62d62db2301255db9ed81288fceb7c2b25bb7e9bbf1",
+    "inputs": [
+      {
+        "name": "images",
+        "shape": [
+          1,
+          224,
+          224,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Softmax",
+        "shape": [
+          1,
+          1000
+        ]
+      }
+    ]
+  },
+  {
+    "id": "canned_gesture_classifier",
+    "file": "canned_gesture_classifier.onnx",
+    "source": "gesture_recognizer.task/hand_gesture_recognizer.task/canned_gesture_classifier.tflite",
+    "bytes": 6388,
+    "sha256": "d18989ddd043b2267a130c6f2889ebd681652e64829216d0b4069440ad6a3312",
+    "inputs": [
+      {
+        "name": "hand_embedding",
+        "shape": [
+          -1,
+          128
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          -1,
+          8
+        ]
+      }
+    ]
+  },
+  {
+    "id": "gesture_embedder",
+    "file": "gesture_embedder.onnx",
+    "source": "gesture_recognizer.task/hand_gesture_recognizer.task/gesture_embedder.tflite",
+    "bytes": 546063,
+    "sha256": "1b6226028ea6f383047cd7df567439dd04eb43735618a6db0487abc78978ed37",
+    "inputs": [
+      {
+        "name": "hand",
+        "shape": [
+          1,
+          21,
+          3
+        ]
+      },
+      {
+        "name": "handedness",
+        "shape": [
+          1,
+          1
+        ]
+      },
+      {
+        "name": "world_hand",
+        "shape": [
+          1,
+          21,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          128
+        ]
+      }
+    ]
+  }
+]

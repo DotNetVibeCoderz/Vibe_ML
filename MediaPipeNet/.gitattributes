@@ -1,0 +1,6 @@
+# Binary assets (models, images, fonts) are committed as regular files.
+*.onnx binary
+*.png binary
+*.jpg binary
+*.ttf binary
+*.ico binary

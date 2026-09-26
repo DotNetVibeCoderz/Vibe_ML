@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Inference</RootNamespace>
+    <Description>MediaPipe.NET inference layer: ONNX Runtime session wrapper with preallocated, pooled I/O buffers, automatic execution provider selection (CUDA, DirectML, CoreML, CPU) and model management (registry, checksum verification, local cache, NuGet model packages). Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Only the managed ONNX Runtime API is referenced; the native runtime (CPU, DirectML or CUDA
+      flavor) comes from the MediaPipeNet / MediaPipeNet.DirectML / MediaPipeNet.Cuda meta packages
+      or from the application itself.
+    -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Core\MediaPipeNet.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaPipeNet.Core.Tests" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

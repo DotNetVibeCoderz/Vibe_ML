@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Imaging</RootNamespace>
+    <Description>MediaPipe.NET imaging layer: pooled RGBA image frames, SixLabors.ImageSharp interop, rotated-ROI image-to-tensor conversion (resize, letterbox, normalize) and frame source abstractions. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Core\MediaPipeNet.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaPipeNet.Core.Tests" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

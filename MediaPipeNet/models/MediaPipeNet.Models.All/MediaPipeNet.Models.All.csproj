@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>All pretrained models for MediaPipe.NET (face, hand, gesture, pose, segmentation, object detection, image classification). Models: Copyright Google LLC, Apache-2.0. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Models.Face\MediaPipeNet.Models.Face.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Models.Hand\MediaPipeNet.Models.Hand.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Models.Pose\MediaPipeNet.Models.Pose.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Models.Segmentation\MediaPipeNet.Models.Segmentation.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Models.ObjectDetection\MediaPipeNet.Models.ObjectDetection.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Models.ImageClassification\MediaPipeNet.Models.ImageClassification.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

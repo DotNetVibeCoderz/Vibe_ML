@@ -1,0 +1,30 @@
+﻿MediaPipe.NET
+Copyright (c) 2026 Gravicode Studios — led by Kang Fadhil.
+
+This product is a .NET port/rewrite of Google MediaPipe (https://github.com/google-ai-edge/mediapipe),
+licensed under the Apache License, Version 2.0.
+
+Pretrained models
+-----------------
+The ONNX models distributed in the MediaPipeNet.Models.* packages (and in models/onnx) were converted
+from the official Google MediaPipe TFLite releases with tools/model-conversion/convert_models.py:
+
+  * BlazeFace short range, Face Mesh V2, Face Blendshapes      (face_landmarker.task, blaze_face_short_range.tflite)
+  * BlazePalm, Hand Landmarks, Gesture Embedder/Classifier       (hand_landmarker.task, gesture_recognizer.task)
+  * BlazePose detector, BlazePose GHUM Lite / Full              (pose_detection.tflite, pose_landmarker_*.task)
+  * Selfie Segmenter                                            (selfie_segmenter.tflite)
+  * EfficientDet-Lite0, EfficientNet-Lite0                      (efficientdet_lite0.tflite, efficientnet_lite0.tflite)
+
+Model weights: Copyright Google LLC, licensed under the Apache License, Version 2.0.
+Please review the MediaPipe model cards (https://ai.google.dev/edge/mediapipe/solutions) for intended
+use and limitations before deploying the models.
+
+Test images in tests/assets/images are MediaPipe test assets (Apache-2.0).
+
+Third-party libraries
+---------------------
+  * ONNX Runtime (MIT) — Microsoft
+  * SixLabors.ImageSharp / ImageSharp.Drawing 3.x/2.x (Six Labors Split License: Apache-2.0 for open
+    source and for organisations under the revenue threshold; commercial license otherwise)
+  * OpenCvSharp (Apache-2.0), OpenCV (Apache-2.0)
+  * Avalonia UI (MIT) — Gallery sample only

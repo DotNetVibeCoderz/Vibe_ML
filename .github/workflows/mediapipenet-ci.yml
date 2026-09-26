@@ -1,0 +1,75 @@
+# MediaPipe.NET - build, test and pack.
+#
+# MediaPipeNet is a subdirectory of the Vibe_ML repository and GitHub reads workflows only from the
+# repository root, so this file lives here and every step runs with MediaPipeNet as its working
+# directory. The path filters keep it from firing on changes to the rest of the monorepo.
+#
+# The tests include the golden cross-validation against the official MediaPipe Python package
+# (tests/assets/golden), so a numerical regression fails the build on every platform.
+#
+# Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+
+name: MediaPipe.NET CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'MediaPipeNet/**'
+      - '.github/workflows/mediapipenet-ci.yml'
+  pull_request:
+    paths:
+      - 'MediaPipeNet/**'
+      - '.github/workflows/mediapipenet-ci.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: MediaPipeNet
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: MediaPipeNet/global.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nuget/packages
+          key: nuget-mediapipenet-${{ runner.os }}-${{ hashFiles('MediaPipeNet/Directory.Packages.props') }}
+
+      - name: Restore
+        run: dotnet restore MediaPipeNet.slnx
+
+      - name: Build
+        run: dotnet build MediaPipeNet.slnx -c Release --no-restore
+
+      - name: Test (unit + golden cross-validation)
+        run: dotnet test MediaPipeNet.slnx -c Release --no-build --collect:"XPlat Code Coverage" --results-directory artifacts/coverage
+
+      - name: Pack
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet pack MediaPipeNet.slnx -c Release --no-build
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mediapipenet-coverage-${{ matrix.os }}
+          path: MediaPipeNet/artifacts/coverage
+          if-no-files-found: ignore

@@ -1,0 +1,38 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MediaPipeNet.Core/MediaPipeNet.Core.csproj" />
+    <Project Path="src/MediaPipeNet.Imaging/MediaPipeNet.Imaging.csproj" />
+    <Project Path="src/MediaPipeNet.Inference/MediaPipeNet.Inference.csproj" />
+    <Project Path="src/MediaPipeNet.Framework/MediaPipeNet.Framework.csproj" />
+    <Project Path="src/MediaPipeNet.Tasks.Vision/MediaPipeNet.Tasks.Vision.csproj" />
+    <Project Path="src/MediaPipeNet.Visualization/MediaPipeNet.Visualization.csproj" />
+    <Project Path="src/MediaPipeNet.Video.OpenCv/MediaPipeNet.Video.OpenCv.csproj" />
+    <Project Path="src/MediaPipeNet.Extensions.DI/MediaPipeNet.Extensions.DI.csproj" />
+    <Project Path="src/MediaPipeNet.Cli/MediaPipeNet.Cli.csproj" />
+    <Project Path="src/MediaPipeNet/MediaPipeNet.csproj" />
+    <Project Path="src/MediaPipeNet.DirectML/MediaPipeNet.DirectML.csproj" />
+    <Project Path="src/MediaPipeNet.Cuda/MediaPipeNet.Cuda.csproj" />
+  </Folder>
+  <Folder Name="/models/">
+    <Project Path="models/MediaPipeNet.Models.Face/MediaPipeNet.Models.Face.csproj" />
+    <Project Path="models/MediaPipeNet.Models.Hand/MediaPipeNet.Models.Hand.csproj" />
+    <Project Path="models/MediaPipeNet.Models.Pose/MediaPipeNet.Models.Pose.csproj" />
+    <Project Path="models/MediaPipeNet.Models.Segmentation/MediaPipeNet.Models.Segmentation.csproj" />
+    <Project Path="models/MediaPipeNet.Models.ObjectDetection/MediaPipeNet.Models.ObjectDetection.csproj" />
+    <Project Path="models/MediaPipeNet.Models.ImageClassification/MediaPipeNet.Models.ImageClassification.csproj" />
+    <Project Path="models/MediaPipeNet.Models.All/MediaPipeNet.Models.All.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/BasicUsage/BasicUsage.csproj" />
+    <Project Path="samples/GraphApiDemo/GraphApiDemo.csproj" />
+    <Project Path="samples/MediaPipeNet.Gallery/MediaPipeNet.Gallery.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MediaPipeNet.Core.Tests/MediaPipeNet.Core.Tests.csproj" />
+    <Project Path="tests/MediaPipeNet.Framework.Tests/MediaPipeNet.Framework.Tests.csproj" />
+    <Project Path="tests/MediaPipeNet.Tasks.Tests/MediaPipeNet.Tasks.Tests.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/MediaPipeNet.Benchmarks/MediaPipeNet.Benchmarks.csproj" />
+  </Folder>
+</Solution>

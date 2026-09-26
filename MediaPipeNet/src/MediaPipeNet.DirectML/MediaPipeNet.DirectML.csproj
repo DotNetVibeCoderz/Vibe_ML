@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Meta package: no code, only dependencies. -->
+  <PropertyGroup>
+    <Description>MediaPipe.NET with the DirectML (DirectX 12 GPU) ONNX Runtime for Windows — GPU acceleration on NVIDIA, AMD and Intel GPUs. Use instead of the MediaPipeNet package. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Vision\MediaPipeNet.Tasks.Vision.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

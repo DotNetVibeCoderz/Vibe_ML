@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Tasks.Vision</RootNamespace>
+    <Description>MediaPipe.NET vision tasks: FaceDetector, FaceLandmarker (face mesh + blendshapes), HandLandmarker, GestureRecognizer, PoseLandmarker, HolisticLandmarker, ImageSegmenter (selfie), ObjectDetector and ImageClassifier — native .NET ports of Google MediaPipe Tasks running on ONNX Runtime, with IMAGE / VIDEO / LIVE_STREAM modes, tracking, smoothing and graph calculators. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\*.txt" LogicalName="MediaPipeNet.Tasks.Vision.Resources.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Core\MediaPipeNet.Core.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Imaging\MediaPipeNet.Imaging.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Inference\MediaPipeNet.Inference.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Framework\MediaPipeNet.Framework.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaPipeNet.Tasks.Tests" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

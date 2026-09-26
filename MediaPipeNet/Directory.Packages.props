@@ -1,0 +1,48 @@
+<Project>
+  <!--
+    Central package management. ONNX Runtime is pinned to 1.24.4 across every flavor because the
+    DirectML build stops at 1.24.x and the managed API must never be newer than the native library
+    it binds to.
+  -->
+  <PropertyGroup>
+    <OnnxRuntimeVersion>1.24.4</OnnxRuntimeVersion>
+    <!-- 11.3.x: the Gallery targets the mature Avalonia 11 API surface. -->
+    <AvaloniaVersion>11.3.22</AvaloniaVersion>
+    <MicrosoftExtensionsVersion>10.0.12</MicrosoftExtensionsVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime.Managed" Version="$(OnnxRuntimeVersion)" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="$(OnnxRuntimeVersion)" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime.DirectML" Version="$(OnnxRuntimeVersion)" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime.Gpu" Version="$(OnnxRuntimeVersion)" />
+
+    <!-- 3.1.x: Six Labors Split License (Apache-2.0 for open source); 4.x requires a license key. -->
+    <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageVersion Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
+
+    <PackageVersion Include="OpenCvSharp4" Version="4.13.0.20260627" />
+    <PackageVersion Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
+
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="$(MicrosoftExtensionsVersion)" />
+
+    <PackageVersion Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Tmds.DBus.Protocol" Version="0.95.1" />
+
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <!-- 7.x is the last Apache-2.0 FluentAssertions line; 8.x is commercially licensed. -->
+    <PackageVersion Include="FluentAssertions" Version="7.2.0" />
+    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+</Project>

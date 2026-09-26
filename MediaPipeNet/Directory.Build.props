@@ -1,0 +1,59 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- CA1848/CA1873 (LoggerMessage delegates) and CA1062 are noise for this codebase's logging volume. -->
+    <NoWarn>$(NoWarn);CA1848;CA1873;CA1062;CA1716;CA1720;CA1711;CA1819;CA2225;CA1305;CA1307;CA1310;CA1303;CA1031;CA1812;CA5394;CA1002;CA1024;CA1508;CA1859;CA1001;CA1814;CA1851;CA1051;CA2215;CA2263</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    Package identity. Shared by every shippable library; samples, tests, benchmarks and tools opt
+    out with IsPackable=false in their own project files.
+  -->
+  <PropertyGroup>
+    <Product>MediaPipe.NET</Product>
+    <Company>Gravicode Studios</Company>
+    <Authors>Gravicode Studios, Kang Fadhil</Authors>
+    <Copyright>Copyright (c) 2026 Gravicode Studios. Models: Copyright Google LLC (Apache-2.0).</Copyright>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <PackageProjectUrl>https://github.com/DotNetVibeCoderz/Vibe_ML/tree/main/MediaPipeNet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/DotNetVibeCoderz/Vibe_ML</RepositoryUrl>
+    <RepositoryBranch>main</RepositoryBranch>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>mediapipe;computer-vision;onnx;onnxruntime;face-detection;hand-tracking;pose-estimation;segmentation;object-detection;gesture;dotnet</PackageTags>
+    <IsPackable>true</IsPackable>
+    <!-- NuGet ids carry the Gravicode prefix (like Gravicode.FaissNet, Gravicode.HFNet.*); namespaces stay MediaPipeNet.* -->
+    <PackageId>Gravicode.$(MSBuildProjectName)</PackageId>
+  </PropertyGroup>
+
+  <!--
+    Packing. Every package carries its own PACKAGE.md (NuGet renders it where relative links do not
+    resolve). Symbols ship as .snupkg; deterministic builds everywhere, CI paths normalized in CI.
+  -->
+  <PropertyGroup>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RepoRoot>$(MSBuildThisFileDirectory)</RepoRoot>
+    <ModelsOnnxDir>$(MSBuildThisFileDirectory)models/onnx/</ModelsOnnxDir>
+  </PropertyGroup>
+
+</Project>

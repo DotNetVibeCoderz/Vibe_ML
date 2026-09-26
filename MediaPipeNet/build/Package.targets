@@ -1,0 +1,15 @@
+<Project>
+  <!--
+    Shared packaging items for shippable projects: the package icon, the per-project PACKAGE.md
+    readme (when present) and the NOTICE file carrying the Google MediaPipe attribution.
+  -->
+  <PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)/PACKAGE.md')">
+    <PackageReadmeFile>PACKAGE.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(RepoRoot)build/icon.png" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(RepoRoot)NOTICE" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildProjectDirectory)/PACKAGE.md" Pack="true" PackagePath="\" Condition="Exists('$(MSBuildProjectDirectory)/PACKAGE.md')" />
+  </ItemGroup>
+</Project>

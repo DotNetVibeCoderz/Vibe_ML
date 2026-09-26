@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet</RootNamespace>
+    <Description>MediaPipe.NET core primitives: timestamps, landmarks, detections, rectangles, categories, telemetry and JSON serialization shared by every MediaPipe.NET package. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaPipeNet.Core.Tests" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

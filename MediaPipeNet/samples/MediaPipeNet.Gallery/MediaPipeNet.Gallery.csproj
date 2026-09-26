@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>MediaPipeNet.Gallery</RootNamespace>
+    <AssemblyName>MediaPipeNet.Gallery</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <None Include="..\..\tests\assets\images\*.jpg" Link="images\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <!-- Avalonia's Linux backend pulls Tmds.DBus.Protocol; pin a version without known advisories. -->
+    <PackageReference Include="Tmds.DBus.Protocol" />
+  </ItemGroup>
+
+  <!-- GPU acceleration through DirectML on Windows; the portable CPU runtime elsewhere. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <ProjectReference Include="..\..\src\MediaPipeNet.DirectML\MediaPipeNet.DirectML.csproj" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" />
+  </ItemGroup>
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <ProjectReference Include="..\..\src\MediaPipeNet\MediaPipeNet.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MediaPipeNet.Visualization\MediaPipeNet.Visualization.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Video.OpenCv\MediaPipeNet.Video.OpenCv.csproj" />
+    <ProjectReference Include="..\..\models\MediaPipeNet.Models.All\MediaPipeNet.Models.All.csproj" />
+  </ItemGroup>
+
+</Project>

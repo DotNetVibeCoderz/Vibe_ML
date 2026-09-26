@@ -1,0 +1,23 @@
+﻿# Build output
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+TestResults/
+BenchmarkDotNet.Artifacts/
+*.nupkg
+*.snupkg
+
+# Model conversion scratch (downloaded TFLite, intermediate graphs)
+artifacts/models/_work/
+
+# Gallery screenshots scratch
+artifacts/shots*/
+
+# Never commit credentials
+PackageCredentials.txt
+*.pfx

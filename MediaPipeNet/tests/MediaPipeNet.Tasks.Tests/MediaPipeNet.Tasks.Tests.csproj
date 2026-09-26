@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MediaPipeNet\MediaPipeNet.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Visualization\MediaPipeNet.Visualization.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Extensions.DI\MediaPipeNet.Extensions.DI.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+
+</Project>

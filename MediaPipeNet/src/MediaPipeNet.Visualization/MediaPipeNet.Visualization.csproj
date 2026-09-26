@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Visualization</RootNamespace>
+    <Description>MediaPipe.NET visualization utilities: draw landmarks, skeletons, face meshes, bounding boxes and segmentation masks (overlay, background blur/replacement) on SixLabors.ImageSharp images for debugging and demos. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Vision\MediaPipeNet.Tasks.Vision.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

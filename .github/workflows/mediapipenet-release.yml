@@ -1,0 +1,128 @@
+# MediaPipe.NET - publish the Gravicode.MediaPipeNet.* packages to NuGet.
+#
+# Triggered by a tag, so the tag and the package version cannot disagree: the version is read from
+# the tag and passed to `dotnet pack`. The tag is prefixed because MediaPipeNet is one project inside
+# the Vibe_ML monorepo.
+#
+#   git tag mediapipenet-v0.1.0
+#   git push origin mediapipenet-v0.1.0
+#
+# Requires the repository secret NUGET_API_KEY (https://www.nuget.org/account/apikeys).
+#
+# Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+
+name: MediaPipe.NET Release
+
+on:
+  push:
+    tags:
+      - 'mediapipenet-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, e.g. 0.1.0'
+        required: true
+      dry_run:
+        description: 'Pack and check, but do not push to NuGet'
+        type: boolean
+        default: true
+
+defaults:
+  run:
+    working-directory: MediaPipeNet
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  release:
+    name: pack and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # to create the GitHub Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: MediaPipeNet/global.json
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#mediapipenet-v}"
+          fi
+          # A bad version on nuget.org cannot be replaced, only unlisted: fail early.
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid semantic version."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION"
+
+      - name: Restore
+        run: dotnet restore MediaPipeNet.slnx
+
+      - name: Build
+        run: dotnet build MediaPipeNet.slnx -c Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      # The suite (including the golden cross-validation) is the gate.
+      - name: Test
+        run: dotnet test MediaPipeNet.slnx -c Release --no-build
+
+      - name: Pack
+        run: |
+          dotnet pack MediaPipeNet.slnx -c Release --no-build \
+            -p:Version=${{ steps.version.outputs.version }} \
+            -p:ContinuousIntegrationBuild=true
+
+      - name: List what will be published
+        run: ls -la artifacts/packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediapipenet-packages-${{ steps.version.outputs.version }}
+          path: |
+            MediaPipeNet/artifacts/packages/*.nupkg
+            MediaPipeNet/artifacts/packages/*.snupkg
+          if-no-files-found: error
+
+      # Dependencies first (Core → Imaging → Inference → Framework → Tasks.Vision) so that no package is
+      # indexed before the packages it depends on. --skip-duplicate lets a re-run finish a partial publish.
+      - name: Push to NuGet
+        if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          push() {
+            dotnet nuget push "$1" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          }
+          for id in Core Imaging Inference Framework Tasks.Vision; do
+            push "artifacts/packages/Gravicode.MediaPipeNet.$id.$VERSION.nupkg"
+          done
+          for package in artifacts/packages/*.nupkg; do
+            case "$package" in
+              *".Core.$VERSION.nupkg"|*".Imaging.$VERSION.nupkg"|*".Inference.$VERSION.nupkg"|*".Framework.$VERSION.nupkg"|*".Tasks.Vision.$VERSION.nupkg") continue ;;
+            esac
+            push "$package"
+          done
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MediaPipe.NET ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            MediaPipeNet/artifacts/packages/*.nupkg

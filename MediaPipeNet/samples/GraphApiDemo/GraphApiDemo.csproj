@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MediaPipeNet\MediaPipeNet.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Visualization\MediaPipeNet.Visualization.csproj" />
+    <!-- Copies every model into bin/.../models so the samples run offline. -->
+    <ProjectReference Include="..\..\models\MediaPipeNet.Models.All\MediaPipeNet.Models.All.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\tests\assets\images\*.jpg" Link="images\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

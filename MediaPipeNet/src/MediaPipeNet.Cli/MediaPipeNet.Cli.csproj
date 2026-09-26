@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>MediaPipeNet.Cli</RootNamespace>
+    <AssemblyName>mediapipenet-cli</AssemblyName>
+    <PackageId>Gravicode.MediaPipeNet.Cli</PackageId>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>mediapipenet-cli</ToolCommandName>
+    <Description>mediapipenet-cli — run MediaPipe.NET tasks (faces, face mesh, hands, gestures, pose, holistic, segmentation, objects, classification) from the command line, benchmark them, and manage models. Install with: dotnet tool install -g Gravicode.MediaPipeNet.Cli. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet\MediaPipeNet.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Visualization\MediaPipeNet.Visualization.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Video.OpenCv\MediaPipeNet.Video.OpenCv.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4.runtime.win" />
+  </ItemGroup>
+
+  <!-- A dotnet tool never runs on mobile: drop the iOS/Android/Mac Catalyst native libraries from the package. -->
+  <Target Name="TrimMobileNatives" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^runtimes[\\/](ios|iossimulator|android|maccatalyst|tvos)'))" />
+    </ItemGroup>
+  </Target>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

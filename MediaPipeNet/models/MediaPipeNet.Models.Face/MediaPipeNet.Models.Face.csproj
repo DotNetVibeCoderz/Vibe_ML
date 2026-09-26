@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Content-only model package. The ONNX files land in the consuming application's output folder under
+    models/ (found automatically by BundledModelProvider) and are also what NuGetModelProvider
+    downloads on demand. Models: Copyright Google LLC, Apache-2.0 (converted from MediaPipe TFLite).
+  -->
+  <PropertyGroup>
+    <Description>Face models for MediaPipe.NET: BlazeFace short-range detector, Face Mesh V2 (478 landmarks with irises) and face blendshapes. Converted from Google MediaPipe (Apache-2.0) and cross-validated against TFLite. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <PackageTags>$(PackageTags);models</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ContentTargetFolders>contentFiles</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(ModelsOnnxDir)face_detection_short_range.onnx" Link="models\face_detection_short_range.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)face_landmarks_detector.onnx" Link="models\face_landmarks_detector.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)face_blendshapes.onnx" Link="models\face_blendshapes.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

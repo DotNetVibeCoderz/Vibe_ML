@@ -1,0 +1,53 @@
+site_name: MediaPipe.NET
+site_description: Google MediaPipe's vision tasks, native in .NET 10 — by Gravicode Studios, led by Kang Fadhil
+copyright: Copyright &copy; 2026 Gravicode Studios · led by Kang Fadhil · Apache-2.0
+docs_dir: docs
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle: { icon: material/weather-night, name: Dark mode }
+    - scheme: slate
+      primary: indigo
+      toggle: { icon: material/weather-sunny, name: Light mode }
+  features: [navigation.sections, content.code.copy, search.suggest]
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+nav:
+  - Home: README.md
+  - English:
+      - Getting started: en/getting-started.md
+      - Tasks: en/tasks.md
+      - Running modes & live video: en/video-and-live-stream.md
+      - Graph API: en/graph-api.md
+      - Models: en/models.md
+      - Performance & GPUs: en/performance.md
+      - Architecture: en/architecture.md
+      - Integration: en/integration.md
+      - CLI: en/cli.md
+      - Gallery: en/gallery.md
+      - Testing: en/testing.md
+      - API reference: en/api-reference.md
+      - Troubleshooting: en/troubleshooting.md
+  - Bahasa Indonesia:
+      - Memulai: id/memulai.md
+      - Task: id/task.md
+      - Mode & video langsung: id/video-dan-live-stream.md
+      - Graph API: id/graph-api.md
+      - Model: id/model.md
+      - Performa & GPU: id/performa.md
+      - Arsitektur: id/arsitektur.md
+      - Integrasi: id/integrasi.md
+      - CLI: id/cli.md
+      - Gallery: id/gallery.md
+      - Pengujian: id/pengujian.md
+      - Referensi API: id/referensi-api.md
+      - Pemecahan masalah: id/pemecahan-masalah.md
