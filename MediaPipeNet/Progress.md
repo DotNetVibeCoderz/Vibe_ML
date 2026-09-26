@@ -3,7 +3,7 @@
 > Development tracking · Pelacakan pengembangan — Gravicode Studios, led by Kang Fadhil
 > Roadmap: [PLAN.md](PLAN.md)
 
-**Current version:** `0.1.0` · **Status:** feature-complete preview; all tests green on Windows 11 / .NET 10.0.12.
+**Current version:** `0.1.0` · **Status:** released on nuget.org as `Gravicode.MediaPipeNet.*` 0.1.0; CI green on Windows, Linux and macOS.
 
 ## Requirements status / Status requirement
 
@@ -27,7 +27,7 @@
 | ID | Requirement | Status | Evidence / Bukti |
 |---|---|---|---|
 | NFR-1 | Face detection < 50 ms @ 640×480 on modern 8-core CPU | ✅ | 8.1 ms on a 2017 4-core i7-8650U (BenchmarkDotNet) |
-| NFR-2 | Windows / Ubuntu / macOS without code changes | 🟡 | Portable code, CI matrix defined; verified on Windows 11 |
+| NFR-2 | Windows / Ubuntu / macOS without code changes | ✅ | CI green on windows-latest, ubuntu-latest, macos-latest (all 104 tests incl. golden) |
 | NFR-3 | ≥ 70 % coverage for Core and Tasks | ✅ | Core 94 %, Imaging 94 %, Inference 91 %, Framework 94 %, Tasks.Vision 92 % |
 | NFR-4 | Semantic versioning | ✅ | `VersionPrefix`/`VersionSuffix`, preview tag |
 | NFR-5 | `Span<T>`/`Memory<T>`, low GC pressure | ✅ | Pooled frames, pooled I/O contexts; 3–18 KB per inference |
@@ -49,8 +49,8 @@
 - [x] GitHub Actions (Vibe_ML root): `mediapipenet-ci.yml` (win/linux/macOS build, test, coverage, pack) and
       `mediapipenet-release.yml` (tag `mediapipenet-v*` → test, pack, push to nuget.org, GitHub Release)
 - [x] Moved into the Vibe_ML monorepo (`MediaPipeNet/`); NuGet ids `Gravicode.MediaPipeNet.*`
-- [ ] Publish 0.1.0 to nuget.org (release workflow)
-- [ ] CI runs on Linux/macOS
+- [x] Published 0.1.0 to nuget.org via `mediapipenet-release.yml` (19 packages + symbols), GitHub Release `mediapipenet-v0.1.0`
+- [x] CI green on Windows, Linux and macOS
 
 ## Log
 

@@ -15,14 +15,14 @@ Legend / Keterangan: ✅ done/selesai · 🟡 partial/sebagian · ⬜ planned/di
 | **M3 — Public Graph API** | Customizable CalculatorGraph, .pbtxt, docs | CalculatorGraph kustom, .pbtxt, dokumentasi | ✅ |
 | **M4 — Objects & Classification** | ObjectDetector, ImageClassifier, GestureRecognizer | ObjectDetector, ImageClassifier, GestureRecognizer | ✅ |
 | **M5 — Tooling & DX** | CLI, DI, benchmarks, docs site (mkdocs), Gallery | CLI, DI, benchmark, situs dokumentasi, Gallery | ✅ |
-| **M6 — v1.0 stabilization** | Cross-platform CI runs, API review, license audit, publish | CI lintas platform, review API, audit lisensi, publikasi | 🟡 CI defined, Windows verified; publish pending |
+| **M6 — v1.0 stabilization** | Cross-platform CI runs, API review, license audit, publish | CI lintas platform, review API, audit lisensi, publikasi | 🟡 CI green on 3 OSes and 0.1.0 published; API review toward 1.0 pending |
 
 ## Next: 0.2.0 (short term / jangka pendek)
 
 | Item | EN | ID |
 |---|---|---|
-| ⬜ Publish | Push 0.1.0 packages to nuget.org (enables `NuGetModelProvider` downloads). | Publikasikan paket ke nuget.org (mengaktifkan unduhan model otomatis). |
-| ⬜ CI green on Linux/macOS | Run the `ci.yml` matrix; fix platform differences (OpenCV runtime on macOS). | Jalankan matriks CI; perbaiki perbedaan platform. |
+| ✅ Publish | 0.1.0 on nuget.org as `Gravicode.MediaPipeNet.*` (enables `NuGetModelProvider` downloads). | 0.1.0 terbit di nuget.org. |
+| ✅ CI green on Linux/macOS | `mediapipenet-ci.yml` passes on Windows, Ubuntu and macOS. | Matriks CI lulus di ketiga OS. |
 | ⬜ Face detector full-range | Add BlazeFace full-range (sparse model, 192×192) for faces farther away. | Tambah BlazeFace full-range untuk wajah jauh. |
 | ⬜ Facial transformation matrix | `FaceLandmarker.OutputFacialTransformationMatrixes` (geometry pipeline metadata). | Matriks transformasi wajah 4×4. |
 | ⬜ Pose landmark refinement | Heatmap-based refinement (output `Identity_3`) like MediaPipe's `RefineLandmarksFromHeatmap`. | Penyempurnaan landmark dari heatmap. |
