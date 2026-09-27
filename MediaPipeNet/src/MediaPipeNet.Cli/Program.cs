@@ -1,12 +1,15 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using MediaPipeNet;
 using MediaPipeNet.Cli;
 using SixLabors.ImageSharp;
 using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference;
 using MediaPipeNet.Inference.Models;
+using MediaPipeNet.Tasks.Audio;
+using MediaPipeNet.Tasks.Text;
 using MediaPipeNet.Tasks.Vision;
 using MediaPipeNet.Video.OpenCv;
+using MediaPipeNet.Tasks;
 
 // mediapipenet-cli — MediaPipe.NET command line. Created by Gravicode Studios, led by Kang Fadhil.
 var cli = new Args(args);
@@ -20,6 +23,8 @@ try
         "models" => await Models(cli),
         "benchmark" => Benchmark(cli),
         "video" => await Video(cli),
+        "audio" => AudioCommand(cli),
+        "text" => TextCommand(cli),
         _ when CliTaskFactory.Descriptions.ContainsKey(cli.Command) => RunImage(cli),
         _ => Fail($"Unknown command '{cli.Command}'. Run 'mediapipenet-cli help'."),
     };
@@ -38,6 +43,8 @@ static int Help()
         USAGE
           mediapipenet-cli <task> <image> [--output annotated.png] [--json result.json] [options]
           mediapipenet-cli video <task> [--input video.mp4 | --camera 0] [--frames 300]
+          mediapipenet-cli audio <clip.wav> [--vad] [--top 3]
+          mediapipenet-cli text classify|classify-fast|embed|language "some text" ["other text"]
           mediapipenet-cli benchmark <task> <image> [--iterations 50]
           mediapipenet-cli models list | download [ids...] | verify
           mediapipenet-cli info
@@ -51,6 +58,7 @@ static int Help()
           --provider auto|cpu|directml|cuda|coreml   Execution provider (default auto)
           --models-dir <dir>                          Directory with the .onnx models
           --threads <n>                               Intra-op threads
+          --precision fp32|fp16|int8                  Model precision variant (default fp32)
           --no-download                               Never download missing models
         """);
     return 0;
@@ -173,6 +181,57 @@ static async Task<int> Video(Args cli)
     return 0;
 }
 
+static int AudioCommand(Args cli)
+{
+    var input = cli.Positional.ElementAtOrDefault(0) ?? throw new ArgumentException("A WAV file is required.");
+    var audio = AudioData.LoadWav(input);
+    Console.WriteLine($"{Path.GetFileName(input)}: {audio.Duration.TotalSeconds:F2} s at {audio.SampleRate} Hz");
+    if (cli.Has("--vad"))
+    {
+        using var vad = VoiceActivityDetector.Create(new() { BaseOptions = CreateBaseOptions(cli) });
+        var result = vad.Detect(audio);
+        Console.WriteLine($"speech in {result.SpeechRatio:P0} of the windows");
+        foreach (var s in result.Segments) Console.WriteLine($"  speech {s.StartMs / 1000.0,7:F2} s - {s.EndMs / 1000.0,7:F2} s  (p = {s.MeanProbability:P0})");
+        return 0;
+    }
+    int top = int.Parse(cli.Get("--top") ?? "3", System.Globalization.CultureInfo.InvariantCulture);
+    using var classifier = AudioClassifier.Create(new() { BaseOptions = CreateBaseOptions(cli), Classifier = new() { MaxResults = top } });
+    foreach (var window in classifier.Classify(audio))
+        Console.WriteLine($"  {window.TimestampMs / 1000.0,6:F2} s  {string.Join(", ", window.Categories)}");
+    return 0;
+}
+
+static int TextCommand(Args cli)
+{
+    var mode = cli.Positional.ElementAtOrDefault(0) ?? throw new ArgumentException("Usage: text classify|classify-fast|embed|language \"text\"");
+    var texts = cli.Positional.Skip(1).ToArray();
+    if (texts.Length == 0) throw new ArgumentException("At least one text is required.");
+    var b = CreateBaseOptions(cli);
+    switch (mode)
+    {
+        case "classify" or "classify-fast":
+            using (var classifier = TextClassifier.Create(new() { BaseOptions = b, Model = mode == "classify" ? TextClassifierModel.Bert : TextClassifierModel.AverageWord }))
+                foreach (var t in texts) Console.WriteLine($"  {classifier.Classify(t).TopCategory}  <- {t}");
+            return 0;
+        case "language":
+            using (var detector = LanguageDetector.Create(new() { BaseOptions = b }))
+                foreach (var t in texts) Console.WriteLine($"  {string.Join(", ", detector.Detect(t).Predictions.Select(p => $"{p.LanguageCode} {p.Probability:P1}"))}  <- {t}");
+            return 0;
+        case "embed":
+            using (var embedder = TextEmbedder.Create(new() { BaseOptions = b, L2Normalize = true }))
+            {
+                var embeddings = texts.Select(t => embedder.Embed(t).Embedding).ToArray();
+                Console.WriteLine($"  {embeddings[0].Dimension}-D embeddings; cosine similarity:");
+                for (int i = 0; i < texts.Length; i++)
+                    for (int j = i + 1; j < texts.Length; j++)
+                        Console.WriteLine($"  {TextEmbedder.CosineSimilarity(embeddings[i], embeddings[j]):F3}  \"{texts[i]}\" ~ \"{texts[j]}\"");
+            }
+            return 0;
+        default:
+            return Fail($"Unknown text mode '{mode}'.");
+    }
+}
+
 static ModelStore CreateStore(Args cli) =>
     ModelStore.CreateDefault(cli.Get("--models-dir"), allowDownload: !cli.Has("--no-download"));
 
@@ -190,7 +249,17 @@ static BaseOptions CreateBaseOptions(Args cli)
     return new BaseOptions
     {
         ModelStore = CreateStore(cli),
-        Inference = new InferenceOptions { Provider = provider, IntraOpThreads = threads },
+        Inference = new InferenceOptions
+        {
+            Provider = provider,
+            IntraOpThreads = threads,
+            Precision = (cli.Get("--precision") ?? "fp32").ToLowerInvariant() switch
+            {
+                "fp16" or "float16" => ModelPrecision.Float16,
+                "int8" => ModelPrecision.Int8,
+                _ => ModelPrecision.Float32,
+            },
+        },
     };
 }
 

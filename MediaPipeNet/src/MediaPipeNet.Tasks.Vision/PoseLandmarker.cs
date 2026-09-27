@@ -1,4 +1,4 @@
-using MediaPipeNet.Imaging;
+﻿using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference;
 using MediaPipeNet.Inference.Models;
 using MediaPipeNet.Tasks.Vision.Processing;
@@ -37,6 +37,12 @@ public sealed record PoseLandmarkerOptions : VisionTaskOptions<PoseLandmarkResul
 
     /// <summary>Smooth landmarks over time in video/live-stream mode (single pose). Default true.</summary>
     public bool SmoothLandmarks { get; init; } = true;
+
+    /// <summary>
+    /// Smooth the segmentation mask over time in video/live-stream mode (single pose), blending uncertain
+    /// pixels with the previous frame as MediaPipe's segmentation smoothing does. Default true.
+    /// </summary>
+    public bool SmoothSegmentationMasks { get; init; } = true;
 }
 
 /// <summary>
@@ -52,9 +58,10 @@ public sealed class PoseLandmarker : VisionTaskBase<PoseLandmarkResult>
     private const int ModelLandmarks = 39;
     private readonly SsdDetector _detector;
     private readonly OnnxModel _landmarks;
-    private readonly int _screenOutput, _presenceOutput, _segmentationOutput, _worldOutput;
+    private readonly int _screenOutput, _presenceOutput, _segmentationOutput, _heatmapOutput, _worldOutput;
     private readonly List<NormalizedRect> _tracked = [];
     private LandmarkSmoother? _smoother;
+    private readonly SegmentationSmoother _maskSmoother = new(0.7f);
 
     private PoseLandmarker(PoseLandmarkerOptions options, OnnxModel detector, OnnxModel landmarks)
         : base(nameof(PoseLandmarker), options.RunningMode, options.BaseOptions, options.ResultCallback, options.MaxInFlightFrames)
@@ -65,6 +72,7 @@ public sealed class PoseLandmarker : VisionTaskBase<PoseLandmarkResult>
         _screenOutput = landmarks.GetOutputIndex("Identity");
         _presenceOutput = landmarks.GetOutputIndex("Identity_1");
         _segmentationOutput = landmarks.GetOutputIndex("Identity_2");
+        _heatmapOutput = landmarks.GetOutputIndex("Identity_3");
         _worldOutput = landmarks.GetOutputIndex("Identity_4");
         CompleteInitialization();
     }
@@ -106,6 +114,7 @@ public sealed class PoseLandmarker : VisionTaskBase<PoseLandmarkResult>
     {
         _tracked.Clear();
         _smoother?.Reset();
+        _maskSmoother.Reset();
     }
 
     internal PoseLandmarkResult Compute(MPImage image, ImageProcessingOptions? options, bool tracking, long timestampMs) =>
@@ -129,8 +138,9 @@ public sealed class PoseLandmarker : VisionTaskBase<PoseLandmarkResult>
             }
         }
 
-        _tracked.Clear();
+        // Tracking state is only touched in video / live-stream mode, so image-mode calls are thread-safe.
         var poses = new List<PoseLandmarks>(rois.Count);
+        var nextTracked = new List<NormalizedRect>(rois.Count);
         foreach (var roi in rois)
         {
             var (pose, next) = RunLandmarks(image, roi);
@@ -142,10 +152,19 @@ public sealed class PoseLandmarker : VisionTaskBase<PoseLandmarkResult>
                 _smoother.Apply(arr, timestampMs, w, h, roi.Width * w);
                 pose = pose with { Landmarks = arr };
             }
+            if (tracking && Options.SmoothSegmentationMasks && Options.NumPoses == 1 && pose.SegmentationMask is { } mask)
+                _maskSmoother.Apply(mask.Data.AsSpan(0, mask.Width * mask.Height));
             poses.Add(pose);
-            if (tracking && pose.PresenceScore >= Options.MinTrackingConfidence) _tracked.Add(next);
+            if (pose.PresenceScore >= Options.MinTrackingConfidence) nextTracked.Add(next);
         }
-        if (poses.Count == 0) _smoother?.Reset();
+        if (!tracking) return poses.Count == 0 ? PoseLandmarkResult.Empty : new PoseLandmarkResult(poses);
+        _tracked.Clear();
+        _tracked.AddRange(nextTracked);
+        if (poses.Count == 0)
+        {
+            _smoother?.Reset();
+            _maskSmoother.Reset();
+        }
         return poses.Count == 0 ? PoseLandmarkResult.Empty : new PoseLandmarkResult(poses);
     }
 
@@ -161,10 +180,20 @@ public sealed class PoseLandmarker : VisionTaskBase<PoseLandmarkResult>
         var world = ctx.GetOutput(_worldOutput);
         float presence = ctx.GetOutput(_presenceOutput)[0]; // already a probability
 
+        // Landmarks in normalized tensor space, refined with the heatmap before projection (as MediaPipe does).
+        Span<float> xy = stackalloc float[2 * ModelLandmarks];
+        for (int i = 0; i < ModelLandmarks; i++)
+        {
+            xy[2 * i] = raw[5 * i] / size;
+            xy[2 * i + 1] = raw[5 * i + 1] / size;
+        }
+        var heatmapSpec = _landmarks.Outputs[_heatmapOutput];
+        HeatmapRefinement.Refine(xy, ctx.GetOutput(_heatmapOutput), heatmapSpec.Shape[1], heatmapSpec.Shape[2]);
+
         var all = new NormalizedLandmark[ModelLandmarks];
         for (int i = 0; i < ModelLandmarks; i++)
         {
-            var (x, y) = mapping.TensorToImage(raw[5 * i] / size, raw[5 * i + 1] / size);
+            var (x, y) = mapping.TensorToImage(xy[2 * i], xy[2 * i + 1]);
             all[i] = new NormalizedLandmark(x, y, mapping.ScaleZ(raw[5 * i + 2] / size),
                 DetectionDecoder.Sigmoid(raw[5 * i + 3]), DetectionDecoder.Sigmoid(raw[5 * i + 4]));
         }

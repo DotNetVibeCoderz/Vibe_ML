@@ -46,6 +46,60 @@ public static class TensorWarp
         dst.CopyTo(destination);
     }
 
+    /// <summary>
+    /// Projects every channel of an interleaved (HWC) tensor back onto the source image in one pass: the
+    /// sampling position is computed once per output pixel and shared by all channels. Each destination
+    /// array receives one channel (<paramref name="outputWidth"/> × <paramref name="outputHeight"/>).
+    /// </summary>
+    public static void ProjectChannelsToImage(
+        float[] tensor, int tensorWidth, int tensorHeight, int channels,
+        in TensorMapping mapping,
+        IReadOnlyList<float[]> destinations, int outputWidth, int outputHeight,
+        float outsideValue = 0f)
+    {
+        ArgumentNullException.ThrowIfNull(tensor);
+        ArgumentNullException.ThrowIfNull(destinations);
+        if (tensor.Length < tensorWidth * tensorHeight * channels) throw new ArgumentException("Tensor is smaller than its declared size.", nameof(tensor));
+        if (destinations.Count != channels) throw new ArgumentException($"Expected {channels} destinations.", nameof(destinations));
+        foreach (var d in destinations)
+            if (d.Length < outputWidth * outputHeight) throw new ArgumentException("A destination is too small.", nameof(destinations));
+
+        var roi = mapping.Roi;
+        float iw = mapping.ImageWidth, ih = mapping.ImageHeight;
+        float sx = iw / outputWidth, sy = ih / outputHeight;
+        float cx = roi.XCenter * iw, cy = roi.YCenter * ih;
+        float rw = roi.Width * iw, rh = roi.Height * ih;
+        float cos = MathF.Cos(roi.Rotation), sin = MathF.Sin(roi.Rotation);
+        var dst = destinations as float[][] ?? [.. destinations];
+        Parallel.For(0, outputHeight, y =>
+        {
+            float py = (y + 0.5f) * sy - cy;
+            int row = y * outputWidth;
+            for (int x = 0; x < outputWidth; x++)
+            {
+                float px = (x + 0.5f) * sx - cx;
+                float lx = px * cos + py * sin, ly = -px * sin + py * cos;
+                float u = (lx / rw + 0.5f) * tensorWidth - 0.5f;
+                float v = (ly / rh + 0.5f) * tensorHeight - 0.5f;
+                if (u < -0.5f || v < -0.5f || u > tensorWidth - 0.5f || v > tensorHeight - 0.5f)
+                {
+                    for (int c = 0; c < channels; c++) dst[c][row + x] = outsideValue;
+                    continue;
+                }
+                u = Math.Clamp(u, 0, tensorWidth - 1);
+                v = Math.Clamp(v, 0, tensorHeight - 1);
+                int x0 = (int)u, y0 = (int)v;
+                int x1 = Math.Min(x0 + 1, tensorWidth - 1), y1 = Math.Min(y0 + 1, tensorHeight - 1);
+                float fx = u - x0, fy = v - y0;
+                float wa = (1 - fx) * (1 - fy), wb = fx * (1 - fy), wc = (1 - fx) * fy, wd = fx * fy;
+                int ia = (y0 * tensorWidth + x0) * channels, ib = (y0 * tensorWidth + x1) * channels;
+                int ic = (y1 * tensorWidth + x0) * channels, id = (y1 * tensorWidth + x1) * channels;
+                for (int c = 0; c < channels; c++)
+                    dst[c][row + x] = tensor[ia + c] * wa + tensor[ib + c] * wb + tensor[ic + c] * wc + tensor[id + c] * wd;
+            }
+        });
+    }
+
     /// <summary>Bilinearly resizes a single-channel float image.</summary>
     public static void Resize(ReadOnlySpan<float> source, int sourceWidth, int sourceHeight, Span<float> destination, int width, int height)
     {

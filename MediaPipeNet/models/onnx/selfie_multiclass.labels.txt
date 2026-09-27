@@ -1,0 +1,6 @@
+background
+hair
+body-skin
+face-skin
+clothes
+others

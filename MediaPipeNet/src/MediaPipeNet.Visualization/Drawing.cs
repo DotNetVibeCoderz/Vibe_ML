@@ -1,4 +1,4 @@
-using MediaPipeNet.Tasks.Vision;
+﻿using MediaPipeNet.Tasks.Vision;
 using SixLabors.Fonts;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing;
@@ -166,6 +166,44 @@ public static class SegmentationMaskOverlay
         Composite(image, mask, (x, y, a, px) => Lerp(blurred[x, y], px, a));
     }
 
+    /// <summary>A distinct color per category index (index 0, usually background, is transparent).</summary>
+    public static IReadOnlyList<Color> CategoryPalette { get; } =
+    [
+        Color.Transparent, Color.ParseHex("#FF6D00"), Color.ParseHex("#FFD600"), Color.ParseHex("#00E676"), Color.ParseHex("#2979FF"),
+        Color.ParseHex("#D500F9"), Color.ParseHex("#00E5FF"), Color.ParseHex("#FF1744"), Color.ParseHex("#76FF03"), Color.ParseHex("#F50057"),
+        Color.ParseHex("#651FFF"), Color.ParseHex("#1DE9B6"), Color.ParseHex("#FFC400"), Color.ParseHex("#3D5AFE"), Color.ParseHex("#C6FF00"),
+        Color.ParseHex("#FF9100"), Color.ParseHex("#00B0FF"), Color.ParseHex("#AA00FF"), Color.ParseHex("#64DD17"), Color.ParseHex("#FF3D00"),
+        Color.ParseHex("#18FFFF"),
+    ];
+
+    /// <summary>
+    /// Tints every pixel with the color of its category (<see cref="CategoryPalette"/> by default); pixels of
+    /// category 0 and unlabeled pixels are left unchanged.
+    /// </summary>
+    public static void OverlayCategories(Image<Rgba32> image, CategoryMask mask, float opacity = 0.55f, IReadOnlyList<Color>? palette = null)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        ArgumentNullException.ThrowIfNull(mask);
+        if (mask.Width != image.Width || mask.Height != image.Height)
+            throw new ArgumentException("Mask and image sizes differ.", nameof(mask));
+        var colors = (palette ?? CategoryPalette).Select(c => c.ToPixel<Rgba32>()).ToArray();
+        image.ProcessPixelRows(rows =>
+        {
+            for (int y = 0; y < rows.Height; y++)
+            {
+                var row = rows.GetRowSpan(y);
+                for (int x = 0; x < row.Length; x++)
+                {
+                    int c = mask.Data[y * mask.Width + x];
+                    if (c == 0 || c == CategoryMask.Unlabeled || colors.Length == 0) continue;
+                    var tint = colors[c % colors.Length];
+                    if (tint.A == 0) continue;
+                    row[x] = Lerp(row[x], tint, opacity);
+                }
+            }
+        });
+    }
+
     private static void Composite(Image<Rgba32> image, SegmentationMask mask, Func<int, int, float, Rgba32, Rgba32> blend)
     {
         ArgumentNullException.ThrowIfNull(mask);
@@ -242,6 +280,12 @@ public static class ResultRenderer
     }
 
     /// <summary>Draws a segmentation mask overlay.</summary>
-    public static void Render(Image<Rgba32> image, SegmentationResult result) =>
-        SegmentationMaskOverlay.Overlay(image, result.ConfidenceMask, Color.ParseHex("#7C4DFF"), 0.5f);
+    public static void Render(Image<Rgba32> image, SegmentationResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.CategoryMask is { } categories && result.ConfidenceMasks.Count != 1)
+            SegmentationMaskOverlay.OverlayCategories(image, categories);
+        else
+            SegmentationMaskOverlay.Overlay(image, result.ConfidenceMask, Color.ParseHex("#7C4DFF"), 0.5f);
+    }
 }

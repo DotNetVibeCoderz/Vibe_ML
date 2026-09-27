@@ -1,10 +1,13 @@
-<Solution>
+﻿<Solution>
   <Folder Name="/src/">
     <Project Path="src/MediaPipeNet.Core/MediaPipeNet.Core.csproj" />
     <Project Path="src/MediaPipeNet.Imaging/MediaPipeNet.Imaging.csproj" />
     <Project Path="src/MediaPipeNet.Inference/MediaPipeNet.Inference.csproj" />
     <Project Path="src/MediaPipeNet.Framework/MediaPipeNet.Framework.csproj" />
+    <Project Path="src/MediaPipeNet.Tasks.Core/MediaPipeNet.Tasks.Core.csproj" />
     <Project Path="src/MediaPipeNet.Tasks.Vision/MediaPipeNet.Tasks.Vision.csproj" />
+    <Project Path="src/MediaPipeNet.Tasks.Audio/MediaPipeNet.Tasks.Audio.csproj" />
+    <Project Path="src/MediaPipeNet.Tasks.Text/MediaPipeNet.Tasks.Text.csproj" />
     <Project Path="src/MediaPipeNet.Visualization/MediaPipeNet.Visualization.csproj" />
     <Project Path="src/MediaPipeNet.Video.OpenCv/MediaPipeNet.Video.OpenCv.csproj" />
     <Project Path="src/MediaPipeNet.Extensions.DI/MediaPipeNet.Extensions.DI.csproj" />
@@ -20,6 +23,10 @@
     <Project Path="models/MediaPipeNet.Models.Segmentation/MediaPipeNet.Models.Segmentation.csproj" />
     <Project Path="models/MediaPipeNet.Models.ObjectDetection/MediaPipeNet.Models.ObjectDetection.csproj" />
     <Project Path="models/MediaPipeNet.Models.ImageClassification/MediaPipeNet.Models.ImageClassification.csproj" />
+    <Project Path="models/MediaPipeNet.Models.ImageEmbedding/MediaPipeNet.Models.ImageEmbedding.csproj" />
+    <Project Path="models/MediaPipeNet.Models.Audio/MediaPipeNet.Models.Audio.csproj" />
+    <Project Path="models/MediaPipeNet.Models.Text/MediaPipeNet.Models.Text.csproj" />
+    <Project Path="models/MediaPipeNet.Models.Quantized/MediaPipeNet.Models.Quantized.csproj" />
     <Project Path="models/MediaPipeNet.Models.All/MediaPipeNet.Models.All.csproj" />
   </Folder>
   <Folder Name="/samples/">

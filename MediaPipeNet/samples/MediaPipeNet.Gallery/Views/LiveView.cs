@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media.Imaging;
@@ -8,6 +8,7 @@ using MediaPipeNet.Gallery.Services;
 using MediaPipeNet.Imaging;
 using MediaPipeNet.Tasks.Vision;
 using MediaPipeNet.Video.OpenCv;
+using MediaPipeNet.Tasks;
 
 namespace MediaPipeNet.Gallery.Views;
 

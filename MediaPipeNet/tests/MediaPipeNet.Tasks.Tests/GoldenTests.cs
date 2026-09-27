@@ -89,7 +89,7 @@ public class GoldenTests
         result.Poses.Should().ContainSingle();
         var pose = result.Poses[0];
         var expected = Golden.For("pose_landmarker", "pose.jpg").GetProperty("landmarks")[0];
-        Golden.MeanError(pose.Landmarks, Golden.Landmarks(expected)).Should().BeLessThan(0.012f);
+        Golden.MeanError(pose.Landmarks, Golden.Landmarks(expected)).Should().BeLessThan(0.005f);
         pose[PoseLandmark.Nose].Visibility.Should().BeGreaterThan(0.9f);
         pose.WorldLandmarks.Should().HaveCount(33);
         pose.SegmentationMask!.Coverage().Should().BeInRange(0.03f, 0.2f);

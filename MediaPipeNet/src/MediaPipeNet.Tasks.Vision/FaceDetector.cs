@@ -1,12 +1,24 @@
-using MediaPipeNet.Imaging;
+﻿using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference.Models;
 using MediaPipeNet.Tasks.Vision.Processing;
 
 namespace MediaPipeNet.Tasks.Vision;
 
+/// <summary>BlazeFace model variant.</summary>
+public enum FaceDetectorModel
+{
+    /// <summary>Short range (128×128): faces within ~2 m, e.g. selfies and video calls. Fastest.</summary>
+    ShortRange,
+    /// <summary>Full range (192×192): faces up to ~5 m, e.g. group photos and rooms.</summary>
+    FullRange,
+}
+
 /// <summary>Options of <see cref="FaceDetector"/>.</summary>
 public sealed record FaceDetectorOptions : VisionTaskOptions<FaceDetectionResult>
 {
+    /// <summary>Model variant. Default <see cref="FaceDetectorModel.ShortRange"/>.</summary>
+    public FaceDetectorModel Model { get; init; } = FaceDetectorModel.ShortRange;
+
     /// <summary>Minimum confidence for a face to be reported. Default 0.5.</summary>
     public float MinDetectionConfidence { get; init; } = 0.5f;
 
@@ -18,8 +30,9 @@ public sealed record FaceDetectorOptions : VisionTaskOptions<FaceDetectionResult
 }
 
 /// <summary>
-/// Detects faces with BlazeFace (short range): a bounding box and 6 keypoints per face
-/// (eyes, nose tip, mouth, ear tragions). Works best for faces within ~2 m of the camera.
+/// Detects faces with BlazeFace: a bounding box and 6 keypoints per face (eyes, nose tip, mouth,
+/// ear tragions). The short-range model works best within ~2 m of the camera, the full-range model
+/// (<see cref="FaceDetectorModel.FullRange"/>) up to ~5 m.
 /// </summary>
 /// <example>
 /// <code>
@@ -49,19 +62,23 @@ public sealed class FaceDetector : VisionTaskBase<FaceDetectionResult>
     public static FaceDetector Create(FaceDetectorOptions? options = null)
     {
         options ??= new FaceDetectorOptions();
-        return new FaceDetector(options, CreateDetector(options, ModelLoader.Load(options.BaseOptions, ModelCatalog.FaceDetectionShortRange)));
+        return new FaceDetector(options, CreateDetector(options, ModelLoader.Load(options.BaseOptions, ModelFor(options))));
     }
 
     /// <summary>Creates a detector, downloading the model asynchronously when needed.</summary>
     public static async Task<FaceDetector> CreateAsync(FaceDetectorOptions? options = null, CancellationToken cancellationToken = default)
     {
         options ??= new FaceDetectorOptions();
-        var model = await ModelLoader.LoadAsync(options.BaseOptions, ModelCatalog.FaceDetectionShortRange, cancellationToken).ConfigureAwait(false);
+        var model = await ModelLoader.LoadAsync(options.BaseOptions, ModelFor(options), cancellationToken).ConfigureAwait(false);
         return new FaceDetector(options, CreateDetector(options, model));
     }
 
+    private static ModelDescriptor ModelFor(FaceDetectorOptions o) =>
+        o.Model == FaceDetectorModel.FullRange ? ModelCatalog.FaceDetectionFullRange : ModelCatalog.FaceDetectionShortRange;
+
     private static SsdDetector CreateDetector(FaceDetectorOptions o, Inference.OnnxModel model) =>
-        new(model, SsdDetectorSpec.FaceShortRange with { NmsThreshold = o.MinSuppressionThreshold });
+        new(model, (o.Model == FaceDetectorModel.FullRange ? SsdDetectorSpec.FaceFullRange : SsdDetectorSpec.FaceShortRange)
+            with { NmsThreshold = o.MinSuppressionThreshold });
 
     /// <summary>Detects faces in a still image.</summary>
     public FaceDetectionResult Detect(MPImage image, ImageProcessingOptions? processingOptions = null) => RunImage(image, processingOptions);

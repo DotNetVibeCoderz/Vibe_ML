@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
 using MediaPipeNet.Diagnostics;
@@ -54,6 +54,8 @@ public sealed class CalculatorGraph : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly ILogger _logger;
     private readonly int _maxInFlight;
+    private readonly Dictionary<string, GraphExecutor> _executors = new(StringComparer.Ordinal);
+    private readonly GraphTracer? _tracer;
     private int _pending;
     private int _openNodes;
     private long _droppedPackets;
@@ -63,6 +65,7 @@ public sealed class CalculatorGraph : IAsyncDisposable
     {
         _logger = builder.Options.Logger ?? NullLogger.Instance;
         _maxInFlight = builder.Options.MaxInFlight;
+        if (builder.Options.EnableTracing) _tracer = new GraphTracer(Math.Max(1, builder.Options.MaxTraceEvents));
         _declaredSidePackets = new Dictionary<string, Type>(builder.SidePackets, StringComparer.Ordinal);
 
         // Graph inputs are streams produced by the application.
@@ -81,6 +84,12 @@ public sealed class CalculatorGraph : IAsyncDisposable
             var contract = new CalculatorContract();
             nb.Node.GetContract(contract);
             var node = new NodeRuntime(this, nb.Name, nb.Node, contract);
+            if (nb.Executor is not null)
+            {
+                if (!builder.Executors.ContainsKey(nb.Executor))
+                    throw new GraphValidationException($"Node '{nb.Name}' runs on executor '{nb.Executor}', which is not declared (AddExecutor).");
+                node.ExecutorName = nb.Executor;
+            }
             foreach (var tag in nb.Outputs.Keys.Concat(nb.Inputs.Keys).Concat(nb.SidePackets.Keys))
             {
                 if (!contract.Outputs.Any(p => p.Tag == tag) && !contract.Inputs.Any(p => p.Tag == tag) && !contract.InputSidePackets.Any(p => p.Tag == tag))
@@ -119,7 +128,7 @@ public sealed class CalculatorGraph : IAsyncDisposable
                         $"Node '{nb.Name}': input '{spec.Tag}' expects {spec.Type.Name} but stream '{stream}' carries {producer.Spec.Type.Name}.");
                 var options = nb.QueueOptions.GetValueOrDefault(spec.Tag)
                               ?? (producer.Producer is null ? _graphInputOptions[stream] : new GraphInputOptions());
-                var queue = new InputQueue(node, i, spec, stream, options);
+                var queue = new InputQueue(node, i, spec, stream, options) { IsBackEdge = nb.BackEdges.Contains(spec.Tag) };
                 producer.Consumers.Add(queue);
                 node.Inputs[i] = queue;
             }
@@ -148,6 +157,8 @@ public sealed class CalculatorGraph : IAsyncDisposable
         }
 
         _nodes = TopologicalSort(nodes);
+        foreach (var name in _nodes.Select(n => n.ExecutorName).OfType<string>().Distinct())
+            _executors[name] = new GraphExecutor(name, builder.Executors[name]);
         State = GraphState.Created;
     }
 
@@ -170,6 +181,24 @@ public sealed class CalculatorGraph : IAsyncDisposable
     public int InFlightCount
     {
         get { lock (_gate) return _inFlight.Count; }
+    }
+
+    /// <summary>True when the graph records a trace (<see cref="GraphOptions.EnableTracing"/>).</summary>
+    public bool IsTracing => _tracer is not null;
+
+    /// <summary>The recorded node executions (empty unless <see cref="GraphOptions.EnableTracing"/> is set).</summary>
+    public IReadOnlyList<GraphTraceEvent> GetTraceEvents() => _tracer?.Snapshot() ?? [];
+
+    /// <summary>
+    /// Writes the recorded trace in Chrome trace-event format, viewable in <c>chrome://tracing</c>,
+    /// <c>edge://tracing</c> or https://ui.perfetto.dev (one row per thread, one bar per node execution).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Tracing is not enabled.</exception>
+    public void WriteChromeTrace(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (_tracer is null) throw new InvalidOperationException("Tracing is disabled; set GraphOptions.EnableTracing.");
+        GraphTracer.WriteChromeTrace(_tracer.Snapshot(), stream);
     }
 
     /// <summary>Raised (on a worker thread) when a node fails.</summary>
@@ -228,7 +257,9 @@ public sealed class CalculatorGraph : IAsyncDisposable
                     throw new GraphValidationException($"Node '{node.Name}': side packet '{name}' was not provided.");
             }
             node.Context = new CalculatorContext(node, _logger, _cts.Token);
+            long openStart = _tracer is null ? 0 : Stopwatch.GetTimestamp();
             await node.Node.OpenAsync(node.Context, _cts.Token).ConfigureAwait(false);
+            _tracer?.Record(node.Name, GraphTraceKind.Open, 0, openStart);
             node.Opened = true;
         }
         _openNodes = _nodes.Count;
@@ -388,6 +419,7 @@ public sealed class CalculatorGraph : IAsyncDisposable
             try { await CloseAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
             catch (Exception e) when (e is TimeoutException or MediaPipeException or OperationCanceledException) { Cancel(); }
         }
+        foreach (var executor in _executors.Values) executor.Dispose();
         _cts.Dispose();
     }
 
@@ -495,7 +527,10 @@ public sealed class CalculatorGraph : IAsyncDisposable
             node.Running = true;
             _pending++;
         }
-        ThreadPool.UnsafeQueueUserWorkItem(static n => _ = n.Graph.RunNodeAsync(n), node, preferLocal: false);
+        if (node.ExecutorName is { } executor)
+            _executors[executor].Post(() => RunNodeAsync(node).GetAwaiter().GetResult());
+        else
+            ThreadPool.UnsafeQueueUserWorkItem(static n => _ = n.Graph.RunNodeAsync(n), node, preferLocal: false);
     }
 
     private async Task RunNodeAsync(NodeRuntime node)
@@ -533,7 +568,9 @@ public sealed class CalculatorGraph : IAsyncDisposable
                 {
                     ctx.InputTimestamp = Timestamp.Done;
                     Array.Clear(ctx.InputPackets);
+                    long closeStart = _tracer is null ? 0 : Stopwatch.GetTimestamp();
                     await node.Node.CloseAsync(ctx, _cts.Token).ConfigureAwait(false);
+                    _tracer?.Record(node.Name, GraphTraceKind.Close, 0, closeStart);
                     List<NodeRuntime> downstream = [];
                     lock (_gate)
                     {
@@ -550,7 +587,9 @@ public sealed class CalculatorGraph : IAsyncDisposable
                 using (var activity = MediaPipeTelemetry.ActivitySource.StartActivity(node.Name, ActivityKind.Internal))
                 {
                     activity?.SetTag("timestamp", ts.Value);
+                    long start = _tracer is null ? 0 : Stopwatch.GetTimestamp();
                     await node.Node.ProcessAsync(ctx, _cts.Token).ConfigureAwait(false);
+                    _tracer?.Record(node.Name, GraphTraceKind.Process, ts.Value, start);
                 }
                 Array.Clear(ctx.InputPackets);
 
@@ -651,7 +690,8 @@ public sealed class CalculatorGraph : IAsyncDisposable
 
     private static List<NodeRuntime> TopologicalSort(List<NodeRuntime> nodes)
     {
-        var indegree = nodes.ToDictionary(n => n, n => n.Inputs.Count(q => q?.Stream is not null && IsNodeProduced(nodes, q.Stream)));
+        // Back edges close loops on purpose and do not constrain the order.
+        var indegree = nodes.ToDictionary(n => n, n => n.Inputs.Count(q => q?.Stream is not null && !q.IsBackEdge && IsNodeProduced(nodes, q.Stream)));
         var ordered = new List<NodeRuntime>(nodes.Count);
         var ready = new Queue<NodeRuntime>(nodes.Where(n => indegree[n] == 0));
         while (ready.Count > 0)
@@ -662,13 +702,14 @@ public sealed class CalculatorGraph : IAsyncDisposable
             {
                 if (port is null) continue;
                 foreach (var q in port.Consumers)
-                    if (--indegree[q.Node] == 0) ready.Enqueue(q.Node);
+                    if (!q.IsBackEdge && --indegree[q.Node] == 0) ready.Enqueue(q.Node);
             }
         }
         if (ordered.Count != nodes.Count)
         {
             var cyclic = nodes.Except(ordered).Select(n => n.Name);
-            throw new GraphValidationException($"The graph contains a cycle involving: {string.Join(", ", cyclic)}.");
+            throw new GraphValidationException(
+                $"The graph contains a cycle involving: {string.Join(", ", cyclic)}. Mark the input that closes the loop as a back edge (In(tag, stream, backEdge: true)).");
         }
         return ordered;
     }
@@ -698,6 +739,7 @@ public sealed class CalculatorGraph : IAsyncDisposable
         public PortSpec Spec { get; } = spec;
         public string? Stream { get; } = stream;
         public GraphInputOptions Options { get; } = options;
+        public bool IsBackEdge { get; init; }
         public Queue<Packet> Packets { get; } = new();
         public Timestamp Bound { get; set; } = Timestamp.PreStream;
 
@@ -732,8 +774,10 @@ public sealed class CalculatorGraph : IAsyncDisposable
         public bool Opened { get; set; }
         public bool Running { get; set; }
         public bool Closed { get; set; }
+        public string? ExecutorName { get; set; }
 
-        public bool InputsDone() => Inputs.All(q => q.Packets.Count == 0 && q.Bound == Timestamp.Done);
+        // A back edge is fed by this node's own downstream, which only closes after this node does.
+        public bool InputsDone() => Inputs.All(q => q.IsBackEdge || (q.Packets.Count == 0 && q.Bound == Timestamp.Done));
 
         public bool IsRunnable() => TryGetReadyTimestamp(out _) || InputsDone();
 
@@ -748,6 +792,7 @@ public sealed class CalculatorGraph : IAsyncDisposable
             }
             foreach (var q in Inputs)
             {
+                if (q.IsBackEdge) continue;
                 var c = q.Candidate;
                 if (c < ts) ts = c;
             }
@@ -755,7 +800,7 @@ public sealed class CalculatorGraph : IAsyncDisposable
             bool any = false;
             foreach (var q in Inputs)
             {
-                if (q.Candidate != ts) continue;
+                if (q.IsBackEdge || q.Candidate != ts) continue;
                 if (q.Packets.Count == 0) return false; // bound == ts: a packet at ts may still arrive
                 any = true;
             }
@@ -768,6 +813,14 @@ public sealed class CalculatorGraph : IAsyncDisposable
             for (int i = 0; i < Inputs.Length; i++)
             {
                 var q = Inputs[i];
+                if (q.IsBackEdge && Contract.InputPolicy == InputPolicy.Synchronized)
+                {
+                    // Deliver the newest loop-back packet at or before ts; older ones are superseded.
+                    Packet? latest = null;
+                    while (q.Packets.Count > 0 && q.Packets.Peek().Timestamp <= ts) latest = q.Packets.Dequeue();
+                    into[i] = latest;
+                    continue;
+                }
                 into[i] = q.Packets.Count > 0 && q.Packets.Peek().Timestamp == ts ? q.Packets.Dequeue() : null;
             }
             return true;

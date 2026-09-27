@@ -1,4 +1,4 @@
-using MediaPipeNet.Imaging;
+﻿using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference;
 using MediaPipeNet.Inference.Models;
 using MediaPipeNet.Tasks.Vision.Processing;
@@ -22,6 +22,12 @@ public sealed record FaceLandmarkerOptions : VisionTaskOptions<FaceLandmarkResul
 
     /// <summary>Also compute the 52 blendshape scores. Default false.</summary>
     public bool OutputFaceBlendshapes { get; init; }
+
+    /// <summary>
+    /// Also compute each face's 4×4 facial transformation matrix: the pose (rotation and translation in
+    /// centimeters) and scale of MediaPipe's canonical face model in camera space, for AR effects. Default false.
+    /// </summary>
+    public bool OutputFacialTransformationMatrixes { get; init; }
 
     /// <summary>Smooth landmarks over time in video/live-stream mode (single face). Default true.</summary>
     public bool SmoothLandmarks { get; init; } = true;
@@ -141,8 +147,9 @@ public sealed class FaceLandmarker : VisionTaskBase<FaceLandmarkResult>
             }
         }
 
+        // Tracking state is only touched in video / live-stream mode, so image-mode calls are thread-safe.
         var faces = new List<FaceLandmarks>(rois.Count);
-        _tracked.Clear();
+        var next = new List<NormalizedRect>(rois.Count);
         foreach (var roi in rois)
         {
             var (landmarks, presence) = RunLandmarks(image, roi);
@@ -153,24 +160,37 @@ public sealed class FaceLandmarker : VisionTaskBase<FaceLandmarkResult>
                 _smoother.Apply(landmarks, timestampMs, w, h, roi.Width * w);
             }
             var blendshapes = _blendshapeModel is null ? null : RunBlendshapes(landmarks, w, h);
-            faces.Add(new FaceLandmarks(landmarks, blendshapes, presence, roi));
+            faces.Add(new FaceLandmarks(landmarks, blendshapes, presence, roi, Transform(landmarks, w, h)));
             if (tracking && presence >= Options.MinTrackingConfidence)
-                _tracked.Add(RoiCalculator.Transform(RoiCalculator.FromLandmarkBounds(landmarks, w, h, 33, 263, 0f), w, h, 1.5f, 1.5f, squareLong: true));
+                next.Add(RoiCalculator.Transform(RoiCalculator.FromLandmarkBounds(landmarks, w, h, 33, 263, 0f), w, h, 1.5f, 1.5f, squareLong: true));
         }
-        if (faces.Count == 0) _smoother?.Reset();
+        if (tracking)
+        {
+            _tracked.Clear();
+            _tracked.AddRange(next);
+            if (faces.Count == 0) _smoother?.Reset();
+        }
         return faces.Count == 0 ? FaceLandmarkResult.Empty : new FaceLandmarkResult(faces);
     }
 
     internal FaceLandmarkResult Compute(MPImage image, ImageProcessingOptions? options, bool tracking, long timestampMs) =>
         Process(image, options, tracking, timestampMs);
 
+    /// <summary>Runs the face detector inside an ROI (used by the holistic pipeline).</summary>
+    internal List<RawDetection> DetectFaces(MPImage image, in NormalizedRect roi, float minScore) =>
+        _detector.Detect(image, roi, minScore, 1);
+
     /// <summary>Runs the face mesh on an externally supplied ROI (used by the holistic pipeline).</summary>
     internal FaceLandmarks? ComputeOnRoi(MPImage image, in NormalizedRect roi)
     {
         var (landmarks, presence) = RunLandmarks(image, roi);
         if (presence < Options.MinFacePresenceConfidence) return null;
-        return new FaceLandmarks(landmarks, _blendshapeModel is null ? null : RunBlendshapes(landmarks, image.Width, image.Height), presence, roi);
+        return new FaceLandmarks(landmarks, _blendshapeModel is null ? null : RunBlendshapes(landmarks, image.Width, image.Height), presence, roi,
+            Transform(landmarks, image.Width, image.Height));
     }
+
+    private float[]? Transform(NormalizedLandmark[] landmarks, int w, int h) =>
+        Options.OutputFacialTransformationMatrixes ? FaceGeometry.Default.EstimateTransform(landmarks, w, h) : null;
 
     private (NormalizedLandmark[] Landmarks, float Presence) RunLandmarks(MPImage image, in NormalizedRect roi)
     {

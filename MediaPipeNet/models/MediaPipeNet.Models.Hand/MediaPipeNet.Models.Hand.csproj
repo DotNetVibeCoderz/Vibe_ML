@@ -20,6 +20,7 @@
     <Content Include="$(ModelsOnnxDir)hand_landmarks_detector.onnx" Link="models\hand_landmarks_detector.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="$(ModelsOnnxDir)gesture_embedder.onnx" Link="models\gesture_embedder.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="$(ModelsOnnxDir)canned_gesture_classifier.onnx" Link="models\canned_gesture_classifier.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)hand_roi_refinement.onnx" Link="models\hand_roi_refinement.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Import Project="$(RepoRoot)build/Package.targets" />

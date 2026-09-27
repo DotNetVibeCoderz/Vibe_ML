@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -74,6 +74,9 @@ public sealed class MainWindow : Window
             Header(header);
             foreach (var t in TaskCatalog.All.Where(t => t.Category == category)) Item(t.Id, t.Title);
         }
+        Header("nav.audiotext");
+        Item("audio", Loc.T("nav.audio"));
+        Item("text", Loc.T("nav.text"));
         Header("nav.pipelines");
         Item("live", Loc.T("nav.live"));
         Item("graph", Loc.T("nav.graph"));
@@ -90,7 +93,7 @@ public sealed class MainWindow : Window
             new Image { Source = AssetLoader("Assets/logo.png"), Width = 34, Height = 34 },
             Ui.Stack(Orientation.Vertical, 0,
                 new TextBlock { Text = "MediaPipe.Net", FontFamily = (FontFamily)Application.Current!.Resources["DisplayFont"]!, FontSize = 15 },
-                Ui.Text("GALLERY · v0.1", "eyebrow")));
+                Ui.Text("GALLERY · v0.3", "eyebrow")));
         brand.Margin = new Thickness(18, 20, 18, 10);
 
         var credit = new TextBlock { Text = Loc.T("footer.credit"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(18, 10, 18, 16) }.With("muted");
@@ -123,6 +126,8 @@ public sealed class MainWindow : Window
         {
             "home" => new HomeView(Navigate),
             "live" => new LiveView(),
+            "audio" => new AudioView(),
+            "text" => new TextView(),
             "graph" => new GraphView(),
             "benchmark" => new BenchmarkView(),
             "models" => new ModelsView(),
@@ -139,7 +144,7 @@ public sealed class MainWindow : Window
     private async Task RunScreenshotsAsync(string directory)
     {
         Directory.CreateDirectory(directory);
-        string[] pages = ["home", .. TaskCatalog.All.Select(t => t.Id), "live", "graph", "benchmark", "models", "settings", "about"];
+        string[] pages = ["home", .. TaskCatalog.All.Select(t => t.Id), "audio", "text", "live", "graph", "benchmark", "models", "settings", "about"];
         foreach (var key in pages) await CaptureAsync(key, Path.Combine(directory, $"gallery-{key}.png"));
 
         // A dark-theme, Indonesian-language variant shows theming and localization.

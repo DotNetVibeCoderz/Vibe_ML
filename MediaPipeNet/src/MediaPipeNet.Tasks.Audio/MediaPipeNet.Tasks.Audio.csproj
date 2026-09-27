@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Tasks.Audio</RootNamespace>
+    <Description>MediaPipe.NET audio tasks: AudioClassifier (YAMNet, 521 AudioSet classes) and VoiceActivityDetector, with audio-clip and audio-stream modes, WAV loading and band-limited resampling — native .NET ports of Google MediaPipe Tasks running on ONNX Runtime. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <PackageTags>$(PackageTags);audio;audio-classification;yamnet;voice-activity-detection;vad</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\*.txt" LogicalName="MediaPipeNet.Tasks.Audio.Resources.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Core\MediaPipeNet.Tasks.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaPipeNet.Tasks.Tests" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

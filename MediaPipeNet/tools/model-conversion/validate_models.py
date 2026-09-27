@@ -23,7 +23,10 @@ def extract_labels(tflite: pathlib.Path, out: pathlib.Path, model_id: str) -> No
         return
     with zipfile.ZipFile(tflite) as z:
         for name in z.namelist():
-            if name.endswith(".txt"):
+            if name == "vocab.txt":  # tokenizer vocabulary of the text models
+                (out / f"{model_id}.vocab.txt").write_bytes(z.read(name))
+                print(f"vocab {model_id} <- {name}")
+            elif name.endswith(".txt") and name != "labelmap.txt":
                 (out / f"{model_id}.labels.txt").write_bytes(z.read(name))
                 print(f"labels {model_id} <- {name}")
 
@@ -67,7 +70,11 @@ def main() -> int:
         for pos, ti in enumerate(t_inputs):
             oi = by_name.get(ti["name"]) or next((v for k, v in by_name.items() if k.startswith(ti["name"])), sess.get_inputs()[pos])
             shape = [max(int(d), 1) for d in ti["shape"]]
-            x = rng.random(shape, dtype=np.float32)
+            if np.issubdtype(ti["dtype"], np.integer):  # token ids / masks
+                high = 2 if "mask" in ti["name"] or "type" in ti["name"] else 100
+                x = rng.integers(0 if high == 2 else 1, high, shape).astype(ti["dtype"])
+            else:
+                x = rng.random(shape, dtype=np.float32)
             interp.set_tensor(ti["index"], x)
             feeds[oi.name] = x
         interp.invoke()

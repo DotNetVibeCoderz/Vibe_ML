@@ -26,6 +26,8 @@ nav:
   - English:
       - Getting started: en/getting-started.md
       - Tasks: en/tasks.md
+      - Audio & text tasks: en/audio-and-text.md
+      - Custom models: en/custom-models.md
       - Running modes & live video: en/video-and-live-stream.md
       - Graph API: en/graph-api.md
       - Models: en/models.md
@@ -37,9 +39,12 @@ nav:
       - Testing: en/testing.md
       - API reference: en/api-reference.md
       - Troubleshooting: en/troubleshooting.md
+      - Platforms (mobile, browser): en/platforms.md
   - Bahasa Indonesia:
       - Memulai: id/memulai.md
       - Task: id/task.md
+      - Task audio & teks: id/audio-dan-teks.md
+      - Model kustom: id/model-kustom.md
       - Mode & video langsung: id/video-dan-live-stream.md
       - Graph API: id/graph-api.md
       - Model: id/model.md
@@ -51,3 +56,4 @@ nav:
       - Pengujian: id/pengujian.md
       - Referensi API: id/referensi-api.md
       - Pemecahan masalah: id/pemecahan-masalah.md
+      - Platform (mobile, browser): id/platform.md

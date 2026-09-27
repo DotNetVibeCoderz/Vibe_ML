@@ -61,16 +61,20 @@ Dispose images when done (the pixel buffer returns to the pool). For video, reus
 
 ## 4. Options
 
-Every task takes an options record. Unset properties keep MediaPipe's defaults:
+Every task takes an options record. Unset properties keep MediaPipe's defaults. `BaseOptions` (where models come
+from and how they run) lives in the `MediaPipeNet.Tasks` namespace, shared by the vision, audio and text tasks:
 
 ```csharp
+using MediaPipeNet.Inference;
+using MediaPipeNet.Tasks;
+
 using var hands = HandLandmarker.Create(new HandLandmarkerOptions
 {
     NumHands = 2,
     MinHandDetectionConfidence = 0.6f,
     BaseOptions = new BaseOptions
     {
-        Inference = new InferenceOptions { Provider = ExecutionProvider.Auto, IntraOpThreads = 4 },
+        Inference = new InferenceOptions { Provider = ExecutionProvider.Auto, IntraOpThreads = 4, Precision = ModelPrecision.Float32 },
         ModelDirectory = "my-models",                 // optional: look here first
     },
 });

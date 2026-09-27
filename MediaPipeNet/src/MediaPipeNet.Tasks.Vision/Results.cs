@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediaPipeNet.Serialization;
@@ -21,10 +21,30 @@ public sealed record FaceDetectionResult(IReadOnlyList<Detection> Detections)
 /// <param name="Blendshapes">52 blendshape scores when enabled, otherwise null.</param>
 /// <param name="PresenceScore">Confidence that a face is present in the ROI.</param>
 /// <param name="Roi">The rotated region the landmark model ran on.</param>
-public sealed record FaceLandmarks(IReadOnlyList<NormalizedLandmark> Landmarks, IReadOnlyList<Category>? Blendshapes, float PresenceScore, NormalizedRect Roi)
+/// <param name="FacialTransformationMatrix">
+/// When enabled, the 4×4 facial transformation matrix as 16 row-major values (MediaPipe layout,
+/// column-vector convention: <c>p_camera = M · p_canonical</c>, translation in centimeters in the last column).
+/// </param>
+public sealed record FaceLandmarks(IReadOnlyList<NormalizedLandmark> Landmarks, IReadOnlyList<Category>? Blendshapes, float PresenceScore, NormalizedRect Roi,
+    IReadOnlyList<float>? FacialTransformationMatrix = null)
 {
     /// <summary>Score of a blendshape by name (e.g. <c>jawOpen</c>), or 0.</summary>
     public float GetBlendshape(string name) => Blendshapes?.FirstOrDefault(c => c.CategoryName == name)?.Score ?? 0f;
+
+    /// <summary>
+    /// The facial transformation matrix as a <see cref="System.Numerics.Matrix4x4"/> in .NET's row-vector
+    /// convention (transposed, so <c>Vector3.Transform(canonicalPoint, m)</c> works; translation in M41..M43),
+    /// or null when it was not requested.
+    /// </summary>
+    public System.Numerics.Matrix4x4? GetTransformMatrix()
+    {
+        if (FacialTransformationMatrix is not { Count: 16 } m) return null;
+        return new System.Numerics.Matrix4x4(
+            m[0], m[4], m[8], m[12],
+            m[1], m[5], m[9], m[13],
+            m[2], m[6], m[10], m[14],
+            m[3], m[7], m[11], m[15]);
+    }
 }
 
 /// <summary>Result of <see cref="FaceLandmarker"/>.</summary>
@@ -121,12 +141,163 @@ public sealed record HolisticResult(PoseLandmarks? Pose, FaceLandmarks? Face, Ha
     public string ToJson(bool indented = false) => MediaPipeJson.Serialize(this, indented);
 }
 
-/// <summary>Result of <see cref="ImageSegmenter"/>.</summary>
-/// <param name="ConfidenceMask">Per-pixel foreground probability in [0, 1], same size as the input image.</param>
-public sealed record SegmentationResult(SegmentationMask ConfidenceMask)
+/// <summary>Result of <see cref="ImageSegmenter"/> and <see cref="InteractiveSegmenter"/>.</summary>
+public sealed record SegmentationResult
 {
-    /// <summary>Serializes the result to JSON (the mask is base64-encoded).</summary>
+    private SegmentationMask? _foreground;
+
+    /// <summary>A result holding a single foreground-probability mask.</summary>
+    public SegmentationResult(SegmentationMask confidenceMask)
+        : this([confidenceMask ?? throw new ArgumentNullException(nameof(confidenceMask))])
+    {
+    }
+
+    /// <summary>Creates a result.</summary>
+    /// <param name="confidenceMasks">One probability mask per category (empty when not requested).</param>
+    /// <param name="categoryMask">The per-pixel category index, when requested.</param>
+    /// <param name="labels">Category names in mask order.</param>
+    [JsonConstructor]
+    public SegmentationResult(IReadOnlyList<SegmentationMask> confidenceMasks, CategoryMask? categoryMask = null, IReadOnlyList<string>? labels = null)
+    {
+        ConfidenceMasks = confidenceMasks ?? throw new ArgumentNullException(nameof(confidenceMasks));
+        CategoryMask = categoryMask;
+        Labels = labels ?? [];
+    }
+
+    /// <summary>One probability mask per category, same size as the input image (empty when not requested).</summary>
+    public IReadOnlyList<SegmentationMask> ConfidenceMasks { get; }
+
+    /// <summary>The most likely category per pixel, when requested.</summary>
+    public CategoryMask? CategoryMask { get; }
+
+    /// <summary>Category names, in <see cref="ConfidenceMasks"/> order.</summary>
+    public IReadOnlyList<string> Labels { get; }
+
+    /// <summary>
+    /// The foreground probability: the only mask of single-mask models (selfie), otherwise
+    /// 1 − P(background) (category 0 of every multi-class model).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Confidence masks were not requested.</exception>
+    [JsonIgnore]
+    public SegmentationMask ConfidenceMask => _foreground ??= ConfidenceMasks.Count switch
+    {
+        0 => throw new InvalidOperationException("Confidence masks were not requested (OutputConfidenceMasks = false)."),
+        1 => ConfidenceMasks[0],
+        _ => ConfidenceMasks[0].Complement(),
+    };
+
+    /// <summary>The confidence mask of a category by name, or null.</summary>
+    public SegmentationMask? GetConfidenceMask(string label)
+    {
+        for (int i = 0; i < Labels.Count && i < ConfidenceMasks.Count; i++)
+            if (string.Equals(Labels[i], label, StringComparison.OrdinalIgnoreCase)) return ConfidenceMasks[i];
+        return null;
+    }
+
+    /// <summary>Serializes the result to JSON (masks are base64-encoded).</summary>
     public string ToJson(bool indented = false) => MediaPipeJson.Serialize(this, indented);
+}
+
+/// <summary>
+/// A per-pixel category index mask (one byte per pixel). JSON-serialized compactly as width, height and
+/// base64 data.
+/// </summary>
+[JsonConverter(typeof(CategoryMaskJsonConverter))]
+public sealed class CategoryMask
+{
+    /// <summary>Value of pixels that belong to no category.</summary>
+    public const byte Unlabeled = 255;
+
+    /// <summary>Creates a mask over existing data (row-major, <c>width * height</c> bytes).</summary>
+    public CategoryMask(int width, int height, byte[] data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        if (data.Length < width * height) throw new ArgumentException("Mask data is smaller than width * height.", nameof(data));
+        Width = width;
+        Height = height;
+        Data = data;
+    }
+
+    /// <summary>Width in pixels.</summary>
+    public int Width { get; }
+
+    /// <summary>Height in pixels.</summary>
+    public int Height { get; }
+
+    /// <summary>Row-major category indices.</summary>
+    public byte[] Data { get; }
+
+    /// <summary>Category at (x, y).</summary>
+    public byte this[int x, int y] => Data[y * Width + x];
+
+    /// <summary>Fraction of pixels per category index (index 255 = unlabeled).</summary>
+    public IReadOnlyDictionary<int, float> Histogram()
+    {
+        var counts = new int[256];
+        foreach (var v in Data.AsSpan(0, Width * Height)) counts[v]++;
+        var result = new SortedDictionary<int, float>();
+        float n = Width * Height;
+        for (int i = 0; i < 256; i++) if (counts[i] > 0) result[i] = counts[i] / n;
+        return result;
+    }
+
+    /// <summary>
+    /// Builds the category mask from confidence masks: the argmax per pixel, or for a single mask 0 where
+    /// the probability exceeds 0.5 and <see cref="Unlabeled"/> elsewhere (MediaPipe's convention).
+    /// </summary>
+    public static CategoryMask FromConfidenceMasks(IReadOnlyList<SegmentationMask> masks)
+    {
+        ArgumentNullException.ThrowIfNull(masks);
+        if (masks.Count == 0) throw new ArgumentException("At least one mask is required.", nameof(masks));
+        int w = masks[0].Width, h = masks[0].Height;
+        var data = new byte[w * h];
+        if (masks.Count == 1)
+        {
+            var m = masks[0].Data;
+            for (int i = 0; i < data.Length; i++) data[i] = m[i] > 0.5f ? (byte)0 : Unlabeled;
+            return new CategoryMask(w, h, data);
+        }
+        Parallel.For(0, h, y =>
+        {
+            for (int i = y * w, end = i + w; i < end; i++)
+            {
+                int best = 0;
+                float max = masks[0].Data[i];
+                for (int c = 1; c < masks.Count; c++)
+                {
+                    float v = masks[c].Data[i];
+                    if (v > max)
+                    {
+                        max = v;
+                        best = c;
+                    }
+                }
+                data[i] = (byte)best;
+            }
+        });
+        return new CategoryMask(w, h, data);
+    }
+}
+
+internal sealed class CategoryMaskJsonConverter : JsonConverter<CategoryMask>
+{
+    public override CategoryMask Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
+        return new CategoryMask(root.GetProperty("width").GetInt32(), root.GetProperty("height").GetInt32(),
+            Convert.FromBase64String(root.GetProperty("data").GetString()!));
+    }
+
+    public override void Write(Utf8JsonWriter writer, CategoryMask value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("width", value.Width);
+        writer.WriteNumber("height", value.Height);
+        writer.WriteString("format", "uint8-base64");
+        writer.WriteBase64String("data", value.Data.AsSpan(0, value.Width * value.Height));
+        writer.WriteEndObject();
+    }
 }
 
 /// <summary>Result of <see cref="ObjectDetector"/>.</summary>
@@ -183,6 +354,14 @@ public sealed class SegmentationMask
         int n = 0;
         foreach (var v in Data.AsSpan(0, Width * Height)) if (v > threshold) n++;
         return (float)n / (Width * Height);
+    }
+
+    /// <summary>A new mask holding 1 − value for every pixel.</summary>
+    public SegmentationMask Complement()
+    {
+        var data = new float[Width * Height];
+        for (int i = 0; i < data.Length; i++) data[i] = 1f - Data[i];
+        return new SegmentationMask(Width, Height, data);
     }
 
     /// <summary>Converts to an 8-bit mask (0..255), optionally thresholded to 0/255.</summary>

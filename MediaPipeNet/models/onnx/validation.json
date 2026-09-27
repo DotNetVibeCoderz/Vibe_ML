@@ -103,5 +103,84 @@
     "outputs": {
       "Identity": 3.5762786865234375e-07
     }
+  },
+  {
+    "id": "face_detection_full_range",
+    "maxAbsDiff": 7.2479248046875e-05,
+    "outputs": {
+      "reshaped_regressor_face_4": 7.2479248046875e-05,
+      "reshaped_classifier_face_4": 7.152557373046875e-06
+    }
+  },
+  {
+    "id": "hand_roi_refinement",
+    "maxAbsDiff": 4.57763671875e-05,
+    "outputs": {
+      "Identity": 4.57763671875e-05
+    }
+  },
+  {
+    "id": "mobilenet_v3_small_embedder",
+    "maxAbsDiff": 3.933906555175781e-06,
+    "outputs": {
+      "StatefulPartitionedCall:0": 3.933906555175781e-06
+    }
+  },
+  {
+    "id": "selfie_multiclass",
+    "maxAbsDiff": 1.2356787919998169e-05,
+    "outputs": {
+      "Identity": 1.2356787919998169e-05
+    }
+  },
+  {
+    "id": "hair_segmenter",
+    "maxAbsDiff": null
+  },
+  {
+    "id": "deeplab_v3",
+    "maxAbsDiff": 2.47955322265625e-05,
+    "outputs": {
+      "ResizeBilinear_3": 2.47955322265625e-05
+    }
+  },
+  {
+    "id": "magic_touch",
+    "maxAbsDiff": 9.819865226745605e-06,
+    "outputs": {
+      "Identity": 9.819865226745605e-06
+    }
+  },
+  {
+    "id": "yamnet",
+    "maxAbsDiff": 0.0859375,
+    "outputs": {
+      "tower0/network/layer32/final_output": 0.0859375
+    }
+  },
+  {
+    "id": "bert_classifier",
+    "maxAbsDiff": 0.0009698271751403809,
+    "outputs": {
+      "StatefulPartitionedCall:0": 0.0009698271751403809
+    }
+  },
+  {
+    "id": "average_word_classifier",
+    "maxAbsDiff": 0.0,
+    "outputs": {
+      "StatefulPartitionedCall:0": 0.0
+    }
+  },
+  {
+    "id": "bert_embedder",
+    "maxAbsDiff": 5.4942626953125,
+    "outputs": {
+      "module_apply_tokens/bert/pooler/Squeeze": 5.4942626953125
+    }
+  },
+  {
+    "id": "language_detector",
+    "maxAbsDiff": null
   }
 ]

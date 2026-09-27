@@ -2,7 +2,7 @@
 
   <!-- Meta package: no code, only dependencies. -->
   <PropertyGroup>
-    <Description>MediaPipe.NET — native .NET port of Google MediaPipe (face detection, face mesh, hand tracking, gestures, pose, holistic, segmentation, object detection, image classification) on ONNX Runtime. This package bundles the CPU runtime (plus CoreML on macOS) and works on Windows, Linux and macOS. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <Description>MediaPipe.NET — native .NET port of Google MediaPipe (face detection, face mesh, hand tracking, gestures, pose, holistic, segmentation, interactive segmentation, object detection, image classification and embedding, audio classification, voice activity detection, text classification and embedding, language detection) on ONNX Runtime. This package bundles the CPU runtime (plus CoreML on macOS) and works on Windows, Linux and macOS. Created by Gravicode Studios, led by Kang Fadhil.</Description>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <IncludeSymbols>false</IncludeSymbols>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
@@ -15,6 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MediaPipeNet.Tasks.Vision\MediaPipeNet.Tasks.Vision.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Audio\MediaPipeNet.Tasks.Audio.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Text\MediaPipeNet.Tasks.Text.csproj" />
   </ItemGroup>
 
   <Import Project="$(RepoRoot)build/Package.targets" />

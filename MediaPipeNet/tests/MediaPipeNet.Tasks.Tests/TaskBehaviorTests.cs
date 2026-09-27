@@ -179,6 +179,30 @@ public class IntegrationTests
     }
 
     [Fact]
+    public void Dependency_injection_registers_the_new_tasks()
+    {
+        var services = new ServiceCollection();
+        services.AddMediaPipeNet(o => { o.ModelDirectory = MediaPipeNet.Tests.TestPaths.Models; o.AllowModelDownload = false; })
+            .AddFaceLandmarker().AddHandLandmarker().AddGestureRecognizer().AddPoseLandmarker().AddHolisticLandmarker()
+            .AddImageSegmenter(o => o with { Model = SegmenterModel.Hair }).AddObjectDetector()
+            .AddImageEmbedder().AddInteractiveSegmenter()
+            .AddAudioClassifier().AddVoiceActivityDetector()
+            .AddTextClassifier(o => o with { Model = MediaPipeNet.Tasks.Text.TextClassifierModel.AverageWord })
+            .AddTextEmbedder().AddLanguageDetector();
+        using var sp = services.BuildServiceProvider();
+        sp.GetRequiredService<ImageSegmenter>().Labels.Should().Equal("background", "hair");
+        sp.GetRequiredService<ImageEmbedder>().Dimension.Should().Be(1024);
+        sp.GetRequiredService<InteractiveSegmenter>().Should().NotBeNull();
+        sp.GetRequiredService<MediaPipeNet.Tasks.Audio.AudioClassifier>().Should().NotBeNull();
+        sp.GetRequiredService<MediaPipeNet.Tasks.Audio.VoiceActivityDetector>().Should().NotBeNull();
+        sp.GetRequiredService<MediaPipeNet.Tasks.Text.TextClassifier>().Classify("great").TopCategory.Should().NotBeNull();
+        sp.GetRequiredService<MediaPipeNet.Tasks.Text.TextEmbedder>().Embed("hello").Embedding.Dimension.Should().Be(512);
+        sp.GetRequiredService<MediaPipeNet.Tasks.Text.LanguageDetector>().Detect("Bonjour tout le monde").TopLanguage!.Value.LanguageCode.Should().Be("fr");
+        foreach (var type in new[] { typeof(FaceLandmarker), typeof(HandLandmarker), typeof(GestureRecognizer), typeof(PoseLandmarker), typeof(HolisticLandmarker), typeof(ObjectDetector) })
+            sp.GetRequiredService(type).Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task Live_stream_processor_processes_every_frame_from_files()
     {
         await using var source = new ImageFileFrameSource([MediaPipeNet.Tests.TestPaths.Image("victory.jpg"), MediaPipeNet.Tests.TestPaths.Image("pointing_up.jpg")]);
@@ -235,7 +259,7 @@ public class IntegrationTests
         await graph.CloseAsync();
         faces.Should().HaveCount(2).And.OnlyContain(f => f.Detections.Count == 1);
         objects.Should().HaveCount(2).And.OnlyContain(o => o.Detections.Any(d => d.TopCategory.CategoryName == "person"));
-        registry.Names.Should().HaveCount(9);
+        registry.Names.Should().HaveCount(10);
     }
 
     [Fact]

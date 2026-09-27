@@ -40,7 +40,7 @@ public sealed class TaskView : IGalleryPage
 
     private Control Build()
     {
-        var header = Ui.Header($"{Loc.T("nav." + _task.Category)} ·{_task.ModelLabel.ToUpperInvariant()}", _task.Title, _task.Blurb);
+        var header = Ui.Header($"{Loc.T("nav." + _task.Category)} · {_task.ModelLabel.ToUpperInvariant()}", _task.Title, _task.Blurb);
 
         // Left: tabs (preview / code / json) + sample strip.
         var stageHost = new Border { Child = _stage, MinHeight = 420 }.With("stage");

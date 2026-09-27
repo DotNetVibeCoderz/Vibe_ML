@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using MediaPipeNet.Gallery.Controls;
 using MediaPipeNet.Imaging;
 using MediaPipeNet.Serialization;
@@ -7,7 +7,7 @@ using MediaPipeNet.Visualization;
 
 namespace MediaPipeNet.Gallery.Services;
 
-/// <summary>The nine vision tasks shown in the Gallery.</summary>
+/// <summary>The vision tasks shown in the Gallery.</summary>
 public static class TaskCatalog
 {
     private static string P(float v) => v.ToString("P0", CultureInfo.CurrentCulture);
@@ -22,12 +22,16 @@ public static class TaskCatalog
         {
             Id = "faces", Category = "detect",
             TitleEn = "Face detection", TitleId = "Deteksi wajah",
-            BlurbEn = "BlazeFace finds faces and six keypoints — eyes, nose tip, mouth and ear tragions. Tuned for faces within about two meters.",
-            BlurbId = "BlazeFace menemukan wajah beserta enam keypoint — mata, ujung hidung, mulut, dan tragus telinga. Optimal untuk wajah dalam jarak sekitar dua meter.",
-            ModelLabel = "blaze_face_short_range · 128²",
+            BlurbEn = "BlazeFace finds faces and six keypoints — eyes, nose tip, mouth and ear tragions. The short-range model suits selfies; the full-range model finds faces up to about five meters away.",
+            BlurbId = "BlazeFace menemukan wajah beserta enam keypoint — mata, ujung hidung, mulut, dan tragus telinga. Model short-range cocok untuk selfie; model full-range menemukan wajah hingga sekitar lima meter.",
+            ModelLabel = "blaze_face_short_range 128² · full_range 192²",
             Samples = ["portrait.jpg", "pose.jpg", "victory.jpg"],
-            Options = [Confidence, new("nms", "Merge overlap (IoU)", "Gabungkan tumpang-tindih (IoU)", OptionKind.Slider, 0.3, 0.1, 0.9)],
-            Create = (o, mode, b) => FaceDetector.Create(new() { BaseOptions = b, RunningMode = mode, MinDetectionConfidence = o.F("confidence"), MinSuppressionThreshold = o.F("nms") }),
+            Options = [new("model", "Model", "Model", OptionKind.Choice, 0, Choices: ["Short range", "Full range"]), Confidence, new("nms", "Merge overlap (IoU)", "Gabungkan tumpang-tindih (IoU)", OptionKind.Slider, 0.3, 0.1, 0.9)],
+            Create = (o, mode, b) => FaceDetector.Create(new()
+            {
+                BaseOptions = b, RunningMode = mode, MinDetectionConfidence = o.F("confidence"), MinSuppressionThreshold = o.F("nms"),
+                Model = o.I("model") == 1 ? FaceDetectorModel.FullRange : FaceDetectorModel.ShortRange,
+            }),
             Run = (t, img, ts, o) =>
             {
                 var d = (FaceDetector)t;
@@ -50,6 +54,7 @@ public static class TaskCatalog
 
                 using var detector = FaceDetector.Create(new FaceDetectorOptions
                 {
+                    Model = FaceDetectorModel.{{(o.I("model") == 1 ? "FullRange" : "ShortRange")}},
                     MinDetectionConfidence = {{o.Inv("confidence")}}f,
                     MinSuppressionThreshold = {{o.Inv("nms")}}f,
                 });
@@ -73,7 +78,11 @@ public static class TaskCatalog
             ModelLabel = "face_landmarks_detector · 256² + blendshapes",
             Samples = ["portrait.jpg"],
             Options = [Confidence, new("mesh", "Show every mesh point", "Tampilkan semua titik mesh", OptionKind.Toggle, 1)],
-            Create = (o, mode, b) => FaceLandmarker.Create(new() { BaseOptions = b, RunningMode = mode, OutputFaceBlendshapes = true, MinFaceDetectionConfidence = o.F("confidence") }),
+            Create = (o, mode, b) => FaceLandmarker.Create(new()
+            {
+                BaseOptions = b, RunningMode = mode, OutputFaceBlendshapes = true, OutputFacialTransformationMatrixes = true,
+                MinFaceDetectionConfidence = o.F("confidence"),
+            }),
             Run = (t, img, ts, o) =>
             {
                 var d = (FaceLandmarker)t;
@@ -84,7 +93,17 @@ public static class TaskCatalog
                 {
                     overlay.AddSkeleton(f.Landmarks, Connections.FaceContours, Overlay.Mint, Overlay.Paper, 1.6, 1.2, points: o.B("mesh"));
                     overlay.AddRoi(f.Roi, img.Width, img.Height, Overlay.Cobalt);
-                    foreach (var c in f.Blendshapes!.Where(c => c.CategoryName != "_neutral").OrderByDescending(c => c.Score).Take(12))
+                    if (f.FacialTransformationMatrix is { } m)
+                    {
+                        // Head pose from the rotation part of the facial transformation matrix (degrees).
+                        double s = Math.Sqrt(m[0] * m[0] + m[4] * m[4] + m[8] * m[8]);
+                        double pitch = Math.Asin(Math.Clamp(-m[9] / s, -1, 1)) * 180 / Math.PI;
+                        double yaw = Math.Atan2(m[8], m[10]) * 180 / Math.PI;
+                        double roll = Math.Atan2(m[1], m[5]) * 180 / Math.PI;
+                        rows.Add(new ResultRow(Loc.Pick("Head pose (yaw / pitch / roll)", "Pose kepala (yaw / pitch / roll)"), $"{yaw:0}° / {pitch:0}° / {roll:0}°"));
+                        rows.Add(new ResultRow(Loc.Pick("Distance to camera", "Jarak ke kamera"), $"{-m[11]:0} cm"));
+                    }
+                    foreach (var c in f.Blendshapes!.Where(c => c.CategoryName != "_neutral").OrderByDescending(c => c.Score).Take(10))
                         rows.Add(new ResultRow(c.CategoryName!, P(c.Score), c.Score));
                 }
                 return new GalleryOutput(overlay, rows, r.ToJson(true), $"{r.Faces.Count} face(s) · 478 landmarks");
@@ -93,6 +112,7 @@ public static class TaskCatalog
                 using var landmarker = FaceLandmarker.Create(new FaceLandmarkerOptions
                 {
                     OutputFaceBlendshapes = true,
+                    OutputFacialTransformationMatrixes = true,   // head pose for AR
                     MinFaceDetectionConfidence = {{o.Inv("confidence")}}f,
                 });
 
@@ -103,6 +123,9 @@ public static class TaskCatalog
                 float smile = face.GetBlendshape("mouthSmileLeft");
                 float blink = face.GetBlendshape("eyeBlinkRight");
                 Console.WriteLine($"smile {smile:P0}, blink {blink:P0}");
+
+                // 4×4 pose of the canonical face in camera space (translation in cm).
+                System.Numerics.Matrix4x4 pose = face.GetTransformMatrix()!.Value;
                 """,
         },
         new GalleryTask
@@ -271,13 +294,21 @@ public static class TaskCatalog
         new GalleryTask
         {
             Id = "segment", Category = "understand",
-            TitleEn = "Selfie segmentation", TitleId = "Segmentasi selfie",
-            BlurbEn = "A per-pixel person mask for background blur or replacement — the effect behind video-call backgrounds.",
-            BlurbId = "Mask orang per piksel untuk blur atau penggantian latar — efek di balik latar video call.",
-            ModelLabel = "selfie_segmenter · 256²",
-            Samples = ["portrait.jpg", "pose.jpg"],
-            Options = [new("effect", "Effect", "Efek", OptionKind.Choice, 0, Choices: ["Mask", "Blur background", "Studio backdrop"])],
-            Create = (o, mode, b) => ImageSegmenter.Create(new() { BaseOptions = b, RunningMode = mode }),
+            TitleEn = "Image segmentation", TitleId = "Segmentasi gambar",
+            BlurbEn = "Per-pixel masks: a person mask for background blur, six selfie classes (hair, skin, clothes…), hair only, or DeepLab's 21 PASCAL classes.",
+            BlurbId = "Mask per piksel: mask orang untuk blur latar, enam kelas selfie (rambut, kulit, pakaian…), rambut saja, atau 21 kelas PASCAL dari DeepLab.",
+            ModelLabel = "selfie · multiclass · hair · deeplab_v3",
+            Samples = ["portrait.jpg", "pose.jpg", "cats_and_dogs.jpg"],
+            Options =
+            [
+                new("model", "Model", "Model", OptionKind.Choice, 0, Choices: ["Selfie", "Selfie multiclass", "Hair", "DeepLab v3"]),
+                new("effect", "Effect", "Efek", OptionKind.Choice, 0, Choices: ["Mask", "Blur background", "Studio backdrop"]),
+            ],
+            Create = (o, mode, b) => ImageSegmenter.Create(new()
+            {
+                BaseOptions = b, RunningMode = mode, OutputCategoryMask = true,
+                Model = o.I("model") switch { 1 => SegmenterModel.SelfieMulticlass, 2 => SegmenterModel.Hair, 3 => SegmenterModel.DeepLabV3, _ => SegmenterModel.Selfie },
+            }),
             Run = (t, img, ts, o) =>
             {
                 var d = (ImageSegmenter)t;
@@ -285,33 +316,144 @@ public static class TaskCatalog
                 var mask = r.ConfidenceMask;
                 var overlay = new Overlay();
                 MPImage? composed = null;
-                switch (o.I("effect"))
+                using (var canvas = img.ToImage())
                 {
-                    case 0:
-                        overlay.Mask = new OverlayMask(mask.Data, mask.Width, mask.Height, Overlay.Violet, 0.55f);
-                        break;
-                    default:
-                        using (var canvas = img.ToImage())
-                        {
-                            if (o.I("effect") == 1) SegmentationMaskOverlay.BlurBackground(canvas, mask, 18);
-                            else SegmentationMaskOverlay.ReplaceBackground(canvas, mask, SixLabors.ImageSharp.Color.ParseHex("#2B59FF"));
+                    switch (o.I("effect"))
+                    {
+                        case 0 when r.ConfidenceMasks.Count == 1:
+                            overlay.Mask = new OverlayMask(mask.Data, mask.Width, mask.Height, Overlay.Violet, 0.55f);
+                            break;
+                        case 0:
+                            SegmentationMaskOverlay.OverlayCategories(canvas, r.CategoryMask!);
                             composed = MPImage.FromImage(canvas);
-                        }
-                        break;
+                            break;
+                        case 1:
+                            SegmentationMaskOverlay.BlurBackground(canvas, mask, 18);
+                            composed = MPImage.FromImage(canvas);
+                            break;
+                        default:
+                            SegmentationMaskOverlay.ReplaceBackground(canvas, mask, SixLabors.ImageSharp.Color.ParseHex("#2B59FF"));
+                            composed = MPImage.FromImage(canvas);
+                            break;
+                    }
                 }
-                var rows = new List<ResultRow> { new(Loc.Pick("Person coverage", "Cakupan orang"), P(mask.Coverage()), mask.Coverage()), new("Mask", $"{mask.Width}×{mask.Height}") };
-                return new GalleryOutput(overlay, rows, $"{{ \"width\": {mask.Width}, \"height\": {mask.Height}, \"coverage\": {mask.Coverage().ToString(CultureInfo.InvariantCulture)} }}", "mask", composed);
+                var rows = new List<ResultRow>();
+                if (r.ConfidenceMasks.Count == 1)
+                {
+                    rows.Add(new(Loc.Pick("Person coverage", "Cakupan orang"), P(mask.Coverage()), mask.Coverage()));
+                }
+                else
+                {
+                    foreach (var (category, fraction) in r.CategoryMask!.Histogram().OrderByDescending(kv => kv.Value))
+                        if (fraction >= 0.002f && category < r.Labels.Count) rows.Add(new(r.Labels[category], P(fraction), fraction));
+                }
+                rows.Add(new("Mask", $"{mask.Width}×{mask.Height} · {r.ConfidenceMasks.Count} ch"));
+                var json = $"{{ \"labels\": [{string.Join(", ", r.Labels.Select(l => $"\"{l}\""))}], \"width\": {mask.Width}, \"height\": {mask.Height} }}";
+                return new GalleryOutput(overlay, rows, json, r.ConfidenceMasks.Count == 1 ? "mask" : $"{rows.Count - 1} categories", composed);
             },
-            Code = o => """
+            Code = o => $$"""
                 using MediaPipeNet.Visualization;
 
-                using var segmenter = ImageSegmenter.Create();
+                using var segmenter = ImageSegmenter.Create(new ImageSegmenterOptions
+                {
+                    Model = SegmenterModel.{{(o.I("model") switch { 1 => "SelfieMulticlass", 2 => "Hair", 3 => "DeepLabV3", _ => "Selfie" })}},
+                    OutputCategoryMask = true,
+                });
                 using var image = MPImage.Load("portrait.jpg");
-                SegmentationMask mask = segmenter.Segment(image).ConfidenceMask;
+                SegmentationResult result = segmenter.Segment(image);
 
-                using var canvas = image.ToImage();          // SixLabors.ImageSharp image
-                SegmentationMaskOverlay.BlurBackground(canvas, mask, sigma: 18);
-                canvas.SaveAsPng("portrait-blur.png");
+                // One probability mask per category, plus the argmax category per pixel.
+                foreach (var (index, fraction) in result.CategoryMask!.Histogram())
+                    Console.WriteLine($"{result.Labels[index]}: {fraction:P1}");
+
+                using var canvas = image.ToImage();
+                SegmentationMaskOverlay.BlurBackground(canvas, result.ConfidenceMask, sigma: 18);
+                """,
+        },
+        new GalleryTask
+        {
+            Id = "interactive", Category = "understand",
+            TitleEn = "Interactive segmentation", TitleId = "Segmentasi interaktif",
+            BlurbEn = "MagicTouch cuts out whatever object sits under a point of interest — tap-to-select for photo editors. Move the point with the sliders.",
+            BlurbId = "MagicTouch memotong objek apa pun di bawah titik yang dipilih — tap-untuk-memilih ala editor foto. Geser titiknya dengan slider.",
+            ModelLabel = "magic_touch · 512² RGB + point",
+            Samples = ["cats_and_dogs.jpg", "burger.jpg", "portrait.jpg"],
+            SupportsLive = false,
+            Options =
+            [
+                new("x", "Point X", "Titik X", OptionKind.Slider, 0.62, 0.02, 0.98, 0.01),
+                new("y", "Point Y", "Titik Y", OptionKind.Slider, 0.5, 0.02, 0.98, 0.01),
+                new("cutout", "Cut out (hide background)", "Potong (sembunyikan latar)", OptionKind.Toggle, 0),
+            ],
+            Create = (o, mode, b) => InteractiveSegmenter.Create(new() { BaseOptions = b }),
+            Run = (t, img, ts, o) =>
+            {
+                var d = (InteractiveSegmenter)t;
+                var r = d.Segment(img, RegionOfInterest.FromKeypoint(o.F("x"), o.F("y")));
+                var mask = r.ConfidenceMask;
+                var overlay = new Overlay();
+                overlay.Points.Add(new OverlayPoint(o.F("x"), o.F("y"), Overlay.Coral, 7));
+                MPImage? composed = null;
+                if (o.B("cutout"))
+                {
+                    using var canvas = img.ToImage();
+                    SegmentationMaskOverlay.ReplaceBackground(canvas, mask, SixLabors.ImageSharp.Color.ParseHex("#F4F1EA"));
+                    composed = MPImage.FromImage(canvas);
+                }
+                else
+                {
+                    overlay.Mask = new OverlayMask(mask.Data, mask.Width, mask.Height, Overlay.Mint, 0.55f);
+                }
+                var rows = new List<ResultRow>
+                {
+                    new(Loc.Pick("Selected area", "Area terpilih"), P(mask.Coverage()), mask.Coverage()),
+                    new(Loc.Pick("Point", "Titik"), $"({o.Inv("x")}, {o.Inv("y")})"),
+                };
+                return new GalleryOutput(overlay, rows, $"{{ \"coverage\": {mask.Coverage().ToString(CultureInfo.InvariantCulture)} }}", Loc.Pick("object selected", "objek terpilih"), composed);
+            },
+            Code = o => $$"""
+                using var segmenter = InteractiveSegmenter.Create();
+                using var image = MPImage.Load("cats_and_dogs.jpg");
+
+                // The object under the point (normalized coordinates) — or pass a scribble.
+                var roi = RegionOfInterest.FromKeypoint({{o.Inv("x")}}f, {{o.Inv("y")}}f);
+                SegmentationMask cutout = segmenter.Segment(image, roi).ConfidenceMask;
+                Console.WriteLine($"selected {cutout.Coverage():P0} of the image");
+                """,
+        },
+        new GalleryTask
+        {
+            Id = "embed", Category = "understand",
+            TitleEn = "Image embedding", TitleId = "Embedding gambar",
+            BlurbEn = "MobileNet V3 turns an image into a 1,024-number fingerprint. Similar pictures get similar vectors — the basis of visual search and de-duplication.",
+            BlurbId = "MobileNet V3 mengubah gambar menjadi sidik jari 1.024 angka. Gambar serupa menghasilkan vektor serupa — dasar pencarian visual dan de-duplikasi.",
+            ModelLabel = "mobilenet_v3_small · 224² · 1024-D",
+            Samples = ["burger.jpg", "burger_crop.jpg", "cat.jpg", "cats_and_dogs.jpg", "portrait.jpg"],
+            Options = [],
+            SupportsLive = false,
+            Create = (o, mode, b) => ImageEmbedder.Create(new() { BaseOptions = b, RunningMode = mode, L2Normalize = true }),
+            Run = (t, img, ts, o) =>
+            {
+                var d = (ImageEmbedder)t;
+                var r = ts is { } v ? d.EmbedForVideo(img, v) : d.Embed(img);
+                var rows = new List<ResultRow>();
+                foreach (var name in new[] { "burger.jpg", "burger_crop.jpg", "cat.jpg", "cats_and_dogs.jpg", "portrait.jpg" })
+                {
+                    double similarity = ImageEmbedder.CosineSimilarity(r.Embedding, ReferenceEmbedding(d, name));
+                    rows.Add(new(Loc.Pick("Similarity to ", "Kemiripan dengan ") + name, similarity.ToString("0.000", CultureInfo.InvariantCulture), Math.Max(0, similarity)));
+                }
+                rows.Sort((a, b) => b.Fraction!.Value.CompareTo(a.Fraction!.Value));
+                return new GalleryOutput(new Overlay(), rows, r.ToJson(true), $"{r.Embedding.Dimension}-D");
+            },
+            Code = o => """
+                using var embedder = ImageEmbedder.Create(new ImageEmbedderOptions { L2Normalize = true });
+
+                using var a = MPImage.Load("burger.jpg");
+                using var b = MPImage.Load("burger_crop.jpg");
+                Embedding ea = embedder.Embed(a).Embedding;   // 1024 floats
+                Embedding eb = embedder.Embed(b).Embedding;
+
+                double similarity = ImageEmbedder.CosineSimilarity(ea, eb);   // ≈ 0.92
                 """,
         },
         new GalleryTask
@@ -382,6 +524,20 @@ public static class TaskCatalog
     ];
 
     public static GalleryTask Get(string id) => All.First(t => t.Id == id);
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ImageEmbedder, Dictionary<string, Embedding>> s_references = [];
+
+    /// <summary>Embedding of a bundled sample, computed once per embedder instance.</summary>
+    private static Embedding ReferenceEmbedding(ImageEmbedder embedder, string sample)
+    {
+        var cache = s_references.GetOrCreateValue(embedder);
+        lock (cache)
+        {
+            if (cache.TryGetValue(sample, out var e)) return e;
+            using var image = MPImage.Load(SamplePath(sample));
+            return cache[sample] = embedder.Embed(image).Embedding;
+        }
+    }
 
     /// <summary>The path of a bundled sample image.</summary>
     public static string SamplePath(string name) => Path.Combine(AppContext.BaseDirectory, "images", name);

@@ -61,16 +61,20 @@ Dispose gambar setelah selesai (buffer piksel kembali ke pool). Untuk video, pak
 
 ## 4. Opsi
 
-Setiap task menerima record opsi. Properti yang tidak diisi memakai default MediaPipe:
+Setiap task menerima record opsi. Properti yang tidak diisi memakai default MediaPipe. `BaseOptions` (asal model dan
+cara model dijalankan) berada di namespace `MediaPipeNet.Tasks`, dipakai bersama task vision, audio, dan teks:
 
 ```csharp
+using MediaPipeNet.Inference;
+using MediaPipeNet.Tasks;
+
 using var hands = HandLandmarker.Create(new HandLandmarkerOptions
 {
     NumHands = 2,
     MinHandDetectionConfidence = 0.6f,
     BaseOptions = new BaseOptions
     {
-        Inference = new InferenceOptions { Provider = ExecutionProvider.Auto, IntraOpThreads = 4 },
+        Inference = new InferenceOptions { Provider = ExecutionProvider.Auto, IntraOpThreads = 4, Precision = ModelPrecision.Float32 },
         ModelDirectory = "model-saya",                // opsional: dicari lebih dulu
     },
 });

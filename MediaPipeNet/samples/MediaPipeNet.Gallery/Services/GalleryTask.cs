@@ -1,8 +1,9 @@
-using System.Globalization;
+﻿using System.Globalization;
 using MediaPipeNet.Gallery.Controls;
 using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference;
 using MediaPipeNet.Tasks.Vision;
+using MediaPipeNet.Tasks;
 
 namespace MediaPipeNet.Gallery.Services;
 
@@ -77,7 +78,12 @@ public static class TaskEngine
     public static BaseOptions BaseOptions => new()
     {
         ModelDirectory = string.IsNullOrWhiteSpace(AppSettings.Current.ModelDirectory) ? null : AppSettings.Current.ModelDirectory,
-        Inference = new InferenceOptions { Provider = AppSettings.Current.Provider, IntraOpThreads = AppSettings.Current.Threads },
+        Inference = new InferenceOptions
+        {
+            Provider = AppSettings.Current.Provider,
+            IntraOpThreads = AppSettings.Current.Threads,
+            Precision = AppSettings.Current.Precision,
+        },
     };
 
     /// <summary>Returns a cached image-mode instance for these options (created on first use).</summary>

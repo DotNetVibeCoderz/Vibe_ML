@@ -19,18 +19,32 @@ public sealed record ImageClassifierOptions : VisionTaskOptions<ClassificationRe
 
     /// <summary>If set, these labels are never returned.</summary>
     public IReadOnlySet<string>? CategoryDenylist { get; init; }
+
+    /// <summary>
+    /// Path of your own ONNX model (e.g. a MediaPipe Model Maker export converted with
+    /// <c>convert_models.py --custom</c>) used instead of the built-in one. Default null.
+    /// </summary>
+    public string? ModelPath { get; init; }
+
+    /// <summary>
+    /// Category names for a custom model, in output order. When null, <c>{model}.labels.txt</c> next to
+    /// <see cref="ModelPath"/> is used if present, otherwise the built-in labels.
+    /// </summary>
+    public IReadOnlyList<string>? Labels { get; init; }
 }
 
 /// <summary>Classifies the whole image into the 1000 ImageNet classes with EfficientNet-Lite0.</summary>
 public sealed class ImageClassifier : VisionTaskBase<ClassificationResult>
 {
     private readonly OnnxModel _model;
+    private readonly IReadOnlyList<string> _labels;
 
     private ImageClassifier(ImageClassifierOptions options, OnnxModel model)
         : base(nameof(ImageClassifier), options.RunningMode, options.BaseOptions, options.ResultCallback, options.MaxInFlightFrames)
     {
         Options = options;
         _model = model;
+        _labels = CustomModels.ResolveLabels(options.Labels, options.ModelPath, Processing.Labels.ImageNet);
         CompleteInitialization();
     }
 
@@ -41,14 +55,14 @@ public sealed class ImageClassifier : VisionTaskBase<ClassificationResult>
     public static ImageClassifier Create(ImageClassifierOptions? options = null)
     {
         options ??= new ImageClassifierOptions();
-        return new ImageClassifier(options, ModelLoader.Load(options.BaseOptions, ModelCatalog.EfficientNetLite0));
+        return new ImageClassifier(options, CustomModels.Load(options.BaseOptions, ModelCatalog.EfficientNetLite0, options.ModelPath));
     }
 
     /// <summary>Creates the task, downloading the model asynchronously when needed.</summary>
     public static async Task<ImageClassifier> CreateAsync(ImageClassifierOptions? options = null, CancellationToken cancellationToken = default)
     {
         options ??= new ImageClassifierOptions();
-        return new ImageClassifier(options, await ModelLoader.LoadAsync(options.BaseOptions, ModelCatalog.EfficientNetLite0, cancellationToken).ConfigureAwait(false));
+        return new ImageClassifier(options, await CustomModels.LoadAsync(options.BaseOptions, ModelCatalog.EfficientNetLite0, options.ModelPath, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Classifies a still image.</summary>
@@ -70,7 +84,7 @@ public sealed class ImageClassifier : VisionTaskBase<ClassificationResult>
     protected override ClassificationResult Process(MPImage image, ImageProcessingOptions? options, bool tracking, long timestampMs)
     {
         var spec = _model.Inputs[0];
-        var labels = Labels.ImageNet;
+        var labels = _labels;
         var categories = new List<Category>();
         using (var ctx = _model.RentContext())
         {

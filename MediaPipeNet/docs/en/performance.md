@@ -24,6 +24,36 @@ CPU provider, 640×480 input, end-to-end (image-to-tensor, inference, decoding):
 
 **NFR-1** (face detection < 50 ms at 640×480 on a modern 8-core CPU): met with a 6× margin on a 4-core 2017 CPU.
 
+### 0.2 / 0.3 tasks (same machine, BenchmarkDotNet short run)
+
+| Task | Mean | Allocated per call |
+|---|---:|---:|
+| ImageEmbedder (MobileNet V3, 820×1024 photo) | 3.6 ms | 7 KB |
+| ImageSegmenter, selfie multiclass + category mask (820×1024) | 104 ms | 22 MB ¹ |
+| AudioClassifier, 4.3 s clip (5 YAMNet windows) | 14.0 ms | 256 KB |
+| TextClassifier, MobileBERT | 56 ms | 4 KB |
+| TextClassifier, average word | 0.024 ms | 2.5 KB |
+| TextEmbedder, MobileBERT | 56 ms | 6 KB |
+| LanguageDetector | 0.062 ms | 12 KB |
+
+¹ Six full-resolution probability masks plus the category mask; all channels are projected in a single pass
+(`TensorWarp.ProjectChannelsToImage`), which made this 1.6× faster than per-channel projection.
+
+### Runtime features (FaceLandmarker on the portrait, CPU)
+
+| Configuration | Mean | Ratio |
+|---|---:|---:|
+| float32 | 20.0 ms | 1.00 |
+| float32 + `UseIoBinding` | 21.0 ms | 1.05 |
+| `ModelPrecision.Float16` | 23.7 ms | 1.19 |
+| `ModelPrecision.Int8` (weight-only) | 22.8 ms | 1.15 |
+| 8 images, sequential loop | 24.3 ms / image | |
+| 8 images, `ProcessBatch` | **12.3 ms / image** | 2× throughput |
+
+On a CPU, I/O binding and FP16 do not pay off (they target GPUs, where they avoid host↔device copies and use
+half-precision units); INT8 variants trade ~15 % speed for a 3–4× smaller download. `ProcessBatch` doubles offline
+throughput on 4 cores.
+
 Run them yourself: `dotnet run -c Release --project benchmarks/MediaPipeNet.Benchmarks -- --filter "*"`, or the
 Gallery's *Benchmark* page, or `mediapipenet-cli benchmark faces image.jpg`.
 
@@ -51,6 +81,10 @@ Gallery's *Benchmark* page, or `mediapipenet-cli benchmark faces image.jpg`.
 | `InferenceOptions.IntraOpThreads` | Threads per operator. Lower it when running several tasks in parallel (e.g. 2 each). |
 | `FaceLandmarkerOptions.OutputFaceBlendshapes = false` | Skips the blendshape model. |
 | Input size | Resize huge photos before processing; the models see 128–320 px anyway. |
+| `ProcessBatch(images)` / `ClassifyBatch` / `EmbedBatch` | Parallel offline processing on one model instance. |
+| `InferenceOptions.Precision` | `Float16` for GPUs, `Int8` for small downloads (see [Models](models.md#precision-variants-fp16-and-int8)). |
+| `InferenceOptions.UseIoBinding` | Binds each pooled context's buffers once (ONNX Runtime I/O binding); useful with GPU providers. |
+| `ImageSegmenterOptions.OutputConfidenceMasks = false` | Only the category mask when that is all you need. |
 
 ## GPUs
 
@@ -72,4 +106,6 @@ Notes from testing:
   benefit more. Measure with the Gallery's Benchmark page.
 - DirectML does not support concurrent `Run` calls or concurrent session creation on one device; MediaPipe.NET
   serializes both automatically when the DirectML provider is active.
-- The Gallery defaults to the CPU provider; switch in *Settings*.
+- The Gallery defaults to the CPU provider; switch provider and precision in *Settings*.
+- `UseIoBinding` creates one `OrtIoBinding` per pooled context and reuses it for every run; results are identical
+  (`BatchAndBindingTests`).

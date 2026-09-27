@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <RootNamespace>MediaPipeNet.Extensions.DependencyInjection</RootNamespace>
@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MediaPipeNet.Tasks.Vision\MediaPipeNet.Tasks.Vision.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Audio\MediaPipeNet.Tasks.Audio.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Text\MediaPipeNet.Tasks.Text.csproj" />
   </ItemGroup>
 
   <Import Project="$(RepoRoot)build/Package.targets" />

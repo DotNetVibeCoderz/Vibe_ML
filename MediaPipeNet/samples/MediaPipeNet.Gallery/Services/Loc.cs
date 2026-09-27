@@ -1,4 +1,4 @@
-namespace MediaPipeNet.Gallery.Services;
+﻿namespace MediaPipeNet.Gallery.Services;
 
 /// <summary>Minimal English / Bahasa Indonesia string table for the Gallery UI.</summary>
 public static class Loc
@@ -9,6 +9,9 @@ public static class Loc
         ["nav.detect"] = ("DETECT", "DETEKSI"),
         ["nav.landmarks"] = ("LANDMARKS", "LANDMARK"),
         ["nav.understand"] = ("SEGMENT & CLASSIFY", "SEGMENTASI & KLASIFIKASI"),
+        ["nav.audiotext"] = ("AUDIO & TEXT", "AUDIO & TEKS"),
+        ["nav.audio"] = ("Audio classification", "Klasifikasi audio"),
+        ["nav.text"] = ("Text understanding", "Pemahaman teks"),
         ["nav.pipelines"] = ("PIPELINES", "PIPELINE"),
         ["nav.app"] = ("APP", "APLIKASI"),
         ["nav.live"] = ("Live camera", "Kamera langsung"),
@@ -77,6 +80,9 @@ public static class Loc
         ["settings.provider"] = ("Execution provider", "Execution provider"),
         ["settings.provider.help"] = ("Auto tries CUDA, then DirectML, CoreML and finally CPU.", "Auto mencoba CUDA, lalu DirectML, CoreML, dan terakhir CPU."),
         ["settings.threads"] = ("CPU threads per model (0 = automatic)", "Thread CPU per model (0 = otomatis)"),
+        ["settings.precision"] = ("Model precision", "Presisi model"),
+        ["settings.precision.help"] = ("FP16 halves model size (best on GPUs); INT8 stores weights in a quarter of the size. Models without such a variant use float32.",
+            "FP16 memperkecil model setengahnya (terbaik di GPU); INT8 menyimpan bobot dalam seperempat ukuran. Model tanpa varian tersebut memakai float32."),
         ["settings.language"] = ("Language", "Bahasa"),
         ["settings.theme"] = ("Theme", "Tema"),
         ["settings.modeldir"] = ("Extra model folder (optional)", "Folder model tambahan (opsional)"),

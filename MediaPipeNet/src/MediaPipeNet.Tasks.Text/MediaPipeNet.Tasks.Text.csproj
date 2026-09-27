@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Tasks.Text</RootNamespace>
+    <Description>MediaPipe.NET text tasks: TextClassifier (MobileBERT and average word-embedding sentiment models), TextEmbedder (MobileBERT sentence embeddings) and LanguageDetector (110 languages), with MediaPipe-exact BERT WordPiece, regex and character n-gram tokenizers — native .NET ports of Google MediaPipe Tasks running on ONNX Runtime. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <PackageTags>$(PackageTags);nlp;text-classification;sentiment;bert;embeddings;language-detection</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\*.txt" LogicalName="MediaPipeNet.Tasks.Text.Resources.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Core\MediaPipeNet.Tasks.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaPipeNet.Tasks.Tests" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

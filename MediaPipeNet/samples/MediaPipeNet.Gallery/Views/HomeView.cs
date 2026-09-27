@@ -50,6 +50,8 @@ public sealed class HomeView : IGalleryPage
         cards.Children.Add(grid);
         cards.Children.Add(Ui.Text(Loc.T("home.more"), "section"));
         var tools = new UniformGrid { Columns = 3 };
+        tools.Children.Add(Card(Loc.T("nav.audio"), Loc.Pick("Name the sounds in a clip and find where people speak.", "Kenali suara dalam klip dan temukan bagian orang berbicara."), "YAMNet · VAD · 16 kHz", "audio"));
+        tools.Children.Add(Card(Loc.T("nav.text"), Loc.Pick("Sentiment, 110-language detection and sentence similarity.", "Sentimen, deteksi 110 bahasa, dan kemiripan kalimat."), "MobileBERT · n-gram LID", "text"));
         tools.Children.Add(Card(Loc.T("nav.live"), Loc.T("live.lede"), "LiveStreamProcessor · OpenCvSharp", "live"));
         tools.Children.Add(Card(Loc.T("nav.graph"), Loc.Pick("Wire calculator nodes into your own pipeline, in code or .pbtxt.", "Rangkai node kalkulator menjadi pipeline sendiri, lewat kode atau .pbtxt."), "CalculatorGraph · Packet<T>", "graph"));
         tools.Children.Add(Card(Loc.T("nav.benchmark"), Loc.T("bench.lede"), "640×480 · per task", "benchmark"));

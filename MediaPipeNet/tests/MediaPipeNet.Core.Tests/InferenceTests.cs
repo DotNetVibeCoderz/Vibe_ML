@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Net;
 using MediaPipeNet.Inference;
 using MediaPipeNet.Inference.Models;
@@ -92,9 +92,9 @@ public class OnnxModelTests
 public class ModelStoreTests
 {
     [Fact]
-    public void Catalog_lists_every_shipped_model()
+    public async Task Catalog_lists_every_shipped_model()
     {
-        ModelCatalog.All.Should().HaveCount(13);
+        ModelCatalog.All.Should().HaveCount(25);
         ModelCatalog.All.Select(m => m.Id).Should().OnlyHaveUniqueItems();
         ModelCatalog.Find("palm_detection.onnx").Should().Be(ModelCatalog.PalmDetection);
         ModelCatalog.Find("unknown").Should().BeNull();
@@ -104,6 +104,7 @@ public class ModelStoreTests
             var path = Path.Combine(TestPaths.Models, m.FileName);
             File.Exists(path).Should().BeTrue(m.FileName);
             new FileInfo(path).Length.Should().Be(m.SizeBytes, m.Id);
+            (await ModelStore.ComputeSha256Async(path)).Should().Be(m.Sha256, m.Id);
         }
     }
 

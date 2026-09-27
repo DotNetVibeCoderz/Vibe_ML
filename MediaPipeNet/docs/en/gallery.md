@@ -9,7 +9,7 @@ samples or your own images and webcam, tune the options, read the results, and c
 dotnet run --project samples/MediaPipeNet.Gallery -c Release
 ```
 
-The app bundles every model (`Gravicode.MediaPipeNet.Models.All`), so it runs offline. On Windows it references the DirectML
+The app bundles every model (`Gravicode.MediaPipeNet.Models.All` and `.Models.Quantized`), so it runs offline. On Windows it references the DirectML
 build of ONNX Runtime; the default provider is CPU and can be changed in *Settings*.
 
 ## Pages
@@ -17,14 +17,16 @@ build of ONNX Runtime; the default provider is CPU and can be changed in *Settin
 | Page | What it shows |
 |---|---|
 | Overview | A live holistic result on the stage and a card per task. |
-| Face detection · Object detection | Boxes, keypoints and labels. |
-| Face mesh · Hand landmarks · Gesture recognition · Pose landmarks · Holistic | Landmark overlays with the rotated ROI (dashed) the model ran on. |
-| Selfie segmentation · Image classification | Mask / blur / backdrop effects; top-K labels. |
+| Face detection · Object detection | Boxes, keypoints and labels; short- or full-range face model. |
+| Face mesh · Hand landmarks · Gesture recognition · Pose landmarks · Holistic | Landmark overlays with the rotated ROI (dashed) the model ran on; head pose (yaw/pitch/roll, distance) from the facial transformation matrix. |
+| Image segmentation · Interactive segmentation · Image embedding · Image classification | Selfie / multiclass / hair / DeepLab masks with blur, backdrop or colored categories; MagicTouch cut-out at a movable point; similarity to the sample images; top-K labels. |
+| Audio classification | Waveform with detected speech segments, YAMNet events per window, the bundled clip or synthetic tones/noise, or any WAV. |
+| Text understanding | Sentiment (MobileBERT and average word), language (110), and sentence similarity for any text. |
 | Live camera | Any task on your webcam in video mode: FPS, latency, dropped frames. |
 | Graph API | A schematic of a custom graph (parallel face + hand nodes, a join and a custom pixelation node), its output, and an editable `.pbtxt` config you can run. |
 | Benchmark | Per-task latency on your machine at 640×480, with the NFR-1 target line. |
 | Models | Catalog status, SHA-256 verification, download of missing models. |
-| Settings | Execution provider, CPU threads, language (English / Bahasa Indonesia), theme (light / dark), extra model folder, landmark points. |
+| Settings | Execution provider, CPU threads, model precision (FP32 / FP16 / INT8), language (English / Bahasa Indonesia), theme (light / dark), extra model folder, landmark points. |
 | About | Credits and licenses. |
 
 Every task page has three tabs: **Preview** (the stage with overlays and an instrument readout: latency ·
@@ -39,6 +41,8 @@ button) and **JSON** (the serialized result).
 | ![Face mesh](../images/gallery-face-mesh.png) | ![Hands](../images/gallery-hands.png) |
 | ![Gestures](../images/gallery-gestures.png) | ![Pose](../images/gallery-pose.png) |
 | ![Holistic](../images/gallery-holistic.png) | ![Segmentation](../images/gallery-segment.png) |
+| ![Interactive segmentation](../images/gallery-interactive.png) | ![Image embedding](../images/gallery-embed.png) |
+| ![Audio classification](../images/gallery-audio.png) | ![Text understanding](../images/gallery-text.png) |
 | ![Objects](../images/gallery-objects.png) | ![Classification](../images/gallery-classify.png) |
 | ![Graph API](../images/gallery-graph.png) | ![Benchmark](../images/gallery-benchmark.png) |
 | ![Models](../images/gallery-models.png) | ![Settings](../images/gallery-settings.png) |
@@ -66,7 +70,8 @@ changing saved settings.
 
 | Folder | |
 |---|---|
-| `Services/TaskCatalog.cs` | The nine task definitions: options, overlay rendering, result rows, code snippet. |
+| `Services/TaskCatalog.cs` | The vision task definitions: options, overlay rendering, result rows, code snippet. |
+| `Views/AudioTextViews.cs` | The audio (waveform, events, VAD) and text pages. |
 | `Controls/StageView.cs` | The viewfinder control (image fit, vector overlay, registration marks, readout). |
 | `Controls/GraphDiagram.cs` | Layered schematic of any `CalculatorGraph` (uses `GetEdges()`). |
 | `Views/*` | Pages. `MainWindow.cs` hosts navigation and the screenshot mode. |

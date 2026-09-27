@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Content-only model package. The ONNX files land in the consuming application's output folder under
+    models/ (found automatically by BundledModelProvider) and are also what NuGetModelProvider
+    downloads on demand. Models: Copyright Google LLC, Apache-2.0 (converted from MediaPipe TFLite).
+  -->
+  <PropertyGroup>
+    <Description>Reduced-precision variants of the MediaPipe.NET models: FP16 (half size, best on GPUs) and weight-only INT8 (about a quarter of the size), each validated against its float32 model. Selected with InferenceOptions.Precision; models without a variant fall back to float32. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <PackageTags>$(PackageTags);models</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ContentTargetFolders>contentFiles</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(ModelsOnnxDir)quantized\*.onnx" Link="models\%(Filename)%(Extension)" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

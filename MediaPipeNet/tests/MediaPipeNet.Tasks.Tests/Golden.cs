@@ -1,7 +1,8 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using MediaPipeNet.Imaging;
 using MediaPipeNet.Tasks.Vision;
 using MediaPipeNet.Tests;
+using MediaPipeNet.Tasks;
 
 namespace MediaPipeNet.Tasks.Tests;
 
@@ -11,7 +12,13 @@ internal static class Golden
     private static readonly Lazy<JsonElement> s_results = new(() =>
         JsonDocument.Parse(File.ReadAllText(TestPaths.Golden)).RootElement.GetProperty("results"));
 
+    private static readonly Lazy<JsonElement> s_resultsV2 = new(() =>
+        JsonDocument.Parse(File.ReadAllText(TestPaths.GoldenV2)).RootElement.GetProperty("results"));
+
     public static JsonElement For(string task, string image) => s_results.Value.GetProperty(task).GetProperty(image);
+
+    /// <summary>Golden data of the 0.2 / 0.3 tasks (tools/golden/generate_golden_v2.py).</summary>
+    public static JsonElement V2(string task) => s_resultsV2.Value.GetProperty(task);
 
     public static NormalizedLandmark[] Landmarks(JsonElement list) =>
         list.EnumerateArray().Select(e => new NormalizedLandmark(e.GetProperty("x").GetSingle(), e.GetProperty("y").GetSingle(), e.GetProperty("z").GetSingle())).ToArray();

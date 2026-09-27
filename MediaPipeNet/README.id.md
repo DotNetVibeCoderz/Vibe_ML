@@ -5,8 +5,9 @@
 <h1 align="center">MediaPipe.NET</h1>
 
 <p align="center">
-  <b>Task vision Google MediaPipe, native di .NET 10.</b><br/>
-  Wajah · face mesh & blendshape · tangan · gestur · pose · holistic · segmentasi · objek · klasifikasi<br/>
+  <b>Task vision, audio, dan teks Google MediaPipe, native di .NET 10.</b><br/>
+  Wajah · face mesh, blendshape & pose kepala · tangan · gestur · pose · holistic · segmentasi · segmentasi interaktif ·
+  objek · klasifikasi · embedding · event audio & aktivitas suara · sentimen · deteksi bahasa<br/>
   <i>Dibuat oleh <b>Gravicode Studios</b>, dipimpin <b>Kang Fadhil</b></i>
 </p>
 
@@ -14,6 +15,7 @@
   <a href="README.md">🇬🇧 Read in English</a> ·
   <a href="docs/id/memulai.md">Dokumentasi</a> ·
   <a href="docs/id/task.md">Task</a> ·
+  <a href="docs/id/audio-dan-teks.md">Audio & teks</a> ·
   <a href="docs/id/graph-api.md">Graph API</a> ·
   <a href="PLAN.md">Roadmap</a>
 </p>
@@ -41,20 +43,27 @@ foreach (var hand in gestures.Recognize(image).Hands)
 
 ## Keunggulan
 
-- **Sembilan task** dengan bentuk yang sama seperti MediaPipe Tasks — `FaceDetector`, `FaceLandmarker` (478
-  landmark + 52 blendshape), `HandLandmarker`, `GestureRecognizer`, `PoseLandmarker` (+ mask segmentasi),
-  `HolisticLandmarker`, `ImageSegmenter`, `ObjectDetector`, `ImageClassifier`.
+- **Enam belas task** dengan bentuk yang sama seperti MediaPipe Tasks —
+  *vision:* `FaceDetector` (short/full range), `FaceLandmarker` (478 landmark, 52 blendshape, matriks transformasi
+  wajah), `HandLandmarker`, `GestureRecognizer`, `PoseLandmarker` (disempurnakan heatmap, + mask segmentasi),
+  `HolisticLandmarker`, `ImageSegmenter` (selfie, multikelas, rambut, DeepLab v3), `InteractiveSegmenter`,
+  `ImageEmbedder`, `ObjectDetector`, `ImageClassifier`;
+  *audio:* `AudioClassifier` (YAMNet), `VoiceActivityDetector`;
+  *teks:* `TextClassifier`, `TextEmbedder`, `LanguageDetector`.
 - **Tiga running mode** — `Image`, `Video` (tracking dan smoothing One-Euro antar-frame), dan `LiveStream`
   (asinkron; frame dibuang saat task sibuk sehingga latensi tidak menumpuk).
 - **Graph API** — susun `ICalculatorNode` yang terhubung lewat stream `Packet<T>` ber-timestamp, dengan semantik
   sinkronisasi input dan timestamp bound ala MediaPipe, eksekusi paralel ter-pipeline, flow limiting, side packet,
-  dan parser konfigurasi `.pbtxt`.
+  loop (back edge), executor khusus, subgraph, profiling Chrome trace, dan parser konfigurasi `.pbtxt`.
 - **Cepat dan hemat** — deteksi wajah 8 ms pada 640×480 di CPU laptop 4-core tahun 2017; tensor pra-alokasi yang
   di-pool membuat satu inferensi hanya mengalokasikan ~3–18 KB.
 - **CPU di mana saja, GPU bila ada** — CPU (Windows / Linux / macOS, x64 / ARM64), DirectML (GPU DX12 apa pun),
   CUDA, CoreML; `ExecutionProvider.Auto` memilih yang terbaik dan kembali ke CPU bila gagal.
 - **Model diurus otomatis** — paket `Gravicode.MediaPipeNet.Models.*` menyalin model ke samping aplikasi; jika tidak ada,
-  model diunduh dari nuget.org saat pertama dipakai dan diverifikasi SHA-256.
+  model diunduh dari nuget.org saat pertama dipakai dan diverifikasi SHA-256. Varian **FP16 / INT8** tervalidasi
+  bila diminta; **model Model Maker milik Anda** lewat `ModelPath`.
+- **Batch dan stabilitas API** — `ProcessBatch` untuk throughput offline; API publik dilacak analyzer sehingga setiap
+  perubahan selalu disengaja.
 - **Hasil strongly-typed dan siap JSON**, utilitas visualisasi, `IFrameSource` untuk webcam dan file video,
   `LiveStreamProcessor<T>`, DI untuk ASP.NET Core, telemetri `ILogger` dan `System.Diagnostics.Metrics`, CLI,
   notebook Polyglot, serta aplikasi Gallery berbasis Avalonia.
@@ -62,20 +71,22 @@ foreach (var hand in gestures.Recognize(image).Hands)
 ## Instalasi
 
 ```bash
-dotnet add package Gravicode.MediaPipeNet               # task + runtime CPU (Windows, Linux, macOS)
-dotnet add package Gravicode.MediaPipeNet.Models.All    # opsional: bundel semua model (≈75 MB) untuk offline
+dotnet add package Gravicode.MediaPipeNet               # semua task + runtime CPU (Windows, Linux, macOS)
+dotnet add package Gravicode.MediaPipeNet.Models.All    # opsional: bundel semua model (≈180 MB) untuk offline
 ```
 
 | Paket | Isi |
 |---|---|
 | `Gravicode.MediaPipeNet` | Semua task + ONNX Runtime **CPU** (dan CoreML di macOS). Mulai dari sini. |
 | `Gravicode.MediaPipeNet.DirectML` / `Gravicode.MediaPipeNet.Cuda` | Semua task + runtime DirectML atau CUDA (pengganti `Gravicode.MediaPipeNet`). |
-| `Gravicode.MediaPipeNet.Models.Face` · `.Hand` · `.Pose` · `.Segmentation` · `.ObjectDetection` · `.ImageClassification` · `.All` | Model ONNX, disalin ke `bin/…/models`. |
+| `Gravicode.MediaPipeNet.Models.Face` · `.Hand` · `.Pose` · `.Segmentation` · `.ObjectDetection` · `.ImageClassification` · `.ImageEmbedding` · `.Audio` · `.Text` · `.All` | Model ONNX, disalin ke `bin/…/models`. |
+| `Gravicode.MediaPipeNet.Models.Quantized` | Varian FP16 / INT8 untuk `InferenceOptions.Precision`. |
 | `Gravicode.MediaPipeNet.Visualization` | Menggambar landmark, kotak, dan mask di gambar ImageSharp. |
 | `Gravicode.MediaPipeNet.Video.OpenCv` | `WebcamFrameSource`, `VideoFileFrameSource`. |
 | `Gravicode.MediaPipeNet.Extensions.DI` | `services.AddMediaPipeNet().AddFaceDetector()…` |
 | `Gravicode.MediaPipeNet.Cli` | `dotnet tool install -g Gravicode.MediaPipeNet.Cli` → `mediapipenet-cli` |
-| `Gravicode.MediaPipeNet.Core` · `.Imaging` · `.Inference` · `.Framework` · `.Tasks.Vision` | Lapisan-lapisan library untuk penggunaan lanjutan. |
+| `Gravicode.MediaPipeNet.Tasks.Audio` · `.Tasks.Text` | Task audio atau teks saja (tanpa dependensi imaging). |
+| `Gravicode.MediaPipeNet.Core` · `.Imaging` · `.Inference` · `.Framework` · `.Tasks.Core` · `.Tasks.Vision` | Lapisan-lapisan library untuk penggunaan lanjutan. |
 
 ## Tur singkat
 
@@ -87,6 +98,14 @@ dotnet add package Gravicode.MediaPipeNet.Models.All    # opsional: bundel semua
 <tr>
 <td><img src="docs/images/gallery-pose.png" alt="Pose" /><br/><b>Pose</b> — 33 landmark + mask orang</td>
 <td><img src="docs/images/gallery-segment.png" alt="Segmentasi" /><br/><b>Segmentasi selfie</b></td>
+</tr>
+<tr>
+<td><img src="docs/images/gallery-interactive.png" alt="Segmentasi interaktif" /><br/><b>Segmentasi interaktif</b> — MagicTouch</td>
+<td><img src="docs/images/gallery-audio.png" alt="Audio" /><br/><b>Audio</b> — event YAMNet + aktivitas suara</td>
+</tr>
+<tr>
+<td><img src="docs/images/gallery-text.png" alt="Teks" /><br/><b>Teks</b> — sentimen, bahasa, kemiripan</td>
+<td><img src="docs/images/segment-multiclass.jpg" alt="Selfie multiclass" /><br/><b>Segmentasi multikelas</b> — rambut, kulit, pakaian</td>
 </tr>
 <tr>
 <td><img src="docs/images/gallery-graph.png" alt="Graph API" /><br/><b>Graph API</b> — node paralel, kalkulator kustom</td>
@@ -114,6 +133,29 @@ var mask = segmenter.Segment(image).ConfidenceMask;
 using var canvas = image.ToImage();
 SegmentationMaskOverlay.BlurBackground(canvas, mask, sigma: 18);        // MediaPipeNet.Visualization
 canvas.SaveAsPng("potret.png");
+```
+
+**Pose kepala untuk AR** — matriks transformasi wajah:
+
+```csharp
+using var landmarker = FaceLandmarker.Create(new() { OutputFacialTransformationMatrixes = true });
+Matrix4x4 pose = landmarker.Detect(image).Faces[0].GetTransformMatrix()!.Value;   // wajah kanonis → kamera (cm)
+```
+
+**Audio dan teks:**
+
+```csharp
+using var audio = AudioClassifier.Create();
+foreach (var w in audio.Classify(AudioData.LoadWav("jalan.wav"))) Console.WriteLine($"{w.TimestampMs} ms {w.TopCategory}");
+
+using var bahasa = LanguageDetector.Create();
+Console.WriteLine(bahasa.Detect("Selamat pagi, apa kabar?").TopLanguage);         // id (97.6 %)
+```
+
+**Model Anda sendiri** (MediaPipe Model Maker, dikonversi dengan `convert_models.py --custom`):
+
+```csharp
+using var classifier = ImageClassifier.Create(new() { ModelPath = "models/makanan_saya.onnx" });   // label dari makanan_saya.labels.txt
 ```
 
 **Graph dari konfigurasi gaya MediaPipe:**
@@ -156,6 +198,14 @@ task dibandingkan end-to-end dengan **paket resmi MediaPipe Python 1.0.1** pada 
 | Segmentasi selfie | rata-rata 0.5072 | rata-rata 0.5080 |
 | Deteksi objek | dog 0.73 · cat 0.70 · dog 0.68 · cat 0.65 | 4 objek yang sama, IoU kotak > 0.85 |
 | Klasifikasi gambar | cheeseburger 0.889 | cheeseburger 0.848 |
+| Matriks transformasi wajah | translasi (−0.4, 22.5, −65.5) cm | dalam selisih 2° dan 1,5 cm |
+| Pose (disempurnakan heatmap) | 33 landmark | error rata-rata 0.0024 |
+| Tangan holistic (pose.jpg) | tangan kiri + kanan | error rata-rata < 0.01 |
+| Selfie multiclass | background 49.1 % · pakaian 41.5 % · wajah 5.8 % | tiap kategori dalam selisih 1,5 % |
+| Embedding gambar | burger/potongan 0.920 · burger/kucing 0.048 | 0.92 · 0.05 |
+| Audio (YAMNet) | Speech di 4 jendela, Tick di akhir | kelas teratas sama |
+| Sentimen teks (MobileBERT) | positive 0.9995 · negative 0.9999 | dalam selisih 0.01 |
+| Deteksi bahasa | id 0.976 · fr 0.9999 · de 0.9999 … | dalam selisih 0.001 |
 
 ## Performa
 
@@ -171,19 +221,25 @@ BenchmarkDotNet, Intel Core i7-8650U (2017, 4 core), provider CPU, input 640×48
 | HandLandmarker / GestureRecognizer | 31,4 / 31,8 ms | 11 / 12 KB |
 | PoseLandmarker (lite) | 36,9 ms | 11 KB |
 
+| ImageEmbedder | 3,6 ms | 7 KB |
+| AudioClassifier (klip 4,3 s) | 14,0 ms | 256 KB |
+| TextClassifier (MobileBERT / average word) | 56 / 0,02 ms | 4 / 2,5 KB |
+| LanguageDetector | 0,06 ms | 12 KB |
+
 NFR-1 meminta deteksi wajah di bawah 50 ms pada 640×480 di CPU 8-core modern; MediaPipe.NET hanya butuh 8 ms di
-laptop 4-core tahun 2017. Lihat [docs/id/performa.md](docs/id/performa.md).
+laptop 4-core tahun 2017. `ProcessBatch` menggandakan throughput offline. Lihat [docs/id/performa.md](docs/id/performa.md).
 
 ## Struktur repositori
 
 ```
-src/          Core · Imaging · Inference · Framework · Tasks.Vision · Visualization · Video.OpenCv · Extensions.DI · Cli · meta package
-models/       onnx/ (13 model hasil konversi) + proyek paket Gravicode.MediaPipeNet.Models.*
+src/          Core · Imaging · Inference · Framework · Tasks.Core · Tasks.Vision · Tasks.Audio · Tasks.Text ·
+              Visualization · Video.OpenCv · Extensions.DI · Cli · meta package
+models/       onnx/ (25 model hasil konversi + quantized/ varian FP16·INT8) + proyek paket Gravicode.MediaPipeNet.Models.*
 samples/      BasicUsage · GraphApiDemo · MediaPipeNet.Gallery (Avalonia)
-tests/        Core.Tests · Framework.Tests · Tasks.Tests (validasi silang golden) — 104 test
+tests/        Core.Tests · Framework.Tests · Tasks.Tests (validasi silang golden) — 159 test
 benchmarks/   suite BenchmarkDotNet
 notebooks/    MediaPipeNet_QuickStart.ipynb (Polyglot Notebooks)
-tools/        model-conversion (TFLite → ONNX + validasi) · golden (referensi MediaPipe Python)
+tools/        model-conversion (TFLite → ONNX, validasi, kuantisasi, model kustom) · golden (referensi MediaPipe Python) · update_public_api.py
 docs/         dokumentasi en/ dan id/, images/
 ```
 
@@ -201,6 +257,8 @@ dotnet run --project samples/MediaPipeNet.Gallery
 |---|---|
 | [Memulai](docs/id/memulai.md) | [Getting started](docs/en/getting-started.md) |
 | [Task](docs/id/task.md) | [Tasks](docs/en/tasks.md) |
+| [Task audio & teks](docs/id/audio-dan-teks.md) | [Audio & text tasks](docs/en/audio-and-text.md) |
+| [Model kustom](docs/id/model-kustom.md) | [Custom models](docs/en/custom-models.md) |
 | [Mode & video langsung](docs/id/video-dan-live-stream.md) | [Running modes & live video](docs/en/video-and-live-stream.md) |
 | [Graph API](docs/id/graph-api.md) | [Graph API](docs/en/graph-api.md) |
 | [Model](docs/id/model.md) | [Models](docs/en/models.md) |
@@ -212,6 +270,15 @@ dotnet run --project samples/MediaPipeNet.Gallery
 | [Pengujian & validasi](docs/id/pengujian.md) | [Testing & validation](docs/en/testing.md) |
 | [Referensi API](docs/id/referensi-api.md) | [API reference](docs/en/api-reference.md) |
 | [Pemecahan masalah](docs/id/pemecahan-masalah.md) | [Troubleshooting](docs/en/troubleshooting.md) |
+| [Platform (MAUI, Blazor WASM)](docs/id/platform.md) | [Platforms (MAUI, Blazor WASM)](docs/en/platforms.md) |
+
+## Yang baru di 0.3.0
+
+Wajah full-range, matriks transformasi wajah, pose yang disempurnakan heatmap, pipeline tangan holistic MediaPipe,
+segmentasi multikelas/rambut/DeepLab dan interaktif, embedding gambar, paket audio dan teks baru, varian model
+FP16/INT8, batch, I/O binding, model kustom, loop/executor/subgraph/tracing pada graph, serta baseline review API.
+Upgrade dari 0.1: tambahkan `using MediaPipeNet.Tasks;` di tempat Anda menyebut `BaseOptions`. Lihat
+[CHANGELOG](CHANGELOG.md).
 
 ## Lisensi
 

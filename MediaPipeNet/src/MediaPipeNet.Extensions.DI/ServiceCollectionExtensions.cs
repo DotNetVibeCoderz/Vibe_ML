@@ -1,10 +1,13 @@
-using MediaPipeNet.Inference;
+﻿using MediaPipeNet.Inference;
 using MediaPipeNet.Inference.Models;
+using MediaPipeNet.Tasks.Audio;
+using MediaPipeNet.Tasks.Text;
 using MediaPipeNet.Tasks.Vision;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MediaPipeNet.Tasks;
 
 namespace MediaPipeNet.Extensions.DependencyInjection;
 
@@ -110,6 +113,34 @@ public static class ServiceCollectionExtensions
     /// <summary>Registers an <see cref="ImageClassifier"/> singleton.</summary>
     public static IMediaPipeNetBuilder AddImageClassifier(this IMediaPipeNetBuilder builder, Func<ImageClassifierOptions, ImageClassifierOptions>? configure = null) =>
         Add(builder, b => ImageClassifier.Create(Configure(new ImageClassifierOptions { BaseOptions = b }, configure)));
+
+    /// <summary>Registers an <see cref="ImageEmbedder"/> singleton.</summary>
+    public static IMediaPipeNetBuilder AddImageEmbedder(this IMediaPipeNetBuilder builder, Func<ImageEmbedderOptions, ImageEmbedderOptions>? configure = null) =>
+        Add(builder, b => ImageEmbedder.Create(Configure(new ImageEmbedderOptions { BaseOptions = b }, configure)));
+
+    /// <summary>Registers an <see cref="InteractiveSegmenter"/> singleton.</summary>
+    public static IMediaPipeNetBuilder AddInteractiveSegmenter(this IMediaPipeNetBuilder builder, Func<InteractiveSegmenterOptions, InteractiveSegmenterOptions>? configure = null) =>
+        Add(builder, b => InteractiveSegmenter.Create(Configure(new InteractiveSegmenterOptions { BaseOptions = b }, configure)));
+
+    /// <summary>Registers an <see cref="AudioClassifier"/> singleton (audio-clips mode).</summary>
+    public static IMediaPipeNetBuilder AddAudioClassifier(this IMediaPipeNetBuilder builder, Func<AudioClassifierOptions, AudioClassifierOptions>? configure = null) =>
+        Add(builder, b => AudioClassifier.Create(Configure(new AudioClassifierOptions { BaseOptions = b }, configure)));
+
+    /// <summary>Registers a <see cref="VoiceActivityDetector"/> singleton (audio-clips mode).</summary>
+    public static IMediaPipeNetBuilder AddVoiceActivityDetector(this IMediaPipeNetBuilder builder, Func<VoiceActivityDetectorOptions, VoiceActivityDetectorOptions>? configure = null) =>
+        Add(builder, b => VoiceActivityDetector.Create(Configure(new VoiceActivityDetectorOptions { BaseOptions = b }, configure)));
+
+    /// <summary>Registers a <see cref="TextClassifier"/> singleton.</summary>
+    public static IMediaPipeNetBuilder AddTextClassifier(this IMediaPipeNetBuilder builder, Func<TextClassifierOptions, TextClassifierOptions>? configure = null) =>
+        Add(builder, b => TextClassifier.Create(Configure(new TextClassifierOptions { BaseOptions = b }, configure)));
+
+    /// <summary>Registers a <see cref="TextEmbedder"/> singleton.</summary>
+    public static IMediaPipeNetBuilder AddTextEmbedder(this IMediaPipeNetBuilder builder, Func<TextEmbedderOptions, TextEmbedderOptions>? configure = null) =>
+        Add(builder, b => TextEmbedder.Create(Configure(new TextEmbedderOptions { BaseOptions = b }, configure)));
+
+    /// <summary>Registers a <see cref="LanguageDetector"/> singleton.</summary>
+    public static IMediaPipeNetBuilder AddLanguageDetector(this IMediaPipeNetBuilder builder, Func<LanguageDetectorOptions, LanguageDetectorOptions>? configure = null) =>
+        Add(builder, b => LanguageDetector.Create(Configure(new LanguageDetectorOptions { BaseOptions = b }, configure)));
 
     // Registered tasks are shared singletons, so they are always created in RunningMode.Image (thread-safe).
     private static T Configure<T>(T options, Func<T, T>? configure) where T : class => configure?.Invoke(options) ?? options;

@@ -1,4 +1,4 @@
-using MediaPipeNet.Imaging;
+﻿using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference;
 using MediaPipeNet.Inference.Models;
 using MediaPipeNet.Tasks.Vision.Processing;
@@ -103,17 +103,25 @@ public sealed class HandLandmarker : VisionTaskBase<HandLandmarkResult>
             }
         }
 
-        _tracked.Clear();
+        // Tracking state is only touched in video / live-stream mode, so image-mode calls are thread-safe.
         var hands = new List<HandLandmarks>(rois.Count);
+        var seen = new List<NormalizedRect>(rois.Count);
+        var nextTracked = new List<NormalizedRect>(rois.Count);
         foreach (var roi in rois)
         {
             var hand = RunLandmarks(image, roi);
             if (hand.PresenceScore < Options.MinHandPresenceConfidence) continue;
             // Two ROIs can converge on the same hand while tracking; keep the first.
             var next = RoiCalculator.FromHandLandmarks(hand.Landmarks, w, h);
-            if (_tracked.Exists(t => RoiCalculator.Overlap(t, next) > 0.5f)) continue;
+            if (seen.Exists(t => RoiCalculator.Overlap(t, next) > 0.5f)) continue;
+            seen.Add(next);
             hands.Add(hand);
-            if (tracking && hand.PresenceScore >= Options.MinTrackingConfidence) _tracked.Add(next);
+            if (hand.PresenceScore >= Options.MinTrackingConfidence) nextTracked.Add(next);
+        }
+        if (tracking)
+        {
+            _tracked.Clear();
+            _tracked.AddRange(nextTracked);
         }
         return hands.Count == 0 ? HandLandmarkResult.Empty : new HandLandmarkResult(hands);
     }

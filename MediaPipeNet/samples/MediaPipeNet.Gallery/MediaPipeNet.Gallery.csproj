@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -14,6 +14,7 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
     <None Include="..\..\tests\assets\images\*.jpg" Link="images\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\tests\assets\audio\*.wav" Link="audio\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -36,8 +37,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediaPipeNet.Visualization\MediaPipeNet.Visualization.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Tasks.Audio\MediaPipeNet.Tasks.Audio.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Tasks.Text\MediaPipeNet.Tasks.Text.csproj" />
     <ProjectReference Include="..\..\src\MediaPipeNet.Video.OpenCv\MediaPipeNet.Video.OpenCv.csproj" />
     <ProjectReference Include="..\..\models\MediaPipeNet.Models.All\MediaPipeNet.Models.All.csproj" />
+    <ProjectReference Include="..\..\models\MediaPipeNet.Models.Quantized\MediaPipeNet.Models.Quantized.csproj" />
   </ItemGroup>
 
 </Project>

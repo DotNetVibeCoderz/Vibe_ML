@@ -9,7 +9,7 @@ bawaan atau gambar dan webcam Anda sendiri, atur opsinya, baca hasilnya, lalu sa
 dotnet run --project samples/MediaPipeNet.Gallery -c Release
 ```
 
-Aplikasi membundel semua model (`Gravicode.MediaPipeNet.Models.All`) sehingga berjalan offline. Di Windows aplikasi memakai
+Aplikasi membundel semua model (`Gravicode.MediaPipeNet.Models.All` dan `.Models.Quantized`) sehingga berjalan offline. Di Windows aplikasi memakai
 build DirectML dari ONNX Runtime; provider default adalah CPU dan dapat diganti di *Pengaturan*.
 
 ## Halaman
@@ -17,14 +17,16 @@ build DirectML dari ONNX Runtime; provider default adalah CPU dan dapat diganti 
 | Halaman | Isi |
 |---|---|
 | Ikhtisar | Hasil holistic langsung di stage dan kartu untuk setiap task. |
-| Deteksi wajah · Deteksi objek | Kotak, keypoint, dan label. |
-| Face mesh · Landmark tangan · Pengenalan gestur · Landmark pose · Holistic | Overlay landmark beserta ROI berotasi (garis putus-putus) tempat model dijalankan. |
-| Segmentasi selfie · Klasifikasi gambar | Efek mask / blur / latar studio; label top-K. |
+| Deteksi wajah · Deteksi objek | Kotak, keypoint, dan label; model wajah short- atau full-range. |
+| Face mesh · Landmark tangan · Pengenalan gestur · Landmark pose · Holistic | Overlay landmark beserta ROI berotasi (garis putus-putus) tempat model dijalankan; pose kepala (yaw/pitch/roll, jarak) dari matriks transformasi wajah. |
+| Segmentasi gambar · Segmentasi interaktif · Embedding gambar · Klasifikasi gambar | Mask selfie / multikelas / rambut / DeepLab dengan blur, latar studio, atau kategori berwarna; potongan MagicTouch pada titik yang dapat digeser; kemiripan dengan gambar contoh; label top-K. |
+| Klasifikasi audio | Waveform dengan segmen ucapan terdeteksi, event YAMNet per jendela, klip bawaan atau nada/derau sintetis, atau WAV apa pun. |
+| Pemahaman teks | Sentimen (MobileBERT dan average word), bahasa (110), dan kemiripan kalimat untuk teks apa pun. |
 | Kamera langsung | Task apa pun pada webcam dalam mode video: FPS, latensi, frame dibuang. |
 | Graph API | Skema graph kustom (node wajah + tangan paralel, join, dan node pixelation kustom), output-nya, serta konfigurasi `.pbtxt` yang bisa diedit dan dijalankan. |
 | Benchmark | Latensi per task di mesin Anda pada 640×480, dengan garis target NFR-1. |
 | Model | Status katalog, verifikasi SHA-256, unduh model yang belum ada. |
-| Pengaturan | Execution provider, thread CPU, bahasa (English / Bahasa Indonesia), tema (terang / gelap), folder model tambahan, titik landmark. |
+| Pengaturan | Execution provider, thread CPU, presisi model (FP32 / FP16 / INT8), bahasa (English / Bahasa Indonesia), tema (terang / gelap), folder model tambahan, titik landmark. |
 | Tentang | Kredit dan lisensi. |
 
 Setiap halaman task punya tiga tab: **Pratinjau** (stage dengan overlay dan readout instrumen: latensi · provider ·
@@ -43,6 +45,8 @@ ukuran gambar · ringkasan), **Kode C#** (snippet yang mengikuti nilai opsi saat
 | ![Klasifikasi](../images/gallery-classify.png) | ![Deteksi wajah](../images/gallery-faces.png) |
 | ![Graph API](../images/gallery-graph.png) | ![Benchmark](../images/gallery-benchmark.png) |
 | ![Model](../images/gallery-models.png) | ![Kamera langsung](../images/gallery-live.png) |
+| ![Segmentasi interaktif](../images/gallery-interactive.png) | ![Embedding gambar](../images/gallery-embed.png) |
+| ![Klasifikasi audio](../images/gallery-audio.png) | ![Pemahaman teks](../images/gallery-text.png) |
 
 ## Desain
 
@@ -65,7 +69,8 @@ tersebut tanpa mengubah pengaturan tersimpan.
 
 | Folder | |
 |---|---|
-| `Services/TaskCatalog.cs` | Definisi sembilan task: opsi, render overlay, baris hasil, snippet kode. |
+| `Services/TaskCatalog.cs` | Definisi task vision: opsi, render overlay, baris hasil, snippet kode. |
+| `Views/AudioTextViews.cs` | Halaman audio (waveform, event, VAD) dan teks. |
 | `Controls/StageView.cs` | Kontrol viewfinder (fit gambar, overlay vektor, tanda registrasi, readout). |
 | `Controls/GraphDiagram.cs` | Skema berlapis untuk `CalculatorGraph` apa pun (memakai `GetEdges()`). |
 | `Views/*` | Halaman. `MainWindow.cs` mengatur navigasi dan mode screenshot. |

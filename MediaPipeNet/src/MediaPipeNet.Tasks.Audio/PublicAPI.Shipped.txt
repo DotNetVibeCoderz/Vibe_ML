@@ -1,0 +1,147 @@
+#nullable enable
+MediaPipeNet.Tasks.Audio.AudioClassificationResult
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.<Clone>$() -> MediaPipeNet.Tasks.Audio.AudioClassificationResult!
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.AudioClassificationResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>! Categories, long TimestampMs) -> void
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.Categories.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>!
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.Categories.init -> void
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>! Categories, out long TimestampMs) -> void
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.Equals(MediaPipeNet.Tasks.Audio.AudioClassificationResult? other) -> bool
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.TimestampMs.get -> long
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.TimestampMs.init -> void
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.ToJson(bool indented = false) -> string!
+MediaPipeNet.Tasks.Audio.AudioClassificationResult.TopCategory.get -> MediaPipeNet.Category?
+MediaPipeNet.Tasks.Audio.AudioClassifier
+MediaPipeNet.Tasks.Audio.AudioClassifier.Classify(MediaPipeNet.Tasks.Audio.AudioData! audio) -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.AudioClassificationResult!>!
+MediaPipeNet.Tasks.Audio.AudioClassifier.ClassifyAsync(MediaPipeNet.Tasks.Audio.AudioData! audio, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.AudioClassificationResult!>!>!
+MediaPipeNet.Tasks.Audio.AudioClassifier.ClassifyStream(MediaPipeNet.Tasks.Audio.AudioData! chunk, long timestampMs) -> void
+MediaPipeNet.Tasks.Audio.AudioClassifier.Dispose() -> void
+MediaPipeNet.Tasks.Audio.AudioClassifier.Options.get -> MediaPipeNet.Tasks.Audio.AudioClassifierOptions!
+MediaPipeNet.Tasks.Audio.AudioClassifier.ResetStream() -> void
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.<Clone>$() -> MediaPipeNet.Tasks.Audio.AudioClassifierOptions!
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.AudioClassifierOptions() -> void
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.BaseOptions.get -> MediaPipeNet.Tasks.BaseOptions!
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.BaseOptions.init -> void
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.Classifier.get -> MediaPipeNet.Tasks.ClassifierOptions!
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.Classifier.init -> void
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.Equals(MediaPipeNet.Tasks.Audio.AudioClassifierOptions? other) -> bool
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.Labels.get -> System.Collections.Generic.IReadOnlyList<string!>?
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.Labels.init -> void
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.ModelPath.get -> string?
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.ModelPath.init -> void
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.ResultCallback.get -> System.Action<MediaPipeNet.Tasks.Audio.AudioClassificationResult!>?
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.ResultCallback.init -> void
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.RunningMode.get -> MediaPipeNet.Tasks.Audio.AudioRunningMode
+MediaPipeNet.Tasks.Audio.AudioClassifierOptions.RunningMode.init -> void
+MediaPipeNet.Tasks.Audio.AudioData
+MediaPipeNet.Tasks.Audio.AudioData.AudioData(float[]! samples, int sampleRate) -> void
+MediaPipeNet.Tasks.Audio.AudioData.Duration.get -> System.TimeSpan
+MediaPipeNet.Tasks.Audio.AudioData.Resample(int targetSampleRate) -> MediaPipeNet.Tasks.Audio.AudioData!
+MediaPipeNet.Tasks.Audio.AudioData.SampleRate.get -> int
+MediaPipeNet.Tasks.Audio.AudioData.Samples.get -> float[]!
+MediaPipeNet.Tasks.Audio.AudioRunningMode
+MediaPipeNet.Tasks.Audio.AudioRunningMode.AudioClips = 0 -> MediaPipeNet.Tasks.Audio.AudioRunningMode
+MediaPipeNet.Tasks.Audio.AudioRunningMode.AudioStream = 1 -> MediaPipeNet.Tasks.Audio.AudioRunningMode
+MediaPipeNet.Tasks.Audio.SpeechSegment
+MediaPipeNet.Tasks.Audio.SpeechSegment.Deconstruct(out long StartMs, out long EndMs, out float MeanProbability) -> void
+MediaPipeNet.Tasks.Audio.SpeechSegment.DurationMs.get -> long
+MediaPipeNet.Tasks.Audio.SpeechSegment.EndMs.get -> long
+MediaPipeNet.Tasks.Audio.SpeechSegment.EndMs.init -> void
+MediaPipeNet.Tasks.Audio.SpeechSegment.Equals(MediaPipeNet.Tasks.Audio.SpeechSegment other) -> bool
+MediaPipeNet.Tasks.Audio.SpeechSegment.MeanProbability.get -> float
+MediaPipeNet.Tasks.Audio.SpeechSegment.MeanProbability.init -> void
+MediaPipeNet.Tasks.Audio.SpeechSegment.SpeechSegment() -> void
+MediaPipeNet.Tasks.Audio.SpeechSegment.SpeechSegment(long StartMs, long EndMs, float MeanProbability) -> void
+MediaPipeNet.Tasks.Audio.SpeechSegment.StartMs.get -> long
+MediaPipeNet.Tasks.Audio.SpeechSegment.StartMs.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetector
+MediaPipeNet.Tasks.Audio.VoiceActivityDetector.Detect(MediaPipeNet.Tasks.Audio.AudioData! audio) -> MediaPipeNet.Tasks.Audio.VoiceActivityResult!
+MediaPipeNet.Tasks.Audio.VoiceActivityDetector.DetectAsync(MediaPipeNet.Tasks.Audio.AudioData! audio, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Audio.VoiceActivityResult!>!
+MediaPipeNet.Tasks.Audio.VoiceActivityDetector.DetectStream(MediaPipeNet.Tasks.Audio.AudioData! chunk, long timestampMs) -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetector.Dispose() -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetector.Options.get -> MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions!
+MediaPipeNet.Tasks.Audio.VoiceActivityDetector.ResetStream() -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.<Clone>$() -> MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions!
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.BaseOptions.get -> MediaPipeNet.Tasks.BaseOptions!
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.BaseOptions.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.Equals(MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions? other) -> bool
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.FrameCallback.get -> System.Action<MediaPipeNet.Tasks.Audio.VoiceActivityFrame>?
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.FrameCallback.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.HopMs.get -> int
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.HopMs.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.MinSilenceMs.get -> int
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.MinSilenceMs.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.MinSpeechMs.get -> int
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.MinSpeechMs.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.RunningMode.get -> MediaPipeNet.Tasks.Audio.AudioRunningMode
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.RunningMode.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.Threshold.get -> float
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.Threshold.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.VoiceActivityDetectorOptions() -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.Deconstruct(out long TimestampMs, out long DurationMs, out float SpeechProbability, out bool IsSpeech) -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.DurationMs.get -> long
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.DurationMs.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.Equals(MediaPipeNet.Tasks.Audio.VoiceActivityFrame other) -> bool
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.IsSpeech.get -> bool
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.IsSpeech.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.SpeechProbability.get -> float
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.SpeechProbability.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.TimestampMs.get -> long
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.TimestampMs.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.VoiceActivityFrame() -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityFrame.VoiceActivityFrame(long TimestampMs, long DurationMs, float SpeechProbability, bool IsSpeech) -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityResult
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.<Clone>$() -> MediaPipeNet.Tasks.Audio.VoiceActivityResult!
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.VoiceActivityFrame>! Frames, out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.SpeechSegment>! Segments) -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.Equals(MediaPipeNet.Tasks.Audio.VoiceActivityResult? other) -> bool
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.Frames.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.VoiceActivityFrame>!
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.Frames.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.Segments.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.SpeechSegment>!
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.Segments.init -> void
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.SpeechRatio.get -> float
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.ToJson(bool indented = false) -> string!
+MediaPipeNet.Tasks.Audio.VoiceActivityResult.VoiceActivityResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.VoiceActivityFrame>! Frames, System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.SpeechSegment>! Segments) -> void
+override MediaPipeNet.Tasks.Audio.AudioClassificationResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Audio.AudioClassificationResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Audio.AudioClassificationResult.ToString() -> string!
+override MediaPipeNet.Tasks.Audio.AudioClassifierOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Audio.AudioClassifierOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.Audio.AudioClassifierOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Audio.SpeechSegment.GetHashCode() -> int
+override MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Audio.VoiceActivityFrame.GetHashCode() -> int
+override MediaPipeNet.Tasks.Audio.VoiceActivityResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Audio.VoiceActivityResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Audio.VoiceActivityResult.ToString() -> string!
+static MediaPipeNet.Tasks.Audio.AudioClassificationResult.operator !=(MediaPipeNet.Tasks.Audio.AudioClassificationResult? left, MediaPipeNet.Tasks.Audio.AudioClassificationResult? right) -> bool
+static MediaPipeNet.Tasks.Audio.AudioClassificationResult.operator ==(MediaPipeNet.Tasks.Audio.AudioClassificationResult? left, MediaPipeNet.Tasks.Audio.AudioClassificationResult? right) -> bool
+static MediaPipeNet.Tasks.Audio.AudioClassifier.Create(MediaPipeNet.Tasks.Audio.AudioClassifierOptions? options = null) -> MediaPipeNet.Tasks.Audio.AudioClassifier!
+static MediaPipeNet.Tasks.Audio.AudioClassifier.CreateAsync(MediaPipeNet.Tasks.Audio.AudioClassifierOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Audio.AudioClassifier!>!
+static MediaPipeNet.Tasks.Audio.AudioClassifier.Labels.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static MediaPipeNet.Tasks.Audio.AudioClassifierOptions.operator !=(MediaPipeNet.Tasks.Audio.AudioClassifierOptions? left, MediaPipeNet.Tasks.Audio.AudioClassifierOptions? right) -> bool
+static MediaPipeNet.Tasks.Audio.AudioClassifierOptions.operator ==(MediaPipeNet.Tasks.Audio.AudioClassifierOptions? left, MediaPipeNet.Tasks.Audio.AudioClassifierOptions? right) -> bool
+static MediaPipeNet.Tasks.Audio.AudioData.FromInterleaved(System.ReadOnlySpan<float> interleaved, int sampleRate, int channels = 1) -> MediaPipeNet.Tasks.Audio.AudioData!
+static MediaPipeNet.Tasks.Audio.AudioData.FromPcm16(System.ReadOnlySpan<short> interleaved, int sampleRate, int channels = 1) -> MediaPipeNet.Tasks.Audio.AudioData!
+static MediaPipeNet.Tasks.Audio.AudioData.LoadWav(System.IO.Stream! stream) -> MediaPipeNet.Tasks.Audio.AudioData!
+static MediaPipeNet.Tasks.Audio.AudioData.LoadWav(System.ReadOnlySpan<byte> wav) -> MediaPipeNet.Tasks.Audio.AudioData!
+static MediaPipeNet.Tasks.Audio.AudioData.LoadWav(string! path) -> MediaPipeNet.Tasks.Audio.AudioData!
+static MediaPipeNet.Tasks.Audio.SpeechSegment.operator !=(MediaPipeNet.Tasks.Audio.SpeechSegment left, MediaPipeNet.Tasks.Audio.SpeechSegment right) -> bool
+static MediaPipeNet.Tasks.Audio.SpeechSegment.operator ==(MediaPipeNet.Tasks.Audio.SpeechSegment left, MediaPipeNet.Tasks.Audio.SpeechSegment right) -> bool
+static MediaPipeNet.Tasks.Audio.VoiceActivityDetector.Create(MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions? options = null) -> MediaPipeNet.Tasks.Audio.VoiceActivityDetector!
+static MediaPipeNet.Tasks.Audio.VoiceActivityDetector.CreateAsync(MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Audio.VoiceActivityDetector!>!
+static MediaPipeNet.Tasks.Audio.VoiceActivityDetector.Merge(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.VoiceActivityFrame>! frames, int minSilenceMs, int minSpeechMs) -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Audio.SpeechSegment>!
+static MediaPipeNet.Tasks.Audio.VoiceActivityDetector.SpeechClasses.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.operator !=(MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions? left, MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions? right) -> bool
+static MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions.operator ==(MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions? left, MediaPipeNet.Tasks.Audio.VoiceActivityDetectorOptions? right) -> bool
+static MediaPipeNet.Tasks.Audio.VoiceActivityFrame.operator !=(MediaPipeNet.Tasks.Audio.VoiceActivityFrame left, MediaPipeNet.Tasks.Audio.VoiceActivityFrame right) -> bool
+static MediaPipeNet.Tasks.Audio.VoiceActivityFrame.operator ==(MediaPipeNet.Tasks.Audio.VoiceActivityFrame left, MediaPipeNet.Tasks.Audio.VoiceActivityFrame right) -> bool
+static MediaPipeNet.Tasks.Audio.VoiceActivityResult.operator !=(MediaPipeNet.Tasks.Audio.VoiceActivityResult? left, MediaPipeNet.Tasks.Audio.VoiceActivityResult? right) -> bool
+static MediaPipeNet.Tasks.Audio.VoiceActivityResult.operator ==(MediaPipeNet.Tasks.Audio.VoiceActivityResult? left, MediaPipeNet.Tasks.Audio.VoiceActivityResult? right) -> bool
+~override MediaPipeNet.Tasks.Audio.SpeechSegment.Equals(object obj) -> bool
+~override MediaPipeNet.Tasks.Audio.SpeechSegment.ToString() -> string
+~override MediaPipeNet.Tasks.Audio.VoiceActivityFrame.Equals(object obj) -> bool
+~override MediaPipeNet.Tasks.Audio.VoiceActivityFrame.ToString() -> string

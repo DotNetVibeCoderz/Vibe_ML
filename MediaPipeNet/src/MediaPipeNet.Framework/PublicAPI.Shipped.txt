@@ -1,0 +1,294 @@
+#nullable enable
+MediaPipeNet.Framework.CalculatorContext
+MediaPipeNet.Framework.CalculatorContext.CancellationToken.get -> System.Threading.CancellationToken
+MediaPipeNet.Framework.CalculatorContext.GetInput<T>(string! tag) -> T
+MediaPipeNet.Framework.CalculatorContext.GetInputOrDefault<T>(string! tag, T fallback = default(T)) -> T
+MediaPipeNet.Framework.CalculatorContext.GetInputPacket(string! tag) -> MediaPipeNet.Framework.Packet?
+MediaPipeNet.Framework.CalculatorContext.GetSidePacket<T>(string! tag) -> T
+MediaPipeNet.Framework.CalculatorContext.HasInput(string! tag) -> bool
+MediaPipeNet.Framework.CalculatorContext.InputTags.get -> System.Collections.Generic.IEnumerable<string!>!
+MediaPipeNet.Framework.CalculatorContext.InputTimestamp.get -> MediaPipeNet.Timestamp
+MediaPipeNet.Framework.CalculatorContext.IsOutputConnected(string! tag) -> bool
+MediaPipeNet.Framework.CalculatorContext.Logger.get -> Microsoft.Extensions.Logging.ILogger!
+MediaPipeNet.Framework.CalculatorContext.NodeName.get -> string!
+MediaPipeNet.Framework.CalculatorContext.OutputTags.get -> System.Collections.Generic.IEnumerable<string!>!
+MediaPipeNet.Framework.CalculatorContext.Send<T>(string! tag, T value) -> void
+MediaPipeNet.Framework.CalculatorContext.Send<T>(string! tag, T value, MediaPipeNet.Timestamp timestamp) -> void
+MediaPipeNet.Framework.CalculatorContext.SendPacket(string! tag, MediaPipeNet.Framework.Packet! packet) -> void
+MediaPipeNet.Framework.CalculatorContext.SetNextTimestampBound(string! tag, MediaPipeNet.Timestamp bound) -> void
+MediaPipeNet.Framework.CalculatorContext.TryGetInput<T>(string! tag, out T value) -> bool
+MediaPipeNet.Framework.CalculatorContext.TryGetSidePacket<T>(string! tag, out T value) -> bool
+MediaPipeNet.Framework.CalculatorContract
+MediaPipeNet.Framework.CalculatorContract.AddInput(string! tag, System.Type! type, bool optional = false) -> MediaPipeNet.Framework.CalculatorContract!
+MediaPipeNet.Framework.CalculatorContract.AddInput<T>(string! tag, bool optional = false) -> MediaPipeNet.Framework.CalculatorContract!
+MediaPipeNet.Framework.CalculatorContract.AddInputSidePacket<T>(string! tag, bool optional = false) -> MediaPipeNet.Framework.CalculatorContract!
+MediaPipeNet.Framework.CalculatorContract.AddOutput(string! tag, System.Type! type, bool optional = true) -> MediaPipeNet.Framework.CalculatorContract!
+MediaPipeNet.Framework.CalculatorContract.AddOutput<T>(string! tag, bool optional = true) -> MediaPipeNet.Framework.CalculatorContract!
+MediaPipeNet.Framework.CalculatorContract.CalculatorContract() -> void
+MediaPipeNet.Framework.CalculatorContract.InputPolicy.get -> MediaPipeNet.Framework.InputPolicy
+MediaPipeNet.Framework.CalculatorContract.InputPolicy.set -> void
+MediaPipeNet.Framework.CalculatorContract.InputSidePackets.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Framework.PortSpec!>!
+MediaPipeNet.Framework.CalculatorContract.Inputs.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Framework.PortSpec!>!
+MediaPipeNet.Framework.CalculatorContract.Outputs.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Framework.PortSpec!>!
+MediaPipeNet.Framework.CalculatorContract.PropagateTimestampBounds.get -> bool
+MediaPipeNet.Framework.CalculatorContract.PropagateTimestampBounds.set -> void
+MediaPipeNet.Framework.CalculatorGraph
+MediaPipeNet.Framework.CalculatorGraph.AddPacket(string! stream, MediaPipeNet.Framework.Packet! packet) -> bool
+MediaPipeNet.Framework.CalculatorGraph.AddPacket<T>(string! stream, T value, long timestampMs) -> bool
+MediaPipeNet.Framework.CalculatorGraph.Cancel() -> void
+MediaPipeNet.Framework.CalculatorGraph.CloseAllInputStreams() -> void
+MediaPipeNet.Framework.CalculatorGraph.CloseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+MediaPipeNet.Framework.CalculatorGraph.CloseInputStream(string! stream) -> void
+MediaPipeNet.Framework.CalculatorGraph.CreateOutputStreamPoller<T>(string! stream, int capacity = 0) -> System.Threading.Channels.ChannelReader<MediaPipeNet.Framework.Packet<T>!>!
+MediaPipeNet.Framework.CalculatorGraph.DisposeAsync() -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Framework.CalculatorGraph.DroppedPackets.get -> long
+MediaPipeNet.Framework.CalculatorGraph.Error.get -> System.Exception?
+MediaPipeNet.Framework.CalculatorGraph.Failed -> System.EventHandler<System.Exception!>?
+MediaPipeNet.Framework.CalculatorGraph.GetEdges() -> System.Collections.Generic.IReadOnlyList<(string! From, string! To, string! Stream)>!
+MediaPipeNet.Framework.CalculatorGraph.GetNodeType(string! nodeName) -> string!
+MediaPipeNet.Framework.CalculatorGraph.GetTraceEvents() -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Framework.GraphTraceEvent>!
+MediaPipeNet.Framework.CalculatorGraph.InFlightCount.get -> int
+MediaPipeNet.Framework.CalculatorGraph.IsTracing.get -> bool
+MediaPipeNet.Framework.CalculatorGraph.NodeNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
+MediaPipeNet.Framework.CalculatorGraph.ObserveOutputStream<T>(string! stream, System.Action<MediaPipeNet.Framework.Packet<T>!>! callback) -> void
+MediaPipeNet.Framework.CalculatorGraph.StartAsync(System.Collections.Generic.IReadOnlyDictionary<string!, object?>? sidePackets = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+MediaPipeNet.Framework.CalculatorGraph.State.get -> MediaPipeNet.Framework.GraphState
+MediaPipeNet.Framework.CalculatorGraph.StreamNames.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+MediaPipeNet.Framework.CalculatorGraph.ToMermaid() -> string!
+MediaPipeNet.Framework.CalculatorGraph.WaitUntilDoneAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+MediaPipeNet.Framework.CalculatorGraph.WaitUntilIdleAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+MediaPipeNet.Framework.CalculatorGraph.WriteChromeTrace(System.IO.Stream! stream) -> void
+MediaPipeNet.Framework.CalculatorNode
+MediaPipeNet.Framework.CalculatorNode.CalculatorNode() -> void
+MediaPipeNet.Framework.Config.CalculatorRegistry
+MediaPipeNet.Framework.Config.CalculatorRegistry.CalculatorRegistry() -> void
+MediaPipeNet.Framework.Config.CalculatorRegistry.Create(MediaPipeNet.Framework.Config.NodeConfig! config) -> MediaPipeNet.Framework.ICalculatorNode!
+MediaPipeNet.Framework.Config.CalculatorRegistry.Names.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+MediaPipeNet.Framework.Config.CalculatorRegistry.Register(string! name, System.Func<MediaPipeNet.Framework.Config.NodeConfig!, MediaPipeNet.Framework.ICalculatorNode!>! factory) -> MediaPipeNet.Framework.Config.CalculatorRegistry!
+MediaPipeNet.Framework.Config.CalculatorRegistry.RegisterSubgraph(string! name, MediaPipeNet.Framework.Config.GraphConfig! config) -> MediaPipeNet.Framework.Config.CalculatorRegistry!
+MediaPipeNet.Framework.Config.CalculatorRegistry.TryGetSubgraph(string! name, out MediaPipeNet.Framework.Config.GraphConfig? config) -> bool
+MediaPipeNet.Framework.Config.GraphConfig
+MediaPipeNet.Framework.Config.GraphConfig.<Clone>$() -> MediaPipeNet.Framework.Config.GraphConfig!
+MediaPipeNet.Framework.Config.GraphConfig.Build(MediaPipeNet.Framework.Config.CalculatorRegistry? registry = null, MediaPipeNet.Framework.GraphOptions? options = null) -> MediaPipeNet.Framework.CalculatorGraph!
+MediaPipeNet.Framework.Config.GraphConfig.EnableTracing.get -> bool
+MediaPipeNet.Framework.Config.GraphConfig.EnableTracing.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.Equals(MediaPipeNet.Framework.Config.GraphConfig? other) -> bool
+MediaPipeNet.Framework.Config.GraphConfig.Executors.get -> System.Collections.Generic.Dictionary<string!, int>!
+MediaPipeNet.Framework.Config.GraphConfig.Executors.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.GraphConfig() -> void
+MediaPipeNet.Framework.Config.GraphConfig.InputSidePackets.get -> System.Collections.Generic.List<string!>!
+MediaPipeNet.Framework.Config.GraphConfig.InputSidePackets.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.InputStreams.get -> System.Collections.Generic.List<string!>!
+MediaPipeNet.Framework.Config.GraphConfig.InputStreams.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.MaxInFlight.get -> int
+MediaPipeNet.Framework.Config.GraphConfig.MaxInFlight.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.MaxQueueSize.get -> int
+MediaPipeNet.Framework.Config.GraphConfig.MaxQueueSize.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.Nodes.get -> System.Collections.Generic.List<MediaPipeNet.Framework.Config.NodeConfig!>!
+MediaPipeNet.Framework.Config.GraphConfig.Nodes.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.OutputStreams.get -> System.Collections.Generic.List<string!>!
+MediaPipeNet.Framework.Config.GraphConfig.OutputStreams.init -> void
+MediaPipeNet.Framework.Config.GraphConfig.ToBuilder(MediaPipeNet.Framework.Config.CalculatorRegistry? registry = null, MediaPipeNet.Framework.GraphOptions? options = null) -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.Config.GraphConfig.ToPbtxt() -> string!
+MediaPipeNet.Framework.Config.NodeConfig
+MediaPipeNet.Framework.Config.NodeConfig.<Clone>$() -> MediaPipeNet.Framework.Config.NodeConfig!
+MediaPipeNet.Framework.Config.NodeConfig.BackEdgeTags.get -> System.Collections.Generic.HashSet<string!>!
+MediaPipeNet.Framework.Config.NodeConfig.BackEdgeTags.init -> void
+MediaPipeNet.Framework.Config.NodeConfig.Calculator.get -> string!
+MediaPipeNet.Framework.Config.NodeConfig.Calculator.init -> void
+MediaPipeNet.Framework.Config.NodeConfig.Equals(MediaPipeNet.Framework.Config.NodeConfig? other) -> bool
+MediaPipeNet.Framework.Config.NodeConfig.Executor.get -> string?
+MediaPipeNet.Framework.Config.NodeConfig.Executor.init -> void
+MediaPipeNet.Framework.Config.NodeConfig.GetOption<T>(string! key, T fallback) -> T
+MediaPipeNet.Framework.Config.NodeConfig.InputSidePackets.get -> System.Collections.Generic.List<string!>!
+MediaPipeNet.Framework.Config.NodeConfig.InputSidePackets.init -> void
+MediaPipeNet.Framework.Config.NodeConfig.InputStreams.get -> System.Collections.Generic.List<string!>!
+MediaPipeNet.Framework.Config.NodeConfig.InputStreams.init -> void
+MediaPipeNet.Framework.Config.NodeConfig.Name.get -> string?
+MediaPipeNet.Framework.Config.NodeConfig.Name.init -> void
+MediaPipeNet.Framework.Config.NodeConfig.NodeConfig() -> void
+MediaPipeNet.Framework.Config.NodeConfig.Options.get -> System.Collections.Generic.Dictionary<string!, string!>!
+MediaPipeNet.Framework.Config.NodeConfig.Options.init -> void
+MediaPipeNet.Framework.Config.NodeConfig.OutputStreams.get -> System.Collections.Generic.List<string!>!
+MediaPipeNet.Framework.Config.NodeConfig.OutputStreams.init -> void
+MediaPipeNet.Framework.GraphBuilder
+MediaPipeNet.Framework.GraphBuilder.AddExecutor(string! name, int threads = 1) -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.GraphBuilder.AddInputStream(string! name, System.Type! type, MediaPipeNet.Framework.GraphInputOptions? options = null) -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.GraphBuilder.AddInputStream<T>(string! name, MediaPipeNet.Framework.GraphInputOptions? options = null) -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.GraphBuilder.AddNode(string! name, MediaPipeNet.Framework.ICalculatorNode! node) -> MediaPipeNet.Framework.NodeBuilder!
+MediaPipeNet.Framework.GraphBuilder.AddNode<TNode>(string! name) -> MediaPipeNet.Framework.NodeBuilder!
+MediaPipeNet.Framework.GraphBuilder.AddOutputStream(string! name) -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.GraphBuilder.AddSidePacket<T>(string! name) -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.GraphBuilder.AddSubgraph(string! name, MediaPipeNet.Framework.GraphBuilder! subgraph, System.Collections.Generic.IReadOnlyDictionary<string!, string!>! inputs, System.Collections.Generic.IReadOnlyDictionary<string!, string!>! outputs) -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.GraphBuilder.Build() -> MediaPipeNet.Framework.CalculatorGraph!
+MediaPipeNet.Framework.GraphBuilder.GraphBuilder() -> void
+MediaPipeNet.Framework.GraphBuilder.Options.get -> MediaPipeNet.Framework.GraphOptions!
+MediaPipeNet.Framework.GraphBuilder.Options.set -> void
+MediaPipeNet.Framework.GraphInputOptions
+MediaPipeNet.Framework.GraphInputOptions.<Clone>$() -> MediaPipeNet.Framework.GraphInputOptions!
+MediaPipeNet.Framework.GraphInputOptions.Deconstruct(out int MaxQueueSize, out MediaPipeNet.Framework.QueueOverflowPolicy OverflowPolicy) -> void
+MediaPipeNet.Framework.GraphInputOptions.Equals(MediaPipeNet.Framework.GraphInputOptions? other) -> bool
+MediaPipeNet.Framework.GraphInputOptions.GraphInputOptions(int MaxQueueSize = 0, MediaPipeNet.Framework.QueueOverflowPolicy OverflowPolicy = MediaPipeNet.Framework.QueueOverflowPolicy.DropOldest) -> void
+MediaPipeNet.Framework.GraphInputOptions.MaxQueueSize.get -> int
+MediaPipeNet.Framework.GraphInputOptions.MaxQueueSize.init -> void
+MediaPipeNet.Framework.GraphInputOptions.OverflowPolicy.get -> MediaPipeNet.Framework.QueueOverflowPolicy
+MediaPipeNet.Framework.GraphInputOptions.OverflowPolicy.init -> void
+MediaPipeNet.Framework.GraphOptions
+MediaPipeNet.Framework.GraphOptions.<Clone>$() -> MediaPipeNet.Framework.GraphOptions!
+MediaPipeNet.Framework.GraphOptions.EnableTracing.get -> bool
+MediaPipeNet.Framework.GraphOptions.EnableTracing.init -> void
+MediaPipeNet.Framework.GraphOptions.Equals(MediaPipeNet.Framework.GraphOptions? other) -> bool
+MediaPipeNet.Framework.GraphOptions.GraphOptions() -> void
+MediaPipeNet.Framework.GraphOptions.Logger.get -> Microsoft.Extensions.Logging.ILogger?
+MediaPipeNet.Framework.GraphOptions.Logger.init -> void
+MediaPipeNet.Framework.GraphOptions.MaxInFlight.get -> int
+MediaPipeNet.Framework.GraphOptions.MaxInFlight.init -> void
+MediaPipeNet.Framework.GraphOptions.MaxTraceEvents.get -> int
+MediaPipeNet.Framework.GraphOptions.MaxTraceEvents.init -> void
+MediaPipeNet.Framework.GraphState
+MediaPipeNet.Framework.GraphState.Cancelled = 4 -> MediaPipeNet.Framework.GraphState
+MediaPipeNet.Framework.GraphState.Created = 0 -> MediaPipeNet.Framework.GraphState
+MediaPipeNet.Framework.GraphState.Done = 2 -> MediaPipeNet.Framework.GraphState
+MediaPipeNet.Framework.GraphState.Failed = 3 -> MediaPipeNet.Framework.GraphState
+MediaPipeNet.Framework.GraphState.Running = 1 -> MediaPipeNet.Framework.GraphState
+MediaPipeNet.Framework.GraphTraceEvent
+MediaPipeNet.Framework.GraphTraceEvent.Deconstruct(out string! Node, out MediaPipeNet.Framework.GraphTraceKind Kind, out long Timestamp, out double StartMicroseconds, out double DurationMicroseconds, out int ThreadId) -> void
+MediaPipeNet.Framework.GraphTraceEvent.DurationMicroseconds.get -> double
+MediaPipeNet.Framework.GraphTraceEvent.DurationMicroseconds.init -> void
+MediaPipeNet.Framework.GraphTraceEvent.Equals(MediaPipeNet.Framework.GraphTraceEvent other) -> bool
+MediaPipeNet.Framework.GraphTraceEvent.GraphTraceEvent() -> void
+MediaPipeNet.Framework.GraphTraceEvent.GraphTraceEvent(string! Node, MediaPipeNet.Framework.GraphTraceKind Kind, long Timestamp, double StartMicroseconds, double DurationMicroseconds, int ThreadId) -> void
+MediaPipeNet.Framework.GraphTraceEvent.Kind.get -> MediaPipeNet.Framework.GraphTraceKind
+MediaPipeNet.Framework.GraphTraceEvent.Kind.init -> void
+MediaPipeNet.Framework.GraphTraceEvent.Node.get -> string!
+MediaPipeNet.Framework.GraphTraceEvent.Node.init -> void
+MediaPipeNet.Framework.GraphTraceEvent.StartMicroseconds.get -> double
+MediaPipeNet.Framework.GraphTraceEvent.StartMicroseconds.init -> void
+MediaPipeNet.Framework.GraphTraceEvent.ThreadId.get -> int
+MediaPipeNet.Framework.GraphTraceEvent.ThreadId.init -> void
+MediaPipeNet.Framework.GraphTraceEvent.Timestamp.get -> long
+MediaPipeNet.Framework.GraphTraceEvent.Timestamp.init -> void
+MediaPipeNet.Framework.GraphTraceKind
+MediaPipeNet.Framework.GraphTraceKind.Close = 2 -> MediaPipeNet.Framework.GraphTraceKind
+MediaPipeNet.Framework.GraphTraceKind.Open = 0 -> MediaPipeNet.Framework.GraphTraceKind
+MediaPipeNet.Framework.GraphTraceKind.Process = 1 -> MediaPipeNet.Framework.GraphTraceKind
+MediaPipeNet.Framework.GraphValidationException
+MediaPipeNet.Framework.GraphValidationException.GraphValidationException() -> void
+MediaPipeNet.Framework.GraphValidationException.GraphValidationException(string! message) -> void
+MediaPipeNet.Framework.GraphValidationException.GraphValidationException(string! message, System.Exception! innerException) -> void
+MediaPipeNet.Framework.ICalculatorNode
+MediaPipeNet.Framework.ICalculatorNode.CloseAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Framework.ICalculatorNode.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+MediaPipeNet.Framework.ICalculatorNode.OpenAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Framework.ICalculatorNode.ProcessAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Framework.InputPolicy
+MediaPipeNet.Framework.InputPolicy.Immediate = 1 -> MediaPipeNet.Framework.InputPolicy
+MediaPipeNet.Framework.InputPolicy.Synchronized = 0 -> MediaPipeNet.Framework.InputPolicy
+MediaPipeNet.Framework.NodeBuilder
+MediaPipeNet.Framework.NodeBuilder.Graph.get -> MediaPipeNet.Framework.GraphBuilder!
+MediaPipeNet.Framework.NodeBuilder.In(string! tag, string! stream, bool backEdge = false) -> MediaPipeNet.Framework.NodeBuilder!
+MediaPipeNet.Framework.NodeBuilder.LimitQueue(string! tag, int maxQueueSize, MediaPipeNet.Framework.QueueOverflowPolicy policy = MediaPipeNet.Framework.QueueOverflowPolicy.DropOldest) -> MediaPipeNet.Framework.NodeBuilder!
+MediaPipeNet.Framework.NodeBuilder.Name.get -> string!
+MediaPipeNet.Framework.NodeBuilder.Node.get -> MediaPipeNet.Framework.ICalculatorNode!
+MediaPipeNet.Framework.NodeBuilder.OnExecutor(string! executor) -> MediaPipeNet.Framework.NodeBuilder!
+MediaPipeNet.Framework.NodeBuilder.Out(string! tag, string! stream) -> MediaPipeNet.Framework.NodeBuilder!
+MediaPipeNet.Framework.NodeBuilder.Side(string! tag, string! sidePacket) -> MediaPipeNet.Framework.NodeBuilder!
+MediaPipeNet.Framework.Nodes.AsyncLambdaNode<TIn, TOut>
+MediaPipeNet.Framework.Nodes.AsyncLambdaNode<TIn, TOut>.AsyncLambdaNode(System.Func<TIn, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TOut?>>! transform) -> void
+MediaPipeNet.Framework.Nodes.AsyncLambdaNode<TIn, TOut>.CloseAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Framework.Nodes.AsyncLambdaNode<TIn, TOut>.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+MediaPipeNet.Framework.Nodes.AsyncLambdaNode<TIn, TOut>.OpenAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Framework.Nodes.AsyncLambdaNode<TIn, TOut>.ProcessAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Framework.Nodes.CombineNode<TA, TB, TOut>
+MediaPipeNet.Framework.Nodes.CombineNode<TA, TB, TOut>.CombineNode(System.Func<TA?, TB?, TOut?>! combine) -> void
+MediaPipeNet.Framework.Nodes.LambdaNode<TIn, TOut>
+MediaPipeNet.Framework.Nodes.LambdaNode<TIn, TOut>.LambdaNode(System.Func<TIn, TOut?>! transform) -> void
+MediaPipeNet.Framework.Nodes.PacketCounterNode
+MediaPipeNet.Framework.Nodes.PacketCounterNode.Count.get -> long
+MediaPipeNet.Framework.Nodes.PacketCounterNode.PacketCounterNode() -> void
+MediaPipeNet.Framework.Nodes.PacketThinnerNode
+MediaPipeNet.Framework.Nodes.PacketThinnerNode.PacketThinnerNode(System.TimeSpan period) -> void
+MediaPipeNet.Framework.Nodes.PacketThinnerNode.Period.get -> System.TimeSpan
+MediaPipeNet.Framework.Nodes.PassThroughNode<T>
+MediaPipeNet.Framework.Nodes.PassThroughNode<T>.PassThroughNode() -> void
+MediaPipeNet.Framework.Nodes.PreviousLoopbackNode<T>
+MediaPipeNet.Framework.Nodes.PreviousLoopbackNode<T>.PreviousLoopbackNode() -> void
+MediaPipeNet.Framework.Nodes.SinkNode<T>
+MediaPipeNet.Framework.Nodes.SinkNode<T>.SinkNode(System.Action<MediaPipeNet.Framework.Packet<T>!>! callback) -> void
+MediaPipeNet.Framework.Packet
+MediaPipeNet.Framework.Packet.As<T>() -> MediaPipeNet.Framework.Packet<T>!
+MediaPipeNet.Framework.Packet.Timestamp.get -> MediaPipeNet.Timestamp
+MediaPipeNet.Framework.Packet<T>
+MediaPipeNet.Framework.Packet<T>.Packet(T value, MediaPipeNet.Timestamp timestamp) -> void
+MediaPipeNet.Framework.Packet<T>.Value.get -> T
+MediaPipeNet.Framework.Packet<T>.WithTimestamp(MediaPipeNet.Timestamp timestamp) -> MediaPipeNet.Framework.Packet<T>!
+MediaPipeNet.Framework.PortSpec
+MediaPipeNet.Framework.PortSpec.<Clone>$() -> MediaPipeNet.Framework.PortSpec!
+MediaPipeNet.Framework.PortSpec.Deconstruct(out string! Tag, out System.Type! Type, out bool Optional) -> void
+MediaPipeNet.Framework.PortSpec.Equals(MediaPipeNet.Framework.PortSpec? other) -> bool
+MediaPipeNet.Framework.PortSpec.Optional.get -> bool
+MediaPipeNet.Framework.PortSpec.Optional.init -> void
+MediaPipeNet.Framework.PortSpec.PortSpec(string! Tag, System.Type! Type, bool Optional = false) -> void
+MediaPipeNet.Framework.PortSpec.Tag.get -> string!
+MediaPipeNet.Framework.PortSpec.Tag.init -> void
+MediaPipeNet.Framework.PortSpec.Type.get -> System.Type!
+MediaPipeNet.Framework.PortSpec.Type.init -> void
+MediaPipeNet.Framework.QueueOverflowPolicy
+MediaPipeNet.Framework.QueueOverflowPolicy.DropNewest = 1 -> MediaPipeNet.Framework.QueueOverflowPolicy
+MediaPipeNet.Framework.QueueOverflowPolicy.DropOldest = 0 -> MediaPipeNet.Framework.QueueOverflowPolicy
+abstract MediaPipeNet.Framework.CalculatorNode.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+abstract MediaPipeNet.Framework.CalculatorNode.Process(MediaPipeNet.Framework.CalculatorContext! context) -> void
+abstract MediaPipeNet.Framework.Packet.At(MediaPipeNet.Timestamp timestamp) -> MediaPipeNet.Framework.Packet!
+abstract MediaPipeNet.Framework.Packet.PayloadType.get -> System.Type!
+abstract MediaPipeNet.Framework.Packet.UntypedValue.get -> object?
+override MediaPipeNet.Framework.Config.GraphConfig.Equals(object? obj) -> bool
+override MediaPipeNet.Framework.Config.GraphConfig.GetHashCode() -> int
+override MediaPipeNet.Framework.Config.GraphConfig.ToString() -> string!
+override MediaPipeNet.Framework.Config.NodeConfig.Equals(object? obj) -> bool
+override MediaPipeNet.Framework.Config.NodeConfig.GetHashCode() -> int
+override MediaPipeNet.Framework.Config.NodeConfig.ToString() -> string!
+override MediaPipeNet.Framework.GraphInputOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Framework.GraphInputOptions.GetHashCode() -> int
+override MediaPipeNet.Framework.GraphInputOptions.ToString() -> string!
+override MediaPipeNet.Framework.GraphOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Framework.GraphOptions.GetHashCode() -> int
+override MediaPipeNet.Framework.GraphOptions.ToString() -> string!
+override MediaPipeNet.Framework.GraphTraceEvent.GetHashCode() -> int
+override MediaPipeNet.Framework.Nodes.CombineNode<TA, TB, TOut>.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+override MediaPipeNet.Framework.Nodes.LambdaNode<TIn, TOut>.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+override MediaPipeNet.Framework.Nodes.PacketCounterNode.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+override MediaPipeNet.Framework.Nodes.PacketThinnerNode.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+override MediaPipeNet.Framework.Nodes.PassThroughNode<T>.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+override MediaPipeNet.Framework.Nodes.PreviousLoopbackNode<T>.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+override MediaPipeNet.Framework.Nodes.SinkNode<T>.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
+override MediaPipeNet.Framework.Packet<T>.At(MediaPipeNet.Timestamp timestamp) -> MediaPipeNet.Framework.Packet!
+override MediaPipeNet.Framework.Packet<T>.PayloadType.get -> System.Type!
+override MediaPipeNet.Framework.Packet<T>.ToString() -> string!
+override MediaPipeNet.Framework.Packet<T>.UntypedValue.get -> object?
+override MediaPipeNet.Framework.PortSpec.Equals(object? obj) -> bool
+override MediaPipeNet.Framework.PortSpec.GetHashCode() -> int
+override MediaPipeNet.Framework.PortSpec.ToString() -> string!
+static MediaPipeNet.Framework.Config.CalculatorRegistry.Default.get -> MediaPipeNet.Framework.Config.CalculatorRegistry!
+static MediaPipeNet.Framework.Config.GraphConfig.ParsePbtxt(string! text) -> MediaPipeNet.Framework.Config.GraphConfig!
+static MediaPipeNet.Framework.Config.GraphConfig.SplitTagged(string! value, string! defaultTag) -> (string! Tag, string! Name)
+static MediaPipeNet.Framework.Config.GraphConfig.operator !=(MediaPipeNet.Framework.Config.GraphConfig? left, MediaPipeNet.Framework.Config.GraphConfig? right) -> bool
+static MediaPipeNet.Framework.Config.GraphConfig.operator ==(MediaPipeNet.Framework.Config.GraphConfig? left, MediaPipeNet.Framework.Config.GraphConfig? right) -> bool
+static MediaPipeNet.Framework.Config.NodeConfig.operator !=(MediaPipeNet.Framework.Config.NodeConfig? left, MediaPipeNet.Framework.Config.NodeConfig? right) -> bool
+static MediaPipeNet.Framework.Config.NodeConfig.operator ==(MediaPipeNet.Framework.Config.NodeConfig? left, MediaPipeNet.Framework.Config.NodeConfig? right) -> bool
+static MediaPipeNet.Framework.GraphInputOptions.operator !=(MediaPipeNet.Framework.GraphInputOptions? left, MediaPipeNet.Framework.GraphInputOptions? right) -> bool
+static MediaPipeNet.Framework.GraphInputOptions.operator ==(MediaPipeNet.Framework.GraphInputOptions? left, MediaPipeNet.Framework.GraphInputOptions? right) -> bool
+static MediaPipeNet.Framework.GraphOptions.operator !=(MediaPipeNet.Framework.GraphOptions? left, MediaPipeNet.Framework.GraphOptions? right) -> bool
+static MediaPipeNet.Framework.GraphOptions.operator ==(MediaPipeNet.Framework.GraphOptions? left, MediaPipeNet.Framework.GraphOptions? right) -> bool
+static MediaPipeNet.Framework.GraphTraceEvent.operator !=(MediaPipeNet.Framework.GraphTraceEvent left, MediaPipeNet.Framework.GraphTraceEvent right) -> bool
+static MediaPipeNet.Framework.GraphTraceEvent.operator ==(MediaPipeNet.Framework.GraphTraceEvent left, MediaPipeNet.Framework.GraphTraceEvent right) -> bool
+static MediaPipeNet.Framework.Packet.Create<T>(T value, MediaPipeNet.Timestamp timestamp) -> MediaPipeNet.Framework.Packet<T>!
+static MediaPipeNet.Framework.Packet.Create<T>(T value, long timestampMs) -> MediaPipeNet.Framework.Packet<T>!
+static MediaPipeNet.Framework.PortSpec.operator !=(MediaPipeNet.Framework.PortSpec? left, MediaPipeNet.Framework.PortSpec? right) -> bool
+static MediaPipeNet.Framework.PortSpec.operator ==(MediaPipeNet.Framework.PortSpec? left, MediaPipeNet.Framework.PortSpec? right) -> bool
+virtual MediaPipeNet.Framework.CalculatorNode.Close(MediaPipeNet.Framework.CalculatorContext! context) -> void
+virtual MediaPipeNet.Framework.CalculatorNode.CloseAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+virtual MediaPipeNet.Framework.CalculatorNode.Open(MediaPipeNet.Framework.CalculatorContext! context) -> void
+virtual MediaPipeNet.Framework.CalculatorNode.OpenAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+virtual MediaPipeNet.Framework.CalculatorNode.ProcessAsync(MediaPipeNet.Framework.CalculatorContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+~override MediaPipeNet.Framework.GraphTraceEvent.Equals(object obj) -> bool
+~override MediaPipeNet.Framework.GraphTraceEvent.ToString() -> string

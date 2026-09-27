@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -226,6 +226,7 @@ public sealed class SettingsView : IGalleryPage
         var providers = new[] { ExecutionProvider.Auto, ExecutionProvider.Cpu, ExecutionProvider.DirectML, ExecutionProvider.Cuda, ExecutionProvider.CoreML };
         var provider = new ComboBox { ItemsSource = providers, SelectedItem = s.Provider, Width = 260 };
         var threads = new NumericUpDown { Minimum = 0, Maximum = Environment.ProcessorCount, Value = s.Threads, Width = 260, FormatString = "0" };
+        var precision = new ComboBox { ItemsSource = new[] { ModelPrecision.Float32, ModelPrecision.Float16, ModelPrecision.Int8 }, SelectedItem = s.Precision, Width = 260 };
         var language = new ComboBox { ItemsSource = new[] { "English", "Bahasa Indonesia" }, SelectedIndex = s.Language == "id" ? 1 : 0, Width = 260 };
         var theme = new ComboBox { ItemsSource = new[] { "Light", "Dark" }, SelectedIndex = s.Theme == "Dark" ? 1 : 0, Width = 260 };
         var modelDir = new TextBox { Text = s.ModelDirectory, Width = 420, Watermark = ModelStore.DefaultCacheDirectory };
@@ -235,6 +236,7 @@ public sealed class SettingsView : IGalleryPage
         {
             s.Provider = (ExecutionProvider)provider.SelectedItem!;
             s.Threads = (int)(threads.Value ?? 0);
+            s.Precision = (ModelPrecision)precision.SelectedItem!;
             s.Language = language.SelectedIndex == 1 ? "id" : "en";
             s.Theme = theme.SelectedIndex == 1 ? "Dark" : "Light";
             s.ModelDirectory = string.IsNullOrWhiteSpace(modelDir.Text) ? null : modelDir.Text;
@@ -253,6 +255,7 @@ public sealed class SettingsView : IGalleryPage
         var form = Ui.Stack(Orientation.Vertical, 0,
             Field(Loc.T("settings.provider"), provider, Loc.T("settings.provider.help")),
             Field(Loc.T("settings.threads"), threads),
+            Field(Loc.T("settings.precision"), precision, Loc.T("settings.precision.help")),
             Field(Loc.T("settings.language"), language),
             Field(Loc.T("settings.theme"), theme),
             Field(Loc.T("settings.modeldir"), modelDir),

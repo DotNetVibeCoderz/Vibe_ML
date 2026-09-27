@@ -4,8 +4,8 @@
 # the tag and passed to `dotnet pack`. The tag is prefixed because MediaPipeNet is one project inside
 # the Vibe_ML monorepo.
 #
-#   git tag mediapipenet-v0.1.0
-#   git push origin mediapipenet-v0.1.0
+#   git tag mediapipenet-v0.3.0
+#   git push origin mediapipenet-v0.3.0
 #
 # Requires the repository secret NUGET_API_KEY (https://www.nuget.org/account/apikeys).
 #
@@ -93,7 +93,7 @@ jobs:
             MediaPipeNet/artifacts/packages/*.snupkg
           if-no-files-found: error
 
-      # Dependencies first (Core → Imaging → Inference → Framework → Tasks.Vision) so that no package is
+      # Dependencies first (Core → Imaging → Inference → Framework → Tasks.Core → Tasks.*) so that no package is
       # indexed before the packages it depends on. --skip-duplicate lets a re-run finish a partial publish.
       - name: Push to NuGet
         if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
@@ -108,14 +108,16 @@ jobs:
           push() {
             dotnet nuget push "$1" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
           }
-          for id in Core Imaging Inference Framework Tasks.Vision; do
+          FIRST="Core Imaging Inference Framework Tasks.Core Tasks.Vision Tasks.Audio Tasks.Text"
+          for id in $FIRST; do
             push "artifacts/packages/Gravicode.MediaPipeNet.$id.$VERSION.nupkg"
           done
           for package in artifacts/packages/*.nupkg; do
-            case "$package" in
-              *".Core.$VERSION.nupkg"|*".Imaging.$VERSION.nupkg"|*".Inference.$VERSION.nupkg"|*".Framework.$VERSION.nupkg"|*".Tasks.Vision.$VERSION.nupkg") continue ;;
-            esac
-            push "$package"
+            skip=false
+            for id in $FIRST; do
+              [ "$package" = "artifacts/packages/Gravicode.MediaPipeNet.$id.$VERSION.nupkg" ] && skip=true
+            done
+            $skip || push "$package"
           done
 
       - name: Create GitHub Release

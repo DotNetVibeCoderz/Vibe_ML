@@ -1,4 +1,4 @@
-using MediaPipeNet.Imaging;
+﻿using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference;
 
 namespace MediaPipeNet.Tasks.Vision.Processing;
@@ -18,6 +18,11 @@ public sealed record SsdDetectorSpec(int InputWidth, int InputHeight, float Rang
     public static SsdDetectorSpec FaceShortRange { get; } = new(128, 128, -1f, 1f,
         new SsdAnchorOptions { InputWidth = 128, InputHeight = 128, Strides = [8, 16, 16, 16] },
         new DetectionDecoderOptions { NumCoords = 16, NumKeypoints = 6, XScale = 128, YScale = 128, WScale = 128, HScale = 128 });
+
+    /// <summary>BlazeFace full range (face_detection_full_range.onnx, 192×192, one 48×48 anchor grid).</summary>
+    public static SsdDetectorSpec FaceFullRange { get; } = new(192, 192, -1f, 1f,
+        new SsdAnchorOptions { InputWidth = 192, InputHeight = 192, Strides = [4], InterpolatedScaleAspectRatio = 0f },
+        new DetectionDecoderOptions { NumCoords = 16, NumKeypoints = 6, XScale = 192, YScale = 192, WScale = 192, HScale = 192 });
 
     /// <summary>BlazePalm (palm_detection.onnx, 192×192).</summary>
     public static SsdDetectorSpec Palm { get; } = new(192, 192, 0f, 1f,

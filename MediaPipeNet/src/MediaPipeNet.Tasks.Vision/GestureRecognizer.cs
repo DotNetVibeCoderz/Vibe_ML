@@ -19,6 +19,19 @@ public sealed record GestureRecognizerOptions : VisionTaskOptions<GestureRecogni
 
     /// <summary>If set, only these gesture names are reported.</summary>
     public IReadOnlySet<string>? CategoryAllowlist { get; init; }
+
+    /// <summary>
+    /// Your own gesture classifier (the <c>custom_gesture_classifier</c> of a MediaPipe Model Maker gesture
+    /// recognizer, converted with <c>convert_models.py --custom gesture_recognizer.task</c>) used instead of the
+    /// canned one. It takes the 128-D gesture embedding. Default null.
+    /// </summary>
+    public string? ClassifierModelPath { get; init; }
+
+    /// <summary>
+    /// Gesture names of a custom classifier, in output order. When null, <c>{model}.labels.txt</c> next to
+    /// <see cref="ClassifierModelPath"/> is used if present, otherwise the 8 canned gestures.
+    /// </summary>
+    public IReadOnlyList<string>? Labels { get; init; }
 }
 
 /// <summary>
@@ -32,6 +45,7 @@ public sealed class GestureRecognizer : VisionTaskBase<GestureRecognitionResult>
     private readonly OnnxModel _embedder;
     private readonly OnnxModel _classifier;
     private readonly int _handInput, _handednessInput, _worldInput;
+    private readonly IReadOnlyList<string> _labels;
 
     private GestureRecognizer(GestureRecognizerOptions options, HandLandmarker hands, OnnxModel embedder, OnnxModel classifier)
         : base(nameof(GestureRecognizer), options.RunningMode, options.BaseOptions, options.ResultCallback, options.MaxInFlightFrames)
@@ -43,6 +57,7 @@ public sealed class GestureRecognizer : VisionTaskBase<GestureRecognitionResult>
         _handInput = embedder.GetInputIndex("hand");
         _handednessInput = embedder.GetInputIndex("handedness");
         _worldInput = embedder.GetInputIndex("world_hand");
+        _labels = CustomModels.ResolveLabels(options.Labels, options.ClassifierModelPath, Processing.Labels.Gestures);
         CompleteInitialization();
     }
 
@@ -60,7 +75,7 @@ public sealed class GestureRecognizer : VisionTaskBase<GestureRecognitionResult>
         var handOptions = options.Hands with { BaseOptions = options.BaseOptions, RunningMode = RunningMode.Image, ResultCallback = null };
         var hands = await HandLandmarker.CreateAsync(handOptions, cancellationToken).ConfigureAwait(false);
         var embedder = await ModelLoader.LoadAsync(options.BaseOptions, ModelCatalog.GestureEmbedder, cancellationToken).ConfigureAwait(false);
-        var classifier = await ModelLoader.LoadAsync(options.BaseOptions, ModelCatalog.CannedGestureClassifier, cancellationToken).ConfigureAwait(false);
+        var classifier = await CustomModels.LoadAsync(options.BaseOptions, ModelCatalog.CannedGestureClassifier, options.ClassifierModelPath, cancellationToken).ConfigureAwait(false);
         return new GestureRecognizer(options, hands, embedder, classifier);
     }
 
@@ -107,7 +122,7 @@ public sealed class GestureRecognizer : VisionTaskBase<GestureRecognitionResult>
             ctx.GetOutput(0).CopyTo(embedding);
         }
 
-        var labels = Labels.Gestures;
+        var labels = _labels;
         var categories = new List<Category>(labels.Count);
         using (var ctx = _classifier.RentContext())
         {

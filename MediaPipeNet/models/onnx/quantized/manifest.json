@@ -1,0 +1,178 @@
+[
+  {
+    "id": "deeplab_v3",
+    "precision": "fp16",
+    "file": "deeplab_v3.fp16.onnx",
+    "bytes": 1414147,
+    "sha256": "c0d7df972ff9cc558b59690733eec1b1d65259983ca797cf67ea71889d5a8e63",
+    "min_cosine": 0.999989
+  },
+  {
+    "id": "deeplab_v3",
+    "precision": "int8",
+    "file": "deeplab_v3.int8.onnx",
+    "bytes": 818362,
+    "sha256": "0920fcc32152781376b76d1e53a0462fa17b1f5c44e6b60dde0f6e7b998178e5",
+    "min_cosine": 0.997396
+  },
+  {
+    "id": "efficientdet_lite0",
+    "precision": "fp16",
+    "file": "efficientdet_lite0.fp16.onnx",
+    "bytes": 6876265,
+    "sha256": "11ac56a3cc9b88e76c11a77c36315b9921ff1cb66baebf3099544d9509206c19",
+    "min_cosine": 0.999988
+  },
+  {
+    "id": "efficientdet_lite0",
+    "precision": "int8",
+    "file": "efficientdet_lite0.int8.onnx",
+    "bytes": 3790461,
+    "sha256": "6d023f809ecdac0a79f260aec9d0e9bf070786583f2bcdcc164f87820c2a5681",
+    "min_cosine": 0.993435
+  },
+  {
+    "id": "efficientnet_lite0",
+    "precision": "fp16",
+    "file": "efficientnet_lite0.fp16.onnx",
+    "bytes": 9354846,
+    "sha256": "0a9c591e27f638b2bdd60d0210db3fd35a262b40dc5bd22ee85f326a6e3658ca",
+    "min_cosine": 0.999928
+  },
+  {
+    "id": "face_detection_full_range",
+    "precision": "fp16",
+    "file": "face_detection_full_range.fp16.onnx",
+    "bytes": 1062420,
+    "sha256": "9c7881822e9cd10940caeb1ad21380be4913a39d09831c18efaeb49990f481f2",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "face_detection_full_range",
+    "precision": "int8",
+    "file": "face_detection_full_range.int8.onnx",
+    "bytes": 659002,
+    "sha256": "0b8aac5b710ed02517d7d447a265e7aa9ba7a642f78fa40ab18b82a9e59fd668",
+    "min_cosine": 0.999944
+  },
+  {
+    "id": "face_landmarks_detector",
+    "precision": "fp16",
+    "file": "face_landmarks_detector.fp16.onnx",
+    "bytes": 2560504,
+    "sha256": "cac51b2ad49bfe1fdb250ebaf1b9e9ee191c604bafbda3dfabe668db068a459b",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "face_landmarks_detector",
+    "precision": "int8",
+    "file": "face_landmarks_detector.int8.onnx",
+    "bytes": 1460160,
+    "sha256": "77629b811eab206200c27b3d5d4a9216de8228244ac9b9989dbef6482fd41d70",
+    "min_cosine": 0.996965
+  },
+  {
+    "id": "hand_landmarks_detector",
+    "precision": "fp16",
+    "file": "hand_landmarks_detector.fp16.onnx",
+    "bytes": 5484495,
+    "sha256": "ea701b727fb76963aac5a5823174d064f6ffac7a267ec7e12cb56197d029d582",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "language_detector",
+    "precision": "fp16",
+    "file": "language_detector.fp16.onnx",
+    "bytes": 1918195,
+    "sha256": "acce2099975b996ebaa7d87fed7c75ac6cc98d28c7b5a6b117ecceb768d377ff",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "magic_touch",
+    "precision": "fp16",
+    "file": "magic_touch.fp16.onnx",
+    "bytes": 6234557,
+    "sha256": "06393a321169f5f4e4a01d2e893a52ce664ebe664debd6bc2a5ff94ead58880a",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "mobilenet_v3_small_embedder",
+    "precision": "fp16",
+    "file": "mobilenet_v3_small_embedder.fp16.onnx",
+    "bytes": 2207713,
+    "sha256": "ed6687a9fd531597f39f175e30786e0ca32c91dc09077988543cfb23554e8971",
+    "min_cosine": 0.999928
+  },
+  {
+    "id": "mobilenet_v3_small_embedder",
+    "precision": "int8",
+    "file": "mobilenet_v3_small_embedder.int8.onnx",
+    "bytes": 1236027,
+    "sha256": "799d54c481ecfe2bcaa493c2336714424d98ea366194c3934add06030ace8318",
+    "min_cosine": 0.990529
+  },
+  {
+    "id": "palm_detection",
+    "precision": "fp16",
+    "file": "palm_detection.fp16.onnx",
+    "bytes": 2342680,
+    "sha256": "e7f4b71fb7285854b36bb11227941898c228a3e934d9b5fdc699353a6c9fa284",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "palm_detection",
+    "precision": "int8",
+    "file": "palm_detection.int8.onnx",
+    "bytes": 1294504,
+    "sha256": "ae37df4ce655e9e1b5b3d29aa4db94950f4b43172e15ff6ca829833c9358def4",
+    "min_cosine": 0.992972
+  },
+  {
+    "id": "pose_detection",
+    "precision": "fp16",
+    "file": "pose_detection.fp16.onnx",
+    "bytes": 6016365,
+    "sha256": "23c49564a9a2a9af0a262812700e1cf125be0a8fc03129d3fec66183b91a6e6b",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "pose_detection",
+    "precision": "int8",
+    "file": "pose_detection.int8.onnx",
+    "bytes": 3237301,
+    "sha256": "89aa53d70471f87c027d12b1f31d1bc39582cd8f3415d83b2278b690895e7a9b",
+    "min_cosine": 0.992751
+  },
+  {
+    "id": "pose_landmarks_detector_full",
+    "precision": "fp16",
+    "file": "pose_landmarks_detector_full.fp16.onnx",
+    "bytes": 6455641,
+    "sha256": "253e67ad05236fba2740a9658337ba79080380ef53ac5e5cd8e5acef6910f79f",
+    "min_cosine": 0.999993
+  },
+  {
+    "id": "pose_landmarks_detector_lite",
+    "precision": "fp16",
+    "file": "pose_landmarks_detector_lite.fp16.onnx",
+    "bytes": 2835170,
+    "sha256": "4c09e210aee7cf1409490a9ddef4507920960f26b5e2b29b431a5ddffabb8223",
+    "min_cosine": 0.999998
+  },
+  {
+    "id": "selfie_multiclass",
+    "precision": "fp16",
+    "file": "selfie_multiclass.fp16.onnx",
+    "bytes": 8371528,
+    "sha256": "60d1087702fe0080ea736ce77cfa789e6508fd0e373256a5c4d8360bab59df83",
+    "min_cosine": 0.999998
+  },
+  {
+    "id": "selfie_multiclass",
+    "precision": "int8",
+    "file": "selfie_multiclass.int8.onnx",
+    "bytes": 4418975,
+    "sha256": "7f4423272d7783677eccff62ca35bf47d75acf20b7031211307f907221b1d39a",
+    "min_cosine": 0.999715
+  }
+]

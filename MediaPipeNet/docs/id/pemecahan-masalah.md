@@ -45,3 +45,23 @@ Gunakan distribusi berbasis glibc (Debian/Ubuntu); Alpine/musl tidak didukung ON
 **Lisensi ImageSharp**
 MediaPipe.NET memakai SixLabors.ImageSharp 3.1 (Six Labors Split License: ketentuan Apache-2.0 untuk open source dan
 organisasi di bawah ambang pendapatan). Pengguna komersial di atas ambang membutuhkan lisensi Six Labors.
+
+## `BaseOptions` / `ModelLoader` tidak ditemukan setelah upgrade ke 0.2+
+
+Keduanya pindah ke assembly baru `Gravicode.MediaPipeNet.Tasks.Core`, namespace `MediaPipeNet.Tasks` (dipakai
+bersama paket vision, audio, dan teks). Tambahkan `using MediaPipeNet.Tasks;`.
+
+## FP16 lebih lambat daripada FP32
+
+Wajar di CPU: provider CPU ONNX Runtime hanya punya sedikit kernel float16 native. Pakai `ModelPrecision.Float16`
+dengan DirectML atau CUDA, dan `ModelPrecision.Int8` bila ukuran unduhan penting.
+
+## `SegmentationResult.ConfidenceMask` melempar exception
+
+`ImageSegmenterOptions.OutputConfidenceMasks` disetel false (hanya category mask yang diminta). Baca
+`result.CategoryMask`, atau aktifkan confidence mask.
+
+## Embedding teks sedikit berbeda dari MediaPipe
+
+MediaPipe menjalankan MobileBERT int8 dengan aktivasi terkuantisasi dinamis; MediaPipe.NET menghitung dalam float.
+Cosine similarity berbeda sekitar 0,02 — lihat [Model](model.md#bobot-int8-dan-onnx-runtime).

@@ -1,4 +1,4 @@
-namespace MediaPipeNet.Tasks.Vision.Processing;
+﻿namespace MediaPipeNet.Tasks.Vision.Processing;
 
 /// <summary>
 /// Region-of-interest math ported from MediaPipe's <c>DetectionsToRectsCalculator</c>,
@@ -71,6 +71,39 @@ public static class RoiCalculator
         float rotation = Angles.ComputeRotation(landmarks[start].X * imageWidth, landmarks[start].Y * imageHeight,
             landmarks[end].X * imageWidth, landmarks[end].Y * imageHeight, targetAngle);
         return new NormalizedRect((minX + maxX) / 2, (minY + maxY) / 2, maxX - minX, maxY - minY, rotation);
+    }
+
+    /// <summary>
+    /// Rect bounding a detection's keypoints (not its box), rotated so keypoint start→end points at
+    /// <paramref name="targetAngle"/> (MediaPipe's <c>DetectionsToRectsCalculator</c> in keypoint mode).
+    /// </summary>
+    public static NormalizedRect FromKeypointBounds(in RawDetection d, int imageWidth, int imageHeight, int startKeypoint, int endKeypoint, float targetAngle)
+    {
+        float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+        for (int i = 0; i < d.KeypointCount; i++)
+        {
+            var (x, y) = d.Keypoint(i);
+            minX = MathF.Min(minX, x); maxX = MathF.Max(maxX, x);
+            minY = MathF.Min(minY, y); maxY = MathF.Max(maxY, y);
+        }
+        var (x0, y0) = d.Keypoint(startKeypoint);
+        var (x1, y1) = d.Keypoint(endKeypoint);
+        float rotation = Angles.ComputeRotation(x0 * imageWidth, y0 * imageHeight, x1 * imageWidth, y1 * imageHeight, targetAngle);
+        return new NormalizedRect((minX + maxX) / 2, (minY + maxY) / 2, maxX - minX, maxY - minY, rotation);
+    }
+
+    /// <summary>
+    /// Hand ROI from the pose model's wrist, pinky and index landmarks (MediaPipe's
+    /// <c>HandDetectionsFromPoseToRectsCalculator</c>): centered on the estimated middle-finger base, twice
+    /// the wrist distance in size, rotated so the hand points up.
+    /// </summary>
+    public static NormalizedRect FromPosePalm(in NormalizedLandmark wrist, in NormalizedLandmark pinky, in NormalizedLandmark index, int imageWidth, int imageHeight)
+    {
+        float xw = wrist.X * imageWidth, yw = wrist.Y * imageHeight;
+        float xm = (2f * index.X + pinky.X) / 3f * imageWidth, ym = (2f * index.Y + pinky.Y) / 3f * imageHeight;
+        float size = 2f * MathF.Sqrt((xm - xw) * (xm - xw) + (ym - yw) * (ym - yw));
+        float rotation = Angles.ComputeRotation(xw, yw, xm, ym, MathF.PI / 2);
+        return new NormalizedRect(xm / imageWidth, ym / imageHeight, size / imageWidth, size / imageHeight, rotation);
     }
 
     // Landmarks used by HandLandmarksToRectCalculator: wrist, thumb CMC..IP, and the MCP/PIP joints of each finger.

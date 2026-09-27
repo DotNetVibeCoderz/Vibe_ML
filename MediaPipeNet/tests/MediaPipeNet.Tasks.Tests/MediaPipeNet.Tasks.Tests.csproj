@@ -1,7 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediaPipeNet\MediaPipeNet.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Tasks.Audio\MediaPipeNet.Tasks.Audio.csproj" />
+    <ProjectReference Include="..\..\src\MediaPipeNet.Tasks.Text\MediaPipeNet.Tasks.Text.csproj" />
     <ProjectReference Include="..\..\src\MediaPipeNet.Visualization\MediaPipeNet.Visualization.csproj" />
     <ProjectReference Include="..\..\src\MediaPipeNet.Extensions.DI\MediaPipeNet.Extensions.DI.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />

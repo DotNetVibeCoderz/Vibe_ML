@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -22,7 +22,7 @@
     <Company>Gravicode Studios</Company>
     <Authors>Gravicode Studios, Kang Fadhil</Authors>
     <Copyright>Copyright (c) 2026 Gravicode Studios. Models: Copyright Google LLC (Apache-2.0).</Copyright>
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>0.3.0</VersionPrefix>
     <PackageProjectUrl>https://github.com/DotNetVibeCoderz/Vibe_ML/tree/main/MediaPipeNet</PackageProjectUrl>
     <RepositoryUrl>https://github.com/DotNetVibeCoderz/Vibe_ML</RepositoryUrl>
     <RepositoryBranch>main</RepositoryBranch>

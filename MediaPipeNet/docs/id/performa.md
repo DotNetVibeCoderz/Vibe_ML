@@ -24,6 +24,36 @@ provider CPU, input 640×480, end-to-end (image-to-tensor, inferensi, decoding):
 
 **NFR-1** (deteksi wajah < 50 ms pada 640×480 di CPU 8-core modern): terpenuhi dengan margin 6× di CPU 4-core 2017.
 
+### Task 0.2 / 0.3 (mesin yang sama, BenchmarkDotNet short run)
+
+| Task | Rata-rata | Alokasi per panggilan |
+|---|---:|---:|
+| ImageEmbedder (MobileNet V3, foto 820×1024) | 3,6 ms | 7 KB |
+| ImageSegmenter, selfie multiclass + category mask (820×1024) | 104 ms | 22 MB ¹ |
+| AudioClassifier, klip 4,3 s (5 jendela YAMNet) | 14,0 ms | 256 KB |
+| TextClassifier, MobileBERT | 56 ms | 4 KB |
+| TextClassifier, average word | 0,024 ms | 2,5 KB |
+| TextEmbedder, MobileBERT | 56 ms | 6 KB |
+| LanguageDetector | 0,062 ms | 12 KB |
+
+¹ Enam mask probabilitas resolusi penuh ditambah category mask; semua kanal diproyeksikan dalam satu pass
+(`TensorWarp.ProjectChannelsToImage`), 1,6× lebih cepat daripada proyeksi per kanal.
+
+### Fitur runtime (FaceLandmarker pada portrait, CPU)
+
+| Konfigurasi | Rata-rata | Rasio |
+|---|---:|---:|
+| float32 | 20,0 ms | 1,00 |
+| float32 + `UseIoBinding` | 21,0 ms | 1,05 |
+| `ModelPrecision.Float16` | 23,7 ms | 1,19 |
+| `ModelPrecision.Int8` (bobot saja) | 22,8 ms | 1,15 |
+| 8 gambar, loop berurutan | 24,3 ms / gambar | |
+| 8 gambar, `ProcessBatch` | **12,3 ms / gambar** | 2× throughput |
+
+Di CPU, I/O binding dan FP16 tidak menguntungkan (keduanya ditujukan untuk GPU, di mana menghindari salinan
+host↔device dan memakai unit half-precision); varian INT8 menukar ~15 % kecepatan dengan unduhan 3–4× lebih kecil.
+`ProcessBatch` menggandakan throughput offline di 4 core.
+
 Jalankan sendiri: `dotnet run -c Release --project benchmarks/MediaPipeNet.Benchmarks -- --filter "*"`, atau halaman
 *Benchmark* di Gallery, atau `mediapipenet-cli benchmark faces gambar.jpg`.
 
@@ -52,6 +82,10 @@ Jalankan sendiri: `dotnet run -c Release --project benchmarks/MediaPipeNet.Bench
 | `InferenceOptions.IntraOpThreads` | Thread per operator. Turunkan bila beberapa task berjalan paralel (mis. 2 per task). |
 | `FaceLandmarkerOptions.OutputFaceBlendshapes = false` | Melewati model blendshape. |
 | Ukuran input | Perkecil foto yang sangat besar; model hanya melihat 128–320 px. |
+| `ProcessBatch(images)` / `ClassifyBatch` / `EmbedBatch` | Pemrosesan offline paralel dengan satu instance model. |
+| `InferenceOptions.Precision` | `Float16` untuk GPU, `Int8` untuk unduhan kecil (lihat [Model](model.md#varian-presisi-fp16-dan-int8)). |
+| `InferenceOptions.UseIoBinding` | Mengikat buffer tiap konteks pool sekali (I/O binding ONNX Runtime); berguna dengan provider GPU. |
+| `ImageSegmenterOptions.OutputConfidenceMasks = false` | Hanya category mask bila hanya itu yang dibutuhkan. |
 
 ## GPU
 
@@ -73,4 +107,6 @@ Catatan dari pengujian:
   Ukur dengan halaman Benchmark di Gallery.
 - DirectML tidak mendukung panggilan `Run` konkuren maupun pembuatan sesi konkuren pada satu device; MediaPipe.NET
   menserialisasi keduanya otomatis saat provider DirectML aktif.
-- Gallery memakai provider CPU secara default; ubah di *Pengaturan*.
+- Gallery memakai provider CPU secara default; ubah provider dan presisi di *Pengaturan*.
+- `UseIoBinding` membuat satu `OrtIoBinding` per konteks pool dan memakainya ulang di setiap run; hasilnya identik
+  (`BatchAndBindingTests`).

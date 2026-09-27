@@ -27,16 +27,16 @@ Every public type carries XML documentation (IntelliSense). This page maps the s
 | `PixelFormat` | `Rgba32`, `Bgra32`, `Rgb24`, `Bgr24`, `Gray8`. |
 | `ImageToTensor`, `ImageToTensorOptions`, `BorderMode` | ROI → NHWC float tensor. |
 | `TensorMapping` | `TensorToImage`, `ImageToTensor`, `ScaleZ`. |
-| `TensorWarp` | `ProjectToImage`, `Resize`. |
+| `TensorWarp` | `ProjectToImage`, `ProjectChannelsToImage` (all channels of an HWC tensor in one pass), `Resize`. |
 | `IFrameSource`, `VideoFrame`, `ImageFileFrameSource`, `MemoryFrameSource` | Video input. |
 
 ## MediaPipeNet.Inference
 
 | Type | |
 |---|---|
-| `OnnxModel` | `Load(path | bytes)`, `Inputs`, `Outputs`, `Provider`, `RentContext()`. |
-| `InferenceContext` | `GetInput`, `Run`, `GetOutput`, `Dispose` (returns to pool). |
-| `InferenceOptions`, `ExecutionProvider` | `Provider`, `DeviceId`, `IntraOpThreads`, `InterOpThreads`, `FallbackToCpu`, `EnableProfiling`, `MaxPooledContexts`. |
+| `OnnxModel` | `Load(path | bytes)`, `Inputs`, `Outputs` (`TensorSpec` with `ElementType` float32/int32/int64), `Provider`, `RentContext()`, `RunDynamic(DynamicTensor[])` for variable shapes, `FindInput`/`FindOutput`. |
+| `InferenceContext` | `GetInput`, `GetInputInt32`, `GetInputInt64`, `Run`, `GetOutput`, `GetOutputInt32`, `UsesIoBinding`, `Dispose` (returns to pool). |
+| `InferenceOptions`, `ExecutionProvider`, `ModelPrecision` | `Provider`, `DeviceId`, `IntraOpThreads`, `InterOpThreads`, `FallbackToCpu`, `EnableProfiling`, `MaxPooledContexts`, `UseIoBinding`, `Precision` (`Float32`, `Float16`, `Int8`). |
 | `ExecutionProviderSelector` | `GetAvailableProviders`, `GetRuntimeVersion`, `GetCandidates`, `CreateSessionOptions`. |
 | `Models.ModelCatalog`, `Models.ModelDescriptor` | The 13 models. |
 | `Models.ModelStore` | `Default`, `CreateDefault`, `GetModelPath(Async)`, `FindLocal`, `EnsureModelsAsync`, `ComputeSha256Async`. |
@@ -75,3 +75,59 @@ Every public type carries XML documentation (IntelliSense). This page maps the s
 
 To generate a full HTML reference: `dotnet tool install -g docfx` then `docfx metadata` over `src/*/*.csproj`
 (the XML documentation files are produced by every build).
+
+## 0.2 / 0.3 additions
+
+### MediaPipeNet.Tasks (Tasks.Core) — new assembly
+
+`BaseOptions` and `ModelLoader` moved here from `MediaPipeNet.Tasks.Vision` so that the audio and text packages do
+not depend on the imaging stack. **Breaking change:** add `using MediaPipeNet.Tasks;` where you name `BaseOptions`
+or `ModelLoader` (property syntax such as `new FaceDetectorOptions { BaseOptions = … }` is unaffected).
+
+| Type | |
+|---|---|
+| `BaseOptions` | Model store / directory / explicit paths, `InferenceOptions`, logger factory. |
+| `ModelLoader` | `LoadAsync`, `ResolvePathAsync` (precision variant → float32 fallback), `SelectVariant`. |
+| `ClassifierOptions` | `MaxResults`, `ScoreThreshold`, `CategoryAllowlist`, `CategoryDenylist`, `Select(scores, labels)`. |
+| `CustomModels` | `LoadAsync(options, fallback, customPath)`, `ResolveLabels`, `CompanionFile`. |
+
+### MediaPipeNet.Tasks.Vision
+
+| Type | New |
+|---|---|
+| `FaceDetectorOptions.Model` / `FaceDetectorModel` | `ShortRange`, `FullRange`. |
+| `FaceLandmarkerOptions.OutputFacialTransformationMatrixes` | `FaceLandmarks.FacialTransformationMatrix`, `GetTransformMatrix()`. |
+| `PoseLandmarkerOptions.SmoothSegmentationMasks` | Heatmap refinement is always on. |
+| `ImageSegmenterOptions` | `Model` (`SegmenterModel`), `OutputConfidenceMasks`, `OutputCategoryMask`. |
+| `SegmentationResult` | `ConfidenceMasks`, `CategoryMask`, `Labels`, `GetConfidenceMask(label)`; `ConfidenceMask` = foreground. |
+| `CategoryMask` | Byte-per-pixel category indices, `Histogram()`, `FromConfidenceMasks`. |
+| `InteractiveSegmenter`, `RegionOfInterest` | MagicTouch; `FromKeypoint`, `FromScribble`. |
+| `ImageEmbedder`, `ImageEmbeddingResult` | MobileNet V3 embeddings; `CosineSimilarity`. |
+| `VisionTaskBase.ProcessBatch` / `ProcessBatchAsync` | Parallel batches, results in order. |
+| `ImageClassifierOptions`, `ObjectDetectorOptions` | `ModelPath`, `Labels`. `GestureRecognizerOptions`: `ClassifierModelPath`, `Labels`. |
+| `Processing.FaceGeometry`, `HeatmapRefinement`, `SegmentationSmoother`, `RoiTracking` | The ported MediaPipe calculators, public for your own pipelines. |
+| `Graph.VisionCalculators` | `ImageEmbedderCalculator`; `ImageSegmenterCalculator` option `model`. |
+
+### MediaPipeNet (Core)
+
+`Embedding(Values, QuantizedValues, HeadIndex, HeadName)` with `CosineSimilarity` and `FromTensor`.
+
+### MediaPipeNet.Tasks.Audio / MediaPipeNet.Tasks.Text
+
+See [Audio & text tasks](audio-and-text.md): `AudioData`, `AudioClassifier`, `VoiceActivityDetector`,
+`AudioRunningMode`; `TextClassifier`, `TextEmbedder`, `LanguageDetector`, `Tokenizers.BertTokenizer`,
+`Tokenizers.RegexTokenizer`, `Tokenizers.NGramHasher`.
+
+### MediaPipeNet.Framework
+
+`NodeBuilder.In(tag, stream, backEdge)`, `NodeBuilder.OnExecutor`, `GraphBuilder.AddExecutor`, `AddSubgraph`,
+`GraphOptions.EnableTracing` / `MaxTraceEvents`, `CalculatorGraph.GetTraceEvents` / `WriteChromeTrace` / `IsTracing`,
+`GraphTraceEvent`, `PreviousLoopbackNode<T>`, `GraphConfig.ToBuilder`, `Executors`, `EnableTracing`,
+`NodeConfig.BackEdgeTags` / `Executor`, `CalculatorRegistry.RegisterSubgraph` / `TryGetSubgraph`.
+
+### API stability
+
+Every shippable library tracks its public surface in `PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt`
+(Microsoft.CodeAnalysis.PublicApiAnalyzers). An unrecorded public API change fails the build (RS0016/RS0017), so
+every change to the surface is deliberate and reviewable; `python tools/update_public_api.py` records intentional
+additions.

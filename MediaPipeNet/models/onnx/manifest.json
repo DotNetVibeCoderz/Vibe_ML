@@ -500,5 +500,365 @@
         ]
       }
     ]
+  },
+  {
+    "id": "face_detection_full_range",
+    "file": "face_detection_full_range.onnx",
+    "source": "blaze_face_full_range.tflite",
+    "bytes": 2076730,
+    "sha256": "30843582dfac582284b32bd100d80a6bb4f5225bce4a50cfdab0080145b22879",
+    "inputs": [
+      {
+        "name": "input",
+        "shape": [
+          1,
+          192,
+          192,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reshaped_regressor_face_4",
+        "shape": [
+          1,
+          2304,
+          16
+        ]
+      },
+      {
+        "name": "reshaped_classifier_face_4",
+        "shape": [
+          1,
+          2304,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hand_roi_refinement",
+    "file": "hand_roi_refinement.onnx",
+    "source": "holistic_landmarker.task/hand_roi_refinement.tflite",
+    "bytes": 129266,
+    "sha256": "5a277b78674e20426caf746ed8a6284f02b702b3fff9b62a651e648748624e83",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          256,
+          256,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          1,
+          1,
+          4
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mobilenet_v3_small_embedder",
+    "file": "mobilenet_v3_small_embedder.onnx",
+    "source": "mobilenet_v3_small.tflite",
+    "bytes": 4189825,
+    "sha256": "30c919adcdb1057c086444c7cdbede62db283ceee0667a442d12bf0163f52683",
+    "inputs": [
+      {
+        "name": "serving_default_inputs:0",
+        "shape": [
+          -1,
+          224,
+          224,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "StatefulPartitionedCall:0",
+        "shape": [
+          -1,
+          1024
+        ]
+      }
+    ]
+  },
+  {
+    "id": "selfie_multiclass",
+    "file": "selfie_multiclass.onnx",
+    "source": "selfie_multiclass_256x256.tflite",
+    "bytes": 16454487,
+    "sha256": "220c6cdd795b44a6c90f539950a0374b3467886065b8af8ac934a4cc72644d63",
+    "inputs": [
+      {
+        "name": "input_29",
+        "shape": [
+          1,
+          256,
+          256,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          256,
+          256,
+          6
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hair_segmenter",
+    "file": "hair_segmenter.onnx",
+    "source": "hair_segmenter.tflite",
+    "bytes": 771295,
+    "sha256": "e378ed4107fc0f76eae003917e47b8e028c286b09850339cdd7901b2d23422c3",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          512,
+          512,
+          4
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "conv2d_transpose_4",
+        "shape": [
+          1,
+          512,
+          512,
+          2
+        ]
+      }
+    ]
+  },
+  {
+    "id": "deeplab_v3",
+    "file": "deeplab_v3.onnx",
+    "source": "deeplab_v3.tflite",
+    "bytes": 2782445,
+    "sha256": "2a6c4360d502edcd9e4c7bf5882cc835295e0e82885f556a3e383eaf24d5cac2",
+    "inputs": [
+      {
+        "name": "sub_7",
+        "shape": [
+          1,
+          257,
+          257,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ResizeBilinear_3",
+        "shape": [
+          1,
+          257,
+          257,
+          21
+        ]
+      }
+    ]
+  },
+  {
+    "id": "magic_touch",
+    "file": "magic_touch.onnx",
+    "source": "magic_touch.tflite",
+    "bytes": 12388061,
+    "sha256": "acbd5aca6e65b56aa759c4bdb31fc0665be5858d13283768ff31f9d02c4455d1",
+    "inputs": [
+      {
+        "name": "input_1",
+        "shape": [
+          1,
+          512,
+          512,
+          4
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "Identity",
+        "shape": [
+          1,
+          512,
+          512,
+          1
+        ]
+      }
+    ]
+  },
+  {
+    "id": "yamnet",
+    "file": "yamnet.onnx",
+    "source": "yamnet.tflite",
+    "bytes": 5077494,
+    "sha256": "2b7cfdfb9d4ed54a456165202d82019b53d98a8fb4737a61dde35b5eb9c1dbc8",
+    "inputs": [
+      {
+        "name": "waveform_binary",
+        "shape": [
+          15600
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tower0/network/layer32/final_output",
+        "shape": [
+          1,
+          521
+        ]
+      }
+    ]
+  },
+  {
+    "id": "bert_classifier",
+    "file": "bert_classifier.onnx",
+    "source": "bert_classifier.tflite",
+    "bytes": 25479396,
+    "sha256": "57a062d6eb4887c3c6d47f0a5fcad6ad53b4ac9e5d771126f55a21229665a8d8",
+    "inputs": [
+      {
+        "name": "serving_default_input_word_ids:0",
+        "shape": [
+          1,
+          128
+        ]
+      },
+      {
+        "name": "serving_default_input_type_ids:0",
+        "shape": [
+          1,
+          128
+        ]
+      },
+      {
+        "name": "serving_default_input_mask:0",
+        "shape": [
+          1,
+          128
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "StatefulPartitionedCall:0",
+        "shape": [
+          1,
+          2
+        ]
+      }
+    ]
+  },
+  {
+    "id": "average_word_classifier",
+    "file": "average_word_classifier.onnx",
+    "source": "average_word_classifier.tflite",
+    "bytes": 642925,
+    "sha256": "fe2c2d0f8e1a5ca038b64ed2385197628d724f03b80869bc348bba450de65231",
+    "inputs": [
+      {
+        "name": "serving_default_input_1:0",
+        "shape": [
+          -1,
+          256
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "StatefulPartitionedCall:0",
+        "shape": [
+          -1,
+          2
+        ]
+      }
+    ]
+  },
+  {
+    "id": "bert_embedder",
+    "file": "bert_embedder.onnx",
+    "source": "bert_embedder.tflite",
+    "bytes": 26622911,
+    "sha256": "2ae36698213c8648ebb595e4399ae15553532e58d8f8aa151abade49c5a1ced9",
+    "inputs": [
+      {
+        "name": "input_word_ids",
+        "shape": [
+          -1,
+          128
+        ]
+      },
+      {
+        "name": "input_mask",
+        "shape": [
+          -1,
+          128
+        ]
+      },
+      {
+        "name": "input_type_ids",
+        "shape": [
+          -1,
+          128
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "module_apply_tokens/bert/pooler/Squeeze",
+        "shape": [
+          -1,
+          512
+        ]
+      }
+    ]
+  },
+  {
+    "id": "language_detector",
+    "file": "language_detector.onnx",
+    "source": "language_detector.tflite",
+    "bytes": 3833619,
+    "sha256": "b80eef5271030261bd5637365595ed54bce3b5edece46d27c9f9d112692fef36",
+    "inputs": [
+      {
+        "name": "ngram_ids",
+        "shape": [
+          4,
+          -1
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "probabilities",
+        "shape": [
+          1,
+          111
+        ]
+      }
+    ]
   }
 ]

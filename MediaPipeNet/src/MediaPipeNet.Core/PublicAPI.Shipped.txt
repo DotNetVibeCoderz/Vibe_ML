@@ -1,0 +1,274 @@
+#nullable enable
+MediaPipeNet.Angles
+MediaPipeNet.Category
+MediaPipeNet.Category.<Clone>$() -> MediaPipeNet.Category!
+MediaPipeNet.Category.Category(int Index, float Score, string? CategoryName = null, string? DisplayName = null) -> void
+MediaPipeNet.Category.CategoryName.get -> string?
+MediaPipeNet.Category.CategoryName.init -> void
+MediaPipeNet.Category.Deconstruct(out int Index, out float Score, out string? CategoryName, out string? DisplayName) -> void
+MediaPipeNet.Category.DisplayName.get -> string?
+MediaPipeNet.Category.DisplayName.init -> void
+MediaPipeNet.Category.Equals(MediaPipeNet.Category? other) -> bool
+MediaPipeNet.Category.Index.get -> int
+MediaPipeNet.Category.Index.init -> void
+MediaPipeNet.Category.Score.get -> float
+MediaPipeNet.Category.Score.init -> void
+MediaPipeNet.Detection
+MediaPipeNet.Detection.<Clone>$() -> MediaPipeNet.Detection!
+MediaPipeNet.Detection.BoundingBox.get -> MediaPipeNet.RectF
+MediaPipeNet.Detection.BoundingBox.init -> void
+MediaPipeNet.Detection.Categories.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>!
+MediaPipeNet.Detection.Categories.init -> void
+MediaPipeNet.Detection.Deconstruct(out MediaPipeNet.RectF BoundingBox, out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>! Categories, out System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedKeypoint>! Keypoints) -> void
+MediaPipeNet.Detection.Detection(MediaPipeNet.RectF BoundingBox, System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>! Categories, System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedKeypoint>! Keypoints) -> void
+MediaPipeNet.Detection.Equals(MediaPipeNet.Detection? other) -> bool
+MediaPipeNet.Detection.Keypoints.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedKeypoint>!
+MediaPipeNet.Detection.Keypoints.init -> void
+MediaPipeNet.Detection.Score.get -> float
+MediaPipeNet.Detection.TopCategory.get -> MediaPipeNet.Category!
+MediaPipeNet.Diagnostics.FrameRateCounter
+MediaPipeNet.Diagnostics.FrameRateCounter.FrameRateCounter(int window = 30) -> void
+MediaPipeNet.Diagnostics.FrameRateCounter.Rate.get -> double
+MediaPipeNet.Diagnostics.FrameRateCounter.Reset() -> void
+MediaPipeNet.Diagnostics.FrameRateCounter.Tick() -> void
+MediaPipeNet.Diagnostics.MediaPipeTelemetry
+MediaPipeNet.Embedding
+MediaPipeNet.Embedding.<Clone>$() -> MediaPipeNet.Embedding!
+MediaPipeNet.Embedding.Deconstruct(out System.Collections.Generic.IReadOnlyList<float>! Values, out System.Collections.Generic.IReadOnlyList<sbyte>? QuantizedValues, out int HeadIndex, out string? HeadName) -> void
+MediaPipeNet.Embedding.Dimension.get -> int
+MediaPipeNet.Embedding.Embedding(System.Collections.Generic.IReadOnlyList<float>! Values, System.Collections.Generic.IReadOnlyList<sbyte>? QuantizedValues = null, int HeadIndex = 0, string? HeadName = null) -> void
+MediaPipeNet.Embedding.Equals(MediaPipeNet.Embedding? other) -> bool
+MediaPipeNet.Embedding.HeadIndex.get -> int
+MediaPipeNet.Embedding.HeadIndex.init -> void
+MediaPipeNet.Embedding.HeadName.get -> string?
+MediaPipeNet.Embedding.HeadName.init -> void
+MediaPipeNet.Embedding.QuantizedValues.get -> System.Collections.Generic.IReadOnlyList<sbyte>?
+MediaPipeNet.Embedding.QuantizedValues.init -> void
+MediaPipeNet.Embedding.Values.get -> System.Collections.Generic.IReadOnlyList<float>!
+MediaPipeNet.Embedding.Values.init -> void
+MediaPipeNet.ImageSize
+MediaPipeNet.ImageSize.Deconstruct(out int Width, out int Height) -> void
+MediaPipeNet.ImageSize.Equals(MediaPipeNet.ImageSize other) -> bool
+MediaPipeNet.ImageSize.Height.get -> int
+MediaPipeNet.ImageSize.Height.init -> void
+MediaPipeNet.ImageSize.ImageSize() -> void
+MediaPipeNet.ImageSize.ImageSize(int Width, int Height) -> void
+MediaPipeNet.ImageSize.Width.get -> int
+MediaPipeNet.ImageSize.Width.init -> void
+MediaPipeNet.Landmark
+MediaPipeNet.Landmark.Deconstruct(out float X, out float Y, out float Z, out float? Visibility, out float? Presence) -> void
+MediaPipeNet.Landmark.Equals(MediaPipeNet.Landmark other) -> bool
+MediaPipeNet.Landmark.Landmark() -> void
+MediaPipeNet.Landmark.Landmark(float X, float Y, float Z, float? Visibility = null, float? Presence = null) -> void
+MediaPipeNet.Landmark.Presence.get -> float?
+MediaPipeNet.Landmark.Presence.init -> void
+MediaPipeNet.Landmark.Visibility.get -> float?
+MediaPipeNet.Landmark.Visibility.init -> void
+MediaPipeNet.Landmark.X.get -> float
+MediaPipeNet.Landmark.X.init -> void
+MediaPipeNet.Landmark.Y.get -> float
+MediaPipeNet.Landmark.Y.init -> void
+MediaPipeNet.Landmark.Z.get -> float
+MediaPipeNet.Landmark.Z.init -> void
+MediaPipeNet.LetterboxPadding
+MediaPipeNet.LetterboxPadding.Bottom.get -> float
+MediaPipeNet.LetterboxPadding.Bottom.init -> void
+MediaPipeNet.LetterboxPadding.ContentHeight.get -> float
+MediaPipeNet.LetterboxPadding.ContentWidth.get -> float
+MediaPipeNet.LetterboxPadding.Deconstruct(out float Left, out float Top, out float Right, out float Bottom) -> void
+MediaPipeNet.LetterboxPadding.Equals(MediaPipeNet.LetterboxPadding other) -> bool
+MediaPipeNet.LetterboxPadding.Left.get -> float
+MediaPipeNet.LetterboxPadding.Left.init -> void
+MediaPipeNet.LetterboxPadding.LetterboxPadding() -> void
+MediaPipeNet.LetterboxPadding.LetterboxPadding(float Left, float Top, float Right, float Bottom) -> void
+MediaPipeNet.LetterboxPadding.Remove(float x, float y) -> (float X, float Y)
+MediaPipeNet.LetterboxPadding.Right.get -> float
+MediaPipeNet.LetterboxPadding.Right.init -> void
+MediaPipeNet.LetterboxPadding.Top.get -> float
+MediaPipeNet.LetterboxPadding.Top.init -> void
+MediaPipeNet.MediaPipeException
+MediaPipeNet.MediaPipeException.MediaPipeException() -> void
+MediaPipeNet.MediaPipeException.MediaPipeException(string! message) -> void
+MediaPipeNet.MediaPipeException.MediaPipeException(string! message, System.Exception! innerException) -> void
+MediaPipeNet.ModelNotFoundException
+MediaPipeNet.ModelNotFoundException.ModelNotFoundException() -> void
+MediaPipeNet.ModelNotFoundException.ModelNotFoundException(string! message) -> void
+MediaPipeNet.ModelNotFoundException.ModelNotFoundException(string! message, System.Exception! innerException) -> void
+MediaPipeNet.NormalizedKeypoint
+MediaPipeNet.NormalizedKeypoint.Deconstruct(out float X, out float Y, out string? Label, out float? Score) -> void
+MediaPipeNet.NormalizedKeypoint.Equals(MediaPipeNet.NormalizedKeypoint other) -> bool
+MediaPipeNet.NormalizedKeypoint.Label.get -> string?
+MediaPipeNet.NormalizedKeypoint.Label.init -> void
+MediaPipeNet.NormalizedKeypoint.NormalizedKeypoint() -> void
+MediaPipeNet.NormalizedKeypoint.NormalizedKeypoint(float X, float Y, string? Label = null, float? Score = null) -> void
+MediaPipeNet.NormalizedKeypoint.Score.get -> float?
+MediaPipeNet.NormalizedKeypoint.Score.init -> void
+MediaPipeNet.NormalizedKeypoint.X.get -> float
+MediaPipeNet.NormalizedKeypoint.X.init -> void
+MediaPipeNet.NormalizedKeypoint.Y.get -> float
+MediaPipeNet.NormalizedKeypoint.Y.init -> void
+MediaPipeNet.NormalizedLandmark
+MediaPipeNet.NormalizedLandmark.Deconstruct(out float X, out float Y, out float Z, out float? Visibility, out float? Presence) -> void
+MediaPipeNet.NormalizedLandmark.Equals(MediaPipeNet.NormalizedLandmark other) -> bool
+MediaPipeNet.NormalizedLandmark.NormalizedLandmark() -> void
+MediaPipeNet.NormalizedLandmark.NormalizedLandmark(float X, float Y, float Z = 0, float? Visibility = null, float? Presence = null) -> void
+MediaPipeNet.NormalizedLandmark.Presence.get -> float?
+MediaPipeNet.NormalizedLandmark.Presence.init -> void
+MediaPipeNet.NormalizedLandmark.ToPixel(int imageWidth, int imageHeight) -> (float X, float Y)
+MediaPipeNet.NormalizedLandmark.Visibility.get -> float?
+MediaPipeNet.NormalizedLandmark.Visibility.init -> void
+MediaPipeNet.NormalizedLandmark.X.get -> float
+MediaPipeNet.NormalizedLandmark.X.init -> void
+MediaPipeNet.NormalizedLandmark.Y.get -> float
+MediaPipeNet.NormalizedLandmark.Y.init -> void
+MediaPipeNet.NormalizedLandmark.Z.get -> float
+MediaPipeNet.NormalizedLandmark.Z.init -> void
+MediaPipeNet.NormalizedRect
+MediaPipeNet.NormalizedRect.Deconstruct(out float XCenter, out float YCenter, out float Width, out float Height, out float Rotation) -> void
+MediaPipeNet.NormalizedRect.Equals(MediaPipeNet.NormalizedRect other) -> bool
+MediaPipeNet.NormalizedRect.GetCorners(int imageWidth, int imageHeight) -> (float X, float Y)[]!
+MediaPipeNet.NormalizedRect.Height.get -> float
+MediaPipeNet.NormalizedRect.Height.init -> void
+MediaPipeNet.NormalizedRect.NormalizedRect() -> void
+MediaPipeNet.NormalizedRect.NormalizedRect(float XCenter, float YCenter, float Width, float Height, float Rotation = 0) -> void
+MediaPipeNet.NormalizedRect.Rotation.get -> float
+MediaPipeNet.NormalizedRect.Rotation.init -> void
+MediaPipeNet.NormalizedRect.ToPixelBounds(int imageWidth, int imageHeight) -> MediaPipeNet.RectF
+MediaPipeNet.NormalizedRect.Width.get -> float
+MediaPipeNet.NormalizedRect.Width.init -> void
+MediaPipeNet.NormalizedRect.XCenter.get -> float
+MediaPipeNet.NormalizedRect.XCenter.init -> void
+MediaPipeNet.NormalizedRect.YCenter.get -> float
+MediaPipeNet.NormalizedRect.YCenter.init -> void
+MediaPipeNet.RectF
+MediaPipeNet.RectF.Area.get -> float
+MediaPipeNet.RectF.Bottom.get -> float
+MediaPipeNet.RectF.CenterX.get -> float
+MediaPipeNet.RectF.CenterY.get -> float
+MediaPipeNet.RectF.Clamp(float width, float height) -> MediaPipeNet.RectF
+MediaPipeNet.RectF.Deconstruct(out float X, out float Y, out float Width, out float Height) -> void
+MediaPipeNet.RectF.Equals(MediaPipeNet.RectF other) -> bool
+MediaPipeNet.RectF.Height.get -> float
+MediaPipeNet.RectF.Height.init -> void
+MediaPipeNet.RectF.IsEmpty.get -> bool
+MediaPipeNet.RectF.RectF() -> void
+MediaPipeNet.RectF.RectF(float X, float Y, float Width, float Height) -> void
+MediaPipeNet.RectF.Right.get -> float
+MediaPipeNet.RectF.Scale(float sx, float sy) -> MediaPipeNet.RectF
+MediaPipeNet.RectF.Width.get -> float
+MediaPipeNet.RectF.Width.init -> void
+MediaPipeNet.RectF.X.get -> float
+MediaPipeNet.RectF.X.init -> void
+MediaPipeNet.RectF.Y.get -> float
+MediaPipeNet.RectF.Y.init -> void
+MediaPipeNet.RunningMode
+MediaPipeNet.RunningMode.Image = 0 -> MediaPipeNet.RunningMode
+MediaPipeNet.RunningMode.LiveStream = 2 -> MediaPipeNet.RunningMode
+MediaPipeNet.RunningMode.Video = 1 -> MediaPipeNet.RunningMode
+MediaPipeNet.Serialization.MediaPipeJson
+MediaPipeNet.Timestamp
+MediaPipeNet.Timestamp.CompareTo(MediaPipeNet.Timestamp other) -> int
+MediaPipeNet.Timestamp.Equals(MediaPipeNet.Timestamp other) -> bool
+MediaPipeNet.Timestamp.IsRangeValue.get -> bool
+MediaPipeNet.Timestamp.IsSpecialValue.get -> bool
+MediaPipeNet.Timestamp.Milliseconds.get -> double
+MediaPipeNet.Timestamp.NextAllowedInStream() -> MediaPipeNet.Timestamp
+MediaPipeNet.Timestamp.Seconds.get -> double
+MediaPipeNet.Timestamp.Timestamp() -> void
+MediaPipeNet.Timestamp.Timestamp(long value) -> void
+MediaPipeNet.Timestamp.Value.get -> long
+const MediaPipeNet.Diagnostics.MediaPipeTelemetry.Name = "MediaPipeNet" -> string!
+override MediaPipeNet.Category.Equals(object? obj) -> bool
+override MediaPipeNet.Category.GetHashCode() -> int
+override MediaPipeNet.Category.ToString() -> string!
+override MediaPipeNet.Detection.Equals(object? obj) -> bool
+override MediaPipeNet.Detection.GetHashCode() -> int
+override MediaPipeNet.Detection.ToString() -> string!
+override MediaPipeNet.Embedding.Equals(object? obj) -> bool
+override MediaPipeNet.Embedding.GetHashCode() -> int
+override MediaPipeNet.Embedding.ToString() -> string!
+override MediaPipeNet.ImageSize.GetHashCode() -> int
+override MediaPipeNet.Landmark.GetHashCode() -> int
+override MediaPipeNet.LetterboxPadding.GetHashCode() -> int
+override MediaPipeNet.NormalizedKeypoint.GetHashCode() -> int
+override MediaPipeNet.NormalizedLandmark.GetHashCode() -> int
+override MediaPipeNet.NormalizedRect.GetHashCode() -> int
+override MediaPipeNet.RectF.GetHashCode() -> int
+override MediaPipeNet.Timestamp.GetHashCode() -> int
+override MediaPipeNet.Timestamp.ToString() -> string!
+static MediaPipeNet.Angles.ComputeRotation(float x0, float y0, float x1, float y1, float targetAngle) -> float
+static MediaPipeNet.Angles.DegreesToRadians(float degrees) -> float
+static MediaPipeNet.Angles.NormalizeRadians(float angle) -> float
+static MediaPipeNet.Angles.RadiansToDegrees(float radians) -> float
+static MediaPipeNet.Category.operator !=(MediaPipeNet.Category? left, MediaPipeNet.Category? right) -> bool
+static MediaPipeNet.Category.operator ==(MediaPipeNet.Category? left, MediaPipeNet.Category? right) -> bool
+static MediaPipeNet.Detection.operator !=(MediaPipeNet.Detection? left, MediaPipeNet.Detection? right) -> bool
+static MediaPipeNet.Detection.operator ==(MediaPipeNet.Detection? left, MediaPipeNet.Detection? right) -> bool
+static MediaPipeNet.Diagnostics.MediaPipeTelemetry.ActivitySource.get -> System.Diagnostics.ActivitySource!
+static MediaPipeNet.Diagnostics.MediaPipeTelemetry.FramesDropped.get -> System.Diagnostics.Metrics.Counter<long>!
+static MediaPipeNet.Diagnostics.MediaPipeTelemetry.FramesProcessed.get -> System.Diagnostics.Metrics.Counter<long>!
+static MediaPipeNet.Diagnostics.MediaPipeTelemetry.GraphPackets.get -> System.Diagnostics.Metrics.Counter<long>!
+static MediaPipeNet.Diagnostics.MediaPipeTelemetry.InferenceDuration.get -> System.Diagnostics.Metrics.Histogram<double>!
+static MediaPipeNet.Diagnostics.MediaPipeTelemetry.Meter.get -> System.Diagnostics.Metrics.Meter!
+static MediaPipeNet.Diagnostics.MediaPipeTelemetry.TaskDuration.get -> System.Diagnostics.Metrics.Histogram<double>!
+static MediaPipeNet.Embedding.CosineSimilarity(MediaPipeNet.Embedding! a, MediaPipeNet.Embedding! b) -> double
+static MediaPipeNet.Embedding.FromTensor(System.ReadOnlySpan<float> tensor, bool l2Normalize, bool quantize, int headIndex = 0, string? headName = null) -> MediaPipeNet.Embedding!
+static MediaPipeNet.Embedding.operator !=(MediaPipeNet.Embedding? left, MediaPipeNet.Embedding? right) -> bool
+static MediaPipeNet.Embedding.operator ==(MediaPipeNet.Embedding? left, MediaPipeNet.Embedding? right) -> bool
+static MediaPipeNet.ImageSize.operator !=(MediaPipeNet.ImageSize left, MediaPipeNet.ImageSize right) -> bool
+static MediaPipeNet.ImageSize.operator ==(MediaPipeNet.ImageSize left, MediaPipeNet.ImageSize right) -> bool
+static MediaPipeNet.Landmark.operator !=(MediaPipeNet.Landmark left, MediaPipeNet.Landmark right) -> bool
+static MediaPipeNet.Landmark.operator ==(MediaPipeNet.Landmark left, MediaPipeNet.Landmark right) -> bool
+static MediaPipeNet.LetterboxPadding.None.get -> MediaPipeNet.LetterboxPadding
+static MediaPipeNet.LetterboxPadding.operator !=(MediaPipeNet.LetterboxPadding left, MediaPipeNet.LetterboxPadding right) -> bool
+static MediaPipeNet.LetterboxPadding.operator ==(MediaPipeNet.LetterboxPadding left, MediaPipeNet.LetterboxPadding right) -> bool
+static MediaPipeNet.NormalizedKeypoint.operator !=(MediaPipeNet.NormalizedKeypoint left, MediaPipeNet.NormalizedKeypoint right) -> bool
+static MediaPipeNet.NormalizedKeypoint.operator ==(MediaPipeNet.NormalizedKeypoint left, MediaPipeNet.NormalizedKeypoint right) -> bool
+static MediaPipeNet.NormalizedLandmark.operator !=(MediaPipeNet.NormalizedLandmark left, MediaPipeNet.NormalizedLandmark right) -> bool
+static MediaPipeNet.NormalizedLandmark.operator ==(MediaPipeNet.NormalizedLandmark left, MediaPipeNet.NormalizedLandmark right) -> bool
+static MediaPipeNet.NormalizedRect.FullImage.get -> MediaPipeNet.NormalizedRect
+static MediaPipeNet.NormalizedRect.operator !=(MediaPipeNet.NormalizedRect left, MediaPipeNet.NormalizedRect right) -> bool
+static MediaPipeNet.NormalizedRect.operator ==(MediaPipeNet.NormalizedRect left, MediaPipeNet.NormalizedRect right) -> bool
+static MediaPipeNet.RectF.FromLtrb(float left, float top, float right, float bottom) -> MediaPipeNet.RectF
+static MediaPipeNet.RectF.Intersect(in MediaPipeNet.RectF a, in MediaPipeNet.RectF b) -> MediaPipeNet.RectF
+static MediaPipeNet.RectF.IntersectionOverUnion(in MediaPipeNet.RectF a, in MediaPipeNet.RectF b) -> float
+static MediaPipeNet.RectF.operator !=(MediaPipeNet.RectF left, MediaPipeNet.RectF right) -> bool
+static MediaPipeNet.RectF.operator ==(MediaPipeNet.RectF left, MediaPipeNet.RectF right) -> bool
+static MediaPipeNet.Serialization.MediaPipeJson.Create(bool indented) -> System.Text.Json.JsonSerializerOptions!
+static MediaPipeNet.Serialization.MediaPipeJson.Deserialize<T>(string! json) -> T?
+static MediaPipeNet.Serialization.MediaPipeJson.IndentedOptions.get -> System.Text.Json.JsonSerializerOptions!
+static MediaPipeNet.Serialization.MediaPipeJson.Options.get -> System.Text.Json.JsonSerializerOptions!
+static MediaPipeNet.Serialization.MediaPipeJson.Serialize<T>(T value, bool indented = false) -> string!
+static MediaPipeNet.Timestamp.Done.get -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.FromMilliseconds(long milliseconds) -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.FromSeconds(double seconds) -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.FromTimeSpan(System.TimeSpan time) -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.Max.get -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.Maximum(MediaPipeNet.Timestamp a, MediaPipeNet.Timestamp b) -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.Min.get -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.Minimum(MediaPipeNet.Timestamp a, MediaPipeNet.Timestamp b) -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.PostStream.get -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.PreStream.get -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.Unset.get -> MediaPipeNet.Timestamp
+static MediaPipeNet.Timestamp.operator !=(MediaPipeNet.Timestamp left, MediaPipeNet.Timestamp right) -> bool
+static MediaPipeNet.Timestamp.operator <(MediaPipeNet.Timestamp a, MediaPipeNet.Timestamp b) -> bool
+static MediaPipeNet.Timestamp.operator <=(MediaPipeNet.Timestamp a, MediaPipeNet.Timestamp b) -> bool
+static MediaPipeNet.Timestamp.operator ==(MediaPipeNet.Timestamp left, MediaPipeNet.Timestamp right) -> bool
+static MediaPipeNet.Timestamp.operator >(MediaPipeNet.Timestamp a, MediaPipeNet.Timestamp b) -> bool
+static MediaPipeNet.Timestamp.operator >=(MediaPipeNet.Timestamp a, MediaPipeNet.Timestamp b) -> bool
+static readonly MediaPipeNet.Diagnostics.MediaPipeTelemetry.Version -> string!
+~override MediaPipeNet.ImageSize.Equals(object obj) -> bool
+~override MediaPipeNet.ImageSize.ToString() -> string
+~override MediaPipeNet.Landmark.Equals(object obj) -> bool
+~override MediaPipeNet.Landmark.ToString() -> string
+~override MediaPipeNet.LetterboxPadding.Equals(object obj) -> bool
+~override MediaPipeNet.LetterboxPadding.ToString() -> string
+~override MediaPipeNet.NormalizedKeypoint.Equals(object obj) -> bool
+~override MediaPipeNet.NormalizedKeypoint.ToString() -> string
+~override MediaPipeNet.NormalizedLandmark.Equals(object obj) -> bool
+~override MediaPipeNet.NormalizedLandmark.ToString() -> string
+~override MediaPipeNet.NormalizedRect.Equals(object obj) -> bool
+~override MediaPipeNet.NormalizedRect.ToString() -> string
+~override MediaPipeNet.RectF.Equals(object obj) -> bool
+~override MediaPipeNet.RectF.ToString() -> string
+~override MediaPipeNet.Timestamp.Equals(object obj) -> bool

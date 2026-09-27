@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using MediaPipeNet.Inference;
 
 namespace MediaPipeNet.Gallery.Services;
@@ -14,6 +14,7 @@ public sealed class AppSettings
     // CPU by default: it works everywhere; GPU providers are opt-in from the Settings page.
     public ExecutionProvider Provider { get; set; } = ExecutionProvider.Cpu;
     public int Threads { get; set; }
+    public ModelPrecision Precision { get; set; } = ModelPrecision.Float32;
     public string Language { get; set; } = "en";
     public string Theme { get; set; } = "Light";
     public string? ModelDirectory { get; set; }

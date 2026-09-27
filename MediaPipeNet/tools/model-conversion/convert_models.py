@@ -1,4 +1,4 @@
-﻿"""
+"""
 MediaPipe.NET model conversion tool.
 
 Downloads the official Google MediaPipe TFLite models (Apache-2.0), unpacks `.task` bundles,
@@ -40,6 +40,22 @@ SOURCES = [
     ("efficientdet_lite0.tflite", f"{BASE}/object_detector/efficientdet_lite0/float32/latest/efficientdet_lite0.tflite"),
     ("efficientnet_lite0.tflite", f"{BASE}/image_classifier/efficientnet_lite0/float32/latest/efficientnet_lite0.tflite"),
     ("gesture_recognizer.task", f"{BASE}/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task"),
+    # 0.2.0
+    ("blaze_face_full_range.tflite", f"{BASE}/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.tflite"),
+    ("hand_recrop.tflite", "https://storage.googleapis.com/mediapipe-assets/hand_recrop.tflite"),
+    # 0.3.0
+    ("holistic_landmarker.task", f"{BASE}/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task"),
+    ("mobilenet_v3_small.tflite", f"{BASE}/image_embedder/mobilenet_v3_small/float32/latest/mobilenet_v3_small.tflite"),
+    ("selfie_multiclass_256x256.tflite", f"{BASE}/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite"),
+    ("hair_segmenter.tflite", f"{BASE}/image_segmenter/hair_segmenter/float32/latest/hair_segmenter.tflite"),
+    ("deeplab_v3.tflite", f"{BASE}/image_segmenter/deeplab_v3/float32/latest/deeplab_v3.tflite"),
+    ("magic_touch.tflite", f"{BASE}/interactive_segmenter/magic_touch/float32/latest/magic_touch.tflite"),
+    ("face_stylizer_color_sketch.task", f"{BASE}/face_stylizer/blaze_face_stylizer/float32/latest/face_stylizer_color_sketch.task"),
+    ("yamnet.tflite", f"{BASE}/audio_classifier/yamnet/float32/latest/yamnet.tflite"),
+    ("bert_classifier.tflite", f"{BASE}/text_classifier/bert_classifier/float32/latest/bert_classifier.tflite"),
+    ("average_word_classifier.tflite", f"{BASE}/text_classifier/average_word_classifier/float32/latest/average_word_classifier.tflite"),
+    ("bert_embedder.tflite", f"{BASE}/text_embedder/bert_embedder/float32/latest/bert_embedder.tflite"),
+    ("language_detector.tflite", f"{BASE}/language_detector/language_detector/float32/latest/language_detector.tflite"),
 ]
 
 # Output ONNX name for each TFLite graph (path inside bundle -> MediaPipe.NET model id).
@@ -60,13 +76,39 @@ RENAMES = {
     "efficientnet_lite0.tflite": "efficientnet_lite0",
     "gesture_recognizer.task/hand_gesture_recognizer.task/gesture_embedder.tflite": "gesture_embedder",
     "gesture_recognizer.task/hand_gesture_recognizer.task/canned_gesture_classifier.tflite": "canned_gesture_classifier",
+    "gesture_recognizer.task/hand_landmarker.task/hand_detector.tflite": None,        # same as hand_landmarker.task
+    "gesture_recognizer.task/hand_landmarker.task/hand_landmarks_detector.tflite": None,
+    # 0.2.0
+    "blaze_face_full_range.tflite": "face_detection_full_range",
+    "hand_recrop.tflite": None,  # superseded by holistic's hand_roi_refinement
+    "holistic_landmarker.task/hand_roi_refinement.tflite": "hand_roi_refinement",
+    "holistic_landmarker.task/face_blendshapes.tflite": None,         # identical to face_landmarker.task
+    "holistic_landmarker.task/face_detector.tflite": None,            # BlazeFace short range (metadata differs)
+    "holistic_landmarker.task/face_landmarks_detector.tflite": None,  # 468-point mesh; the 478-point model is used
+    "holistic_landmarker.task/hand_landmarks_detector.tflite": None,  # same weights as hand_landmarker.task
+    "holistic_landmarker.task/pose_detector.tflite": None,            # identical to pose_detection.tflite
+    "holistic_landmarker.task/pose_landmarks_detector.tflite": None,  # BlazePose lite
+    # 0.3.0
+    "mobilenet_v3_small.tflite": "mobilenet_v3_small_embedder",
+    "selfie_multiclass_256x256.tflite": "selfie_multiclass",
+    "hair_segmenter.tflite": "hair_segmenter",
+    "deeplab_v3.tflite": "deeplab_v3",
+    "magic_touch.tflite": "magic_touch",
+    "face_stylizer_color_sketch.task/face_detector.tflite": None,
+    "face_stylizer_color_sketch.task/face_landmarks_detector.tflite": None,
+    "face_stylizer_color_sketch.task/face_stylizer.tflite": "face_stylizer_color_sketch",
+    "yamnet.tflite": "yamnet",
+    "bert_classifier.tflite": "bert_classifier",
+    "average_word_classifier.tflite": "average_word_classifier",
+    "bert_embedder.tflite": "bert_embedder",
+    "language_detector.tflite": "language_detector",
 }
 
 
 NO_INTERPRETER: set[str] = set()
 
 # HardSwish needs opset 14.
-OPSET_OVERRIDES = {"selfie_segmenter": 14}
+OPSET_OVERRIDES = {"selfie_segmenter": 14, "mobilenet_v3_small_embedder": 14, "hair_segmenter": 14}
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -125,45 +167,268 @@ def densify(path: pathlib.Path) -> pathlib.Path:
     return out
 
 
-def lower_transpose_conv_bias(onnx_path: pathlib.Path) -> None:
+def tflite_custom_ops(tflite_path: pathlib.Path) -> dict[str, tuple[str, bytes, list[list[int]]]]:
+    """Maps the first output tensor name of every custom op to (op name, custom options, input shapes)."""
+    from tensorflow.lite.tools import flatbuffer_utils
+
+    model = flatbuffer_utils.read_model(str(tflite_path))
+    g = model.subgraphs[0]
+    result = {}
+    for op in g.operators:
+        code = model.operatorCodes[op.opcodeIndex]
+        if not code.customCode:
+            continue
+        name = g.tensors[op.outputs[0]].name.decode()
+        shapes = [g.tensors[i].shape.tolist() if i >= 0 else [] for i in op.inputs]
+        opts = bytes(op.customOptions) if op.customOptions is not None else b""
+        result[name] = (code.customCode.decode(), opts, shapes)
+    return result
+
+
+def lower_custom_ops(onnx_path: pathlib.Path, tflite_path: pathlib.Path) -> None:
     """
-    MediaPipe's segmentation models end with the custom TFLite op `Convolution2DTransposeBias`
-    (a transposed convolution with a fused bias; SAME padding, stride 2), which tf2onnx leaves in the
-    graph as an unknown node. It is rewritten here as NHWC->NCHW Transpose, ONNX ConvTranspose and
-    NCHW->NHWC Transpose. The TFLite kernel layout [O,H,W,I] becomes ONNX's [I,O,H,W].
+    Rewrites MediaPipe's custom TFLite ops, which tf2onnx leaves as unknown nodes, as standard ONNX ops.
+    Options come from the TFLite flatbuffer (TfLiteTransposeConvParams / TfLitePoolParams: int32 padding,
+    stride_w, stride_h[, filter_w, filter_h]). TFLite tensors are NHWC; ONNX ops run in NCHW between Transposes.
+
+    * Convolution2DTransposeBias -> ConvTranspose (+ bias). Kernel [O,H,W,I] -> [I,O,H,W].
+    * MaxPoolingWithArgmax2D     -> MaxPool with Indices output.
+    * MaxUnpooling2D             -> MaxUnpool (indices come from the matching MaxPool; both use ONNX's
+                                     NCHW index convention, so the pair stays consistent).
     """
+    import struct
+
     import onnx
     from onnx import helper
 
+    custom = tflite_custom_ops(tflite_path)
     model = onnx.load(str(onnx_path))
     graph = model.graph
-    changed = False
+    pool_input_nchw: dict[str, str] = {}  # indices tensor -> NCHW input of the pool that produced it
+    changed = []
     for idx, node in enumerate(list(graph.node)):
-        if "Convolution2DTransposeBias" not in node.op_type:
+        op = node.op_type.removeprefix("TFL_")
+        if op not in ("Convolution2DTransposeBias", "MaxPoolingWithArgmax2D", "MaxUnpooling2D"):
             continue
-        x, w, b = node.input[:3]
-        y = node.output[0]
-        n = node.name or f"conv_t_bias_{idx}"
-        new_nodes = [
-            helper.make_node("Transpose", [x], [f"{n}__x_nchw"], perm=[0, 3, 1, 2], name=f"{n}__tx"),
-            helper.make_node("Transpose", [w], [f"{n}__w_iohw"], perm=[3, 0, 1, 2], name=f"{n}__tw"),
-            helper.make_node("ConvTranspose", [f"{n}__x_nchw", f"{n}__w_iohw", b], [f"{n}__y_nchw"],
-                             strides=[2, 2], kernel_shape=[2, 2], name=f"{n}__convt"),
-            helper.make_node("Transpose", [f"{n}__y_nchw"], [y], perm=[0, 2, 3, 1], name=f"{n}__ty"),
-        ]
+        tfl = custom.get(node.output[0])
+        opts = struct.unpack("<5i", tfl[1][:20].ljust(20, b"\0")) if tfl else (1, 2, 2, 2, 2)
+        _, stride_w, stride_h, filter_w, filter_h = opts
+        n = (node.name or f"{op}_{idx}").replace(":", "_")
+        if op == "Convolution2DTransposeBias":
+            x, w, b = node.input[:3]
+            k_h, k_w = (tfl[2][1][1], tfl[2][1][2]) if tfl else (2, 2)
+            new = [
+                helper.make_node("Transpose", [x], [f"{n}__x"], perm=[0, 3, 1, 2]),
+                helper.make_node("Transpose", [w], [f"{n}__w"], perm=[3, 0, 1, 2]),
+                helper.make_node("ConvTranspose", [f"{n}__x", f"{n}__w", b], [f"{n}__y"],
+                                 strides=[stride_h, stride_w], kernel_shape=[k_h, k_w], auto_pad="SAME_UPPER"),
+                helper.make_node("Transpose", [f"{n}__y"], [node.output[0]], perm=[0, 2, 3, 1]),
+            ]
+        elif op == "MaxPoolingWithArgmax2D":
+            x = node.input[0]
+            pool_input_nchw[node.output[1]] = f"{n}__x"
+            new = [
+                helper.make_node("Transpose", [x], [f"{n}__x"], perm=[0, 3, 1, 2]),
+                helper.make_node("MaxPool", [f"{n}__x"], [f"{n}__y", node.output[1]],
+                                 kernel_shape=[filter_h, filter_w], strides=[stride_h, stride_w]),
+                helper.make_node("Transpose", [f"{n}__y"], [node.output[0]], perm=[0, 2, 3, 1]),
+            ]
+        else:  # MaxUnpooling2D
+            x, indices = node.input[:2]
+            new = [
+                helper.make_node("Transpose", [x], [f"{n}__x"], perm=[0, 3, 1, 2]),
+                helper.make_node("Shape", [pool_input_nchw[indices]], [f"{n}__shape"]),
+                helper.make_node("MaxUnpool", [f"{n}__x", indices, f"{n}__shape"], [f"{n}__y"],
+                                 kernel_shape=[filter_h, filter_w], strides=[stride_h, stride_w]),
+                helper.make_node("Transpose", [f"{n}__y"], [node.output[0]], perm=[0, 2, 3, 1]),
+            ]
         pos = list(graph.node).index(node)
         graph.node.remove(node)
-        for k, nn in enumerate(new_nodes):
+        for k, nn in enumerate(new):
             graph.node.insert(pos + k, nn)
-        changed = True
+        changed.append(op)
     if changed:
-        # drop the custom-domain opset import tf2onnx added for the unknown op
         keep = [o for o in model.opset_import if o.domain in ("", "ai.onnx")]
         del model.opset_import[:]
         model.opset_import.extend(keep)
+        # Stale type annotations of rewritten tensors (e.g. int32 argmax indices) would clash with ONNX's int64.
+        rewritten = {o for nd in graph.node for o in nd.output}
+        kept_info = [vi for vi in graph.value_info if vi.name not in rewritten or vi.type.tensor_type.elem_type == 1]
+        del graph.value_info[:]
+        graph.value_info.extend(kept_info)
         onnx.checker.check_model(model)
         onnx.save(model, str(onnx_path))
-        print(f"lowered Convolution2DTransposeBias in {onnx_path.name}")
+        print(f"lowered custom ops in {onnx_path.name}: {sorted(set(changed))}")
+
+
+def strip_dynamic_quantization(onnx_path: pathlib.Path) -> None:
+    """
+    TFLite hybrid FULLY_CONNECTED ops with `asymmetric_quantize_inputs` (MobileBERT) are converted by tf2onnx
+    into DynamicQuantizeLinear -> DequantizeLinear pairs on the input, the weights AND the bias (uint8,
+    per-tensor), which is far coarser than TFLite's per-channel int8 weights and costs up to 7% cosine
+    similarity on the output. Each pair is removed so the layer runs in float; the int8 weight storage
+    (constant DequantizeLinear) is kept.
+    """
+    import onnx
+
+    model = onnx.load(str(onnx_path))
+    graph = model.graph
+    producer = {o: n for n in graph.node for o in n.output}
+    rename: dict[str, str] = {}
+    dead = set()
+    for node in graph.node:
+        if node.op_type != "DequantizeLinear":
+            continue
+        q = producer.get(node.input[0])
+        if q is None or q.op_type != "DynamicQuantizeLinear" or list(node.input[1:3]) != list(q.output[1:3]):
+            continue
+        rename[node.output[0]] = q.input[0]
+        dead.add(id(node))
+    if not rename:
+        return
+    for node in graph.node:
+        for i, name in enumerate(node.input):
+            while name in rename:
+                name = rename[name]
+            node.input[i] = name
+    for out in graph.output:
+        if out.name in rename:
+            raise RuntimeError(f"graph output {out.name} is produced by a stripped DequantizeLinear")
+    used = {i for n in graph.node if id(n) not in dead for i in n.input} | {o.name for o in graph.output}
+    keep = [n for n in graph.node if id(n) not in dead and not (n.op_type == "DynamicQuantizeLinear" and not any(o in used for o in n.output))]
+    removed = len(graph.node) - len(keep)
+    del graph.node[:]
+    graph.node.extend(keep)
+    onnx.checker.check_model(model)
+    onnx.save(model, str(onnx_path))
+    print(f"stripped {len(rename)} dynamic quantization pairs ({removed} nodes) from {onnx_path.name}")
+
+
+def build_language_detector(tflite_path: pathlib.Path, onnx_path: pathlib.Path) -> None:
+    """
+    The language detector starts with the string op NGramHash (character n-gram hashing), which has no ONNX
+    equivalent, so the model is rebuilt by hand. NGramHash runs in C# (MediaPipeNet.Tasks.Text.NGramHasher)
+    and produces the ONNX input `ngram_ids` [num_ngram_lengths, num_tokens] int32 (every id >= 1).
+
+    KmeansEmbeddingLookup (product-quantized embeddings: uint8 codes [V, 6] into a [256, 4] codebook, averaged
+    over tokens) is expanded into a dense float table [V, 24] and lowered to Gather + ReduceMean.
+    The fully connected layers are hybrid int8 in TFLite; they are dequantized to float32 here.
+    """
+    import numpy as np
+    import onnx
+    from onnx import TensorProto, helper, numpy_helper
+    from tensorflow.lite.python import schema_py_generated as schema
+    from tensorflow.lite.tools import flatbuffer_utils
+
+    model = flatbuffer_utils.read_model(str(tflite_path))
+    g = model.subgraphs[0]
+    np_types = {0: np.float32, 2: np.int32, 3: np.uint8, 9: np.int8}
+
+    def tensor(i: int) -> np.ndarray:
+        t = g.tensors[i]
+        a = np.frombuffer(bytes(model.buffers[t.buffer].data), dtype=np_types[t.type]).reshape(t.shape)
+        if t.type == 9:  # int8 weights: per-tensor or per-channel (axis 0) symmetric quantization
+            scale = np.asarray(t.quantization.scale, dtype=np.float32)
+            a = a.astype(np.float32) * (scale.reshape(-1, 1) if scale.size > 1 else scale[0])
+        return a
+
+    def op_name(op) -> str:
+        c = model.operatorCodes[op.opcodeIndex]
+        if c.customCode:
+            return c.customCode.decode()
+        code = max(c.builtinCode, c.deprecatedBuiltinCode)
+        return next(k for k, v in schema.BuiltinOperator.__dict__.items() if v == code)
+
+    inits, nodes, heads, fcs = [], [], [], []
+    for op in g.operators:
+        name = op_name(op)
+        if name == "KmeansEmbeddingLookup":
+            codes, codebook = tensor(op.inputs[1]), tensor(op.inputs[2])
+            heads.append(codebook[codes].reshape(codes.shape[0], -1).astype(np.float32))  # [V, 6*4]
+        elif name == "FULLY_CONNECTED":
+            relu = op.builtinOptions.fusedActivationFunction == schema.ActivationFunctionType.RELU
+            fcs.append((tensor(op.inputs[1]), tensor(op.inputs[2]), relu))
+
+    nodes.append(helper.make_node("Split", ["ngram_ids"], [f"ids_{k}" for k in range(len(heads))], axis=0))
+    for k, table in enumerate(heads):
+        inits.append(numpy_helper.from_array(table, f"embedding_{k}"))
+        nodes.append(helper.make_node("Gather", [f"embedding_{k}", f"ids_{k}"], [f"emb_{k}"], axis=0))       # [1, T, 24]
+        nodes.append(helper.make_node("ReduceMean", [f"emb_{k}"], [f"head_{k}"], axes=[1], keepdims=0))     # [1, 24]
+    nodes.append(helper.make_node("Concat", [f"head_{k}" for k in range(len(heads))], ["x_0"], axis=1))
+    for k, (w, b, relu) in enumerate(fcs):
+        inits += [numpy_helper.from_array(w.T.copy(), f"fc_{k}_w"), numpy_helper.from_array(b, f"fc_{k}_b")]
+        out = f"x_{k + 1}" if relu or k < len(fcs) - 1 else "logits"
+        nodes.append(helper.make_node("Gemm", [f"x_{k}", f"fc_{k}_w", f"fc_{k}_b"], [f"fc_{k}" if relu else out]))
+        if relu:
+            nodes.append(helper.make_node("Relu", [f"fc_{k}"], [out]))
+    nodes.append(helper.make_node("Softmax", ["logits"], ["probabilities"], axis=-1))
+
+    graph = helper.make_graph(
+        nodes, "language_detector",
+        [helper.make_tensor_value_info("ngram_ids", TensorProto.INT32, [len(heads), "tokens"])],
+        [helper.make_tensor_value_info("probabilities", TensorProto.FLOAT, [1, fcs[-1][1].shape[0]])],
+        inits)
+    onnx_model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)], producer_name="MediaPipe.NET")
+    onnx.checker.check_model(onnx_model)
+    onnx.save(onnx_model, str(onnx_path))
+    print(f"built {onnx_path.name}: {len(heads)} n-gram heads, {len(fcs)} dense layers")
+
+
+MANUAL_BUILDERS = {"language_detector": build_language_detector}
+
+
+def convert_custom(src: pathlib.Path, model_id: str | None, out: pathlib.Path, opset: int) -> int:
+    """
+    Converts one user-supplied TFLite model (a MediaPipe Model Maker export, for instance) with the same
+    pipeline as the catalog models, and writes the files MediaPipe.NET's custom-model support reads:
+    {id}.onnx, {id}.labels.txt (from the TFLite metadata, when present) and {id}.vocab.txt (text models).
+    Use them with e.g. ImageClassifierOptions.ModelPath / ObjectDetectorOptions.ModelPath.
+    """
+    import tensorflow as tf
+    import tf2onnx
+
+    _interpreter = tf.lite.Interpreter
+    tf.lite.Interpreter = lambda *a, **kw: _interpreter(
+        *a, **{**kw, "experimental_op_resolver_type": tf.lite.experimental.OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES})
+    model_id = model_id or src.stem
+    out.mkdir(parents=True, exist_ok=True)
+    if src.suffix == ".task":
+        # A bundle (e.g. a Model Maker gesture recognizer): convert every graph inside it as {id}_{graph}.
+        found: dict[str, pathlib.Path] = {}
+        collect_tflite(src, src.name, out / "_work", found)
+        status = 0
+        for logical, inner in found.items():
+            status |= convert_custom(inner, f"{model_id}_{inner.stem}", out, opset)
+        return status
+    dst = out / f"{model_id}.onnx"
+    work = out / "_work"
+    work.mkdir(exist_ok=True)
+    tfl = densify(src)
+    last_error = None
+    for candidate in dict.fromkeys([opset, 14, 15]):  # HardSwish and friends need a newer opset
+        try:
+            tf2onnx.convert.from_tflite(str(tfl), opset=candidate, output_path=str(dst))
+            lower_custom_ops(dst, tfl)
+            strip_dynamic_quantization(dst)
+            describe(dst)
+            last_error = None
+            break
+        except Exception as e:  # retry with a newer opset
+            last_error = e
+            dst.unlink(missing_ok=True)
+    if last_error is not None:
+        print(f"conversion failed: {type(last_error).__name__}: {last_error}")
+        return 1
+    if zipfile.is_zipfile(src):
+        with zipfile.ZipFile(src) as z:
+            for name in z.namelist():
+                kind = "vocab" if "vocab" in name else "labels" if name.endswith(".txt") and name != "labelmap.txt" else None
+                if kind:
+                    (out / f"{model_id}.{kind}.txt").write_bytes(z.read(name))
+                    print(f"{kind}: {out / f'{model_id}.{kind}.txt'} <- {name}")
+    info = describe(dst)
+    print(json.dumps({"id": model_id, "file": str(dst), "bytes": dst.stat().st_size, "sha256": sha256(dst), **info}, indent=2))
+    return 0
 
 
 def download(url: str, dst: pathlib.Path) -> None:
@@ -180,7 +445,7 @@ def collect_tflite(path: pathlib.Path, prefix: str, work: pathlib.Path, found: d
         found[prefix] = path
         return
     if not zipfile.is_zipfile(path):
-        return  # e.g. geometry_pipeline_metadata.binarypb â€” not needed at inference time
+        return  # e.g. geometry_pipeline_metadata.binarypb - not needed at inference time
     target = work / (prefix.replace("/", "__") + ".d")
     target.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path) as z:
@@ -202,9 +467,13 @@ def main() -> int:
     ap.add_argument("--out", default="artifacts/models")
     ap.add_argument("--opset", type=int, default=13)
     ap.add_argument("--only", nargs="*", help="convert only these model ids (default: all)")
+    ap.add_argument("--custom", help="convert your own .tflite (e.g. a MediaPipe Model Maker export) instead of the catalog")
+    ap.add_argument("--custom-id", help="output name for --custom (default: the file name)")
     args = ap.parse_args()
 
     out = pathlib.Path(args.out).resolve()
+    if args.custom:
+        return convert_custom(pathlib.Path(args.custom), args.custom_id, out, args.opset)
     work = out / "_work"
     work.mkdir(parents=True, exist_ok=True)
 
@@ -232,6 +501,7 @@ def main() -> int:
         collect_tflite(src, name, work, found)
 
     manifest = []
+    failed: dict[str, str] = {}
     for logical, tfl in found.items():
         model_id = RENAMES.get(logical, "__unknown__")
         if model_id is None:
@@ -246,13 +516,24 @@ def main() -> int:
             print(f"convert {logical} -> {dst.name}", flush=True)
             state["use_interpreter"] = model_id not in NO_INTERPRETER
             tfl = densify(tfl)
-            tf2onnx.convert.from_tflite(str(tfl), opset=OPSET_OVERRIDES.get(model_id, args.opset), output_path=str(dst))
-            lower_transpose_conv_bias(dst)
+            try:
+                if model_id in MANUAL_BUILDERS:
+                    MANUAL_BUILDERS[model_id](tfl, dst)
+                else:
+                    tf2onnx.convert.from_tflite(str(tfl), opset=OPSET_OVERRIDES.get(model_id, args.opset), output_path=str(dst))
+                    lower_custom_ops(dst, tfl)
+                    strip_dynamic_quantization(dst)
+            except Exception as e:  # e.g. Flex / stateful ops that have no ONNX equivalent
+                dst.unlink(missing_ok=True)
+                failed[model_id] = f"{type(e).__name__}: {e}"
+                print(f"FAILED {model_id}: {failed[model_id]}", flush=True)
+                continue
         entry = {"id": model_id, "file": dst.name, "source": logical, "bytes": dst.stat().st_size, "sha256": sha256(dst)}
         entry.update(describe(dst))
         manifest.append(entry)
 
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    (out / "failed.json").write_text(json.dumps(failed, indent=2))
     print(json.dumps(manifest, indent=2))
     return 0
 

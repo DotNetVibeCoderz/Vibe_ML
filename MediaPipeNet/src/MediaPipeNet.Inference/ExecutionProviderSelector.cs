@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.ML.OnnxRuntime;
 
 namespace MediaPipeNet.Inference;
@@ -52,6 +52,10 @@ public static class ExecutionProviderSelector
         if (options.IntraOpThreads > 0) so.IntraOpNumThreads = options.IntraOpThreads;
         if (options.InterOpThreads > 0) so.InterOpNumThreads = options.InterOpThreads;
         if (options.EnableProfiling) so.EnableProfiling = true;
+        // Models that store int8 weights behind DequantizeLinear (the MobileBERT text models, YAMNet and the
+        // Int8 model variants) would otherwise be fused into kernels that also quantize the activations on
+        // the fly, costing several percent of accuracy. The weights are dequantized once and run in float.
+        so.AddSessionConfigEntry("session.disable_quant_qdq", "1");
         try
         {
             switch (provider)

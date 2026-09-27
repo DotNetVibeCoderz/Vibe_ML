@@ -17,6 +17,10 @@
 
   <ItemGroup>
     <Content Include="$(ModelsOnnxDir)selfie_segmenter.onnx" Link="models\selfie_segmenter.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)selfie_multiclass.onnx" Link="models\selfie_multiclass.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)hair_segmenter.onnx" Link="models\hair_segmenter.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)deeplab_v3.onnx" Link="models\deeplab_v3.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)magic_touch.onnx" Link="models\magic_touch.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Import Project="$(RepoRoot)build/Package.targets" />

@@ -1,4 +1,4 @@
-namespace MediaPipeNet.Framework.Nodes;
+﻿namespace MediaPipeNet.Framework.Nodes;
 
 /// <summary>Forwards every input packet unchanged (MediaPipe's <c>PassThroughCalculator</c>).</summary>
 /// <typeparam name="T">Payload type.</typeparam>
@@ -124,4 +124,34 @@ public sealed class PacketCounterNode : CalculatorNode
 
     /// <inheritdoc />
     protected override void Process(CalculatorContext context) => context.Send("COUNT", Interlocked.Increment(ref _count));
+}
+
+/// <summary>
+/// Feeds a node's own earlier result back into the graph (MediaPipe's <c>PreviousLoopbackCalculator</c>):
+/// for every <c>MAIN</c> packet it emits, on <c>PREV_LOOP</c> at the same timestamp, the most recent
+/// <c>LOOP</c> value received so far (nothing before the first one). Connect <c>LOOP</c> as a back edge:
+/// <c>.In("LOOP", "result", backEdge: true)</c>. Because the graph pipelines frames, "most recent" is the
+/// newest loop value that has already arrived, which for sequential processing is the previous frame's.
+/// </summary>
+/// <typeparam name="T">Loop value type.</typeparam>
+public sealed class PreviousLoopbackNode<T> : CalculatorNode
+{
+    private bool _has;
+    private T _last = default!;
+
+    /// <inheritdoc />
+    public override void GetContract(CalculatorContract contract) =>
+        contract.AddInput<object>("MAIN").AddInput<T>("LOOP", optional: true).AddOutput<T>("PREV_LOOP");
+
+    /// <inheritdoc />
+    protected override void Process(CalculatorContext context)
+    {
+        // The back edge delivers the newest loop value that arrived before this timestamp.
+        if (context.TryGetInput<T>("LOOP", out var loop))
+        {
+            _last = loop;
+            _has = true;
+        }
+        if (context.HasInput("MAIN") && _has) context.Send("PREV_LOOP", _last);
+    }
 }

@@ -14,12 +14,16 @@ mediapipenet-cli help
 | `mediapipenet-cli <task> <image> [--output out.png] [--json out.json \| --json-stdout]` | Run a task on an image. |
 | `mediapipenet-cli video <task> [--input file.mp4 \| --camera 0] [--frames N]` | Video/webcam in video mode with live FPS, latency and drop statistics. |
 | `mediapipenet-cli benchmark <task> <image> [--iterations 50]` | Mean, p50, p95, min latency and FPS. |
+| `mediapipenet-cli audio <clip.wav> [--vad] [--top 3]` | YAMNet events per window, or speech segments with `--vad`. |
+| `mediapipenet-cli text classify\|classify-fast\|embed\|language "text" ["text"…]` | Sentiment (MobileBERT / average word), pairwise similarity, language. |
 | `mediapipenet-cli models list \| download [ids…] \| verify` | Model status, download, SHA-256 verification. |
 | `mediapipenet-cli info` | Version, ONNX Runtime, available execution providers, model cache. |
 
-Tasks: `faces`, `face-mesh`, `hands`, `gestures`, `pose`, `holistic`, `segment`, `objects`, `classify`.
+Tasks: `faces`, `faces-full`, `face-mesh`, `hands`, `gestures`, `pose`, `holistic`, `segment`,
+`segment-multiclass`, `segment-hair`, `segment-deeplab`, `embed`, `objects`, `classify`.
 
-Common options: `--provider auto|cpu|directml|cuda|coreml`, `--threads N`, `--models-dir DIR`, `--no-download`.
+Common options: `--provider auto|cpu|directml|cuda|coreml`, `--threads N`, `--precision fp32|fp16|int8`,
+`--models-dir DIR`, `--no-download`.
 
 ## Examples
 
@@ -35,6 +39,18 @@ JSON written to objects.json
 $ mediapipenet-cli benchmark faces portrait.jpg --iterations 100
 faces on portrait.jpg (820x1024), 100 runs:
   mean 9.37 ms | p50 8.61 ms | p95 14.37 ms | min 7.20 ms | 106.7 FPS
+
+$ mediapipenet-cli segment-multiclass portrait.jpg --output parts.png
+segment-multiclass: background 49.2 %, hair 1.3 %, body-skin 2.1 %, face-skin 5.7 %, clothes 41.4 %  [129.3 ms]
+
+$ mediapipenet-cli audio speech.wav --vad
+speech.wav: 4.27 s at 16000 Hz
+speech in 100 % of the windows
+  speech    0.00 s -    4.38 s  (p = 97 %)
+
+$ mediapipenet-cli text language "Selamat pagi" "Guten Morgen"
+  id 74.7 %, ms 23.3 %, hi-Latn 1.0 %  <- Selamat pagi
+  de 94.4 %, nl 2.5 %, sv 1.2 %  <- Guten Morgen
 
 $ mediapipenet-cli models verify
   face_detection_short_range     OK

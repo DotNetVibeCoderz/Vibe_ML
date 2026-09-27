@@ -1,6 +1,6 @@
 # Gravicode.MediaPipeNet.Tasks.Vision
 
-The vision tasks: `FaceDetector`, `FaceLandmarker` (478 landmarks + 52 blendshapes), `HandLandmarker`, `GestureRecognizer`, `PoseLandmarker`, `HolisticLandmarker`, `ImageSegmenter`, `ObjectDetector`, `ImageClassifier` — with IMAGE / VIDEO / LIVE_STREAM modes, tracking, smoothing, `LiveStreamProcessor<T>` and graph calculators. Needs a native ONNX Runtime: prefer the `Gravicode.MediaPipeNet` package.
+The vision tasks: `FaceDetector` (short and full range), `FaceLandmarker` (478 landmarks + 52 blendshapes + facial transformation matrix), `HandLandmarker`, `GestureRecognizer`, `PoseLandmarker`, `HolisticLandmarker`, `ImageSegmenter` (selfie, multiclass, hair, DeepLab v3), `InteractiveSegmenter`, `ImageEmbedder`, `ObjectDetector`, `ImageClassifier` — with IMAGE / VIDEO / LIVE_STREAM modes, tracking, smoothing, `LiveStreamProcessor<T>` and graph calculators. Needs a native ONNX Runtime: prefer the `Gravicode.MediaPipeNet` package.
 
 ## Quick start
 
@@ -15,6 +15,6 @@ foreach (var hand in hands.Detect(image).Hands)
 ```
 
 ---
-**MediaPipe.NET** — a native .NET 10 port of Google MediaPipe's vision tasks on ONNX Runtime.
+**MediaPipe.NET** — a native .NET 10 port of Google MediaPipe's tasks on ONNX Runtime.
 Created by **Gravicode Studios**, led by **Kang Fadhil**. Library: Apache-2.0. Model weights: © Google LLC, Apache-2.0.
 Documentation (English & Bahasa Indonesia): see the `docs/` folder of the repository.

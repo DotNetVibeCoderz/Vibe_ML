@@ -44,4 +44,28 @@ public sealed record InferenceOptions
 
     /// <summary>Maximum number of idle I/O contexts kept per model for concurrent callers.</summary>
     public int MaxPooledContexts { get; init; } = Math.Max(2, Environment.ProcessorCount / 2);
+
+    /// <summary>
+    /// Bind each context's input and output buffers to the session once (ONNX Runtime I/O binding) and
+    /// reuse the binding for every run. Saves per-call marshaling; most useful with GPU providers.
+    /// </summary>
+    public bool UseIoBinding { get; init; }
+
+    /// <summary>
+    /// Preferred numeric precision of the models. <see cref="ModelPrecision.Float16"/> halves model size
+    /// (best on GPUs); <see cref="ModelPrecision.Int8"/> quarters it (dynamic weight quantization, CPU).
+    /// Models without such a variant fall back to float32.
+    /// </summary>
+    public ModelPrecision Precision { get; init; } = ModelPrecision.Float32;
+}
+
+/// <summary>Numeric precision variant of a model.</summary>
+public enum ModelPrecision
+{
+    /// <summary>The reference float32 model (default).</summary>
+    Float32 = 0,
+    /// <summary>Weights stored as float16 (half the size; exact on GPUs, cast on CPU).</summary>
+    Float16,
+    /// <summary>Weights quantized to 8-bit integers (a quarter of the size).</summary>
+    Int8,
 }

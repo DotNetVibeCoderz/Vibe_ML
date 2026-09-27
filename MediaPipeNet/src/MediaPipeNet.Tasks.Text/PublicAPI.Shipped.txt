@@ -1,0 +1,158 @@
+#nullable enable
+MediaPipeNet.Tasks.Text.LanguageDetectionResult
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.<Clone>$() -> MediaPipeNet.Tasks.Text.LanguageDetectionResult!
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Text.LanguagePrediction>! Predictions) -> void
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.Equals(MediaPipeNet.Tasks.Text.LanguageDetectionResult? other) -> bool
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.LanguageDetectionResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Text.LanguagePrediction>! Predictions) -> void
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.Predictions.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Text.LanguagePrediction>!
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.Predictions.init -> void
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.ToJson(bool indented = false) -> string!
+MediaPipeNet.Tasks.Text.LanguageDetectionResult.TopLanguage.get -> MediaPipeNet.Tasks.Text.LanguagePrediction?
+MediaPipeNet.Tasks.Text.LanguageDetector
+MediaPipeNet.Tasks.Text.LanguageDetector.Detect(string! text) -> MediaPipeNet.Tasks.Text.LanguageDetectionResult!
+MediaPipeNet.Tasks.Text.LanguageDetector.DetectAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Text.LanguageDetectionResult!>!
+MediaPipeNet.Tasks.Text.LanguageDetector.Dispose() -> void
+MediaPipeNet.Tasks.Text.LanguageDetector.Options.get -> MediaPipeNet.Tasks.Text.LanguageDetectorOptions!
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions.<Clone>$() -> MediaPipeNet.Tasks.Text.LanguageDetectorOptions!
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions.BaseOptions.get -> MediaPipeNet.Tasks.BaseOptions!
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions.BaseOptions.init -> void
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions.Classifier.get -> MediaPipeNet.Tasks.ClassifierOptions!
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions.Classifier.init -> void
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions.Equals(MediaPipeNet.Tasks.Text.LanguageDetectorOptions? other) -> bool
+MediaPipeNet.Tasks.Text.LanguageDetectorOptions.LanguageDetectorOptions() -> void
+MediaPipeNet.Tasks.Text.LanguagePrediction
+MediaPipeNet.Tasks.Text.LanguagePrediction.Deconstruct(out string! LanguageCode, out float Probability) -> void
+MediaPipeNet.Tasks.Text.LanguagePrediction.Equals(MediaPipeNet.Tasks.Text.LanguagePrediction other) -> bool
+MediaPipeNet.Tasks.Text.LanguagePrediction.LanguageCode.get -> string!
+MediaPipeNet.Tasks.Text.LanguagePrediction.LanguageCode.init -> void
+MediaPipeNet.Tasks.Text.LanguagePrediction.LanguagePrediction() -> void
+MediaPipeNet.Tasks.Text.LanguagePrediction.LanguagePrediction(string! LanguageCode, float Probability) -> void
+MediaPipeNet.Tasks.Text.LanguagePrediction.Probability.get -> float
+MediaPipeNet.Tasks.Text.LanguagePrediction.Probability.init -> void
+MediaPipeNet.Tasks.Text.TextClassificationResult
+MediaPipeNet.Tasks.Text.TextClassificationResult.<Clone>$() -> MediaPipeNet.Tasks.Text.TextClassificationResult!
+MediaPipeNet.Tasks.Text.TextClassificationResult.Categories.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>!
+MediaPipeNet.Tasks.Text.TextClassificationResult.Categories.init -> void
+MediaPipeNet.Tasks.Text.TextClassificationResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>! Categories) -> void
+MediaPipeNet.Tasks.Text.TextClassificationResult.Equals(MediaPipeNet.Tasks.Text.TextClassificationResult? other) -> bool
+MediaPipeNet.Tasks.Text.TextClassificationResult.TextClassificationResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>! Categories) -> void
+MediaPipeNet.Tasks.Text.TextClassificationResult.ToJson(bool indented = false) -> string!
+MediaPipeNet.Tasks.Text.TextClassificationResult.TopCategory.get -> MediaPipeNet.Category?
+MediaPipeNet.Tasks.Text.TextClassifier
+MediaPipeNet.Tasks.Text.TextClassifier.Classify(string! text) -> MediaPipeNet.Tasks.Text.TextClassificationResult!
+MediaPipeNet.Tasks.Text.TextClassifier.ClassifyAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Text.TextClassificationResult!>!
+MediaPipeNet.Tasks.Text.TextClassifier.ClassifyBatch(System.Collections.Generic.IReadOnlyList<string!>! texts, int maxDegreeOfParallelism = -1) -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Text.TextClassificationResult!>!
+MediaPipeNet.Tasks.Text.TextClassifier.Dispose() -> void
+MediaPipeNet.Tasks.Text.TextClassifier.Options.get -> MediaPipeNet.Tasks.Text.TextClassifierOptions!
+MediaPipeNet.Tasks.Text.TextClassifierModel
+MediaPipeNet.Tasks.Text.TextClassifierModel.AverageWord = 1 -> MediaPipeNet.Tasks.Text.TextClassifierModel
+MediaPipeNet.Tasks.Text.TextClassifierModel.Bert = 0 -> MediaPipeNet.Tasks.Text.TextClassifierModel
+MediaPipeNet.Tasks.Text.TextClassifierOptions
+MediaPipeNet.Tasks.Text.TextClassifierOptions.<Clone>$() -> MediaPipeNet.Tasks.Text.TextClassifierOptions!
+MediaPipeNet.Tasks.Text.TextClassifierOptions.BaseOptions.get -> MediaPipeNet.Tasks.BaseOptions!
+MediaPipeNet.Tasks.Text.TextClassifierOptions.BaseOptions.init -> void
+MediaPipeNet.Tasks.Text.TextClassifierOptions.Classifier.get -> MediaPipeNet.Tasks.ClassifierOptions!
+MediaPipeNet.Tasks.Text.TextClassifierOptions.Classifier.init -> void
+MediaPipeNet.Tasks.Text.TextClassifierOptions.Equals(MediaPipeNet.Tasks.Text.TextClassifierOptions? other) -> bool
+MediaPipeNet.Tasks.Text.TextClassifierOptions.Labels.get -> System.Collections.Generic.IReadOnlyList<string!>?
+MediaPipeNet.Tasks.Text.TextClassifierOptions.Labels.init -> void
+MediaPipeNet.Tasks.Text.TextClassifierOptions.Model.get -> MediaPipeNet.Tasks.Text.TextClassifierModel
+MediaPipeNet.Tasks.Text.TextClassifierOptions.Model.init -> void
+MediaPipeNet.Tasks.Text.TextClassifierOptions.ModelPath.get -> string?
+MediaPipeNet.Tasks.Text.TextClassifierOptions.ModelPath.init -> void
+MediaPipeNet.Tasks.Text.TextClassifierOptions.TextClassifierOptions() -> void
+MediaPipeNet.Tasks.Text.TextClassifierOptions.VocabularyPath.get -> string?
+MediaPipeNet.Tasks.Text.TextClassifierOptions.VocabularyPath.init -> void
+MediaPipeNet.Tasks.Text.TextEmbedder
+MediaPipeNet.Tasks.Text.TextEmbedder.Dispose() -> void
+MediaPipeNet.Tasks.Text.TextEmbedder.Embed(string! text) -> MediaPipeNet.Tasks.Text.TextEmbeddingResult!
+MediaPipeNet.Tasks.Text.TextEmbedder.EmbedAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Text.TextEmbeddingResult!>!
+MediaPipeNet.Tasks.Text.TextEmbedder.EmbedBatch(System.Collections.Generic.IReadOnlyList<string!>! texts, int maxDegreeOfParallelism = -1) -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Text.TextEmbeddingResult!>!
+MediaPipeNet.Tasks.Text.TextEmbedder.Options.get -> MediaPipeNet.Tasks.Text.TextEmbedderOptions!
+MediaPipeNet.Tasks.Text.TextEmbedderOptions
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.<Clone>$() -> MediaPipeNet.Tasks.Text.TextEmbedderOptions!
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.BaseOptions.get -> MediaPipeNet.Tasks.BaseOptions!
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.BaseOptions.init -> void
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.Equals(MediaPipeNet.Tasks.Text.TextEmbedderOptions? other) -> bool
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.L2Normalize.get -> bool
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.L2Normalize.init -> void
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.Quantize.get -> bool
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.Quantize.init -> void
+MediaPipeNet.Tasks.Text.TextEmbedderOptions.TextEmbedderOptions() -> void
+MediaPipeNet.Tasks.Text.TextEmbeddingResult
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.<Clone>$() -> MediaPipeNet.Tasks.Text.TextEmbeddingResult!
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Embedding!>! Embeddings) -> void
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.Embedding.get -> MediaPipeNet.Embedding!
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.Embeddings.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Embedding!>!
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.Embeddings.init -> void
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.Equals(MediaPipeNet.Tasks.Text.TextEmbeddingResult? other) -> bool
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.TextEmbeddingResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Embedding!>! Embeddings) -> void
+MediaPipeNet.Tasks.Text.TextEmbeddingResult.ToJson(bool indented = false) -> string!
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.BertTokenizer(System.Collections.Generic.IReadOnlyList<string!>! vocabulary) -> void
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.ClassifierId.get -> int
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.Encode(string! text, int maxSequenceLength) -> (int[]! InputIds, int[]! InputMask, int[]! SegmentIds)
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.PadId.get -> int
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.SeparatorId.get -> int
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.Tokenize(string! text) -> System.Collections.Generic.List<string!>!
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.UnknownId.get -> int
+MediaPipeNet.Tasks.Text.Tokenizers.BertTokenizer.VocabularySize.get -> int
+MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher
+MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher.Hash(string! text) -> (int[]! Ids, int TokenCount)
+MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher.MaxSplits.get -> int
+MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher.NGramHasher(ulong seed = 10911, System.Collections.Generic.IReadOnlyList<int>? ngramLengths = null, System.Collections.Generic.IReadOnlyList<int>? vocabSizes = null, int maxSplits = 128) -> void
+MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher.NGramLengths.get -> System.Collections.Generic.IReadOnlyList<int>!
+MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher.Seed.get -> ulong
+MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher.VocabSizes.get -> System.Collections.Generic.IReadOnlyList<int>!
+MediaPipeNet.Tasks.Text.Tokenizers.RegexTokenizer
+MediaPipeNet.Tasks.Text.Tokenizers.RegexTokenizer.Encode(string! text, int maxSequenceLength) -> int[]!
+MediaPipeNet.Tasks.Text.Tokenizers.RegexTokenizer.PadId.get -> int
+MediaPipeNet.Tasks.Text.Tokenizers.RegexTokenizer.RegexTokenizer(string! delimiterPattern, System.Collections.Generic.IEnumerable<string!>! vocabulary) -> void
+MediaPipeNet.Tasks.Text.Tokenizers.RegexTokenizer.StartId.get -> int?
+MediaPipeNet.Tasks.Text.Tokenizers.RegexTokenizer.Tokenize(string! text) -> string![]!
+MediaPipeNet.Tasks.Text.Tokenizers.RegexTokenizer.UnknownId.get -> int
+override MediaPipeNet.Tasks.Text.LanguageDetectionResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Text.LanguageDetectionResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Text.LanguageDetectionResult.ToString() -> string!
+override MediaPipeNet.Tasks.Text.LanguageDetectorOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Text.LanguageDetectorOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.Text.LanguageDetectorOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Text.LanguagePrediction.GetHashCode() -> int
+override MediaPipeNet.Tasks.Text.TextClassificationResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Text.TextClassificationResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Text.TextClassificationResult.ToString() -> string!
+override MediaPipeNet.Tasks.Text.TextClassifierOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Text.TextClassifierOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.Text.TextClassifierOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Text.TextEmbedderOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Text.TextEmbedderOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.Text.TextEmbedderOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Text.TextEmbeddingResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Text.TextEmbeddingResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Text.TextEmbeddingResult.ToString() -> string!
+static MediaPipeNet.Tasks.Text.LanguageDetectionResult.operator !=(MediaPipeNet.Tasks.Text.LanguageDetectionResult? left, MediaPipeNet.Tasks.Text.LanguageDetectionResult? right) -> bool
+static MediaPipeNet.Tasks.Text.LanguageDetectionResult.operator ==(MediaPipeNet.Tasks.Text.LanguageDetectionResult? left, MediaPipeNet.Tasks.Text.LanguageDetectionResult? right) -> bool
+static MediaPipeNet.Tasks.Text.LanguageDetector.Create(MediaPipeNet.Tasks.Text.LanguageDetectorOptions? options = null) -> MediaPipeNet.Tasks.Text.LanguageDetector!
+static MediaPipeNet.Tasks.Text.LanguageDetector.CreateAsync(MediaPipeNet.Tasks.Text.LanguageDetectorOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Text.LanguageDetector!>!
+static MediaPipeNet.Tasks.Text.LanguageDetector.Languages.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static MediaPipeNet.Tasks.Text.LanguageDetectorOptions.operator !=(MediaPipeNet.Tasks.Text.LanguageDetectorOptions? left, MediaPipeNet.Tasks.Text.LanguageDetectorOptions? right) -> bool
+static MediaPipeNet.Tasks.Text.LanguageDetectorOptions.operator ==(MediaPipeNet.Tasks.Text.LanguageDetectorOptions? left, MediaPipeNet.Tasks.Text.LanguageDetectorOptions? right) -> bool
+static MediaPipeNet.Tasks.Text.LanguagePrediction.operator !=(MediaPipeNet.Tasks.Text.LanguagePrediction left, MediaPipeNet.Tasks.Text.LanguagePrediction right) -> bool
+static MediaPipeNet.Tasks.Text.LanguagePrediction.operator ==(MediaPipeNet.Tasks.Text.LanguagePrediction left, MediaPipeNet.Tasks.Text.LanguagePrediction right) -> bool
+static MediaPipeNet.Tasks.Text.TextClassificationResult.operator !=(MediaPipeNet.Tasks.Text.TextClassificationResult? left, MediaPipeNet.Tasks.Text.TextClassificationResult? right) -> bool
+static MediaPipeNet.Tasks.Text.TextClassificationResult.operator ==(MediaPipeNet.Tasks.Text.TextClassificationResult? left, MediaPipeNet.Tasks.Text.TextClassificationResult? right) -> bool
+static MediaPipeNet.Tasks.Text.TextClassifier.Create(MediaPipeNet.Tasks.Text.TextClassifierOptions? options = null) -> MediaPipeNet.Tasks.Text.TextClassifier!
+static MediaPipeNet.Tasks.Text.TextClassifier.CreateAsync(MediaPipeNet.Tasks.Text.TextClassifierOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Text.TextClassifier!>!
+static MediaPipeNet.Tasks.Text.TextClassifierOptions.operator !=(MediaPipeNet.Tasks.Text.TextClassifierOptions? left, MediaPipeNet.Tasks.Text.TextClassifierOptions? right) -> bool
+static MediaPipeNet.Tasks.Text.TextClassifierOptions.operator ==(MediaPipeNet.Tasks.Text.TextClassifierOptions? left, MediaPipeNet.Tasks.Text.TextClassifierOptions? right) -> bool
+static MediaPipeNet.Tasks.Text.TextEmbedder.CosineSimilarity(MediaPipeNet.Embedding! a, MediaPipeNet.Embedding! b) -> double
+static MediaPipeNet.Tasks.Text.TextEmbedder.Create(MediaPipeNet.Tasks.Text.TextEmbedderOptions? options = null) -> MediaPipeNet.Tasks.Text.TextEmbedder!
+static MediaPipeNet.Tasks.Text.TextEmbedder.CreateAsync(MediaPipeNet.Tasks.Text.TextEmbedderOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Text.TextEmbedder!>!
+static MediaPipeNet.Tasks.Text.TextEmbedderOptions.operator !=(MediaPipeNet.Tasks.Text.TextEmbedderOptions? left, MediaPipeNet.Tasks.Text.TextEmbedderOptions? right) -> bool
+static MediaPipeNet.Tasks.Text.TextEmbedderOptions.operator ==(MediaPipeNet.Tasks.Text.TextEmbedderOptions? left, MediaPipeNet.Tasks.Text.TextEmbedderOptions? right) -> bool
+static MediaPipeNet.Tasks.Text.TextEmbeddingResult.operator !=(MediaPipeNet.Tasks.Text.TextEmbeddingResult? left, MediaPipeNet.Tasks.Text.TextEmbeddingResult? right) -> bool
+static MediaPipeNet.Tasks.Text.TextEmbeddingResult.operator ==(MediaPipeNet.Tasks.Text.TextEmbeddingResult? left, MediaPipeNet.Tasks.Text.TextEmbeddingResult? right) -> bool
+static MediaPipeNet.Tasks.Text.Tokenizers.NGramHasher.MurmurHash64(System.ReadOnlySpan<byte> data, ulong seed) -> ulong
+~override MediaPipeNet.Tasks.Text.LanguagePrediction.Equals(object obj) -> bool
+~override MediaPipeNet.Tasks.Text.LanguagePrediction.ToString() -> string

@@ -22,6 +22,18 @@ public sealed record ObjectDetectorOptions : VisionTaskOptions<ObjectDetectionRe
 
     /// <summary>If set, these labels are never reported.</summary>
     public IReadOnlySet<string>? CategoryDenylist { get; init; }
+
+    /// <summary>
+    /// Path of your own EfficientDet-Lite ONNX model (e.g. a MediaPipe Model Maker export, any input size converted with
+    /// <c>convert_models.py --custom</c>) used instead of the built-in one. Default null.
+    /// </summary>
+    public string? ModelPath { get; init; }
+
+    /// <summary>
+    /// Category names for a custom model, in output order. When null, <c>{model}.labels.txt</c> next to
+    /// <see cref="ModelPath"/> is used if present, otherwise the built-in labels.
+    /// </summary>
+    public IReadOnlyList<string>? Labels { get; init; }
 }
 
 /// <summary>
@@ -30,7 +42,8 @@ public sealed record ObjectDetectorOptions : VisionTaskOptions<ObjectDetectionRe
 /// </summary>
 public sealed class ObjectDetector : VisionTaskBase<ObjectDetectionResult>
 {
-    private const int InputSize = 320;
+    private readonly int _inputSize;
+    private readonly IReadOnlyList<string> _labels;
     private readonly OnnxModel _model;
     private readonly Anchor[] _anchors;
     private readonly int _boxesOutput, _scoresOutput, _numClasses;
@@ -42,14 +55,15 @@ public sealed class ObjectDetector : VisionTaskBase<ObjectDetectionResult>
     {
         Options = options;
         _model = model;
-        _anchors = SsdAnchors.GenerateEfficientDet(InputSize);
+        _inputSize = model.Inputs[0].Shape[1];
+        _anchors = SsdAnchors.GenerateEfficientDet(_inputSize);
         for (int i = 0; i < model.Outputs.Count; i++)
         {
             if (model.Outputs[i].Shape[^1] == 4) _boxesOutput = i;
             else _scoresOutput = i;
         }
         _numClasses = model.Outputs[_scoresOutput].Shape[^1];
-        var labels = Labels.Coco;
+        var labels = _labels = CustomModels.ResolveLabels(options.Labels, options.ModelPath, Labels.Coco);
         _classEnabled = new bool[_numClasses];
         for (int c = 0; c < _numClasses; c++)
         {
@@ -73,14 +87,14 @@ public sealed class ObjectDetector : VisionTaskBase<ObjectDetectionResult>
     public static ObjectDetector Create(ObjectDetectorOptions? options = null)
     {
         options ??= new ObjectDetectorOptions();
-        return new ObjectDetector(options, ModelLoader.Load(options.BaseOptions, ModelCatalog.EfficientDetLite0));
+        return new ObjectDetector(options, CustomModels.Load(options.BaseOptions, ModelCatalog.EfficientDetLite0, options.ModelPath));
     }
 
     /// <summary>Creates the task, downloading the model asynchronously when needed.</summary>
     public static async Task<ObjectDetector> CreateAsync(ObjectDetectorOptions? options = null, CancellationToken cancellationToken = default)
     {
         options ??= new ObjectDetectorOptions();
-        return new ObjectDetector(options, await ModelLoader.LoadAsync(options.BaseOptions, ModelCatalog.EfficientDetLite0, cancellationToken).ConfigureAwait(false));
+        return new ObjectDetector(options, await CustomModels.LoadAsync(options.BaseOptions, ModelCatalog.EfficientDetLite0, options.ModelPath, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Detects objects in a still image.</summary>
@@ -106,20 +120,20 @@ public sealed class ObjectDetector : VisionTaskBase<ObjectDetectionResult>
         using (var ctx = _model.RentContext())
         {
             mapping = ImageToTensor.Convert(image, options?.ToRoi() ?? NormalizedRect.FullImage,
-                new ImageToTensorOptions(InputSize, InputSize, -1f, 1f, KeepAspectRatio: false), ctx.GetInput(0));
+                new ImageToTensorOptions(_inputSize, _inputSize, -1f, 1f, KeepAspectRatio: false), ctx.GetInput(0));
             ctx.Run();
             DetectionDecoder.Decode(ctx.GetOutput(_boxesOutput), ctx.GetOutput(_scoresOutput), _anchors, _decoder, raw,
                 Options.ScoreThreshold, c => _classEnabled[c]);
         }
         var kept = NonMaxSuppression.Hard(raw, Options.NmsThreshold, Options.MaxResults, perClass: false);
-        var labels = Labels.Coco;
+        var labels = _labels;
         var detections = new Detection[kept.Count];
         for (int i = 0; i < kept.Count; i++)
         {
             var d = kept[i].MapToImage(mapping);
             d.XMin = Math.Clamp(d.XMin, 0, 1); d.YMin = Math.Clamp(d.YMin, 0, 1);
             d.XMax = Math.Clamp(d.XMax, 0, 1); d.YMax = Math.Clamp(d.YMax, 0, 1);
-            detections[i] = d.ToDetection(image.Width, image.Height, labels[d.ClassId]);
+            detections[i] = d.ToDetection(image.Width, image.Height, d.ClassId < labels.Count ? labels[d.ClassId] : d.ClassId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         return detections.Length == 0 ? ObjectDetectionResult.Empty : new ObjectDetectionResult(detections);
     }

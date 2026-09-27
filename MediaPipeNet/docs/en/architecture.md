@@ -6,26 +6,37 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ Tasks API              MediaPipeNet.Tasks.Vision                              │
+│ Tasks API   MediaPipeNet.Tasks.Vision                                         │
 │   FaceDetector · FaceLandmarker · HandLandmarker · GestureRecognizer ·        │
-│   PoseLandmarker · HolisticLandmarker · ImageSegmenter · ObjectDetector ·     │
-│   ImageClassifier · LiveStreamProcessor<T> · VisionCalculators               │
+│   PoseLandmarker · HolisticLandmarker · ImageSegmenter · InteractiveSegmenter │
+│   ImageEmbedder · ObjectDetector · ImageClassifier · LiveStreamProcessor<T>   │
+│             MediaPipeNet.Tasks.Audio   AudioClassifier · VoiceActivityDetector│
+│             MediaPipeNet.Tasks.Text    TextClassifier · TextEmbedder ·        │
+│                                        LanguageDetector · tokenizers          │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ Graph API              MediaPipeNet.Framework                                 │
-│   CalculatorGraph · ICalculatorNode · Packet<T> · GraphConfig (.pbtxt)        │
+│ Task foundations  MediaPipeNet.Tasks (Tasks.Core)                             │
+│   BaseOptions · ModelLoader (precision variants) · ClassifierOptions ·        │
+│   CustomModels                                                               │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ Inference              MediaPipeNet.Inference                                 │
-│   OnnxModel / InferenceContext · ExecutionProviderSelector · ModelStore        │
+│ Graph API   MediaPipeNet.Framework                                            │
+│   CalculatorGraph · ICalculatorNode · Packet<T> · GraphConfig (.pbtxt) ·      │
+│   back edges · executors · subgraphs · Chrome trace                          │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ Imaging & tensors      MediaPipeNet.Imaging                                   │
+│ Inference   MediaPipeNet.Inference                                            │
+│   OnnxModel / InferenceContext (IoBinding, int tensors, RunDynamic) ·         │
+│   ExecutionProviderSelector · ModelStore · ModelCatalog (+ FP16/INT8)         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Imaging & tensors   MediaPipeNet.Imaging                                      │
 │   MPImage · ImageToTensor · TensorMapping · TensorWarp · IFrameSource          │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ Core                   MediaPipeNet.Core                                      │
-│   Timestamp · NormalizedLandmark · Detection · NormalizedRect · telemetry     │
+│ Core        MediaPipeNet.Core                                                 │
+│   Timestamp · NormalizedLandmark · Detection · Embedding · telemetry          │
 └──────────────────────────────────────────────────────────────────────────────┘
   Add-ons: Visualization (ImageSharp.Drawing) · Video.OpenCv · Extensions.DI · Cli
   Meta packages: MediaPipeNet (CPU) · MediaPipeNet.DirectML · MediaPipeNet.Cuda
 ```
+
+The audio and text tasks depend on `Tasks.Core` and `Inference` only — no imaging stack, no ImageSharp.
 
 Dependencies only point downward. `Inference` references just the *managed* ONNX Runtime API; the native runtime
 flavor is chosen by the meta package an application references, so CPU, DirectML and CUDA builds never collide.
@@ -101,3 +112,19 @@ MediaPipeNet.slnx
 
 Build-wide settings live in `Directory.Build.props` (net10.0, nullable, analyzers, package metadata) and
 `Directory.Packages.props` (central package versions; ONNX Runtime pinned to one version across CPU/DirectML/CUDA).
+
+## Ported MediaPipe calculators (0.2 / 0.3)
+
+| MediaPipe | MediaPipe.NET |
+|---|---|
+| `GeometryPipeline` + `ProcrustesSolver` (face geometry) | `Processing.FaceGeometry` (canonical mesh extracted from `face_landmarker.task` into `Resources/face_geometry.bin`) |
+| `RefineLandmarksFromHeatmapCalculator` | `Processing.HeatmapRefinement` |
+| `SegmentationSmoothingCalculator` | `Processing.SegmentationSmoother` |
+| `RoiTrackingCalculator` | `Processing.RoiTracking` |
+| `HandDetectionsFromPoseToRectsCalculator`, `HandRoiRefinementGraph`, `AlignHandToPoseInWorldCalculator` | `RoiCalculator.FromPosePalm`, `HolisticLandmarker` |
+| `TensorsToSegmentationCalculator` (softmax, category mask) | `ImageSegmenter`, `CategoryMask.FromConfidenceMasks` |
+| `TensorsToEmbeddingsCalculator` | `Embedding.FromTensor` (L2 normalization, scalar quantization) |
+| `AudioToTensorCalculator` (windows, resampling) | `AudioData.Resample`, `AudioStreamBuffer` |
+| `BertPreprocessorCalculator`, `RegexPreprocessorCalculator` | `Tokenizers.BertTokenizer`, `Tokenizers.RegexTokenizer` |
+| `NGramHash` (TFLite custom op) | `Tokenizers.NGramHasher` |
+| `PreviousLoopbackCalculator` | `Nodes.PreviousLoopbackNode<T>` |

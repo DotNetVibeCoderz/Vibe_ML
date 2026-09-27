@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    API review (M6): every shippable library tracks its public surface in PublicAPI.Shipped.txt /
+    PublicAPI.Unshipped.txt. Any public API change that is not recorded there fails the build (RS0016/RS0017),
+    so breaking changes are always deliberate. After a release, move Unshipped entries into Shipped.
+  -->
+  <PropertyGroup Condition="'$(IsPackable)' == 'true' and '$(IncludeBuildOutput)' != 'false' and '$(OutputType)' != 'Exe'">
+    <TrackPublicApi>true</TrackPublicApi>
+    <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TrackPublicApi)' == 'true'">
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)/PublicAPI.Shipped.txt;$(MSBuildProjectDirectory)/PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+</Project>

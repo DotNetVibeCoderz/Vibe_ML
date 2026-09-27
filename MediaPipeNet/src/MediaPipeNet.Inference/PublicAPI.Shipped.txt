@@ -1,0 +1,246 @@
+#nullable enable
+MediaPipeNet.Inference.DynamicTensor
+MediaPipeNet.Inference.DynamicTensor.Data.get -> System.Array!
+MediaPipeNet.Inference.DynamicTensor.Data.init -> void
+MediaPipeNet.Inference.DynamicTensor.Deconstruct(out string! Name, out System.Array! Data, out long[]! Shape) -> void
+MediaPipeNet.Inference.DynamicTensor.DynamicTensor() -> void
+MediaPipeNet.Inference.DynamicTensor.DynamicTensor(string! Name, System.Array! Data, long[]! Shape) -> void
+MediaPipeNet.Inference.DynamicTensor.Equals(MediaPipeNet.Inference.DynamicTensor other) -> bool
+MediaPipeNet.Inference.DynamicTensor.Name.get -> string!
+MediaPipeNet.Inference.DynamicTensor.Name.init -> void
+MediaPipeNet.Inference.DynamicTensor.Shape.get -> long[]!
+MediaPipeNet.Inference.DynamicTensor.Shape.init -> void
+MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.ExecutionProvider.Auto = 0 -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.ExecutionProvider.CoreML = 4 -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.ExecutionProvider.Cpu = 1 -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.ExecutionProvider.Cuda = 2 -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.ExecutionProvider.DirectML = 3 -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.ExecutionProviderSelector
+MediaPipeNet.Inference.InferenceContext
+MediaPipeNet.Inference.InferenceContext.Dispose() -> void
+MediaPipeNet.Inference.InferenceContext.GetInput(int index) -> System.Span<float>
+MediaPipeNet.Inference.InferenceContext.GetInput(string! name) -> System.Span<float>
+MediaPipeNet.Inference.InferenceContext.GetInputInt32(int index) -> System.Span<int>
+MediaPipeNet.Inference.InferenceContext.GetInputInt64(int index) -> System.Span<long>
+MediaPipeNet.Inference.InferenceContext.GetOutput(int index) -> System.ReadOnlySpan<float>
+MediaPipeNet.Inference.InferenceContext.GetOutput(string! name) -> System.ReadOnlySpan<float>
+MediaPipeNet.Inference.InferenceContext.GetOutputInt32(int index) -> System.ReadOnlySpan<int>
+MediaPipeNet.Inference.InferenceContext.Model.get -> MediaPipeNet.Inference.OnnxModel!
+MediaPipeNet.Inference.InferenceContext.Run() -> void
+MediaPipeNet.Inference.InferenceContext.UsesIoBinding.get -> bool
+MediaPipeNet.Inference.InferenceOptions
+MediaPipeNet.Inference.InferenceOptions.<Clone>$() -> MediaPipeNet.Inference.InferenceOptions!
+MediaPipeNet.Inference.InferenceOptions.DeviceId.get -> int
+MediaPipeNet.Inference.InferenceOptions.DeviceId.init -> void
+MediaPipeNet.Inference.InferenceOptions.EnableProfiling.get -> bool
+MediaPipeNet.Inference.InferenceOptions.EnableProfiling.init -> void
+MediaPipeNet.Inference.InferenceOptions.Equals(MediaPipeNet.Inference.InferenceOptions? other) -> bool
+MediaPipeNet.Inference.InferenceOptions.FallbackToCpu.get -> bool
+MediaPipeNet.Inference.InferenceOptions.FallbackToCpu.init -> void
+MediaPipeNet.Inference.InferenceOptions.InferenceOptions() -> void
+MediaPipeNet.Inference.InferenceOptions.InterOpThreads.get -> int
+MediaPipeNet.Inference.InferenceOptions.InterOpThreads.init -> void
+MediaPipeNet.Inference.InferenceOptions.IntraOpThreads.get -> int
+MediaPipeNet.Inference.InferenceOptions.IntraOpThreads.init -> void
+MediaPipeNet.Inference.InferenceOptions.MaxPooledContexts.get -> int
+MediaPipeNet.Inference.InferenceOptions.MaxPooledContexts.init -> void
+MediaPipeNet.Inference.InferenceOptions.Precision.get -> MediaPipeNet.Inference.ModelPrecision
+MediaPipeNet.Inference.InferenceOptions.Precision.init -> void
+MediaPipeNet.Inference.InferenceOptions.Provider.get -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.InferenceOptions.Provider.init -> void
+MediaPipeNet.Inference.InferenceOptions.UseIoBinding.get -> bool
+MediaPipeNet.Inference.InferenceOptions.UseIoBinding.init -> void
+MediaPipeNet.Inference.ModelPrecision
+MediaPipeNet.Inference.ModelPrecision.Float16 = 1 -> MediaPipeNet.Inference.ModelPrecision
+MediaPipeNet.Inference.ModelPrecision.Float32 = 0 -> MediaPipeNet.Inference.ModelPrecision
+MediaPipeNet.Inference.ModelPrecision.Int8 = 2 -> MediaPipeNet.Inference.ModelPrecision
+MediaPipeNet.Inference.Models.BundledModelProvider
+MediaPipeNet.Inference.Models.BundledModelProvider.BundledModelProvider() -> void
+MediaPipeNet.Inference.Models.BundledModelProvider.IsRemote.get -> bool
+MediaPipeNet.Inference.Models.BundledModelProvider.Name.get -> string!
+MediaPipeNet.Inference.Models.BundledModelProvider.TryGetModelPathAsync(MediaPipeNet.Inference.Models.ModelDescriptor! model, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<string?>
+MediaPipeNet.Inference.Models.DirectoryModelProvider
+MediaPipeNet.Inference.Models.DirectoryModelProvider.Directory.get -> string!
+MediaPipeNet.Inference.Models.DirectoryModelProvider.DirectoryModelProvider(string! directory) -> void
+MediaPipeNet.Inference.Models.DirectoryModelProvider.IsRemote.get -> bool
+MediaPipeNet.Inference.Models.DirectoryModelProvider.Name.get -> string!
+MediaPipeNet.Inference.Models.DirectoryModelProvider.TryGetModelPathAsync(MediaPipeNet.Inference.Models.ModelDescriptor! model, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<string?>
+MediaPipeNet.Inference.Models.EmbeddedResourceModelProvider
+MediaPipeNet.Inference.Models.EmbeddedResourceModelProvider.EmbeddedResourceModelProvider(System.Reflection.Assembly! assembly, string! cacheDirectory) -> void
+MediaPipeNet.Inference.Models.EmbeddedResourceModelProvider.IsRemote.get -> bool
+MediaPipeNet.Inference.Models.EmbeddedResourceModelProvider.Name.get -> string!
+MediaPipeNet.Inference.Models.EmbeddedResourceModelProvider.TryGetModelPathAsync(MediaPipeNet.Inference.Models.ModelDescriptor! model, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<string?>
+MediaPipeNet.Inference.Models.HttpModelProvider
+MediaPipeNet.Inference.Models.HttpModelProvider.HttpModelProvider(System.Uri! baseUrl, string! cacheDirectory, System.Net.Http.HttpClient? httpClient = null) -> void
+MediaPipeNet.Inference.Models.HttpModelProvider.IsRemote.get -> bool
+MediaPipeNet.Inference.Models.HttpModelProvider.Name.get -> string!
+MediaPipeNet.Inference.Models.HttpModelProvider.TryGetModelPathAsync(MediaPipeNet.Inference.Models.ModelDescriptor! model, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<string?>
+MediaPipeNet.Inference.Models.IModelProvider
+MediaPipeNet.Inference.Models.IModelProvider.IsRemote.get -> bool
+MediaPipeNet.Inference.Models.IModelProvider.Name.get -> string!
+MediaPipeNet.Inference.Models.IModelProvider.TryGetModelPathAsync(MediaPipeNet.Inference.Models.ModelDescriptor! model, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<string?>
+MediaPipeNet.Inference.Models.ModelCatalog
+MediaPipeNet.Inference.Models.ModelDescriptor
+MediaPipeNet.Inference.Models.ModelDescriptor.<Clone>$() -> MediaPipeNet.Inference.Models.ModelDescriptor!
+MediaPipeNet.Inference.Models.ModelDescriptor.Attribution.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.Deconstruct(out string! Id, out string! FileName, out string! Sha256, out long SizeBytes, out string! PackageId, out string! Title, out string! Source, out string! License) -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.Equals(MediaPipeNet.Inference.Models.ModelDescriptor? other) -> bool
+MediaPipeNet.Inference.Models.ModelDescriptor.FileName.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.FileName.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.Id.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.Id.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.License.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.License.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.ModelDescriptor(string! Id, string! FileName, string! Sha256, long SizeBytes, string! PackageId, string! Title, string! Source, string! License = "Apache-2.0") -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.PackageId.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.PackageId.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.Precision.get -> MediaPipeNet.Inference.ModelPrecision
+MediaPipeNet.Inference.Models.ModelDescriptor.Precision.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.Sha256.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.Sha256.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.SizeBytes.get -> long
+MediaPipeNet.Inference.Models.ModelDescriptor.SizeBytes.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.Source.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.Source.init -> void
+MediaPipeNet.Inference.Models.ModelDescriptor.Title.get -> string!
+MediaPipeNet.Inference.Models.ModelDescriptor.Title.init -> void
+MediaPipeNet.Inference.Models.ModelDownloadProgress
+MediaPipeNet.Inference.Models.ModelDownloadProgress.BytesReceived.get -> long
+MediaPipeNet.Inference.Models.ModelDownloadProgress.BytesReceived.init -> void
+MediaPipeNet.Inference.Models.ModelDownloadProgress.Deconstruct(out MediaPipeNet.Inference.Models.ModelDescriptor! Model, out long BytesReceived, out long? TotalBytes, out string! Stage) -> void
+MediaPipeNet.Inference.Models.ModelDownloadProgress.Equals(MediaPipeNet.Inference.Models.ModelDownloadProgress other) -> bool
+MediaPipeNet.Inference.Models.ModelDownloadProgress.Fraction.get -> double?
+MediaPipeNet.Inference.Models.ModelDownloadProgress.Model.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+MediaPipeNet.Inference.Models.ModelDownloadProgress.Model.init -> void
+MediaPipeNet.Inference.Models.ModelDownloadProgress.ModelDownloadProgress() -> void
+MediaPipeNet.Inference.Models.ModelDownloadProgress.ModelDownloadProgress(MediaPipeNet.Inference.Models.ModelDescriptor! Model, long BytesReceived, long? TotalBytes, string! Stage) -> void
+MediaPipeNet.Inference.Models.ModelDownloadProgress.Stage.get -> string!
+MediaPipeNet.Inference.Models.ModelDownloadProgress.Stage.init -> void
+MediaPipeNet.Inference.Models.ModelDownloadProgress.TotalBytes.get -> long?
+MediaPipeNet.Inference.Models.ModelDownloadProgress.TotalBytes.init -> void
+MediaPipeNet.Inference.Models.ModelStore
+MediaPipeNet.Inference.Models.ModelStore.EnsureModelsAsync(System.Collections.Generic.IEnumerable<MediaPipeNet.Inference.Models.ModelDescriptor!>! models, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+MediaPipeNet.Inference.Models.ModelStore.FindLocal(MediaPipeNet.Inference.Models.ModelDescriptor! model) -> string?
+MediaPipeNet.Inference.Models.ModelStore.GetModelPath(MediaPipeNet.Inference.Models.ModelDescriptor! model) -> string!
+MediaPipeNet.Inference.Models.ModelStore.GetModelPathAsync(MediaPipeNet.Inference.Models.ModelDescriptor! model, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
+MediaPipeNet.Inference.Models.ModelStore.ModelStore(System.Collections.Generic.IEnumerable<MediaPipeNet.Inference.Models.IModelProvider!>! providers, bool verifyChecksums = true, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+MediaPipeNet.Inference.Models.ModelStore.Providers.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.Models.IModelProvider!>!
+MediaPipeNet.Inference.Models.ModelStore.VerifyChecksums.get -> bool
+MediaPipeNet.Inference.Models.NuGetModelProvider
+MediaPipeNet.Inference.Models.NuGetModelProvider.IsRemote.get -> bool
+MediaPipeNet.Inference.Models.NuGetModelProvider.Name.get -> string!
+MediaPipeNet.Inference.Models.NuGetModelProvider.NuGetModelProvider(string! cacheDirectory, string? packageVersion = null, System.Uri? flatContainer = null, System.Net.Http.HttpClient? httpClient = null) -> void
+MediaPipeNet.Inference.Models.NuGetModelProvider.TryGetModelPathAsync(MediaPipeNet.Inference.Models.ModelDescriptor! model, System.IProgress<MediaPipeNet.Inference.Models.ModelDownloadProgress>? progress, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<string?>
+MediaPipeNet.Inference.OnnxModel
+MediaPipeNet.Inference.OnnxModel.Dispose() -> void
+MediaPipeNet.Inference.OnnxModel.FindInput(string! fragment) -> int
+MediaPipeNet.Inference.OnnxModel.FindOutput(string! fragment) -> int
+MediaPipeNet.Inference.OnnxModel.GetInputIndex(string! name) -> int
+MediaPipeNet.Inference.OnnxModel.GetOutputIndex(string! name) -> int
+MediaPipeNet.Inference.OnnxModel.Inputs.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.TensorSpec!>!
+MediaPipeNet.Inference.OnnxModel.Name.get -> string!
+MediaPipeNet.Inference.OnnxModel.Options.get -> MediaPipeNet.Inference.InferenceOptions!
+MediaPipeNet.Inference.OnnxModel.Outputs.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.TensorSpec!>!
+MediaPipeNet.Inference.OnnxModel.Provider.get -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.OnnxModel.RentContext() -> MediaPipeNet.Inference.InferenceContext!
+MediaPipeNet.Inference.OnnxModel.RunDynamic(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.DynamicTensor>! inputs) -> System.Collections.Generic.IReadOnlyList<(float[]! Data, long[]! Shape)>!
+MediaPipeNet.Inference.OnnxModel.Session.get -> Microsoft.ML.OnnxRuntime.InferenceSession!
+MediaPipeNet.Inference.TensorDataType
+MediaPipeNet.Inference.TensorDataType.Float32 = 0 -> MediaPipeNet.Inference.TensorDataType
+MediaPipeNet.Inference.TensorDataType.Int32 = 1 -> MediaPipeNet.Inference.TensorDataType
+MediaPipeNet.Inference.TensorDataType.Int64 = 2 -> MediaPipeNet.Inference.TensorDataType
+MediaPipeNet.Inference.TensorSpec
+MediaPipeNet.Inference.TensorSpec.<Clone>$() -> MediaPipeNet.Inference.TensorSpec!
+MediaPipeNet.Inference.TensorSpec.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<int>! Shape, out MediaPipeNet.Inference.TensorDataType ElementType) -> void
+MediaPipeNet.Inference.TensorSpec.ElementCount.get -> int
+MediaPipeNet.Inference.TensorSpec.ElementType.get -> MediaPipeNet.Inference.TensorDataType
+MediaPipeNet.Inference.TensorSpec.ElementType.init -> void
+MediaPipeNet.Inference.TensorSpec.Equals(MediaPipeNet.Inference.TensorSpec? other) -> bool
+MediaPipeNet.Inference.TensorSpec.Name.get -> string!
+MediaPipeNet.Inference.TensorSpec.Name.init -> void
+MediaPipeNet.Inference.TensorSpec.Shape.get -> System.Collections.Generic.IReadOnlyList<int>!
+MediaPipeNet.Inference.TensorSpec.Shape.init -> void
+MediaPipeNet.Inference.TensorSpec.TensorSpec(string! Name, System.Collections.Generic.IReadOnlyList<int>! Shape, MediaPipeNet.Inference.TensorDataType ElementType = MediaPipeNet.Inference.TensorDataType.Float32) -> void
+const MediaPipeNet.Inference.Models.BundledModelProvider.FolderName = "models" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.AudioPackage = "Gravicode.MediaPipeNet.Models.Audio" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.FacePackage = "Gravicode.MediaPipeNet.Models.Face" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.HandPackage = "Gravicode.MediaPipeNet.Models.Hand" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.ImageClassificationPackage = "Gravicode.MediaPipeNet.Models.ImageClassification" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.ImageEmbeddingPackage = "Gravicode.MediaPipeNet.Models.ImageEmbedding" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.ObjectDetectionPackage = "Gravicode.MediaPipeNet.Models.ObjectDetection" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.PosePackage = "Gravicode.MediaPipeNet.Models.Pose" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.QuantizedPackage = "Gravicode.MediaPipeNet.Models.Quantized" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.SegmentationPackage = "Gravicode.MediaPipeNet.Models.Segmentation" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.TextPackage = "Gravicode.MediaPipeNet.Models.Text" -> string!
+const MediaPipeNet.Inference.Models.ModelStore.ModelDirectoryEnvironmentVariable = "MEDIAPIPENET_MODELS" -> string!
+override MediaPipeNet.Inference.DynamicTensor.GetHashCode() -> int
+override MediaPipeNet.Inference.InferenceOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Inference.InferenceOptions.GetHashCode() -> int
+override MediaPipeNet.Inference.InferenceOptions.ToString() -> string!
+override MediaPipeNet.Inference.Models.ModelDescriptor.Equals(object? obj) -> bool
+override MediaPipeNet.Inference.Models.ModelDescriptor.GetHashCode() -> int
+override MediaPipeNet.Inference.Models.ModelDescriptor.ToString() -> string!
+override MediaPipeNet.Inference.Models.ModelDownloadProgress.GetHashCode() -> int
+override MediaPipeNet.Inference.TensorSpec.Equals(object? obj) -> bool
+override MediaPipeNet.Inference.TensorSpec.GetHashCode() -> int
+override MediaPipeNet.Inference.TensorSpec.ToString() -> string!
+static MediaPipeNet.Inference.DynamicTensor.operator !=(MediaPipeNet.Inference.DynamicTensor left, MediaPipeNet.Inference.DynamicTensor right) -> bool
+static MediaPipeNet.Inference.DynamicTensor.operator ==(MediaPipeNet.Inference.DynamicTensor left, MediaPipeNet.Inference.DynamicTensor right) -> bool
+static MediaPipeNet.Inference.ExecutionProviderSelector.CreateSessionOptions(MediaPipeNet.Inference.ExecutionProvider provider, MediaPipeNet.Inference.InferenceOptions! options) -> Microsoft.ML.OnnxRuntime.SessionOptions!
+static MediaPipeNet.Inference.ExecutionProviderSelector.FromOrtName(string! name) -> MediaPipeNet.Inference.ExecutionProvider?
+static MediaPipeNet.Inference.ExecutionProviderSelector.GetAvailableProviders() -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.ExecutionProvider>!
+static MediaPipeNet.Inference.ExecutionProviderSelector.GetCandidates(MediaPipeNet.Inference.ExecutionProvider requested, bool fallbackToCpu) -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.ExecutionProvider>!
+static MediaPipeNet.Inference.ExecutionProviderSelector.GetRuntimeVersion() -> string?
+static MediaPipeNet.Inference.ExecutionProviderSelector.PreferenceOrder.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.ExecutionProvider>!
+static MediaPipeNet.Inference.InferenceOptions.Default.get -> MediaPipeNet.Inference.InferenceOptions!
+static MediaPipeNet.Inference.InferenceOptions.operator !=(MediaPipeNet.Inference.InferenceOptions? left, MediaPipeNet.Inference.InferenceOptions? right) -> bool
+static MediaPipeNet.Inference.InferenceOptions.operator ==(MediaPipeNet.Inference.InferenceOptions? left, MediaPipeNet.Inference.InferenceOptions? right) -> bool
+static MediaPipeNet.Inference.Models.ModelCatalog.All.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.Models.ModelDescriptor!>!
+static MediaPipeNet.Inference.Models.ModelCatalog.AverageWordClassifier.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.BertClassifier.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.BertEmbedder.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.CannedGestureClassifier.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.DeepLabV3.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.EfficientDetLite0.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.EfficientNetLite0.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.FaceBlendshapes.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.FaceDetectionFullRange.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.FaceDetectionShortRange.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.FaceLandmarksDetector.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.Find(string! idOrFileName) -> MediaPipeNet.Inference.Models.ModelDescriptor?
+static MediaPipeNet.Inference.Models.ModelCatalog.GestureEmbedder.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.GetVariant(MediaPipeNet.Inference.Models.ModelDescriptor! model, MediaPipeNet.Inference.ModelPrecision precision) -> MediaPipeNet.Inference.Models.ModelDescriptor?
+static MediaPipeNet.Inference.Models.ModelCatalog.HairSegmenter.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.HandLandmarksDetector.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.HandRoiRefinement.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.LanguageDetector.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.MagicTouch.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.MobileNetV3SmallEmbedder.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.PalmDetection.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.PoseDetection.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.PoseLandmarksFull.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.PoseLandmarksLite.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.QuantizedVariants.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Inference.Models.ModelDescriptor!>!
+static MediaPipeNet.Inference.Models.ModelCatalog.SelfieMulticlass.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.SelfieSegmenter.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.YamNet.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelDescriptor.operator !=(MediaPipeNet.Inference.Models.ModelDescriptor? left, MediaPipeNet.Inference.Models.ModelDescriptor? right) -> bool
+static MediaPipeNet.Inference.Models.ModelDescriptor.operator ==(MediaPipeNet.Inference.Models.ModelDescriptor? left, MediaPipeNet.Inference.Models.ModelDescriptor? right) -> bool
+static MediaPipeNet.Inference.Models.ModelDownloadProgress.operator !=(MediaPipeNet.Inference.Models.ModelDownloadProgress left, MediaPipeNet.Inference.Models.ModelDownloadProgress right) -> bool
+static MediaPipeNet.Inference.Models.ModelDownloadProgress.operator ==(MediaPipeNet.Inference.Models.ModelDownloadProgress left, MediaPipeNet.Inference.Models.ModelDownloadProgress right) -> bool
+static MediaPipeNet.Inference.Models.ModelStore.ComputeSha256Async(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+static MediaPipeNet.Inference.Models.ModelStore.CreateDefault(string? modelDirectory = null, string? cacheDirectory = null, bool allowDownload = true, Microsoft.Extensions.Logging.ILogger? logger = null) -> MediaPipeNet.Inference.Models.ModelStore!
+static MediaPipeNet.Inference.Models.ModelStore.Default.get -> MediaPipeNet.Inference.Models.ModelStore!
+static MediaPipeNet.Inference.Models.ModelStore.Default.set -> void
+static MediaPipeNet.Inference.Models.ModelStore.DefaultCacheDirectory.get -> string!
+static MediaPipeNet.Inference.Models.ModelStore.LibraryVersion.get -> string!
+static MediaPipeNet.Inference.OnnxModel.Load(byte[]! model, string! name, MediaPipeNet.Inference.InferenceOptions? options = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> MediaPipeNet.Inference.OnnxModel!
+static MediaPipeNet.Inference.OnnxModel.Load(string! path, MediaPipeNet.Inference.InferenceOptions? options = null, Microsoft.Extensions.Logging.ILogger? logger = null, string? name = null) -> MediaPipeNet.Inference.OnnxModel!
+static MediaPipeNet.Inference.TensorSpec.operator !=(MediaPipeNet.Inference.TensorSpec? left, MediaPipeNet.Inference.TensorSpec? right) -> bool
+static MediaPipeNet.Inference.TensorSpec.operator ==(MediaPipeNet.Inference.TensorSpec? left, MediaPipeNet.Inference.TensorSpec? right) -> bool
+static readonly MediaPipeNet.Inference.Models.NuGetModelProvider.NuGetOrgFlatContainer -> System.Uri!
+~override MediaPipeNet.Inference.DynamicTensor.Equals(object obj) -> bool
+~override MediaPipeNet.Inference.DynamicTensor.ToString() -> string
+~override MediaPipeNet.Inference.Models.ModelDownloadProgress.Equals(object obj) -> bool
+~override MediaPipeNet.Inference.Models.ModelDownloadProgress.ToString() -> string

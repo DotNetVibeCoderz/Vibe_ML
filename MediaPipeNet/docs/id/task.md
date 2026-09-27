@@ -10,8 +10,16 @@ Semua task mengikuti pola yang sama:
 | `RunningMode.Video` | `DetectForVideo(image, timestampMs)` | Frame berurutan, timestamp naik; tracking + smoothing. |
 | `RunningMode.LiveStream` | `DetectLiveStream(image, timestampMs)` → `ResultCallback` | Asinkron; mengembalikan `false` bila frame dibuang. |
 
-(`GestureRecognizer` memakai `Recognize…`, `ImageSegmenter` `Segment…`, `ImageClassifier` `Classify…`.)
-Semua method menerima `ImageProcessingOptions(RegionOfInterest, RotationDegrees)` opsional.
+(`GestureRecognizer` memakai `Recognize…`, `ImageSegmenter` `Segment…`, `ImageClassifier` `Classify…`,
+`ImageEmbedder` `Embed…`.) Semua method menerima `ImageProcessingOptions(RegionOfInterest, RotationDegrees)` opsional.
+
+**Batch** — setiap task vision juga punya `ProcessBatch(images, options, maxDegreeOfParallelism)` /
+`ProcessBatchAsync(…)` untuk beban offline: gambar diproses paralel pada model yang sama (tiap worker menyewa buffer
+pool sendiri) dan hasilnya kembali sesuai urutan input — sekitar 2× throughput loop berurutan di CPU 4 core.
+Pemanggilan mode Image thread-safe; state tracking hanya disentuh di mode video / live-stream.
+
+Task audio dan teks dijelaskan di [Task audio & teks](audio-dan-teks.md); model Anda sendiri di
+[Model kustom](model-kustom.md).
 
 ---
 
@@ -19,11 +27,13 @@ Semua method menerima `ImageProcessingOptions(RegionOfInterest, RotationDegrees)
 
 ![Deteksi wajah](../images/gallery-faces.png)
 
-BlazeFace short-range (128×128): bounding box + 6 keypoint per wajah (`FaceKeypoint`: mata kanan/kiri, ujung
-hidung, tengah mulut, tragus telinga kanan/kiri). Optimal untuk wajah dalam jarak ~2 m.
+BlazeFace: bounding box + 6 keypoint per wajah (`FaceKeypoint`: mata kanan/kiri, ujung hidung, tengah mulut,
+tragus telinga kanan/kiri). Model short-range (128×128) cocok untuk wajah dalam jarak ~2 m; model **full-range**
+(192×192, satu grid anchor 48×48) menemukan wajah hingga ~5 m — foto grup, ruangan, pemantauan.
 
 | Opsi | Default | Arti |
 |---|---|---|
+| `Model` | `ShortRange` | `FaceDetectorModel.ShortRange` atau `FaceDetectorModel.FullRange`. |
 | `MinDetectionConfidence` | 0.5 | Skor wajah minimum. |
 | `MinSuppressionThreshold` | 0.3 | IoU di atas nilai ini membuat deteksi yang bertumpuk digabung (weighted NMS). |
 | `MaxResults` | -1 | Jumlah wajah maksimum (-1 = semua). |
@@ -45,6 +55,7 @@ diturunkan dari landmark saat ini, sehingga detektor hanya berjalan ketika wajah
 | `MinFacePresenceConfidence` | 0.5 | Ambang presence model landmark. |
 | `MinTrackingConfidence` | 0.5 | Di bawah nilai ini wajah dideteksi ulang (video/live). |
 | `OutputFaceBlendshapes` | false | Hitung juga 52 blendshape. |
+| `OutputFacialTransformationMatrixes` | false | Hitung juga matriks transformasi wajah 4×4 tiap wajah. |
 | `SmoothLandmarks` | true | Smoothing One-Euro di mode video/live (satu wajah). |
 
 ```csharp
@@ -52,6 +63,20 @@ var face = landmarker.Detect(image).Faces[0];
 float senyum = face.GetBlendshape("mouthSmileLeft");
 var ujungHidung = face.Landmarks[1];
 Connections.FaceContours   // oval, bibir, mata, alis, iris — untuk menggambar
+```
+
+**Matriks transformasi wajah (pose kepala untuk AR).** Dengan `OutputFacialTransformationMatrixes = true`,
+`FaceLandmarks.FacialTransformationMatrix` berisi pose rigid dan skala yang memetakan model wajah 3-D kanonis
+MediaPipe ke ruang kamera — port geometry pipeline MediaPipe (kamera perspektif, field of view vertikal 63°, weighted
+orthogonal Procrustes pada 33 landmark stabil). Ke-16 nilai tersusun row-major seperti MediaPipe (konvensi vektor
+kolom, translasi dalam sentimeter di kolom terakhir); `face.GetTransformMatrix()` mengembalikan matriks yang sama
+sebagai `System.Numerics.Matrix4x4` dengan konvensi vektor baris .NET, siap untuk `Vector3.Transform`. Pada fixture
+portrait hasilnya cocok dengan MediaPipe dalam selisih rotasi 2° dan translasi 1,5 cm.
+
+```csharp
+using var landmarker = FaceLandmarker.Create(new() { OutputFacialTransformationMatrixes = true });
+var pose = landmarker.Detect(image).Faces[0].GetTransformMatrix()!.Value;
+var hidungDiKamera = Vector3.Transform(new Vector3(0, -0.5f, 7.5f), pose);   // cm model kanonis → cm kamera
 ```
 
 ## HandLandmarker
@@ -96,6 +121,9 @@ diklasifikasi: `recognizer.Classify(handLandmarks, lebar, tinggi)`.
 ![Pose](../images/gallery-pose.png)
 
 Detektor BlazePose (224×224) → ROI alignment-point → model landmark BlazePose GHUM (256×256, Lite atau Full).
+Seperti MediaPipe, landmark hasil regresi **disempurnakan dengan heatmap 64×64 model** (centroid berbobot sigmoid
+pada jendela 7×7 di sekitar tiap landmark) sebelum diproyeksikan ke gambar — membuat landmark 2,7× lebih dekat ke
+hasil MediaPipe dibanding regresi saja.
 
 | Opsi | Default | |
 |---|---|---|
@@ -104,6 +132,7 @@ Detektor BlazePose (224×224) → ROI alignment-point → model landmark BlazePo
 | `MinPoseDetectionConfidence` / `MinPosePresenceConfidence` / `MinTrackingConfidence` | 0.5 | |
 | `OutputSegmentationMasks` | false | Mask orang untuk seluruh gambar. |
 | `SmoothLandmarks` | true | Smoothing One-Euro di mode video/live. |
+| `SmoothSegmentationMasks` | true | Segmentation smoothing MediaPipe pada mask orang di mode video/live. |
 
 Setiap landmark memiliki `Visibility` dan `Presence`. `pose[PoseLandmark.LeftWrist]`, `WorldLandmarks` (meter, titik
 asal di pinggul), `SegmentationMask`, `Connections.Pose`.
@@ -112,24 +141,83 @@ asal di pinggul), `SegmentationMask`, `Connections.Pose`.
 
 ![Holistic](../images/gallery-holistic.png)
 
-Pose, face mesh, dan kedua tangan satu orang. Ketiga pipeline berjalan paralel; tangan dipasangkan ke pergelangan
-kiri/kanan tubuh; bila detektor wajah melewatkan wajah kecil atau menyamping, ROI wajah diturunkan dari landmark
-wajah milik pose. `HolisticResult(Pose, Face, LeftHand, RightHand)` — kiri/kanan adalah sisi anatomis **orang
-tersebut**.
+Pose, face mesh, dan kedua tangan satu orang, mengikuti graph holistic MediaPipe:
 
-## ImageSegmenter (selfie)
+1. **Pose** (BlazePose, Lite atau Full) menemukan orangnya.
+2. **Wajah** — ROI berasal dari landmark wajah milik pose (×3), detektor wajah berjalan di dalamnya dan keypoint-nya
+   menjadi ROI face mesh. Wajah yang terlalu kecil untuk detektor (beberapa puluh piksel) jatuh kembali ke landmark
+   wajah pose — hal yang tidak dilakukan MediaPipe — tetap disaring oleh skor presence mesh.
+3. **Tangan** — untuk tiap pergelangan dengan visibility di atas 0,1, ROI dibangun dari landmark pergelangan,
+   telunjuk, dan kelingking pose (×2,7), disempurnakan oleh **model hand ROI refinement** (256×256, dua titik:
+   pergelangan dan jari tengah), lalu model landmark tangan dijalankan di sana. World landmark tangan
+   dijangkarkan ulang ke pergelangan world milik pose.
+4. Di mode video/live tiap bagian mempertahankan ROI sebelumnya selama masih sesuai dengan ROI baru
+   (`RoiTrackingCalculator` MediaPipe: batas rotasi, translasi, dan skala, landmark sebelumnya berada di dalam ROI
+   baru), sehingga crop stabil dari frame ke frame.
+
+Wajah dan kedua tangan berjalan paralel. `HolisticResult(Pose, Face, LeftHand, RightHand)` — kiri/kanan adalah sisi
+anatomis **orang tersebut**. Pada fixture pose, kedua tangan cocok dengan MediaPipe dalam selisih 0,01 (ternormalisasi).
+
+## ImageSegmenter
 
 ![Segmentasi](../images/gallery-segment.png)
 
-Probabilitas orang per piksel (`SegmentationMask`, ukuran sama dengan gambar). `TemporalSmoothing` (default 0.3)
-memadukan mask antar-frame di mode video/live. Gunakan `MediaPipeNet.Visualization.SegmentationMaskOverlay` untuk
-blur atau mengganti latar, `mask.Coverage()` untuk porsi foreground, `mask.ToBytes(ambang)` untuk mask 8-bit.
+![Selfie multiclass](../images/segment-multiclass.jpg)
+
+| `Model` | Input | Kategori |
+|---|---|---|
+| `Selfie` (default) | 256×256 | satu mask orang |
+| `SelfieMulticlass` | 256×256 | background, hair, body-skin, face-skin, clothes, others |
+| `Hair` | 512×512 (RGBA) | background, hair |
+| `DeepLabV3` | 257×257 | 21 kelas PASCAL VOC (person, cat, dog, car, …) |
+
+| Opsi | Default | |
+|---|---|---|
+| `OutputConfidenceMasks` | true | Satu mask probabilitas per kategori (`SegmentationResult.ConfidenceMasks`). |
+| `OutputCategoryMask` | false | Kategori paling mungkin per piksel (`CategoryMask`, satu byte per piksel; 255 = tanpa label). |
+| `TemporalSmoothing` | 0.3 | Smoothing berbobot ketidakpastian ala MediaPipe antar-frame (video/live). |
+
+`result.ConfidenceMask` adalah foreground: satu-satunya mask model selfie, atau 1 − P(background) untuk model lain.
+`result.GetConfidenceMask("hair")` memilih kategori berdasarkan nama, `result.Labels` mendaftarnya,
+`result.CategoryMask.Histogram()` memberi porsi tiap kategori. Gunakan
+`MediaPipeNet.Visualization.SegmentationMaskOverlay` untuk blur/mengganti latar atau mewarnai kategori
+(`OverlayCategories`).
+
+```csharp
+using var segmenter = ImageSegmenter.Create(new() { Model = SegmenterModel.SelfieMulticlass, OutputCategoryMask = true });
+var result = segmenter.Segment(image);
+Console.WriteLine($"rambut menutupi {result.GetConfidenceMask("hair")!.Coverage():P1}");
+```
+
+## InteractiveSegmenter
+
+![Segmentasi interaktif](../images/gallery-interactive.png)
+
+MagicTouch (512×512): mensegmentasi objek di bawah sebuah titik atau goresan — "ketuk untuk memilih". Hanya mode
+Image, seperti MediaPipe. Petunjuknya digambar ke kanal input keempat model persis seperti MediaPipe (lingkaran yang
+ketebalannya mengikuti ukuran gambar).
+
+```csharp
+using var segmenter = InteractiveSegmenter.Create(new() { OutputCategoryMask = true });
+var potongan = segmenter.Segment(image, RegionOfInterest.FromKeypoint(0.62f, 0.5f)).ConfidenceMask;
+var goresan = RegionOfInterest.FromScribble([new(0.3f, 0.6f), new(0.35f, 0.62f), new(0.4f, 0.6f)]);
+```
+
+## ImageEmbedder
+
+![Embedding gambar](../images/gallery-embed.png)
+
+MobileNet V3 small (224×224): vektor fitur 1024-D per gambar untuk pencarian visual, clustering, dan de-duplikasi.
+Opsi: `L2Normalize` (false, seperti MediaPipe), `Quantize` (nilai int8 di `Embedding.QuantizedValues`). Bandingkan
+dengan `ImageEmbedder.CosineSimilarity(a, b)`: burger vs. potongan burger yang sama ≈ 0,92, burger vs. kucing ≈ 0,05
+(MediaPipe: 0,920 dan 0,048).
 
 ## ObjectDetector
 
 ![Objek](../images/gallery-objects.png)
 
-EfficientDet-Lite0 (320×320), 80 kelas COCO.
+EfficientDet-Lite0 (320×320), 80 kelas COCO. Model EfficientDet-Lite kustom dengan ukuran input berapa pun dapat
+dimuat lewat `ModelPath` + `Labels` — lihat [Model kustom](model-kustom.md).
 
 | Opsi | Default | |
 |---|---|---|
@@ -143,7 +231,7 @@ EfficientDet-Lite0 (320×320), 80 kelas COCO.
 ![Klasifikasi](../images/gallery-classify.png)
 
 EfficientNet-Lite0 (224×224), 1000 kelas ImageNet. Opsi: `MaxResults` (5), `ScoreThreshold`,
-`CategoryAllowlist`, `CategoryDenylist`.
+`CategoryAllowlist`, `CategoryDenylist`, serta `ModelPath` / `Labels` untuk [classifier Anda sendiri](model-kustom.md).
 
 ---
 

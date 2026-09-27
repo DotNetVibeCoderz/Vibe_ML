@@ -1,0 +1,20 @@
+#nullable enable
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource.Capture.get -> OpenCvSharp.VideoCapture!
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource.DisposeAsync() -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource.FrameRate.get -> double?
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource.FrameSize.get -> MediaPipeNet.ImageSize?
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource.Name.get -> string!
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource.OpenCvFrameSource(OpenCvSharp.VideoCapture! capture, string! name) -> void
+MediaPipeNet.Video.OpenCv.OpenCvFrameSource.ReadFramesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<MediaPipeNet.Imaging.VideoFrame!>!
+MediaPipeNet.Video.OpenCv.VideoFileFrameSource
+MediaPipeNet.Video.OpenCv.VideoFileFrameSource.FrameCount.get -> int
+MediaPipeNet.Video.OpenCv.VideoFileFrameSource.VideoFileFrameSource(string! path) -> void
+MediaPipeNet.Video.OpenCv.WebcamFrameSource
+MediaPipeNet.Video.OpenCv.WebcamFrameSource.DeviceIndex.get -> int
+MediaPipeNet.Video.OpenCv.WebcamFrameSource.WebcamFrameSource(int deviceIndex = 0, int width = 640, int height = 480, double fps = 30) -> void
+abstract MediaPipeNet.Video.OpenCv.OpenCvFrameSource.GetTimestampMs(long index, System.Diagnostics.Stopwatch! clock) -> long
+abstract MediaPipeNet.Video.OpenCv.OpenCvFrameSource.IsLive.get -> bool
+override MediaPipeNet.Video.OpenCv.VideoFileFrameSource.IsLive.get -> bool
+override MediaPipeNet.Video.OpenCv.WebcamFrameSource.IsLive.get -> bool
+static MediaPipeNet.Video.OpenCv.WebcamFrameSource.ListCameras(int maxDevices = 5) -> System.Collections.Generic.IReadOnlyList<int>!

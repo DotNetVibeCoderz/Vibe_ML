@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MediaPipeNet.Tasks</RootNamespace>
+    <Description>MediaPipe.NET task foundations shared by the vision, audio and text tasks: BaseOptions (model sources, execution provider, logging), model loading and classification post-processing. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaPipeNet.Core\MediaPipeNet.Core.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Inference\MediaPipeNet.Inference.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

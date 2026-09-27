@@ -1,12 +1,12 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <RootNamespace>MediaPipeNet.Tasks.Vision</RootNamespace>
-    <Description>MediaPipe.NET vision tasks: FaceDetector, FaceLandmarker (face mesh + blendshapes), HandLandmarker, GestureRecognizer, PoseLandmarker, HolisticLandmarker, ImageSegmenter (selfie), ObjectDetector and ImageClassifier — native .NET ports of Google MediaPipe Tasks running on ONNX Runtime, with IMAGE / VIDEO / LIVE_STREAM modes, tracking, smoothing and graph calculators. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <Description>MediaPipe.NET vision tasks: FaceDetector, FaceLandmarker (face mesh + blendshapes), HandLandmarker, GestureRecognizer, PoseLandmarker, HolisticLandmarker, ImageSegmenter (selfie, multiclass, hair, DeepLab v3), InteractiveSegmenter, ImageEmbedder, ObjectDetector and ImageClassifier — native .NET ports of Google MediaPipe Tasks running on ONNX Runtime, with IMAGE / VIDEO / LIVE_STREAM modes, tracking, smoothing and graph calculators. Created by Gravicode Studios, led by Kang Fadhil.</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\*.txt" LogicalName="MediaPipeNet.Tasks.Vision.Resources.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Resources\*.txt;Resources\*.bin" LogicalName="MediaPipeNet.Tasks.Vision.Resources.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -14,6 +14,11 @@
     <ProjectReference Include="..\MediaPipeNet.Imaging\MediaPipeNet.Imaging.csproj" />
     <ProjectReference Include="..\MediaPipeNet.Inference\MediaPipeNet.Inference.csproj" />
     <ProjectReference Include="..\MediaPipeNet.Framework\MediaPipeNet.Framework.csproj" />
+    <ProjectReference Include="..\MediaPipeNet.Tasks.Core\MediaPipeNet.Tasks.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="MediaPipeNet.Tasks" />
   </ItemGroup>
 
   <ItemGroup>

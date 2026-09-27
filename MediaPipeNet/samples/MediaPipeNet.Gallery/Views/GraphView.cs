@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -13,6 +13,7 @@ using MediaPipeNet.Imaging;
 using MediaPipeNet.Serialization;
 using MediaPipeNet.Tasks.Vision;
 using MediaPipeNet.Tasks.Vision.Graph;
+using MediaPipeNet.Tasks;
 
 namespace MediaPipeNet.Gallery.Views;
 

@@ -1,0 +1,137 @@
+#nullable enable
+MediaPipeNet.Imaging.BorderMode
+MediaPipeNet.Imaging.BorderMode.Replicate = 1 -> MediaPipeNet.Imaging.BorderMode
+MediaPipeNet.Imaging.BorderMode.Zero = 0 -> MediaPipeNet.Imaging.BorderMode
+MediaPipeNet.Imaging.IFrameSource
+MediaPipeNet.Imaging.IFrameSource.FrameRate.get -> double?
+MediaPipeNet.Imaging.IFrameSource.FrameSize.get -> MediaPipeNet.ImageSize?
+MediaPipeNet.Imaging.IFrameSource.IsLive.get -> bool
+MediaPipeNet.Imaging.IFrameSource.Name.get -> string!
+MediaPipeNet.Imaging.IFrameSource.ReadFramesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<MediaPipeNet.Imaging.VideoFrame!>!
+MediaPipeNet.Imaging.ImageFileFrameSource
+MediaPipeNet.Imaging.ImageFileFrameSource.DisposeAsync() -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Imaging.ImageFileFrameSource.FrameRate.get -> double?
+MediaPipeNet.Imaging.ImageFileFrameSource.FrameSize.get -> MediaPipeNet.ImageSize?
+MediaPipeNet.Imaging.ImageFileFrameSource.ImageFileFrameSource(System.Collections.Generic.IEnumerable<string!>! paths, double frameRate = 30, bool loop = false) -> void
+MediaPipeNet.Imaging.ImageFileFrameSource.ImageFileFrameSource(string! path, double frameRate = 30, bool loop = false) -> void
+MediaPipeNet.Imaging.ImageFileFrameSource.IsLive.get -> bool
+MediaPipeNet.Imaging.ImageFileFrameSource.Name.get -> string!
+MediaPipeNet.Imaging.ImageFileFrameSource.ReadFramesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<MediaPipeNet.Imaging.VideoFrame!>!
+MediaPipeNet.Imaging.ImageToTensor
+MediaPipeNet.Imaging.ImageToTensorOptions
+MediaPipeNet.Imaging.ImageToTensorOptions.Antialias.get -> bool
+MediaPipeNet.Imaging.ImageToTensorOptions.Antialias.init -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.BorderMode.get -> MediaPipeNet.Imaging.BorderMode
+MediaPipeNet.Imaging.ImageToTensorOptions.BorderMode.init -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.Deconstruct(out int Width, out int Height, out float RangeMin, out float RangeMax, out bool KeepAspectRatio, out MediaPipeNet.Imaging.BorderMode BorderMode, out bool Antialias) -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.Equals(MediaPipeNet.Imaging.ImageToTensorOptions other) -> bool
+MediaPipeNet.Imaging.ImageToTensorOptions.Height.get -> int
+MediaPipeNet.Imaging.ImageToTensorOptions.Height.init -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.ImageToTensorOptions() -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.ImageToTensorOptions(int Width, int Height, float RangeMin = 0, float RangeMax = 1, bool KeepAspectRatio = false, MediaPipeNet.Imaging.BorderMode BorderMode = MediaPipeNet.Imaging.BorderMode.Zero, bool Antialias = true) -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.KeepAspectRatio.get -> bool
+MediaPipeNet.Imaging.ImageToTensorOptions.KeepAspectRatio.init -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.RangeMax.get -> float
+MediaPipeNet.Imaging.ImageToTensorOptions.RangeMax.init -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.RangeMin.get -> float
+MediaPipeNet.Imaging.ImageToTensorOptions.RangeMin.init -> void
+MediaPipeNet.Imaging.ImageToTensorOptions.Width.get -> int
+MediaPipeNet.Imaging.ImageToTensorOptions.Width.init -> void
+MediaPipeNet.Imaging.MPImage
+MediaPipeNet.Imaging.MPImage.AsBytes() -> System.ReadOnlySpan<byte>
+MediaPipeNet.Imaging.MPImage.Clone() -> MediaPipeNet.Imaging.MPImage!
+MediaPipeNet.Imaging.MPImage.CopyFrom(MediaPipeNet.Imaging.MPImage! other) -> void
+MediaPipeNet.Imaging.MPImage.CopyFrom(System.ReadOnlySpan<byte> data, int width, int height, MediaPipeNet.Imaging.PixelFormat format, int stride = 0) -> void
+MediaPipeNet.Imaging.MPImage.CopyTo(System.Span<byte> destination, MediaPipeNet.Imaging.PixelFormat format, int stride = 0) -> void
+MediaPipeNet.Imaging.MPImage.Dispose() -> void
+MediaPipeNet.Imaging.MPImage.FlipHorizontal() -> MediaPipeNet.Imaging.MPImage!
+MediaPipeNet.Imaging.MPImage.GetPixelSpan() -> System.Span<SixLabors.ImageSharp.PixelFormats.Rgba32>
+MediaPipeNet.Imaging.MPImage.GetRow(int y) -> System.ReadOnlySpan<SixLabors.ImageSharp.PixelFormats.Rgba32>
+MediaPipeNet.Imaging.MPImage.Height.get -> int
+MediaPipeNet.Imaging.MPImage.IsDisposed.get -> bool
+MediaPipeNet.Imaging.MPImage.PixelCount.get -> int
+MediaPipeNet.Imaging.MPImage.Pixels.get -> System.ReadOnlySpan<SixLabors.ImageSharp.PixelFormats.Rgba32>
+MediaPipeNet.Imaging.MPImage.SaveAsJpeg(string! path, int quality = 90) -> void
+MediaPipeNet.Imaging.MPImage.SaveAsPng(string! path) -> void
+MediaPipeNet.Imaging.MPImage.Size.get -> MediaPipeNet.ImageSize
+MediaPipeNet.Imaging.MPImage.ToImage() -> SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>!
+MediaPipeNet.Imaging.MPImage.Width.get -> int
+MediaPipeNet.Imaging.MPImage.this[int x, int y].get -> SixLabors.ImageSharp.PixelFormats.Rgba32
+MediaPipeNet.Imaging.MemoryFrameSource
+MediaPipeNet.Imaging.MemoryFrameSource.DisposeAsync() -> System.Threading.Tasks.ValueTask
+MediaPipeNet.Imaging.MemoryFrameSource.FrameRate.get -> double?
+MediaPipeNet.Imaging.MemoryFrameSource.FrameSize.get -> MediaPipeNet.ImageSize?
+MediaPipeNet.Imaging.MemoryFrameSource.IsLive.get -> bool
+MediaPipeNet.Imaging.MemoryFrameSource.MemoryFrameSource(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Imaging.MPImage!>! frames, double frameRate = 30, bool realTime = false) -> void
+MediaPipeNet.Imaging.MemoryFrameSource.Name.get -> string!
+MediaPipeNet.Imaging.MemoryFrameSource.ReadFramesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<MediaPipeNet.Imaging.VideoFrame!>!
+MediaPipeNet.Imaging.PixelFormat
+MediaPipeNet.Imaging.PixelFormat.Bgr24 = 3 -> MediaPipeNet.Imaging.PixelFormat
+MediaPipeNet.Imaging.PixelFormat.Bgra32 = 1 -> MediaPipeNet.Imaging.PixelFormat
+MediaPipeNet.Imaging.PixelFormat.Gray8 = 4 -> MediaPipeNet.Imaging.PixelFormat
+MediaPipeNet.Imaging.PixelFormat.Rgb24 = 2 -> MediaPipeNet.Imaging.PixelFormat
+MediaPipeNet.Imaging.PixelFormat.Rgba32 = 0 -> MediaPipeNet.Imaging.PixelFormat
+MediaPipeNet.Imaging.TensorMapping
+MediaPipeNet.Imaging.TensorMapping.Deconstruct(out MediaPipeNet.NormalizedRect Roi, out MediaPipeNet.LetterboxPadding Padding, out int ImageWidth, out int ImageHeight, out int TensorWidth, out int TensorHeight) -> void
+MediaPipeNet.Imaging.TensorMapping.Equals(MediaPipeNet.Imaging.TensorMapping other) -> bool
+MediaPipeNet.Imaging.TensorMapping.ImageHeight.get -> int
+MediaPipeNet.Imaging.TensorMapping.ImageHeight.init -> void
+MediaPipeNet.Imaging.TensorMapping.ImageToTensor(float x, float y) -> (float U, float V)
+MediaPipeNet.Imaging.TensorMapping.ImageWidth.get -> int
+MediaPipeNet.Imaging.TensorMapping.ImageWidth.init -> void
+MediaPipeNet.Imaging.TensorMapping.Padding.get -> MediaPipeNet.LetterboxPadding
+MediaPipeNet.Imaging.TensorMapping.Padding.init -> void
+MediaPipeNet.Imaging.TensorMapping.Roi.get -> MediaPipeNet.NormalizedRect
+MediaPipeNet.Imaging.TensorMapping.Roi.init -> void
+MediaPipeNet.Imaging.TensorMapping.ScaleZ(float z) -> float
+MediaPipeNet.Imaging.TensorMapping.TensorHeight.get -> int
+MediaPipeNet.Imaging.TensorMapping.TensorHeight.init -> void
+MediaPipeNet.Imaging.TensorMapping.TensorMapping() -> void
+MediaPipeNet.Imaging.TensorMapping.TensorMapping(MediaPipeNet.NormalizedRect Roi, MediaPipeNet.LetterboxPadding Padding, int ImageWidth, int ImageHeight, int TensorWidth, int TensorHeight) -> void
+MediaPipeNet.Imaging.TensorMapping.TensorToImage(float u, float v) -> (float X, float Y)
+MediaPipeNet.Imaging.TensorMapping.TensorWidth.get -> int
+MediaPipeNet.Imaging.TensorMapping.TensorWidth.init -> void
+MediaPipeNet.Imaging.TensorWarp
+MediaPipeNet.Imaging.VideoFrame
+MediaPipeNet.Imaging.VideoFrame.<Clone>$() -> MediaPipeNet.Imaging.VideoFrame!
+MediaPipeNet.Imaging.VideoFrame.Deconstruct(out MediaPipeNet.Imaging.MPImage! Image, out long TimestampMs, out long Index) -> void
+MediaPipeNet.Imaging.VideoFrame.Equals(MediaPipeNet.Imaging.VideoFrame? other) -> bool
+MediaPipeNet.Imaging.VideoFrame.Image.get -> MediaPipeNet.Imaging.MPImage!
+MediaPipeNet.Imaging.VideoFrame.Image.init -> void
+MediaPipeNet.Imaging.VideoFrame.Index.get -> long
+MediaPipeNet.Imaging.VideoFrame.Index.init -> void
+MediaPipeNet.Imaging.VideoFrame.TimestampMs.get -> long
+MediaPipeNet.Imaging.VideoFrame.TimestampMs.init -> void
+MediaPipeNet.Imaging.VideoFrame.VideoFrame(MediaPipeNet.Imaging.MPImage! Image, long TimestampMs, long Index) -> void
+override MediaPipeNet.Imaging.ImageToTensorOptions.GetHashCode() -> int
+override MediaPipeNet.Imaging.TensorMapping.GetHashCode() -> int
+override MediaPipeNet.Imaging.VideoFrame.Equals(object? obj) -> bool
+override MediaPipeNet.Imaging.VideoFrame.GetHashCode() -> int
+override MediaPipeNet.Imaging.VideoFrame.ToString() -> string!
+static MediaPipeNet.Imaging.ImageFileFrameSource.FromDirectory(string! directory, double frameRate = 30, bool loop = false) -> MediaPipeNet.Imaging.ImageFileFrameSource!
+static MediaPipeNet.Imaging.ImageToTensor.Convert(MediaPipeNet.Imaging.MPImage! image, in MediaPipeNet.Imaging.ImageToTensorOptions options, System.Span<float> destination) -> MediaPipeNet.Imaging.TensorMapping
+static MediaPipeNet.Imaging.ImageToTensor.Convert(MediaPipeNet.Imaging.MPImage! image, in MediaPipeNet.NormalizedRect roi, in MediaPipeNet.Imaging.ImageToTensorOptions options, System.Span<float> destination) -> MediaPipeNet.Imaging.TensorMapping
+static MediaPipeNet.Imaging.ImageToTensor.PadRoi(in MediaPipeNet.NormalizedRect roi, int imageWidth, int imageHeight, int tensorWidth, int tensorHeight, out MediaPipeNet.LetterboxPadding padding) -> MediaPipeNet.NormalizedRect
+static MediaPipeNet.Imaging.ImageToTensorOptions.operator !=(MediaPipeNet.Imaging.ImageToTensorOptions left, MediaPipeNet.Imaging.ImageToTensorOptions right) -> bool
+static MediaPipeNet.Imaging.ImageToTensorOptions.operator ==(MediaPipeNet.Imaging.ImageToTensorOptions left, MediaPipeNet.Imaging.ImageToTensorOptions right) -> bool
+static MediaPipeNet.Imaging.MPImage.Create(int width, int height) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.FromImage(SixLabors.ImageSharp.Image! image) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.FromImage(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.FromPixelData(System.ReadOnlySpan<byte> data, int width, int height, MediaPipeNet.Imaging.PixelFormat format, int stride = 0) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.FromPixels(System.ReadOnlySpan<SixLabors.ImageSharp.PixelFormats.Rgba32> pixels, int width, int height) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.Load(System.IO.Stream! stream) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.Load(System.ReadOnlySpan<byte> encoded) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.Load(string! path) -> MediaPipeNet.Imaging.MPImage!
+static MediaPipeNet.Imaging.MPImage.LoadAsync(System.IO.Stream! stream, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Imaging.MPImage!>!
+static MediaPipeNet.Imaging.MPImage.LoadAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Imaging.MPImage!>!
+static MediaPipeNet.Imaging.TensorMapping.operator !=(MediaPipeNet.Imaging.TensorMapping left, MediaPipeNet.Imaging.TensorMapping right) -> bool
+static MediaPipeNet.Imaging.TensorMapping.operator ==(MediaPipeNet.Imaging.TensorMapping left, MediaPipeNet.Imaging.TensorMapping right) -> bool
+static MediaPipeNet.Imaging.TensorWarp.ProjectChannelsToImage(float[]! tensor, int tensorWidth, int tensorHeight, int channels, in MediaPipeNet.Imaging.TensorMapping mapping, System.Collections.Generic.IReadOnlyList<float[]!>! destinations, int outputWidth, int outputHeight, float outsideValue = 0) -> void
+static MediaPipeNet.Imaging.TensorWarp.ProjectToImage(System.ReadOnlySpan<float> tensor, int tensorWidth, int tensorHeight, in MediaPipeNet.Imaging.TensorMapping mapping, System.Span<float> destination, int outputWidth, int outputHeight, float outsideValue = 0) -> void
+static MediaPipeNet.Imaging.TensorWarp.Resize(System.ReadOnlySpan<float> source, int sourceWidth, int sourceHeight, System.Span<float> destination, int width, int height) -> void
+static MediaPipeNet.Imaging.VideoFrame.operator !=(MediaPipeNet.Imaging.VideoFrame? left, MediaPipeNet.Imaging.VideoFrame? right) -> bool
+static MediaPipeNet.Imaging.VideoFrame.operator ==(MediaPipeNet.Imaging.VideoFrame? left, MediaPipeNet.Imaging.VideoFrame? right) -> bool
+~override MediaPipeNet.Imaging.ImageToTensorOptions.Equals(object obj) -> bool
+~override MediaPipeNet.Imaging.ImageToTensorOptions.ToString() -> string
+~override MediaPipeNet.Imaging.TensorMapping.Equals(object obj) -> bool
+~override MediaPipeNet.Imaging.TensorMapping.ToString() -> string

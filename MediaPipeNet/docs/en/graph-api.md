@@ -19,6 +19,11 @@
 | `DefaultInputStreamHandler` | `InputPolicy.Synchronized` | One call per timestamp once every input is settled. |
 | `ImmediateInputStreamHandler` | `InputPolicy.Immediate` | Every packet processed on arrival (a timestamp may arrive once per input: emit once). |
 | `FlowLimiterCalculator` | `GraphOptions.MaxInFlight` | Drops new input while the graph is busy. |
+| `back_edge: true` | `In(tag, stream, backEdge: true)` | Loops, e.g. feeding the previous result back. |
+| `PreviousLoopbackCalculator` | `PreviousLoopbackNode<T>` | Emits the previous loop value at the current timestamp. |
+| `executor { … }` / `executor:` | `AddExecutor(name, threads)` + `OnExecutor(name)` | Dedicated threads for some nodes. |
+| Subgraphs | `AddSubgraph(…)` / `CalculatorRegistry.RegisterSubgraph` | Reusable blocks, inlined at build time. |
+| Profiler / tracer | `GraphOptions.EnableTracing` + `WriteChromeTrace` | Timeline for `chrome://tracing` / Perfetto. |
 | `CalculatorGraphConfig` (.pbtxt) | `GraphConfig.ParsePbtxt` | Same text syntax (subset). |
 
 ## Semantics
@@ -116,6 +121,21 @@ members: `InputTimestamp`, `HasInput`, `TryGetInput`, `Send(tag, value[, timesta
 
 ## Graphs from `.pbtxt`
 
+The parser understands the fields above plus `input_stream_info { tag_index: "LOOP" back_edge: true }`, per-node
+`executor: "name"`, graph-level `executor { name: "gpu" … num_threads: 1 }` and `profiler_config { trace_enabled:
+true }`. Subgraphs are registered as configs: a node whose calculator is a registered subgraph is replaced by the
+subgraph's nodes, its `TAG:stream` entries matched by tag (or by position when untagged):
+
+```csharp
+var registry = CalculatorRegistry.Default.AddVisionCalculators()
+    .RegisterSubgraph("FaceAndHands", GraphConfig.ParsePbtxt("""
+        input_stream: "IMAGE:image"
+        output_stream: "FACES:faces"
+        node { calculator: "FaceDetectorCalculator" input_stream: "IMAGE:image" output_stream: "RESULT:faces" }
+        """));
+```
+
+
 ```csharp
 const string Config = """
     input_stream: "image"
@@ -147,6 +167,73 @@ Registered vision calculators: `FaceDetectorCalculator`, `FaceLandmarkerCalculat
 `registry.Register("MyCalculator", nodeConfig => new MyNode(nodeConfig.GetOption("threshold", 0.5f)))`.
 Extension option blocks such as `[mediapipe.FooOptions.ext] { … }` are accepted (the type name is ignored).
 `GraphConfig.ToPbtxt()` renders a config back to text.
+
+## Loops (back edges)
+
+A graph may contain a cycle when the input that closes it is marked as a **back edge**, as MediaPipe's
+`back_edge: true`. Back edges are ignored by cycle detection, never hold their node back, and deliver the newest
+packet at or before the timestamp being processed (in `Synchronized` nodes). `PreviousLoopbackNode<T>` is the
+classic companion: for every `MAIN` packet it emits the latest `LOOP` value on `PREV_LOOP`.
+
+```csharp
+// Running sum: sum[t] = in[t] + sum[t-1]
+var b = new GraphBuilder().AddInputStream<int>("in").AddOutputStream("sum");
+b.AddNode("prev", new PreviousLoopbackNode<int>())
+    .In("MAIN", "in").In("LOOP", "sum", backEdge: true).Out("PREV_LOOP", "prev_sum");
+b.AddNode("add", new CombineNode<int, int, int>((x, prev) => x + prev))
+    .In("A", "in").In("B", "prev_sum").Out("OUT", "sum");
+```
+
+Because frames are pipelined, "latest" is the newest loop value that has already arrived — the previous frame's
+when frames are processed one after another (e.g. with `MaxInFlight = 1`). Without the back-edge mark the builder
+rejects the cycle and says so.
+
+## Executors
+
+By default every node runs on the .NET thread pool. `AddExecutor(name, threads)` declares a set of dedicated
+threads and `OnExecutor(name)` pins nodes to it — MediaPipe's `executor` / `ThreadPoolExecutor`. Use a one-thread
+executor to serialize nodes that share a non-thread-safe resource (a GPU context, a camera, a native library), or a
+separate pool so a heavy node cannot starve the rest.
+
+```csharp
+var b = new GraphBuilder().AddInputStream<MPImage>("frames").AddExecutor("gpu", threads: 1);
+b.AddNode("faces", faceNode).In("IN", "frames").Out("OUT", "faces").OnExecutor("gpu");
+```
+
+## Tracing (Chrome trace / Perfetto)
+
+With `GraphOptions.EnableTracing` the graph records every node open, process (with its packet timestamp) and
+close, with start time, duration and thread. `GetTraceEvents()` returns them and `WriteChromeTrace(stream)` writes
+the Chrome trace-event JSON that `chrome://tracing`, `edge://tracing` and https://ui.perfetto.dev display as a
+timeline — one row per thread, which makes pipelining and bottlenecks visible. The buffer keeps the latest
+`MaxTraceEvents` (100 000) events. Each process call is also an `Activity` of `MediaPipeTelemetry.ActivitySource`
+for OpenTelemetry.
+
+```csharp
+var graph = new GraphBuilder { Options = new GraphOptions { EnableTracing = true } } /* … */ .Build();
+// … run …
+await using var file = File.Create("graph-trace.json");
+graph.WriteChromeTrace(file);
+```
+
+## Subgraphs
+
+`AddSubgraph(name, subgraphBuilder, inputs, outputs)` inlines another `GraphBuilder` as a reusable block: its nodes
+become `{name}/{node}`, its input streams are wired to the outer streams given in `inputs`, the streams listed in
+`outputs` are renamed to outer streams, and every other internal stream becomes `{name}/{stream}`. Build a fresh
+subgraph builder for each use (node instances hold state).
+
+```csharp
+static GraphBuilder Affine(int scale, int offset)
+{
+    var g = new GraphBuilder().AddInputStream<int>("x").AddOutputStream("y");
+    g.AddNode("scale", new LambdaNode<int, int>(v => v * scale)).In("IN", "x").Out("OUT", "scaled");
+    g.AddNode("offset", new LambdaNode<int, int>(v => v + offset)).In("IN", "scaled").Out("OUT", "y");
+    return g;
+}
+builder.AddSubgraph("first", Affine(2, 1), new Dictionary<string, string> { ["x"] = "in" }, new Dictionary<string, string> { ["y"] = "mid" });
+builder.AddSubgraph("second", Affine(10, 0), new Dictionary<string, string> { ["x"] = "mid" }, new Dictionary<string, string> { ["y"] = "out" });
+```
 
 ## Live streams
 

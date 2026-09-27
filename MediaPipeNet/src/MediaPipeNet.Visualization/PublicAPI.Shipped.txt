@@ -1,0 +1,44 @@
+#nullable enable
+MediaPipeNet.Visualization.BoundingBoxDrawer
+MediaPipeNet.Visualization.DrawingStyle
+MediaPipeNet.Visualization.DrawingStyle.<Clone>$() -> MediaPipeNet.Visualization.DrawingStyle!
+MediaPipeNet.Visualization.DrawingStyle.Color.get -> SixLabors.ImageSharp.Color
+MediaPipeNet.Visualization.DrawingStyle.Color.init -> void
+MediaPipeNet.Visualization.DrawingStyle.Deconstruct(out SixLabors.ImageSharp.Color Color, out float Thickness, out float Radius) -> void
+MediaPipeNet.Visualization.DrawingStyle.DrawingStyle(SixLabors.ImageSharp.Color Color, float Thickness = 0, float Radius = 0) -> void
+MediaPipeNet.Visualization.DrawingStyle.Equals(MediaPipeNet.Visualization.DrawingStyle? other) -> bool
+MediaPipeNet.Visualization.DrawingStyle.Radius.get -> float
+MediaPipeNet.Visualization.DrawingStyle.Radius.init -> void
+MediaPipeNet.Visualization.DrawingStyle.Thickness.get -> float
+MediaPipeNet.Visualization.DrawingStyle.Thickness.init -> void
+MediaPipeNet.Visualization.LandmarkDrawer
+MediaPipeNet.Visualization.ResultRenderer
+MediaPipeNet.Visualization.SegmentationMaskOverlay
+override MediaPipeNet.Visualization.DrawingStyle.Equals(object? obj) -> bool
+override MediaPipeNet.Visualization.DrawingStyle.GetHashCode() -> int
+override MediaPipeNet.Visualization.DrawingStyle.ToString() -> string!
+static MediaPipeNet.Visualization.BoundingBoxDrawer.Draw(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Detection! detection, MediaPipeNet.Visualization.DrawingStyle? style = null, bool drawLabel = true, bool drawKeypoints = true) -> void
+static MediaPipeNet.Visualization.BoundingBoxDrawer.DrawAll(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, System.Collections.Generic.IEnumerable<MediaPipeNet.Detection!>! detections, MediaPipeNet.Visualization.DrawingStyle? style = null) -> void
+static MediaPipeNet.Visualization.DrawingStyle.Boxes.get -> MediaPipeNet.Visualization.DrawingStyle!
+static MediaPipeNet.Visualization.DrawingStyle.Lines.get -> MediaPipeNet.Visualization.DrawingStyle!
+static MediaPipeNet.Visualization.DrawingStyle.Points.get -> MediaPipeNet.Visualization.DrawingStyle!
+static MediaPipeNet.Visualization.DrawingStyle.operator !=(MediaPipeNet.Visualization.DrawingStyle? left, MediaPipeNet.Visualization.DrawingStyle? right) -> bool
+static MediaPipeNet.Visualization.DrawingStyle.operator ==(MediaPipeNet.Visualization.DrawingStyle? left, MediaPipeNet.Visualization.DrawingStyle? right) -> bool
+static MediaPipeNet.Visualization.LandmarkDrawer.Draw(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedLandmark>! landmarks, System.Collections.Generic.IReadOnlyList<(int From, int To)>? connections = null, MediaPipeNet.Visualization.DrawingStyle? points = null, MediaPipeNet.Visualization.DrawingStyle? lines = null, float minVisibility = 0.5) -> void
+static MediaPipeNet.Visualization.LandmarkDrawer.DrawFace(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.FaceLandmarks! face, bool drawAllPoints = false, MediaPipeNet.Visualization.DrawingStyle? lines = null) -> void
+static MediaPipeNet.Visualization.LandmarkDrawer.DrawHand(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.HandLandmarks! hand, MediaPipeNet.Visualization.DrawingStyle? points = null, MediaPipeNet.Visualization.DrawingStyle? lines = null) -> void
+static MediaPipeNet.Visualization.LandmarkDrawer.DrawPose(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.PoseLandmarks! pose, MediaPipeNet.Visualization.DrawingStyle? points = null, MediaPipeNet.Visualization.DrawingStyle? lines = null) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.FaceDetectionResult! result) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.FaceLandmarkResult! result) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.GestureRecognitionResult! result) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.HandLandmarkResult! result) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.HolisticResult! result) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.ObjectDetectionResult! result) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.PoseLandmarkResult! result) -> void
+static MediaPipeNet.Visualization.ResultRenderer.Render(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.SegmentationResult! result) -> void
+static MediaPipeNet.Visualization.SegmentationMaskOverlay.BlurBackground(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.SegmentationMask! mask, float sigma = 12) -> void
+static MediaPipeNet.Visualization.SegmentationMaskOverlay.CategoryPalette.get -> System.Collections.Generic.IReadOnlyList<SixLabors.ImageSharp.Color>!
+static MediaPipeNet.Visualization.SegmentationMaskOverlay.Overlay(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.SegmentationMask! mask, SixLabors.ImageSharp.Color color, float opacity = 0.5) -> void
+static MediaPipeNet.Visualization.SegmentationMaskOverlay.OverlayCategories(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.CategoryMask! mask, float opacity = 0.55, System.Collections.Generic.IReadOnlyList<SixLabors.ImageSharp.Color>? palette = null) -> void
+static MediaPipeNet.Visualization.SegmentationMaskOverlay.ReplaceBackground(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.SegmentationMask! mask, SixLabors.ImageSharp.Color background) -> void
+static MediaPipeNet.Visualization.SegmentationMaskOverlay.ReplaceBackground(SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! image, MediaPipeNet.Tasks.Vision.SegmentationMask! mask, SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>! background) -> void

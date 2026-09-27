@@ -1,4 +1,4 @@
-namespace MediaPipeNet.Inference.Models;
+﻿namespace MediaPipeNet.Inference.Models;
 
 /// <summary>Describes one pretrained model file: identity, integrity and provenance.</summary>
 /// <param name="Id">Stable model identifier (e.g. <c>face_detection_short_range</c>).</param>
@@ -19,6 +19,9 @@ public sealed record ModelDescriptor(
     string Source,
     string License = "Apache-2.0")
 {
+    /// <summary>Numeric precision of this file (<see cref="ModelPrecision.Float32"/> for the reference models).</summary>
+    public ModelPrecision Precision { get; init; } = ModelPrecision.Float32;
+
     /// <summary>Attribution text required by the model license.</summary>
     public string Attribution => $"{Title} — converted from Google MediaPipe '{Source}' (Copyright Google LLC, {License}).";
 

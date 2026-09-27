@@ -1,4 +1,4 @@
-namespace MediaPipeNet.Tasks.Vision.Processing;
+﻿namespace MediaPipeNet.Tasks.Vision.Processing;
 
 /// <summary>An SSD anchor in normalized tensor coordinates.</summary>
 /// <param name="XCenter">Center X.</param>
@@ -26,7 +26,7 @@ public sealed record SsdAnchorOptions
     public required IReadOnlyList<int> Strides { get; init; }
     /// <summary>Aspect ratios per location.</summary>
     public IReadOnlyList<float> AspectRatios { get; init; } = [1.0f];
-    /// <summary>Aspect ratio of the extra interpolated-scale anchor (â‰¤ 0 disables it).</summary>
+    /// <summary>Aspect ratio of the extra interpolated-scale anchor (≤ 0 disables it).</summary>
     public float InterpolatedScaleAspectRatio { get; init; } = 1.0f;
     /// <summary>Emit unit-size anchors (the box regressor predicts absolute sizes).</summary>
     public bool FixedAnchorSize { get; init; } = true;
@@ -92,7 +92,7 @@ public static class SsdAnchors
     }
 
     /// <summary>
-    /// Generates EfficientDet multi-level anchors (levels 3â€“7, 3 octave scales Ã— aspect ratios
+    /// Generates EfficientDet multi-level anchors (levels 3–7, 3 octave scales × aspect ratios
     /// 1, 2, 0.5, anchor scale 3 — verified against MediaPipe's own detections) in normalized (cx, cy, w, h) form, as exported by TFLite Model Maker.
     /// </summary>
     public static Anchor[] GenerateEfficientDet(int inputSize, int minLevel = 3, int maxLevel = 7, int numScales = 3, float anchorScale = 3f)

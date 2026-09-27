@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Content-only model package. The ONNX files land in the consuming application's output folder under
+    models/ (found automatically by BundledModelProvider) and are also what NuGetModelProvider
+    downloads on demand. Models: Copyright Google LLC, Apache-2.0 (converted from MediaPipe TFLite).
+  -->
+  <PropertyGroup>
+    <Description>Text models for MediaPipe.NET: MobileBERT and average-word sentiment classifiers, MobileBERT sentence embedder and the 110-language detector. Converted from Google MediaPipe (Apache-2.0) and cross-validated against TFLite. Created by Gravicode Studios, led by Kang Fadhil.</Description>
+    <PackageTags>$(PackageTags);models</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ContentTargetFolders>contentFiles</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(ModelsOnnxDir)bert_classifier.onnx" Link="models\bert_classifier.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)average_word_classifier.onnx" Link="models\average_word_classifier.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)bert_embedder.onnx" Link="models\bert_embedder.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ModelsOnnxDir)language_detector.onnx" Link="models\language_detector.onnx" Pack="true" PackagePath="contentFiles/any/any/models/" PackageCopyToOutput="true" BuildAction="None" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="$(RepoRoot)build/Package.targets" />
+
+</Project>

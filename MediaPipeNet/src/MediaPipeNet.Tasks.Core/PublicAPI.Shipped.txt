@@ -1,0 +1,51 @@
+#nullable enable
+MediaPipeNet.Tasks.BaseOptions
+MediaPipeNet.Tasks.BaseOptions.<Clone>$() -> MediaPipeNet.Tasks.BaseOptions!
+MediaPipeNet.Tasks.BaseOptions.BaseOptions() -> void
+MediaPipeNet.Tasks.BaseOptions.Equals(MediaPipeNet.Tasks.BaseOptions? other) -> bool
+MediaPipeNet.Tasks.BaseOptions.Inference.get -> MediaPipeNet.Inference.InferenceOptions!
+MediaPipeNet.Tasks.BaseOptions.Inference.init -> void
+MediaPipeNet.Tasks.BaseOptions.LoggerFactory.get -> Microsoft.Extensions.Logging.ILoggerFactory?
+MediaPipeNet.Tasks.BaseOptions.LoggerFactory.init -> void
+MediaPipeNet.Tasks.BaseOptions.ModelDirectory.get -> string?
+MediaPipeNet.Tasks.BaseOptions.ModelDirectory.init -> void
+MediaPipeNet.Tasks.BaseOptions.ModelPaths.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+MediaPipeNet.Tasks.BaseOptions.ModelPaths.init -> void
+MediaPipeNet.Tasks.BaseOptions.ModelStore.get -> MediaPipeNet.Inference.Models.ModelStore?
+MediaPipeNet.Tasks.BaseOptions.ModelStore.init -> void
+MediaPipeNet.Tasks.ClassifierOptions
+MediaPipeNet.Tasks.ClassifierOptions.<Clone>$() -> MediaPipeNet.Tasks.ClassifierOptions!
+MediaPipeNet.Tasks.ClassifierOptions.CategoryAllowlist.get -> System.Collections.Generic.IReadOnlySet<string!>?
+MediaPipeNet.Tasks.ClassifierOptions.CategoryAllowlist.init -> void
+MediaPipeNet.Tasks.ClassifierOptions.CategoryDenylist.get -> System.Collections.Generic.IReadOnlySet<string!>?
+MediaPipeNet.Tasks.ClassifierOptions.CategoryDenylist.init -> void
+MediaPipeNet.Tasks.ClassifierOptions.ClassifierOptions() -> void
+MediaPipeNet.Tasks.ClassifierOptions.Equals(MediaPipeNet.Tasks.ClassifierOptions? other) -> bool
+MediaPipeNet.Tasks.ClassifierOptions.MaxResults.get -> int
+MediaPipeNet.Tasks.ClassifierOptions.MaxResults.init -> void
+MediaPipeNet.Tasks.ClassifierOptions.ScoreThreshold.get -> float
+MediaPipeNet.Tasks.ClassifierOptions.ScoreThreshold.init -> void
+MediaPipeNet.Tasks.ClassifierOptions.Select(System.ReadOnlySpan<float> scores, System.Collections.Generic.IReadOnlyList<string!>? labels) -> System.Collections.Generic.List<MediaPipeNet.Category!>!
+MediaPipeNet.Tasks.CustomModels
+MediaPipeNet.Tasks.ModelLoader
+override MediaPipeNet.Tasks.BaseOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.BaseOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.BaseOptions.ToString() -> string!
+override MediaPipeNet.Tasks.ClassifierOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.ClassifierOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.ClassifierOptions.ToString() -> string!
+static MediaPipeNet.Tasks.BaseOptions.Default.get -> MediaPipeNet.Tasks.BaseOptions!
+static MediaPipeNet.Tasks.BaseOptions.operator !=(MediaPipeNet.Tasks.BaseOptions? left, MediaPipeNet.Tasks.BaseOptions? right) -> bool
+static MediaPipeNet.Tasks.BaseOptions.operator ==(MediaPipeNet.Tasks.BaseOptions? left, MediaPipeNet.Tasks.BaseOptions? right) -> bool
+static MediaPipeNet.Tasks.ClassifierOptions.Default.get -> MediaPipeNet.Tasks.ClassifierOptions!
+static MediaPipeNet.Tasks.ClassifierOptions.operator !=(MediaPipeNet.Tasks.ClassifierOptions? left, MediaPipeNet.Tasks.ClassifierOptions? right) -> bool
+static MediaPipeNet.Tasks.ClassifierOptions.operator ==(MediaPipeNet.Tasks.ClassifierOptions? left, MediaPipeNet.Tasks.ClassifierOptions? right) -> bool
+static MediaPipeNet.Tasks.CustomModels.CompanionFile(string! modelPath, string! kind) -> string?
+static MediaPipeNet.Tasks.CustomModels.Load(MediaPipeNet.Tasks.BaseOptions! options, MediaPipeNet.Inference.Models.ModelDescriptor! model, string? customModelPath) -> MediaPipeNet.Inference.OnnxModel!
+static MediaPipeNet.Tasks.CustomModels.LoadAsync(MediaPipeNet.Tasks.BaseOptions! options, MediaPipeNet.Inference.Models.ModelDescriptor! model, string? customModelPath, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<MediaPipeNet.Inference.OnnxModel!>
+static MediaPipeNet.Tasks.CustomModels.ReadLines(string! path) -> string![]!
+static MediaPipeNet.Tasks.CustomModels.ResolveLabels(System.Collections.Generic.IReadOnlyList<string!>? labels, string? customModelPath, System.Collections.Generic.IReadOnlyList<string!>! builtIn) -> System.Collections.Generic.IReadOnlyList<string!>!
+static MediaPipeNet.Tasks.ModelLoader.Load(MediaPipeNet.Tasks.BaseOptions! options, MediaPipeNet.Inference.Models.ModelDescriptor! model) -> MediaPipeNet.Inference.OnnxModel!
+static MediaPipeNet.Tasks.ModelLoader.LoadAsync(MediaPipeNet.Tasks.BaseOptions! options, MediaPipeNet.Inference.Models.ModelDescriptor! model, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<MediaPipeNet.Inference.OnnxModel!>
+static MediaPipeNet.Tasks.ModelLoader.ResolvePathAsync(MediaPipeNet.Tasks.BaseOptions! options, MediaPipeNet.Inference.Models.ModelDescriptor! model, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
+static MediaPipeNet.Tasks.ModelLoader.SelectVariant(MediaPipeNet.Tasks.BaseOptions! options, MediaPipeNet.Inference.Models.ModelDescriptor! model) -> MediaPipeNet.Inference.Models.ModelDescriptor!

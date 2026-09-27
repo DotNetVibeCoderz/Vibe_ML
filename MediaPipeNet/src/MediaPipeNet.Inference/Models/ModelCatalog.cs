@@ -1,4 +1,4 @@
-namespace MediaPipeNet.Inference.Models;
+﻿namespace MediaPipeNet.Inference.Models;
 
 /// <summary>
 /// The registry of pretrained models shipped with MediaPipe.NET. Every model was converted from the
@@ -6,7 +6,7 @@ namespace MediaPipeNet.Inference.Models;
 /// cross-validated against the TFLite interpreter (max |Δ| ≈ 1e-4).
 /// </summary>
 /// <remarks>Generated from <c>models/onnx/manifest.json</c>.</remarks>
-public static class ModelCatalog
+public static partial class ModelCatalog
 {
     /// <summary>NuGet package holding the face models.</summary>
     public const string FacePackage = "Gravicode.MediaPipeNet.Models.Face";
@@ -20,6 +20,12 @@ public static class ModelCatalog
     public const string ObjectDetectionPackage = "Gravicode.MediaPipeNet.Models.ObjectDetection";
     /// <summary>NuGet package holding the image classification models.</summary>
     public const string ImageClassificationPackage = "Gravicode.MediaPipeNet.Models.ImageClassification";
+    /// <summary>NuGet package holding the image embedding models.</summary>
+    public const string ImageEmbeddingPackage = "Gravicode.MediaPipeNet.Models.ImageEmbedding";
+    /// <summary>NuGet package holding the audio models.</summary>
+    public const string AudioPackage = "Gravicode.MediaPipeNet.Models.Audio";
+    /// <summary>NuGet package holding the text models.</summary>
+    public const string TextPackage = "Gravicode.MediaPipeNet.Models.Text";
 
     private const string Mp = "https://storage.googleapis.com/mediapipe-models";
 
@@ -101,6 +107,78 @@ public static class ModelCatalog
         "fbcd11eee78c348a7d3ee62d62db2301255db9ed81288fceb7c2b25bb7e9bbf1", 18_599_569, ImageClassificationPackage,
         "EfficientNet-Lite0", $"{Mp}/image_classifier/efficientnet_lite0/float32/latest/efficientnet_lite0.tflite");
 
+    /// <summary>BlazeFace full-range face detector (192×192): faces up to ~5 m from the camera.</summary>
+    public static ModelDescriptor FaceDetectionFullRange { get; } = new(
+        "face_detection_full_range", "face_detection_full_range.onnx",
+        "30843582dfac582284b32bd100d80a6bb4f5225bce4a50cfdab0080145b22879", 2_076_730, FacePackage,
+        "BlazeFace (full range)", $"{Mp}/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.tflite");
+
+    /// <summary>Hand ROI refinement (256×256): re-crops a hand around the pose model's palm landmarks (holistic).</summary>
+    public static ModelDescriptor HandRoiRefinement { get; } = new(
+        "hand_roi_refinement", "hand_roi_refinement.onnx",
+        "5a277b78674e20426caf746ed8a6284f02b702b3fff9b62a651e648748624e83", 129_266, HandPackage,
+        "Hand ROI Refinement", $"{Mp}/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task#hand_roi_refinement.tflite");
+
+    /// <summary>Selfie multiclass segmenter (256×256): background, hair, body skin, face skin, clothes, others.</summary>
+    public static ModelDescriptor SelfieMulticlass { get; } = new(
+        "selfie_multiclass", "selfie_multiclass.onnx",
+        "220c6cdd795b44a6c90f539950a0374b3467886065b8af8ac934a4cc72644d63", 16_454_487, SegmentationPackage,
+        "Selfie Multiclass Segmenter", $"{Mp}/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite");
+
+    /// <summary>Hair segmenter (512×512).</summary>
+    public static ModelDescriptor HairSegmenter { get; } = new(
+        "hair_segmenter", "hair_segmenter.onnx",
+        "e378ed4107fc0f76eae003917e47b8e028c286b09850339cdd7901b2d23422c3", 771_295, SegmentationPackage,
+        "Hair Segmenter", $"{Mp}/image_segmenter/hair_segmenter/float32/latest/hair_segmenter.tflite");
+
+    /// <summary>DeepLab v3 (257×257): 21 PASCAL VOC classes.</summary>
+    public static ModelDescriptor DeepLabV3 { get; } = new(
+        "deeplab_v3", "deeplab_v3.onnx",
+        "2a6c4360d502edcd9e4c7bf5882cc835295e0e82885f556a3e383eaf24d5cac2", 2_782_445, SegmentationPackage,
+        "DeepLab v3", $"{Mp}/image_segmenter/deeplab_v3/float32/latest/deeplab_v3.tflite");
+
+    /// <summary>MagicTouch interactive segmenter (512×512): segments the object under a point of interest.</summary>
+    public static ModelDescriptor MagicTouch { get; } = new(
+        "magic_touch", "magic_touch.onnx",
+        "acbd5aca6e65b56aa759c4bdb31fc0665be5858d13283768ff31f9d02c4455d1", 12_388_061, SegmentationPackage,
+        "MagicTouch", $"{Mp}/interactive_segmenter/magic_touch/float32/latest/magic_touch.tflite");
+
+    /// <summary>MobileNet V3 small image embedder (224×224, 1024-D).</summary>
+    public static ModelDescriptor MobileNetV3SmallEmbedder { get; } = new(
+        "mobilenet_v3_small_embedder", "mobilenet_v3_small_embedder.onnx",
+        "30c919adcdb1057c086444c7cdbede62db283ceee0667a442d12bf0163f52683", 4_189_825, ImageEmbeddingPackage,
+        "MobileNet V3 Small (embedder)", $"{Mp}/image_embedder/mobilenet_v3_small/float32/latest/mobilenet_v3_small.tflite");
+
+    /// <summary>YAMNet audio event classifier: 521 AudioSet classes from 0.975 s of 16 kHz mono audio.</summary>
+    public static ModelDescriptor YamNet { get; } = new(
+        "yamnet", "yamnet.onnx",
+        "2b7cfdfb9d4ed54a456165202d82019b53d98a8fb4737a61dde35b5eb9c1dbc8", 5_077_494, AudioPackage,
+        "YAMNet", $"{Mp}/audio_classifier/yamnet/float32/latest/yamnet.tflite");
+
+    /// <summary>MobileBERT sentiment classifier (SST-2: negative / positive, 128 tokens).</summary>
+    public static ModelDescriptor BertClassifier { get; } = new(
+        "bert_classifier", "bert_classifier.onnx",
+        "57a062d6eb4887c3c6d47f0a5fcad6ad53b4ac9e5d771126f55a21229665a8d8", 25_479_396, TextPackage,
+        "BERT Classifier (SST-2)", $"{Mp}/text_classifier/bert_classifier/float32/latest/bert_classifier.tflite");
+
+    /// <summary>Average word-embedding sentiment classifier (SST-2, 256 tokens; tiny and fast).</summary>
+    public static ModelDescriptor AverageWordClassifier { get; } = new(
+        "average_word_classifier", "average_word_classifier.onnx",
+        "fe2c2d0f8e1a5ca038b64ed2385197628d724f03b80869bc348bba450de65231", 642_925, TextPackage,
+        "Average Word Classifier (SST-2)", $"{Mp}/text_classifier/average_word_classifier/float32/latest/average_word_classifier.tflite");
+
+    /// <summary>MobileBERT sentence embedder (512-D, 128 tokens).</summary>
+    public static ModelDescriptor BertEmbedder { get; } = new(
+        "bert_embedder", "bert_embedder.onnx",
+        "2ae36698213c8648ebb595e4399ae15553532e58d8f8aa151abade49c5a1ced9", 26_622_911, TextPackage,
+        "BERT Embedder", $"{Mp}/text_embedder/bert_embedder/float32/latest/bert_embedder.tflite");
+
+    /// <summary>Language detector: 110 languages from character n-grams.</summary>
+    public static ModelDescriptor LanguageDetector { get; } = new(
+        "language_detector", "language_detector.onnx",
+        "b80eef5271030261bd5637365595ed54bce3b5edece46d27c9f9d112692fef36", 3_833_619, TextPackage,
+        "Language Detector", $"{Mp}/language_detector/language_detector/float32/latest/language_detector.tflite");
+
     /// <summary>Every model in the catalog.</summary>
     public static IReadOnlyList<ModelDescriptor> All { get; } =
     [
@@ -108,6 +186,9 @@ public static class ModelCatalog
         PalmDetection, HandLandmarksDetector, GestureEmbedder, CannedGestureClassifier,
         PoseDetection, PoseLandmarksLite, PoseLandmarksFull,
         SelfieSegmenter, EfficientDetLite0, EfficientNetLite0,
+        FaceDetectionFullRange, HandRoiRefinement,
+        SelfieMulticlass, HairSegmenter, DeepLabV3, MagicTouch, MobileNetV3SmallEmbedder,
+        YamNet, BertClassifier, AverageWordClassifier, BertEmbedder, LanguageDetector,
     ];
 
     /// <summary>Finds a model by id or file name.</summary>

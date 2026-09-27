@@ -116,6 +116,30 @@ public abstract class VisionTaskBase<TResult> : IDisposable where TResult : clas
         }
     }
 
+    /// <summary>
+    /// Runs the task on many still images in parallel (image mode) and returns the results in input order.
+    /// Concurrent calls share the models: each worker rents its own pooled I/O buffers, so throughput
+    /// scales with cores (or with GPU queue depth).
+    /// </summary>
+    /// <param name="images">The images.</param>
+    /// <param name="options">Pre-processing applied to every image.</param>
+    /// <param name="maxDegreeOfParallelism">Maximum concurrent images (−1 = number of cores).</param>
+    /// <param name="cancellationToken">Stops scheduling further images.</param>
+    public IReadOnlyList<TResult> ProcessBatch(IReadOnlyList<MPImage> images, ImageProcessingOptions? options = null,
+        int maxDegreeOfParallelism = -1, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(images);
+        var results = new TResult[images.Count];
+        var parallel = new ParallelOptions { MaxDegreeOfParallelism = maxDegreeOfParallelism, CancellationToken = cancellationToken };
+        Parallel.For(0, images.Count, parallel, i => results[i] = RunImage(images[i], options));
+        return results;
+    }
+
+    /// <summary>Asynchronous variant of <see cref="ProcessBatch"/> (runs on the thread pool).</summary>
+    public Task<IReadOnlyList<TResult>> ProcessBatchAsync(IReadOnlyList<MPImage> images, ImageProcessingOptions? options = null,
+        int maxDegreeOfParallelism = -1, CancellationToken cancellationToken = default) =>
+        Task.Run(() => ProcessBatch(images, options, maxDegreeOfParallelism, cancellationToken), cancellationToken);
+
     /// <summary>Clears tracking state (previous ROIs, filters). Call when a video jumps.</summary>
     public virtual void ResetTracking() { }
 

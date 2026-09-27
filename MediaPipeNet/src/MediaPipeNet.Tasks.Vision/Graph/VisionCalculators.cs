@@ -1,4 +1,4 @@
-using MediaPipeNet.Framework;
+﻿using MediaPipeNet.Framework;
 using MediaPipeNet.Framework.Config;
 using MediaPipeNet.Imaging;
 using MediaPipeNet.Inference;
@@ -104,7 +104,8 @@ public static class VisionCalculators
     /// <summary>
     /// Registers <c>FaceDetectorCalculator</c>, <c>FaceLandmarkerCalculator</c>,
     /// <c>HandLandmarkerCalculator</c>, <c>GestureRecognizerCalculator</c>, <c>PoseLandmarkerCalculator</c>,
-    /// <c>HolisticLandmarkerCalculator</c>, <c>ImageSegmenterCalculator</c>, <c>ObjectDetectorCalculator</c>
+    /// <c>HolisticLandmarkerCalculator</c>, <c>ImageSegmenterCalculator</c> (option <c>model</c>: selfie,
+    /// selfie_multiclass, hair, deeplab_v3), <c>ImageEmbedderCalculator</c>, <c>ObjectDetectorCalculator</c>
     /// and <c>ImageClassifierCalculator</c>. Each takes an <c>IMAGE</c> input and produces a <c>RESULT</c>
     /// output; common options (<c>min_detection_confidence</c>, <c>num_hands</c>, <c>num_faces</c>,
     /// <c>max_results</c>, <c>score_threshold</c>) are read from the node's <c>options</c> block.
@@ -133,9 +134,17 @@ public static class VisionCalculators
             .Register("HolisticLandmarkerCalculator", _ => new VisionTaskNode<HolisticLandmarker, HolisticResult>(
                 ct => HolisticLandmarker.CreateAsync(new() { BaseOptions = b, RunningMode = video }, ct),
                 (t, i, ts) => t.DetectForVideo(i, ts)))
-            .Register("ImageSegmenterCalculator", _ => new VisionTaskNode<ImageSegmenter, SegmentationResult>(
-                ct => ImageSegmenter.CreateAsync(new() { BaseOptions = b, RunningMode = video }, ct),
+            .Register("ImageSegmenterCalculator", c => new VisionTaskNode<ImageSegmenter, SegmentationResult>(
+                ct => ImageSegmenter.CreateAsync(new()
+                {
+                    BaseOptions = b, RunningMode = video,
+                    Model = Enum.Parse<SegmenterModel>(c.Options.GetValueOrDefault("model", "selfie").Replace("_", "", StringComparison.Ordinal), ignoreCase: true),
+                    OutputCategoryMask = c.GetOption("output_category_mask", false),
+                }, ct),
                 (t, i, ts) => t.SegmentForVideo(i, ts)))
+            .Register("ImageEmbedderCalculator", c => new VisionTaskNode<ImageEmbedder, ImageEmbeddingResult>(
+                ct => ImageEmbedder.CreateAsync(new() { BaseOptions = b, RunningMode = video, L2Normalize = c.GetOption("l2_normalize", true) }, ct),
+                (t, i, ts) => t.EmbedForVideo(i, ts)))
             .Register("ObjectDetectorCalculator", c => new VisionTaskNode<ObjectDetector, ObjectDetectionResult>(
                 ct => ObjectDetector.CreateAsync(new() { BaseOptions = b, RunningMode = video, ScoreThreshold = c.GetOption("score_threshold", 0.3f), MaxResults = c.GetOption("max_results", -1) }, ct),
                 (t, i, ts) => t.DetectForVideo(i, ts)))

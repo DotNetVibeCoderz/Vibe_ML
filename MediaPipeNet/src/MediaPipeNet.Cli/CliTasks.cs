@@ -1,9 +1,10 @@
-using MediaPipeNet.Imaging;
+﻿using MediaPipeNet.Imaging;
 using MediaPipeNet.Serialization;
 using MediaPipeNet.Tasks.Vision;
 using MediaPipeNet.Visualization;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using MediaPipeNet.Tasks;
 
 namespace MediaPipeNet.Cli;
 
@@ -35,13 +36,18 @@ internal static class CliTaskFactory
 {
     public static readonly IReadOnlyDictionary<string, string> Descriptions = new Dictionary<string, string>
     {
-        ["faces"] = "Face detection (BlazeFace): boxes + 6 keypoints",
+        ["faces"] = "Face detection (BlazeFace short range): boxes + 6 keypoints",
+        ["faces-full"] = "Face detection (BlazeFace full range, up to ~5 m)",
         ["face-mesh"] = "Face mesh: 478 landmarks + 52 blendshapes",
         ["hands"] = "Hand landmarks: 21 points per hand + handedness",
         ["gestures"] = "Gesture recognition (thumbs up, victory, ...)",
         ["pose"] = "Pose landmarks: 33 body points (+ mask)",
         ["holistic"] = "Pose + face + both hands",
         ["segment"] = "Selfie segmentation mask",
+        ["segment-multiclass"] = "Hair / body skin / face skin / clothes / background",
+        ["segment-hair"] = "Hair segmentation",
+        ["segment-deeplab"] = "DeepLab v3: 21 PASCAL VOC classes",
+        ["embed"] = "Image embedding (MobileNet V3, 1024-D)",
         ["objects"] = "Object detection (80 COCO classes)",
         ["classify"] = "Image classification (1000 ImageNet classes)",
     };
@@ -52,6 +58,23 @@ internal static class CliTaskFactory
             FaceDetector.Create(new() { BaseOptions = b, RunningMode = mode }), (t, i) => t.Detect(i), (t, i, ts) => t.DetectForVideo(i, ts),
             r => $"{r.Detections.Count} face(s): " + string.Join(", ", r.Detections.Select(d => $"{d.BoundingBox.Width:F0}x{d.BoundingBox.Height:F0}@({d.BoundingBox.X:F0},{d.BoundingBox.Y:F0}) {d.Score:P0}")),
             ResultRenderer.Render),
+        "faces-full" => new CliTask<FaceDetector, FaceDetectionResult>(
+            FaceDetector.Create(new() { BaseOptions = b, RunningMode = mode, Model = FaceDetectorModel.FullRange }), (t, i) => t.Detect(i), (t, i, ts) => t.DetectForVideo(i, ts),
+            r => $"{r.Detections.Count} face(s): " + string.Join(", ", r.Detections.Select(d => $"{d.BoundingBox.Width:F0}x{d.BoundingBox.Height:F0}@({d.BoundingBox.X:F0},{d.BoundingBox.Y:F0}) {d.Score:P0}")),
+            ResultRenderer.Render),
+        "segment-multiclass" or "segment-hair" or "segment-deeplab" => new CliTask<ImageSegmenter, SegmentationResult>(
+            ImageSegmenter.Create(new()
+            {
+                BaseOptions = b, RunningMode = mode, OutputCategoryMask = true,
+                Model = name switch { "segment-hair" => SegmenterModel.Hair, "segment-deeplab" => SegmenterModel.DeepLabV3, _ => SegmenterModel.SelfieMulticlass },
+            }), (t, i) => t.Segment(i), (t, i, ts) => t.SegmentForVideo(i, ts),
+            r => string.Join(", ", r.CategoryMask!.Histogram().Where(kv => kv.Value >= 0.005f)
+                .Select(kv => $"{(kv.Key < r.Labels.Count ? r.Labels[kv.Key] : "unlabeled")} {kv.Value:P1}")),
+            ResultRenderer.Render),
+        "embed" => new CliTask<ImageEmbedder, ImageEmbeddingResult>(
+            ImageEmbedder.Create(new() { BaseOptions = b, RunningMode = mode, L2Normalize = true }), (t, i) => t.Embed(i), (t, i, ts) => t.EmbedForVideo(i, ts),
+            r => $"{r.Embedding.Dimension}-D embedding: [{string.Join(", ", r.Embedding.Values.Take(6).Select(v => v.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)))}, ...]",
+            (_, _) => { }),
         "face-mesh" => new CliTask<FaceLandmarker, FaceLandmarkResult>(
             FaceLandmarker.Create(new() { BaseOptions = b, RunningMode = mode, OutputFaceBlendshapes = true }), (t, i) => t.Detect(i), (t, i, ts) => t.DetectForVideo(i, ts),
             r => $"{r.Faces.Count} face(s)" + string.Concat(r.Faces.Select(f => "; top blendshapes: " + string.Join(", ", f.Blendshapes!.Where(c => c.CategoryName != "_neutral").OrderByDescending(c => c.Score).Take(3)))),

@@ -44,3 +44,23 @@ Use a glibc-based distribution (Debian/Ubuntu); Alpine/musl is not supported by 
 **ImageSharp licensing**
 MediaPipe.NET uses SixLabors.ImageSharp 3.1 (Six Labors Split License: Apache-2.0 terms for open source and for
 organizations under the revenue threshold). Commercial users above the threshold need a Six Labors license.
+
+## `BaseOptions` / `ModelLoader` not found after upgrading to 0.2+
+
+They moved to the new `Gravicode.MediaPipeNet.Tasks.Core` assembly, namespace `MediaPipeNet.Tasks` (shared by the
+vision, audio and text packages). Add `using MediaPipeNet.Tasks;`.
+
+## FP16 is slower than FP32
+
+Expected on a CPU: ONNX Runtime's CPU provider has few native float16 kernels. Use `ModelPrecision.Float16` with
+DirectML or CUDA, and `ModelPrecision.Int8` when download size matters.
+
+## `SegmentationResult.ConfidenceMask` throws
+
+`ImageSegmenterOptions.OutputConfidenceMasks` was set to false (only the category mask was requested). Read
+`result.CategoryMask`, or enable confidence masks.
+
+## Text embeddings differ slightly from MediaPipe
+
+MediaPipe runs the int8 MobileBERT with dynamically quantized activations; MediaPipe.NET computes in float. Cosine
+similarities differ by about 0.02 — see [Models](models.md#int8-weights-and-onnx-runtime).
