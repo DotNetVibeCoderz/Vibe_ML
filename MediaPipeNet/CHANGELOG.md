@@ -2,6 +2,40 @@
 
 All notable changes to MediaPipe.NET. Versioning follows [SemVer](https://semver.org).
 
+## 1.0.0 — 2026-09-28
+
+The first stable release. The public API is recorded in `PublicAPI.Shipped.txt` for every library and from here on
+changes only compatibly within 1.x (SemVer). Upgrading from 0.3.0 needs no code changes. Created by Gravicode Studios,
+led by Kang Fadhil.
+
+### Added
+- `FaceStylizer` (MediaPipe's color-sketch face stylizer): face mesh → MediaPipe's `FaceToRectCalculator` alignment →
+  generator → 256×256 image; `FaceStylizerResult.Composite(image)` pastes the result back onto the photo;
+  `OutputFaceAlignment`; `FaceStylizer.ComputeFaceRect`. Golden-tested against MediaPipe 0.10.21 (mean |Δ| 2.4 / 255
+  at 32×32 against the average of 16 MediaPipe runs). DI (`AddFaceStylizer`), CLI (`stylize`), Gallery page.
+- Models: `face_stylizer_color_sketch` (converted: resource variables frozen, training-mode `FusedBatchNormV3`
+  lowered to per-instance normalization, noise kept) and `face_landmarks_detector_192` (the stylizer's face mesh) in
+  the new `Gravicode.MediaPipeNet.Models.FaceStylizer` package; FP16 and INT8 variants of both.
+- `FaceLandmarkerOptions.LandmarksModel` to choose the face mesh model.
+- `ExecutionProvider.Nnapi` (Android) — `Auto` now tries CUDA → DirectML → CoreML → NNAPI → CPU; CLI `--provider nnapi`.
+- `samples/MediaPipeNet.Maui`: .NET MAUI app for Android (and iOS on a Mac) with bundled INT8 models.
+- `benchmarks/MediaPipeNet.GpuBenchmark`: CPU vs DirectML (fp32, fp16, I/O binding) latency table that checks every
+  configuration's result against the CPU's.
+- Documentation site on GitHub Pages (`.github/workflows/mediapipenet-docs.yml`).
+- Tools: `convert_models.py` freezes resource variables and lowers `FusedBatchNormV3`, and prunes dead
+  initializers; `generate_golden_stylizer.py`; `evaluate_static_int8.py`.
+
+### Fixed
+- `InferenceOptions.UseIoBinding` with a GPU provider (DirectML, CUDA, CoreML, NNAPI) returned results for stale
+  inputs: ONNX Runtime copies a bound CPU input to the device when it is bound, so the inputs are now re-bound before
+  every run on those providers.
+
+### Evaluated, not shipped
+- Static (calibrated) INT8 for the models without an INT8 variant: below the 0.99 cosine bar on every model
+  (MediaPipe's models were not trained for quantization).
+- In-browser Blazor WebAssembly inference: needs an asynchronous backend under the tasks; planned as an additive 1.x
+  feature. Server-side inference works today.
+
 ## 0.3.0 — 2026-09-28
 
 Delivers the whole 0.2 and 0.3 roadmap in one release (there is no separate 0.2.0). Created by Gravicode Studios,

@@ -65,6 +65,16 @@ Sections the Python package cannot run (the interactive segmenter and face styli
 listed under `"unavailable"`; the interactive segmenter is validated behaviorally instead (the mask must cover the
 object under the point and little else).
 
+The face stylizer has its own reference from the last MediaPipe version that ships it (0.10.21, in a separate
+environment). Its generator injects noise, so the reference is the average of 16 runs downsampled to 32×32 plus the
+spread of single runs; `FaceStylizerTests` accept a mean |Δ| < 3.5 / 255 (measured 2.4; FP16 2.4, INT8 2.8) and
+check that a 90°-rotated photo still yields the upright face:
+
+```bash
+py -3.12 -m venv C:\mpo && C:\mpo\Scripts\pip install mediapipe==0.10.21
+C:\mpo\Scripts\python tools/golden/generate_golden_stylizer.py --models artifacts/models/_work
+```
+
 ## Benchmarks
 
 `benchmarks/MediaPipeNet.Benchmarks` (BenchmarkDotNet) — see [Performance](performance.md). CI runs it on

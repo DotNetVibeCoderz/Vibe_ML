@@ -38,7 +38,7 @@ CANDIDATES = [
     "pose_detection", "pose_landmarks_detector_lite", "pose_landmarks_detector_full",
     "efficientdet_lite0", "efficientnet_lite0", "mobilenet_v3_small_embedder",
     "selfie_multiclass", "deeplab_v3", "magic_touch", "yamnet",
-    "bert_classifier", "bert_embedder", "language_detector",
+    "bert_classifier", "bert_embedder", "language_detector", "face_stylizer_color_sketch", "face_landmarks_detector_192",
 ]
 NO_INT8 = {"language_detector"}
 
@@ -99,7 +99,7 @@ def to_fp16(src: pathlib.Path, dst: pathlib.Path) -> None:
     model = onnx.load(str(src))
     # Resize/Range and friends need float32 scales; keep them (and shape arithmetic) in float32.
     converted = float16.convert_float_to_float16(model, keep_io_types=True, disable_shape_infer=False,
-                                                 op_block_list=["Resize", "Range", "RandomNormal", "DequantizeLinear", "Softmax"])
+                                                 op_block_list=["Resize", "Range", "RandomNormal", "RandomNormalLike", "ConstantOfShape", "DequantizeLinear", "Softmax"])
     onnx.save(converted, str(dst))
 
 

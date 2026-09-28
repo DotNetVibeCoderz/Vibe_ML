@@ -3,7 +3,7 @@ namespace MediaPipeNet.Inference;
 /// <summary>The hardware backend (ONNX Runtime execution provider) used to run models.</summary>
 public enum ExecutionProvider
 {
-    /// <summary>Pick the best available backend: CUDA → DirectML → CoreML → CPU.</summary>
+    /// <summary>Pick the best available backend: CUDA → DirectML → CoreML → NNAPI → CPU.</summary>
     Auto = 0,
     /// <summary>Portable CPU execution (always available).</summary>
     Cpu,
@@ -13,6 +13,11 @@ public enum ExecutionProvider
     DirectML,
     /// <summary>Apple Neural Engine / GPU on macOS and iOS.</summary>
     CoreML,
+    /// <summary>
+    /// Android Neural Networks API (NPU / GPU / DSP) on Android 8.1+. Available when the app runs the Android build of
+    /// ONNX Runtime (the Microsoft.ML.OnnxRuntime package inside a .NET for Android / MAUI app).
+    /// </summary>
+    Nnapi,
 }
 
 /// <summary>Controls how models are executed.</summary>
@@ -21,7 +26,7 @@ public sealed record InferenceOptions
     /// <summary>Default options: automatic provider selection, ONNX Runtime's default threading.</summary>
     public static InferenceOptions Default { get; } = new();
 
-    /// <summary>The requested execution provider. <see cref="ExecutionProvider.Auto"/> probes in order CUDA → DirectML → CoreML → CPU.</summary>
+    /// <summary>The requested execution provider. <see cref="ExecutionProvider.Auto"/> probes in order CUDA → DirectML → CoreML → NNAPI → CPU.</summary>
     public ExecutionProvider Provider { get; init; } = ExecutionProvider.Auto;
 
     /// <summary>GPU device index for CUDA / DirectML.</summary>

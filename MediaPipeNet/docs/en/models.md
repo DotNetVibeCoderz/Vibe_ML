@@ -31,6 +31,8 @@
 | `average_word_classifier` | 0.6 MB | Models.Text | `average_word_classifier.tflite` |
 | `bert_embedder` | 26.6 MB | Models.Text | `bert_embedder.tflite` (int8 weights) |
 | `language_detector` | 3.8 MB | Models.Text | `language_detector.tflite` (rebuilt, see below) |
+| `face_stylizer_color_sketch` | 28.2 MB | Models.FaceStylizer | `face_stylizer_color_sketch.task` (variables frozen, batch norms lowered — see below) |
+| `face_landmarks_detector_192` | 1.2 MB | Models.FaceStylizer | `face_stylizer_color_sketch.task` (the 192×192 mesh the stylizer aligns with) |
 
 `ModelCatalog.All` lists them with SHA-256, size, package and source URL; `descriptor.Attribution` gives the
 required license text. Model weights are © Google LLC, Apache-2.0.
@@ -46,15 +48,19 @@ using var landmarker = FaceLandmarker.Create(new() { BaseOptions = options });
 
 | Precision | What changes | Size | Best for | Models |
 |---|---|---|---|---|
-| `Float32` (default) | the reference models | 100 % | everything | all 25 |
-| `Float16` | weights and activations in float16 (inputs/outputs stay float32) | ~50 % | GPUs (DirectML, CUDA) | 14 |
-| `Int8` | weight-only int8, per channel, computed in float | ~27–32 % | smaller downloads / apps | 9 |
+| `Float32` (default) | the reference models | 100 % | everything | all 27 |
+| `Float16` | weights and activations in float16 (inputs/outputs stay float32) | ~50 % | GPUs (DirectML, CUDA) | 16 |
+| `Int8` | weight-only int8, per channel, computed in float | ~27–32 % | smaller downloads / apps | 11 |
 
 `tools/model-conversion/quantize_models.py` creates the variants and **keeps only those that stay faithful**: every
 variant runs next to its float32 model and must reach a cosine similarity of ≥ 0.999 (FP16) or ≥ 0.99 (INT8) on
 every output. Rejected: INT8 for the hand, pose-landmark, EfficientNet and MagicTouch models (their accuracy drops),
 and both variants for the text models and YAMNet (they already store int8 weights). Dynamic activation
-quantization was also evaluated and destroys the landmark CNNs, so it is not used. `PrecisionTests` checks the
+quantization was also evaluated and destroys the landmark CNNs, so it is not used. **Static (calibrated) INT8** —
+activations quantized with ranges measured on real images, `QOperator` and `QDQ` formats, MinMax and percentile
+calibration — was evaluated for the rejected models with `evaluate_static_int8.py` and does not reach the bar either
+(hand presence 0.56, EfficientNet probabilities 0.92, MagicTouch mask 0.98, pose landmarks < 0.1): MediaPipe's float
+models were not trained for quantization, so real int8 compute would need quantization-aware training. `PrecisionTests` checks the
 variants end to end (face mesh within 0.002 / 0.004, same objects detected, < 0.5 % of segmentation pixels change).
 
 A model without the requested variant uses float32; so does a variant that cannot be found (with a warning).
@@ -109,9 +115,30 @@ The CLI does the same: `mediapipenet-cli models list | download | verify`.
    - **Language detector** — its `NGramHash` string op has no ONNX equivalent, so the model is rebuilt by hand:
      the hashing runs in C# and `KmeansEmbeddingLookup` (product-quantized embeddings) is expanded into dense
      tables with `Gather` + `ReduceMean`.
+   - **Face stylizer** — see [below](#face-stylizer).
    - The TFLite interpreter's XNNPACK delegate is disabled during conversion (it crashes on some graphs on Windows).
-4. Writes `manifest.json` (inputs, outputs, SHA-256) and `failed.json` (graphs that cannot be converted — only the
-   face stylizer, see [Platforms](platforms.md#face-stylizer)).
+4. Writes `manifest.json` (inputs, outputs, SHA-256) and `failed.json` (graphs that cannot be converted — none).
+
+### Face stylizer
+
+The color-sketch generator is a GAN exported in *training mode*, which tf2onnx cannot follow as is. Three steps
+make it a plain inference graph (`freeze_resource_variables` and `lower_custom_ops` in `convert_models.py`):
+
+1. **Resource variables** — a `CALL_ONCE` init subgraph assigns the batch-norm moving averages to variables
+   (`VAR_HANDLE` + `ASSIGN_VARIABLE`); the main graph reads them (`READ_VARIABLE`) and writes updates back. Every
+   read becomes a constant holding the initial value and the state ops are dropped — the written-back averages never
+   reach the output.
+2. **`FusedBatchNormV3`** (a Flex op, `is_training=True`, NHWC) — lowered to per-instance normalization over
+   N, H, W: `(x − mean) / sqrt(var + 0.001) · scale + offset`. In training mode the batch statistics, not the
+   stored averages, normalize the activations, which is why the frozen averages are unused.
+3. **`RANDOM_STANDARD_NORMAL`** noise injection maps to ONNX `RandomNormalLike` — kept, so the output varies slightly
+   per run exactly like MediaPipe's.
+
+The input is the aligned face in [−1, 1], the output an RGB image in [0, 1]. Because MediaPipe's Python package
+dropped the stylizer after 0.10.21, the golden reference comes from that version
+(`tools/golden/generate_golden_stylizer.py`): the average of 16 MediaPipe runs, compared at 32×32. The stylizer
+bundle carries its own face mesh (192×192, no attention), whose eye corners differ enough from the 256×256 attention
+mesh to change the crop size by 3 %, so it is converted too and used for the alignment.
 
 ### Int8 weights and ONNX Runtime
 

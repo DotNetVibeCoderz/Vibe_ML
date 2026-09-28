@@ -7,13 +7,14 @@
 <p align="center">
   <b>Task vision, audio, dan teks Google MediaPipe, native di .NET 10.</b><br/>
   Wajah · face mesh, blendshape & pose kepala · tangan · gestur · pose · holistic · segmentasi · segmentasi interaktif ·
-  objek · klasifikasi · embedding · event audio & aktivitas suara · sentimen · deteksi bahasa<br/>
+  stilisasi wajah · objek · klasifikasi · embedding · event audio & aktivitas suara · sentimen · deteksi bahasa<br/>
   <i>Dibuat oleh <b>Gravicode Studios</b>, dipimpin <b>Kang Fadhil</b></i>
 </p>
 
 <p align="center">
   <a href="README.md">🇬🇧 Read in English</a> ·
-  <a href="docs/id/memulai.md">Dokumentasi</a> ·
+  <a href="https://dotnetvibecoderz.github.io/Vibe_ML/mediapipenet/">Situs dokumentasi</a> ·
+  <a href="docs/id/memulai.md">Memulai</a> ·
   <a href="docs/id/task.md">Task</a> ·
   <a href="docs/id/audio-dan-teks.md">Audio & teks</a> ·
   <a href="docs/id/graph-api.md">Graph API</a> ·
@@ -43,11 +44,11 @@ foreach (var hand in gestures.Recognize(image).Hands)
 
 ## Keunggulan
 
-- **Enam belas task** dengan bentuk yang sama seperti MediaPipe Tasks —
+- **Tujuh belas task** dengan bentuk yang sama seperti MediaPipe Tasks —
   *vision:* `FaceDetector` (short/full range), `FaceLandmarker` (478 landmark, 52 blendshape, matriks transformasi
   wajah), `HandLandmarker`, `GestureRecognizer`, `PoseLandmarker` (disempurnakan heatmap, + mask segmentasi),
   `HolisticLandmarker`, `ImageSegmenter` (selfie, multikelas, rambut, DeepLab v3), `InteractiveSegmenter`,
-  `ImageEmbedder`, `ObjectDetector`, `ImageClassifier`;
+  `FaceStylizer`, `ImageEmbedder`, `ObjectDetector`, `ImageClassifier`;
   *audio:* `AudioClassifier` (YAMNet), `VoiceActivityDetector`;
   *teks:* `TextClassifier`, `TextEmbedder`, `LanguageDetector`.
 - **Tiga running mode** — `Image`, `Video` (tracking dan smoothing One-Euro antar-frame), dan `LiveStream`
@@ -58,7 +59,7 @@ foreach (var hand in gestures.Recognize(image).Hands)
 - **Cepat dan hemat** — deteksi wajah 8 ms pada 640×480 di CPU laptop 4-core tahun 2017; tensor pra-alokasi yang
   di-pool membuat satu inferensi hanya mengalokasikan ~3–18 KB.
 - **CPU di mana saja, GPU bila ada** — CPU (Windows / Linux / macOS, x64 / ARM64), DirectML (GPU DX12 apa pun),
-  CUDA, CoreML; `ExecutionProvider.Auto` memilih yang terbaik dan kembali ke CPU bila gagal.
+  CUDA, CoreML, NNAPI (Android); `ExecutionProvider.Auto` memilih yang terbaik dan kembali ke CPU bila gagal.
 - **Model diurus otomatis** — paket `Gravicode.MediaPipeNet.Models.*` menyalin model ke samping aplikasi; jika tidak ada,
   model diunduh dari nuget.org saat pertama dipakai dan diverifikasi SHA-256. Varian **FP16 / INT8** tervalidasi
   bila diminta; **model Model Maker milik Anda** lewat `ModelPath`.
@@ -72,14 +73,14 @@ foreach (var hand in gestures.Recognize(image).Hands)
 
 ```bash
 dotnet add package Gravicode.MediaPipeNet               # semua task + runtime CPU (Windows, Linux, macOS)
-dotnet add package Gravicode.MediaPipeNet.Models.All    # opsional: bundel semua model (≈180 MB) untuk offline
+dotnet add package Gravicode.MediaPipeNet.Models.All    # opsional: bundel semua model (≈215 MB) untuk offline
 ```
 
 | Paket | Isi |
 |---|---|
 | `Gravicode.MediaPipeNet` | Semua task + ONNX Runtime **CPU** (dan CoreML di macOS). Mulai dari sini. |
 | `Gravicode.MediaPipeNet.DirectML` / `Gravicode.MediaPipeNet.Cuda` | Semua task + runtime DirectML atau CUDA (pengganti `Gravicode.MediaPipeNet`). |
-| `Gravicode.MediaPipeNet.Models.Face` · `.Hand` · `.Pose` · `.Segmentation` · `.ObjectDetection` · `.ImageClassification` · `.ImageEmbedding` · `.Audio` · `.Text` · `.All` | Model ONNX, disalin ke `bin/…/models`. |
+| `Gravicode.MediaPipeNet.Models.Face` · `.Hand` · `.Pose` · `.Segmentation` · `.ObjectDetection` · `.ImageClassification` · `.ImageEmbedding` · `.FaceStylizer` · `.Audio` · `.Text` · `.All` | Model ONNX, disalin ke `bin/…/models`. |
 | `Gravicode.MediaPipeNet.Models.Quantized` | Varian FP16 / INT8 untuk `InferenceOptions.Precision`. |
 | `Gravicode.MediaPipeNet.Visualization` | Menggambar landmark, kotak, dan mask di gambar ImageSharp. |
 | `Gravicode.MediaPipeNet.Video.OpenCv` | `WebcamFrameSource`, `VideoFileFrameSource`. |
@@ -106,6 +107,10 @@ dotnet add package Gravicode.MediaPipeNet.Models.All    # opsional: bundel semua
 <tr>
 <td><img src="docs/images/gallery-text.png" alt="Teks" /><br/><b>Teks</b> — sentimen, bahasa, kemiripan</td>
 <td><img src="docs/images/segment-multiclass.jpg" alt="Selfie multiclass" /><br/><b>Segmentasi multikelas</b> — rambut, kulit, pakaian</td>
+</tr>
+<tr>
+<td><img src="docs/images/gallery-stylize.png" alt="Stilisasi wajah" /><br/><b>Stilisasi wajah</b> — sketsa berwarna, diselaraskan seperti MediaPipe</td>
+<td><img src="docs/images/gallery-embed.png" alt="Embedding gambar" /><br/><b>Embedding gambar</b> — MobileNet V3, kemiripan visual</td>
 </tr>
 <tr>
 <td><img src="docs/images/gallery-graph.png" alt="Graph API" /><br/><b>Graph API</b> — node paralel, kalkulator kustom</td>
@@ -270,15 +275,16 @@ dotnet run --project samples/MediaPipeNet.Gallery
 | [Pengujian & validasi](docs/id/pengujian.md) | [Testing & validation](docs/en/testing.md) |
 | [Referensi API](docs/id/referensi-api.md) | [API reference](docs/en/api-reference.md) |
 | [Pemecahan masalah](docs/id/pemecahan-masalah.md) | [Troubleshooting](docs/en/troubleshooting.md) |
-| [Platform (MAUI, Blazor WASM)](docs/id/platform.md) | [Platforms (MAUI, Blazor WASM)](docs/en/platforms.md) |
+| [Platform (MAUI / Android / iOS, Blazor WASM)](docs/id/platform.md) | [Platforms (MAUI / Android / iOS, Blazor WASM)](docs/en/platforms.md) |
 
-## Yang baru di 0.3.0
+## Yang baru di 1.0.0
 
-Wajah full-range, matriks transformasi wajah, pose yang disempurnakan heatmap, pipeline tangan holistic MediaPipe,
-segmentasi multikelas/rambut/DeepLab dan interaktif, embedding gambar, paket audio dan teks baru, varian model
-FP16/INT8, batch, I/O binding, model kustom, loop/executor/subgraph/tracing pada graph, serta baseline review API.
-Upgrade dari 0.1: tambahkan `using MediaPipeNet.Tasks;` di tempat Anda menyebut `BaseOptions`. Lihat
-[CHANGELOG](CHANGELOG.md).
+Rilis stabil pertama: API publik dibekukan mengikuti semantic versioning (baseline PublicApiAnalyzers).
+Baru: **`FaceStylizer`** — face stylizer color-sketch MediaPipe yang dikonversi ke ONNX (resource variable dibekukan,
+batch norm mode training diturunkan) dengan penyelarasan wajah persis seperti MediaPipe, diuji golden terhadap
+MediaPipe 0.10.21, plus varian FP16/INT8; `ExecutionProvider.Nnapi` dan **sampel .NET MAUI** (Android / iOS);
+benchmark DirectML dan perbaikan I/O binding pada provider GPU; situs dokumentasi di GitHub Pages. Upgrade dari 0.3
+tidak perlu perubahan kode. Lihat [CHANGELOG](CHANGELOG.md).
 
 ## Lisensi
 

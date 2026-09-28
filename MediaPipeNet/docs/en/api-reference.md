@@ -102,6 +102,8 @@ or `ModelLoader` (property syntax such as `new FaceDetectorOptions { BaseOptions
 | `SegmentationResult` | `ConfidenceMasks`, `CategoryMask`, `Labels`, `GetConfidenceMask(label)`; `ConfidenceMask` = foreground. |
 | `CategoryMask` | Byte-per-pixel category indices, `Histogram()`, `FromConfidenceMasks`. |
 | `InteractiveSegmenter`, `RegionOfInterest` | MagicTouch; `FromKeypoint`, `FromScribble`. |
+| `FaceStylizer`, `FaceStylizerOptions`, `FaceStylizerResult` | Color-sketch stylizer; `StylizedImage`, `FaceAlignment`, `FaceRect`, `Composite(image)`, `ComputeFaceRect(landmarks, w, h)`. |
+| `FaceLandmarkerOptions.LandmarksModel` | Choose the face mesh (`ModelCatalog.FaceLandmarksDetector` or `FaceLandmarksDetector192`). |
 | `ImageEmbedder`, `ImageEmbeddingResult` | MobileNet V3 embeddings; `CosineSimilarity`. |
 | `VisionTaskBase.ProcessBatch` / `ProcessBatchAsync` | Parallel batches, results in order. |
 | `ImageClassifierOptions`, `ObjectDetectorOptions` | `ModelPath`, `Labels`. `GestureRecognizerOptions`: `ClassifierModelPath`, `Labels`. |

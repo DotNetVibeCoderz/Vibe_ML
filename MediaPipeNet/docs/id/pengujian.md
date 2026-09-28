@@ -65,6 +65,16 @@ Bagian yang tidak dapat dijalankan paket Python (interactive segmenter dan face 
 di `"unavailable"`; interactive segmenter divalidasi secara perilaku (mask harus menutupi objek di bawah titik dan
 sedikit di luar itu).
 
+Face stylizer punya referensi sendiri dari versi MediaPipe terakhir yang masih menyertakannya (0.10.21, di environment
+terpisah). Generatornya menyuntikkan noise, jadi referensinya adalah rata-rata 16 kali proses yang diperkecil ke 32×32
+plus sebaran tiap proses; `FaceStylizerTests` menerima rata-rata |Δ| < 3,5 / 255 (terukur 2,4; FP16 2,4, INT8 2,8) dan
+memeriksa bahwa foto yang diputar 90° tetap menghasilkan wajah tegak:
+
+```bash
+py -3.12 -m venv C:\mpo && C:\mpo\Scripts\pip install mediapipe==0.10.21
+C:\mpo\Scripts\python tools/golden/generate_golden_stylizer.py --models artifacts/models/_work
+```
+
 ## Benchmark
 
 `benchmarks/MediaPipeNet.Benchmarks` (BenchmarkDotNet) — lihat [Performa](performa.md). CI menjalankannya pada tag

@@ -11,7 +11,7 @@ Every task follows the same pattern:
 | `RunningMode.LiveStream` | `DetectLiveStream(image, timestampMs)` → `ResultCallback` | Asynchronous; returns `false` when a frame was dropped. |
 
 (`GestureRecognizer` uses `Recognize…`, `ImageSegmenter` `Segment…`, `ImageClassifier` `Classify…`,
-`ImageEmbedder` `Embed…`.) All methods accept an optional `ImageProcessingOptions(RegionOfInterest, RotationDegrees)`.
+`ImageEmbedder` `Embed…`, `FaceStylizer` `Stylize…`.) All methods accept an optional `ImageProcessingOptions(RegionOfInterest, RotationDegrees)`.
 
 **Batches** — every vision task also has `ProcessBatch(images, options, maxDegreeOfParallelism)` /
 `ProcessBatchAsync(…)` for offline workloads: the images run in parallel on the shared model (each worker rents its
@@ -201,6 +201,34 @@ using var segmenter = InteractiveSegmenter.Create(new() { OutputCategoryMask = t
 var cutout = segmenter.Segment(image, RegionOfInterest.FromKeypoint(0.62f, 0.5f)).ConfidenceMask;
 var scribble = RegionOfInterest.FromScribble([new(0.3f, 0.6f), new(0.35f, 0.62f), new(0.4f, 0.6f)]);
 ```
+
+## FaceStylizer
+
+![Face stylizer](../images/gallery-stylize.png)
+
+Redraws the most prominent face in a style — the official "color sketch" BlazeFaceStylizer (256×256), converted to
+ONNX. The pipeline is MediaPipe's: the face mesh (the 192×192 mesh bundled with the stylizer) → eyes and mouth →
+`FaceToRectCalculator`'s rotated square (centred between the eyes, 10 % towards the mouth, max(3.6 × eye-to-mouth,
+4 × eye-to-eye)) → the generator → a 256×256 image. Tilted heads come out upright.
+
+```csharp
+using var stylizer = FaceStylizer.Create(new() { OutputFaceAlignment = true });
+using var result = stylizer.Stylize(image);          // dispose: the images use pooled buffers
+result.StylizedImage?.SaveAsPng("sketch.png");       // null when no face was found
+using var pasted = result.Composite(image);          // pasted back onto the photo, feathered edges
+Console.WriteLine(result.FaceRect);                  // the rotated crop, normalized
+```
+
+| Option | Default | |
+|---|---|---|
+| `MinFaceDetectionConfidence` / `MinFacePresenceConfidence` | 0.5 | As in `FaceLandmarker`. |
+| `OutputFaceAlignment` | false | Also return the aligned 256×256 crop the model saw. |
+| `Model` | color sketch | Another stylizer converted with `convert_models.py`. |
+
+The generator injects random noise (as the original does), so two runs differ slightly — in MediaPipe too. Against
+the average of 16 MediaPipe runs the output differs by 2.4 / 255 per channel at 32×32 (MediaPipe's own runs spread
+0.2 around that average; the rest is a one-pixel shift of the rounded crop centre). FP16 (14 MB) and INT8 (7.6 MB)
+variants stay within 2.8. How the model was converted: [Models](models.md#face-stylizer).
 
 ## ImageEmbedder
 

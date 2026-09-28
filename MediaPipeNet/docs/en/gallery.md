@@ -42,6 +42,7 @@ button) and **JSON** (the serialized result).
 | ![Gestures](../images/gallery-gestures.png) | ![Pose](../images/gallery-pose.png) |
 | ![Holistic](../images/gallery-holistic.png) | ![Segmentation](../images/gallery-segment.png) |
 | ![Interactive segmentation](../images/gallery-interactive.png) | ![Image embedding](../images/gallery-embed.png) |
+| ![Face stylizer](../images/gallery-stylize.png) | |
 | ![Audio classification](../images/gallery-audio.png) | ![Text understanding](../images/gallery-text.png) |
 | ![Objects](../images/gallery-objects.png) | ![Classification](../images/gallery-classify.png) |
 | ![Graph API](../images/gallery-graph.png) | ![Benchmark](../images/gallery-benchmark.png) |

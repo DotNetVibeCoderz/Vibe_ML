@@ -4,8 +4,8 @@
 # the tag and passed to `dotnet pack`. The tag is prefixed because MediaPipeNet is one project inside
 # the Vibe_ML monorepo.
 #
-#   git tag mediapipenet-v0.3.0
-#   git push origin mediapipenet-v0.3.0
+#   git tag mediapipenet-v1.0.0
+#   git push origin mediapipenet-v1.0.0
 #
 # Requires the repository secret NUGET_API_KEY (https://www.nuget.org/account/apikeys).
 #

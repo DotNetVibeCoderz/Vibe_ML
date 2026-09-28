@@ -103,6 +103,8 @@ tidak terpengaruh).
 | `SegmentationResult` | `ConfidenceMasks`, `CategoryMask`, `Labels`, `GetConfidenceMask(label)`; `ConfidenceMask` = foreground. |
 | `CategoryMask` | Indeks kategori satu byte per piksel, `Histogram()`, `FromConfidenceMasks`. |
 | `InteractiveSegmenter`, `RegionOfInterest` | MagicTouch; `FromKeypoint`, `FromScribble`. |
+| `FaceStylizer`, `FaceStylizerOptions`, `FaceStylizerResult` | Stylizer sketsa berwarna; `StylizedImage`, `FaceAlignment`, `FaceRect`, `Composite(image)`, `ComputeFaceRect(landmarks, w, h)`. |
+| `FaceLandmarkerOptions.LandmarksModel` | Pilih face mesh (`ModelCatalog.FaceLandmarksDetector` atau `FaceLandmarksDetector192`). |
 | `ImageEmbedder`, `ImageEmbeddingResult` | Embedding MobileNet V3; `CosineSimilarity`. |
 | `VisionTaskBase.ProcessBatch` / `ProcessBatchAsync` | Batch paralel, hasil berurutan. |
 | `ImageClassifierOptions`, `ObjectDetectorOptions` | `ModelPath`, `Labels`. `GestureRecognizerOptions`: `ClassifierModelPath`, `Labels`. |

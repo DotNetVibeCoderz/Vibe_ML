@@ -13,7 +13,7 @@ public static class ExecutionProviderSelector
 
     /// <summary>The auto-selection order.</summary>
     public static IReadOnlyList<ExecutionProvider> PreferenceOrder { get; } =
-        [ExecutionProvider.Cuda, ExecutionProvider.DirectML, ExecutionProvider.CoreML, ExecutionProvider.Cpu];
+        [ExecutionProvider.Cuda, ExecutionProvider.DirectML, ExecutionProvider.CoreML, ExecutionProvider.Nnapi, ExecutionProvider.Cpu];
 
     /// <summary>
     /// Providers compiled into the native ONNX Runtime library that is loaded in this process.
@@ -71,6 +71,10 @@ public static class ExecutionProviderSelector
                 case ExecutionProvider.CoreML:
                     so.AppendExecutionProvider("CoreML", new Dictionary<string, string>());
                     break;
+                case ExecutionProvider.Nnapi:
+                    // Full float32 precision (no NNAPI_FLAG_USE_FP16); operators NNAPI cannot run fall back to the CPU.
+                    so.AppendExecutionProvider_Nnapi();
+                    break;
             }
         }
         catch
@@ -87,6 +91,7 @@ public static class ExecutionProviderSelector
         "CUDAExecutionProvider" => ExecutionProvider.Cuda,
         "DmlExecutionProvider" => ExecutionProvider.DirectML,
         "CoreMLExecutionProvider" => ExecutionProvider.CoreML,
+        "NnapiExecutionProvider" => ExecutionProvider.Nnapi,
         "CPUExecutionProvider" => ExecutionProvider.Cpu,
         _ => null,
     };

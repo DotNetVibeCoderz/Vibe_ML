@@ -1,6 +1,6 @@
 # Gravicode.MediaPipeNet.Tasks.Vision
 
-The vision tasks: `FaceDetector` (short and full range), `FaceLandmarker` (478 landmarks + 52 blendshapes + facial transformation matrix), `HandLandmarker`, `GestureRecognizer`, `PoseLandmarker`, `HolisticLandmarker`, `ImageSegmenter` (selfie, multiclass, hair, DeepLab v3), `InteractiveSegmenter`, `ImageEmbedder`, `ObjectDetector`, `ImageClassifier` — with IMAGE / VIDEO / LIVE_STREAM modes, tracking, smoothing, `LiveStreamProcessor<T>` and graph calculators. Needs a native ONNX Runtime: prefer the `Gravicode.MediaPipeNet` package.
+The vision tasks: `FaceDetector` (short and full range), `FaceLandmarker` (478 landmarks + 52 blendshapes + facial transformation matrix), `HandLandmarker`, `GestureRecognizer`, `PoseLandmarker`, `HolisticLandmarker`, `ImageSegmenter` (selfie, multiclass, hair, DeepLab v3), `InteractiveSegmenter`, `FaceStylizer`, `ImageEmbedder`, `ObjectDetector`, `ImageClassifier` — with IMAGE / VIDEO / LIVE_STREAM modes, tracking, smoothing, `LiveStreamProcessor<T>` and graph calculators. Needs a native ONNX Runtime: prefer the `Gravicode.MediaPipeNet` package.
 
 ## Quick start
 

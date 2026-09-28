@@ -24,6 +24,7 @@
     <Project Path="models/MediaPipeNet.Models.ObjectDetection/MediaPipeNet.Models.ObjectDetection.csproj" />
     <Project Path="models/MediaPipeNet.Models.ImageClassification/MediaPipeNet.Models.ImageClassification.csproj" />
     <Project Path="models/MediaPipeNet.Models.ImageEmbedding/MediaPipeNet.Models.ImageEmbedding.csproj" />
+    <Project Path="models/MediaPipeNet.Models.FaceStylizer/MediaPipeNet.Models.FaceStylizer.csproj" />
     <Project Path="models/MediaPipeNet.Models.Audio/MediaPipeNet.Models.Audio.csproj" />
     <Project Path="models/MediaPipeNet.Models.Text/MediaPipeNet.Models.Text.csproj" />
     <Project Path="models/MediaPipeNet.Models.Quantized/MediaPipeNet.Models.Quantized.csproj" />
@@ -41,5 +42,6 @@
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/MediaPipeNet.Benchmarks/MediaPipeNet.Benchmarks.csproj" />
+    <Project Path="benchmarks/MediaPipeNet.GpuBenchmark/MediaPipeNet.GpuBenchmark.csproj" />
   </Folder>
 </Solution>

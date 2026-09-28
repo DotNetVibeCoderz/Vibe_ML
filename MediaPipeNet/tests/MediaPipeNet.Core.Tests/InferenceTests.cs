@@ -94,7 +94,7 @@ public class ModelStoreTests
     [Fact]
     public async Task Catalog_lists_every_shipped_model()
     {
-        ModelCatalog.All.Should().HaveCount(25);
+        ModelCatalog.All.Should().HaveCount(27);
         ModelCatalog.All.Select(m => m.Id).Should().OnlyHaveUniqueItems();
         ModelCatalog.Find("palm_detection.onnx").Should().Be(ModelCatalog.PalmDetection);
         ModelCatalog.Find("unknown").Should().BeNull();

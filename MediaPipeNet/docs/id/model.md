@@ -31,6 +31,8 @@
 | `average_word_classifier` | 0,6 MB | Models.Text | `average_word_classifier.tflite` |
 | `bert_embedder` | 26,6 MB | Models.Text | `bert_embedder.tflite` (bobot int8) |
 | `language_detector` | 3,8 MB | Models.Text | `language_detector.tflite` (dibangun ulang, lihat di bawah) |
+| `face_stylizer_color_sketch` | 28,2 MB | Models.FaceStylizer | `face_stylizer_color_sketch.task` (variabel dibekukan, batch norm diturunkan — lihat di bawah) |
+| `face_landmarks_detector_192` | 1,2 MB | Models.FaceStylizer | `face_stylizer_color_sketch.task` (mesh 192×192 untuk penyelarasan stylizer) |
 
 `ModelCatalog.All` berisi semuanya lengkap dengan SHA-256, ukuran, paket, dan URL sumber; `descriptor.Attribution`
 memberikan teks lisensi yang wajib dicantumkan. Bobot model © Google LLC, Apache-2.0.
@@ -47,15 +49,19 @@ using var landmarker = FaceLandmarker.Create(new() { BaseOptions = options });
 
 | Presisi | Yang berubah | Ukuran | Cocok untuk | Model |
 |---|---|---|---|---|
-| `Float32` (default) | model referensi | 100 % | semua | ke-25 model |
-| `Float16` | bobot dan aktivasi float16 (input/output tetap float32) | ~50 % | GPU (DirectML, CUDA) | 14 |
-| `Int8` | bobot int8 per kanal saja, dihitung dalam float | ~27–32 % | unduhan / aplikasi lebih kecil | 9 |
+| `Float32` (default) | model referensi | 100 % | semua | ke-27 model |
+| `Float16` | bobot dan aktivasi float16 (input/output tetap float32) | ~50 % | GPU (DirectML, CUDA) | 16 |
+| `Int8` | bobot int8 per kanal saja, dihitung dalam float | ~27–32 % | unduhan / aplikasi lebih kecil | 11 |
 
 `tools/model-conversion/quantize_models.py` membuat varian dan **hanya menyimpan yang tetap setia**: setiap varian
 dijalankan berdampingan dengan model float32-nya dan harus mencapai cosine similarity ≥ 0,999 (FP16) atau ≥ 0,99
 (INT8) di setiap output. Ditolak: INT8 untuk model tangan, landmark pose, EfficientNet, dan MagicTouch (akurasinya
 turun), serta kedua varian untuk model teks dan YAMNet (sudah menyimpan bobot int8). Kuantisasi aktivasi dinamis juga
-dievaluasi dan merusak CNN landmark, sehingga tidak dipakai. `PrecisionTests` menguji varian end-to-end (face mesh
+dievaluasi dan merusak CNN landmark, sehingga tidak dipakai. **INT8 statis (terkalibrasi)** — aktivasi dikuantisasi
+dengan rentang yang diukur pada gambar nyata, format `QOperator` dan `QDQ`, kalibrasi MinMax dan persentil — juga
+dievaluasi untuk model yang ditolak dengan `evaluate_static_int8.py` dan tetap tidak memenuhi batas (presence tangan
+0,56, probabilitas EfficientNet 0,92, mask MagicTouch 0,98, landmark pose < 0,1): model float MediaPipe tidak dilatih
+untuk kuantisasi, sehingga komputasi int8 sungguhan memerlukan quantization-aware training. `PrecisionTests` menguji varian end-to-end (face mesh
 dalam selisih 0,002 / 0,004, objek yang sama terdeteksi, < 0,5 % piksel segmentasi berubah).
 
 Model tanpa varian yang diminta memakai float32; demikian pula varian yang tidak ditemukan (dengan peringatan).
@@ -111,9 +117,31 @@ CLI melakukan hal yang sama: `mediapipenet-cli models list | download | verify`.
    - **Language detector** — op string `NGramHash`-nya tidak punya padanan ONNX, sehingga model dibangun ulang:
      hashing berjalan di C# dan `KmeansEmbeddingLookup` (embedding terkuantisasi produk) diekspansi menjadi tabel
      padat dengan `Gather` + `ReduceMean`.
+   - **Face stylizer** — lihat [di bawah](#face-stylizer).
    - Delegate XNNPACK interpreter TFLite dimatikan selama konversi (crash pada beberapa graph di Windows).
-4. Menulis `manifest.json` (input, output, SHA-256) dan `failed.json` (graph yang tidak bisa dikonversi — hanya
-   face stylizer, lihat [Platform](platform.md#face-stylizer)).
+4. Menulis `manifest.json` (input, output, SHA-256) dan `failed.json` (graph yang tidak bisa dikonversi — tidak ada).
+
+### Face stylizer
+
+Generator color-sketch adalah GAN yang diekspor dalam *mode training*, yang tidak bisa diikuti tf2onnx apa adanya.
+Tiga langkah menjadikannya graph inferensi biasa (`freeze_resource_variables` dan `lower_custom_ops` di
+`convert_models.py`):
+
+1. **Resource variable** — subgraph inisialisasi `CALL_ONCE` mengisi moving average batch norm ke variabel
+   (`VAR_HANDLE` + `ASSIGN_VARIABLE`); graph utama membacanya (`READ_VARIABLE`) dan menulis pembaruan kembali. Setiap
+   pembacaan menjadi konstanta berisi nilai awal dan op state dibuang — rata-rata yang ditulis kembali tidak pernah
+   memengaruhi output.
+2. **`FusedBatchNormV3`** (op Flex, `is_training=True`, NHWC) — diturunkan menjadi normalisasi per instance atas
+   N, H, W: `(x − mean) / sqrt(var + 0,001) · scale + offset`. Dalam mode training statistik batch, bukan rata-rata
+   tersimpan, yang menormalkan aktivasi; itu sebabnya rata-rata yang dibekukan tidak terpakai.
+3. **`RANDOM_STANDARD_NORMAL`** (injeksi noise) dipetakan ke ONNX `RandomNormalLike` — dipertahankan, sehingga output
+   sedikit berbeda tiap proses persis seperti MediaPipe.
+
+Input-nya wajah yang sudah diselaraskan dalam [−1, 1], output-nya gambar RGB dalam [0, 1]. Karena paket Python
+MediaPipe menghapus stylizer setelah 0.10.21, referensi golden berasal dari versi itu
+(`tools/golden/generate_golden_stylizer.py`): rata-rata 16 kali proses MediaPipe, dibandingkan pada 32×32. Bundel
+stylizer membawa face mesh sendiri (192×192, tanpa attention) yang sudut matanya cukup berbeda dari mesh attention
+256×256 sehingga ukuran potongan berubah 3 %, jadi model itu ikut dikonversi dan dipakai untuk penyelarasan.
 
 ### Bobot int8 dan ONNX Runtime
 

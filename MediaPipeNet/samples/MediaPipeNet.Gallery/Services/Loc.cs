@@ -9,6 +9,7 @@ public static class Loc
         ["nav.detect"] = ("DETECT", "DETEKSI"),
         ["nav.landmarks"] = ("LANDMARKS", "LANDMARK"),
         ["nav.understand"] = ("SEGMENT & CLASSIFY", "SEGMENTASI & KLASIFIKASI"),
+        ["nav.create"] = ("CREATE", "KREASI"),
         ["nav.audiotext"] = ("AUDIO & TEXT", "AUDIO & TEKS"),
         ["nav.audio"] = ("Audio classification", "Klasifikasi audio"),
         ["nav.text"] = ("Text understanding", "Pemahaman teks"),

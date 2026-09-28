@@ -69,7 +69,7 @@ public sealed class MainWindow : Window
         }
 
         Item("home", Loc.T("nav.home"));
-        foreach (var (category, header) in new[] { ("detect", "nav.detect"), ("landmarks", "nav.landmarks"), ("understand", "nav.understand") })
+        foreach (var (category, header) in new[] { ("detect", "nav.detect"), ("landmarks", "nav.landmarks"), ("understand", "nav.understand"), ("create", "nav.create") })
         {
             Header(header);
             foreach (var t in TaskCatalog.All.Where(t => t.Category == category)) Item(t.Id, t.Title);
@@ -93,7 +93,7 @@ public sealed class MainWindow : Window
             new Image { Source = AssetLoader("Assets/logo.png"), Width = 34, Height = 34 },
             Ui.Stack(Orientation.Vertical, 0,
                 new TextBlock { Text = "MediaPipe.Net", FontFamily = (FontFamily)Application.Current!.Resources["DisplayFont"]!, FontSize = 15 },
-                Ui.Text("GALLERY · v0.3", "eyebrow")));
+                Ui.Text("GALLERY · v1.0", "eyebrow")));
         brand.Margin = new Thickness(18, 20, 18, 10);
 
         var credit = new TextBlock { Text = Loc.T("footer.credit"), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(18, 10, 18, 16) }.With("muted");

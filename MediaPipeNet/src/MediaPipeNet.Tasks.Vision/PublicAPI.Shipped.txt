@@ -1,11 +1,17 @@
 #nullable enable
+abstract MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.Process(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? options, bool tracking, long timestampMs) -> TResult!
+abstract MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.<Clone>$() -> MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>!
+const MediaPipeNet.Tasks.Vision.CategoryMask.Unlabeled = 255 -> byte
+const MediaPipeNet.Tasks.Vision.FaceLandmarker.LandmarkCount = 478 -> int
+const MediaPipeNet.Tasks.Vision.HandLandmarker.LandmarkCount = 21 -> int
+const MediaPipeNet.Tasks.Vision.PoseLandmarker.LandmarkCount = 33 -> int
 MediaPipeNet.Tasks.Vision.CategoryMask
 MediaPipeNet.Tasks.Vision.CategoryMask.CategoryMask(int width, int height, byte[]! data) -> void
 MediaPipeNet.Tasks.Vision.CategoryMask.Data.get -> byte[]!
 MediaPipeNet.Tasks.Vision.CategoryMask.Height.get -> int
 MediaPipeNet.Tasks.Vision.CategoryMask.Histogram() -> System.Collections.Generic.IReadOnlyDictionary<int, float>!
-MediaPipeNet.Tasks.Vision.CategoryMask.Width.get -> int
 MediaPipeNet.Tasks.Vision.CategoryMask.this[int x, int y].get -> byte
+MediaPipeNet.Tasks.Vision.CategoryMask.Width.get -> int
 MediaPipeNet.Tasks.Vision.ClassificationResult
 MediaPipeNet.Tasks.Vision.ClassificationResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.ClassificationResult!
 MediaPipeNet.Tasks.Vision.ClassificationResult.Categories.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>!
@@ -50,14 +56,6 @@ MediaPipeNet.Tasks.Vision.FaceKeypoint.MouthCenter = 3 -> MediaPipeNet.Tasks.Vis
 MediaPipeNet.Tasks.Vision.FaceKeypoint.NoseTip = 2 -> MediaPipeNet.Tasks.Vision.FaceKeypoint
 MediaPipeNet.Tasks.Vision.FaceKeypoint.RightEarTragion = 4 -> MediaPipeNet.Tasks.Vision.FaceKeypoint
 MediaPipeNet.Tasks.Vision.FaceKeypoint.RightEye = 0 -> MediaPipeNet.Tasks.Vision.FaceKeypoint
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.FaceLandmarkResult!
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.FaceLandmarks!>! Faces) -> void
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Equals(MediaPipeNet.Tasks.Vision.FaceLandmarkResult? other) -> bool
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult.FaceLandmarkResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.FaceLandmarks!>! Faces) -> void
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Faces.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.FaceLandmarks!>!
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Faces.init -> void
-MediaPipeNet.Tasks.Vision.FaceLandmarkResult.ToJson(bool indented = false) -> string!
 MediaPipeNet.Tasks.Vision.FaceLandmarker
 MediaPipeNet.Tasks.Vision.FaceLandmarker.Detect(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null) -> MediaPipeNet.Tasks.Vision.FaceLandmarkResult!
 MediaPipeNet.Tasks.Vision.FaceLandmarker.DetectAsync(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.FaceLandmarkResult!>!
@@ -67,6 +65,8 @@ MediaPipeNet.Tasks.Vision.FaceLandmarker.Options.get -> MediaPipeNet.Tasks.Visio
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.Equals(MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions? other) -> bool
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.FaceLandmarkerOptions() -> void
+MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.LandmarksModel.get -> MediaPipeNet.Inference.Models.ModelDescriptor?
+MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.LandmarksModel.init -> void
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.MinFaceDetectionConfidence.get -> float
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.MinFaceDetectionConfidence.init -> void
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.MinFacePresenceConfidence.get -> float
@@ -81,6 +81,14 @@ MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.OutputFacialTransformationMatrix
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.OutputFacialTransformationMatrixes.init -> void
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.SmoothLandmarks.get -> bool
 MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.SmoothLandmarks.init -> void
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.FaceLandmarkResult!
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.FaceLandmarks!>! Faces) -> void
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Equals(MediaPipeNet.Tasks.Vision.FaceLandmarkResult? other) -> bool
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult.FaceLandmarkResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.FaceLandmarks!>! Faces) -> void
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Faces.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.FaceLandmarks!>!
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Faces.init -> void
+MediaPipeNet.Tasks.Vision.FaceLandmarkResult.ToJson(bool indented = false) -> string!
 MediaPipeNet.Tasks.Vision.FaceLandmarks
 MediaPipeNet.Tasks.Vision.FaceLandmarks.<Clone>$() -> MediaPipeNet.Tasks.Vision.FaceLandmarks!
 MediaPipeNet.Tasks.Vision.FaceLandmarks.Blendshapes.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Category!>?
@@ -98,6 +106,40 @@ MediaPipeNet.Tasks.Vision.FaceLandmarks.PresenceScore.get -> float
 MediaPipeNet.Tasks.Vision.FaceLandmarks.PresenceScore.init -> void
 MediaPipeNet.Tasks.Vision.FaceLandmarks.Roi.get -> MediaPipeNet.NormalizedRect
 MediaPipeNet.Tasks.Vision.FaceLandmarks.Roi.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizer
+MediaPipeNet.Tasks.Vision.FaceStylizer.Options.get -> MediaPipeNet.Tasks.Vision.FaceStylizerOptions!
+MediaPipeNet.Tasks.Vision.FaceStylizer.Stylize(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null) -> MediaPipeNet.Tasks.Vision.FaceStylizerResult!
+MediaPipeNet.Tasks.Vision.FaceStylizer.StylizeAsync(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.FaceStylizerResult!>!
+MediaPipeNet.Tasks.Vision.FaceStylizer.StylizeForVideo(MediaPipeNet.Imaging.MPImage! image, long timestampMs, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null) -> MediaPipeNet.Tasks.Vision.FaceStylizerResult!
+MediaPipeNet.Tasks.Vision.FaceStylizer.StylizeLiveStream(MediaPipeNet.Imaging.MPImage! image, long timestampMs, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null) -> bool
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.Equals(MediaPipeNet.Tasks.Vision.FaceStylizerOptions? other) -> bool
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.FaceStylizerOptions() -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.MinFaceDetectionConfidence.get -> float
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.MinFaceDetectionConfidence.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.MinFacePresenceConfidence.get -> float
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.MinFacePresenceConfidence.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.Model.get -> MediaPipeNet.Inference.Models.ModelDescriptor?
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.Model.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.OutputFaceAlignment.get -> bool
+MediaPipeNet.Tasks.Vision.FaceStylizerOptions.OutputFaceAlignment.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.FaceStylizerResult!
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.Composite(MediaPipeNet.Imaging.MPImage! original, float feather = 0.08) -> MediaPipeNet.Imaging.MPImage?
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.Deconstruct(out MediaPipeNet.Imaging.MPImage? StylizedImage, out MediaPipeNet.Imaging.MPImage? FaceAlignment, out MediaPipeNet.NormalizedRect? FaceRect, out MediaPipeNet.Tasks.Vision.FaceLandmarks? Face) -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.Dispose() -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.Equals(MediaPipeNet.Tasks.Vision.FaceStylizerResult? other) -> bool
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.Face.get -> MediaPipeNet.Tasks.Vision.FaceLandmarks?
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.Face.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.FaceAlignment.get -> MediaPipeNet.Imaging.MPImage?
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.FaceAlignment.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.FaceRect.get -> MediaPipeNet.NormalizedRect?
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.FaceRect.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.FaceStylizerResult(MediaPipeNet.Imaging.MPImage? StylizedImage, MediaPipeNet.Imaging.MPImage? FaceAlignment, MediaPipeNet.NormalizedRect? FaceRect, MediaPipeNet.Tasks.Vision.FaceLandmarks? Face) -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.HasFace.get -> bool
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.StylizedImage.get -> MediaPipeNet.Imaging.MPImage?
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.StylizedImage.init -> void
+MediaPipeNet.Tasks.Vision.FaceStylizerResult.ToJson(bool indented = false) -> string!
 MediaPipeNet.Tasks.Vision.GestureRecognitionResult
 MediaPipeNet.Tasks.Vision.GestureRecognitionResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.GestureRecognitionResult!
 MediaPipeNet.Tasks.Vision.GestureRecognitionResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.RecognizedHand!>! Hands) -> void
@@ -160,14 +202,6 @@ MediaPipeNet.Tasks.Vision.HandLandmark.ThumbIp = 3 -> MediaPipeNet.Tasks.Vision.
 MediaPipeNet.Tasks.Vision.HandLandmark.ThumbMcp = 2 -> MediaPipeNet.Tasks.Vision.HandLandmark
 MediaPipeNet.Tasks.Vision.HandLandmark.ThumbTip = 4 -> MediaPipeNet.Tasks.Vision.HandLandmark
 MediaPipeNet.Tasks.Vision.HandLandmark.Wrist = 0 -> MediaPipeNet.Tasks.Vision.HandLandmark
-MediaPipeNet.Tasks.Vision.HandLandmarkResult
-MediaPipeNet.Tasks.Vision.HandLandmarkResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.HandLandmarkResult!
-MediaPipeNet.Tasks.Vision.HandLandmarkResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.HandLandmarks!>! Hands) -> void
-MediaPipeNet.Tasks.Vision.HandLandmarkResult.Equals(MediaPipeNet.Tasks.Vision.HandLandmarkResult? other) -> bool
-MediaPipeNet.Tasks.Vision.HandLandmarkResult.HandLandmarkResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.HandLandmarks!>! Hands) -> void
-MediaPipeNet.Tasks.Vision.HandLandmarkResult.Hands.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.HandLandmarks!>!
-MediaPipeNet.Tasks.Vision.HandLandmarkResult.Hands.init -> void
-MediaPipeNet.Tasks.Vision.HandLandmarkResult.ToJson(bool indented = false) -> string!
 MediaPipeNet.Tasks.Vision.HandLandmarker
 MediaPipeNet.Tasks.Vision.HandLandmarker.Detect(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null) -> MediaPipeNet.Tasks.Vision.HandLandmarkResult!
 MediaPipeNet.Tasks.Vision.HandLandmarker.DetectAsync(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.HandLandmarkResult!>!
@@ -185,13 +219,21 @@ MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.MinTrackingConfidence.get -> flo
 MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.MinTrackingConfidence.init -> void
 MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.NumHands.get -> int
 MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.NumHands.init -> void
+MediaPipeNet.Tasks.Vision.HandLandmarkResult
+MediaPipeNet.Tasks.Vision.HandLandmarkResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.HandLandmarkResult!
+MediaPipeNet.Tasks.Vision.HandLandmarkResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.HandLandmarks!>! Hands) -> void
+MediaPipeNet.Tasks.Vision.HandLandmarkResult.Equals(MediaPipeNet.Tasks.Vision.HandLandmarkResult? other) -> bool
+MediaPipeNet.Tasks.Vision.HandLandmarkResult.HandLandmarkResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.HandLandmarks!>! Hands) -> void
+MediaPipeNet.Tasks.Vision.HandLandmarkResult.Hands.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.HandLandmarks!>!
+MediaPipeNet.Tasks.Vision.HandLandmarkResult.Hands.init -> void
+MediaPipeNet.Tasks.Vision.HandLandmarkResult.ToJson(bool indented = false) -> string!
 MediaPipeNet.Tasks.Vision.HandLandmarks
 MediaPipeNet.Tasks.Vision.HandLandmarks.<Clone>$() -> MediaPipeNet.Tasks.Vision.HandLandmarks!
 MediaPipeNet.Tasks.Vision.HandLandmarks.Deconstruct(out MediaPipeNet.Category! Handedness, out System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedLandmark>! Landmarks, out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Landmark>! WorldLandmarks, out float PresenceScore, out MediaPipeNet.NormalizedRect Roi) -> void
 MediaPipeNet.Tasks.Vision.HandLandmarks.Equals(MediaPipeNet.Tasks.Vision.HandLandmarks? other) -> bool
-MediaPipeNet.Tasks.Vision.HandLandmarks.HandLandmarks(MediaPipeNet.Category! Handedness, System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedLandmark>! Landmarks, System.Collections.Generic.IReadOnlyList<MediaPipeNet.Landmark>! WorldLandmarks, float PresenceScore, MediaPipeNet.NormalizedRect Roi) -> void
 MediaPipeNet.Tasks.Vision.HandLandmarks.Handedness.get -> MediaPipeNet.Category!
 MediaPipeNet.Tasks.Vision.HandLandmarks.Handedness.init -> void
+MediaPipeNet.Tasks.Vision.HandLandmarks.HandLandmarks(MediaPipeNet.Category! Handedness, System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedLandmark>! Landmarks, System.Collections.Generic.IReadOnlyList<MediaPipeNet.Landmark>! WorldLandmarks, float PresenceScore, MediaPipeNet.NormalizedRect Roi) -> void
 MediaPipeNet.Tasks.Vision.HandLandmarks.IsLeft.get -> bool
 MediaPipeNet.Tasks.Vision.HandLandmarks.Landmarks.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedLandmark>!
 MediaPipeNet.Tasks.Vision.HandLandmarks.Landmarks.init -> void
@@ -199,9 +241,9 @@ MediaPipeNet.Tasks.Vision.HandLandmarks.PresenceScore.get -> float
 MediaPipeNet.Tasks.Vision.HandLandmarks.PresenceScore.init -> void
 MediaPipeNet.Tasks.Vision.HandLandmarks.Roi.get -> MediaPipeNet.NormalizedRect
 MediaPipeNet.Tasks.Vision.HandLandmarks.Roi.init -> void
+MediaPipeNet.Tasks.Vision.HandLandmarks.this[MediaPipeNet.Tasks.Vision.HandLandmark landmark].get -> MediaPipeNet.NormalizedLandmark
 MediaPipeNet.Tasks.Vision.HandLandmarks.WorldLandmarks.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Landmark>!
 MediaPipeNet.Tasks.Vision.HandLandmarks.WorldLandmarks.init -> void
-MediaPipeNet.Tasks.Vision.HandLandmarks.this[MediaPipeNet.Tasks.Vision.HandLandmark landmark].get -> MediaPipeNet.NormalizedLandmark
 MediaPipeNet.Tasks.Vision.HolisticLandmarker
 MediaPipeNet.Tasks.Vision.HolisticLandmarker.Detect(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null) -> MediaPipeNet.Tasks.Vision.HolisticResult!
 MediaPipeNet.Tasks.Vision.HolisticLandmarker.DetectAsync(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.HolisticResult!>!
@@ -432,14 +474,6 @@ MediaPipeNet.Tasks.Vision.PoseLandmark.RightPinky = 18 -> MediaPipeNet.Tasks.Vis
 MediaPipeNet.Tasks.Vision.PoseLandmark.RightShoulder = 12 -> MediaPipeNet.Tasks.Vision.PoseLandmark
 MediaPipeNet.Tasks.Vision.PoseLandmark.RightThumb = 22 -> MediaPipeNet.Tasks.Vision.PoseLandmark
 MediaPipeNet.Tasks.Vision.PoseLandmark.RightWrist = 16 -> MediaPipeNet.Tasks.Vision.PoseLandmark
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.PoseLandmarkResult!
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.PoseLandmarks!>! Poses) -> void
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Equals(MediaPipeNet.Tasks.Vision.PoseLandmarkResult? other) -> bool
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult.PoseLandmarkResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.PoseLandmarks!>! Poses) -> void
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Poses.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.PoseLandmarks!>!
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Poses.init -> void
-MediaPipeNet.Tasks.Vision.PoseLandmarkResult.ToJson(bool indented = false) -> string!
 MediaPipeNet.Tasks.Vision.PoseLandmarker
 MediaPipeNet.Tasks.Vision.PoseLandmarker.Detect(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null) -> MediaPipeNet.Tasks.Vision.PoseLandmarkResult!
 MediaPipeNet.Tasks.Vision.PoseLandmarker.DetectAsync(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? processingOptions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.PoseLandmarkResult!>!
@@ -465,6 +499,14 @@ MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.SmoothLandmarks.get -> bool
 MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.SmoothLandmarks.init -> void
 MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.SmoothSegmentationMasks.get -> bool
 MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.SmoothSegmentationMasks.init -> void
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.PoseLandmarkResult!
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.PoseLandmarks!>! Poses) -> void
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Equals(MediaPipeNet.Tasks.Vision.PoseLandmarkResult? other) -> bool
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult.PoseLandmarkResult(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.PoseLandmarks!>! Poses) -> void
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Poses.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Tasks.Vision.PoseLandmarks!>!
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Poses.init -> void
+MediaPipeNet.Tasks.Vision.PoseLandmarkResult.ToJson(bool indented = false) -> string!
 MediaPipeNet.Tasks.Vision.PoseLandmarks
 MediaPipeNet.Tasks.Vision.PoseLandmarks.<Clone>$() -> MediaPipeNet.Tasks.Vision.PoseLandmarks!
 MediaPipeNet.Tasks.Vision.PoseLandmarks.Deconstruct(out System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedLandmark>! Landmarks, out System.Collections.Generic.IReadOnlyList<MediaPipeNet.Landmark>! WorldLandmarks, out float PresenceScore, out MediaPipeNet.NormalizedRect Roi, out MediaPipeNet.Tasks.Vision.SegmentationMask? SegmentationMask) -> void
@@ -478,9 +520,9 @@ MediaPipeNet.Tasks.Vision.PoseLandmarks.Roi.get -> MediaPipeNet.NormalizedRect
 MediaPipeNet.Tasks.Vision.PoseLandmarks.Roi.init -> void
 MediaPipeNet.Tasks.Vision.PoseLandmarks.SegmentationMask.get -> MediaPipeNet.Tasks.Vision.SegmentationMask?
 MediaPipeNet.Tasks.Vision.PoseLandmarks.SegmentationMask.init -> void
+MediaPipeNet.Tasks.Vision.PoseLandmarks.this[MediaPipeNet.Tasks.Vision.PoseLandmark landmark].get -> MediaPipeNet.NormalizedLandmark
 MediaPipeNet.Tasks.Vision.PoseLandmarks.WorldLandmarks.get -> System.Collections.Generic.IReadOnlyList<MediaPipeNet.Landmark>!
 MediaPipeNet.Tasks.Vision.PoseLandmarks.WorldLandmarks.init -> void
-MediaPipeNet.Tasks.Vision.PoseLandmarks.this[MediaPipeNet.Tasks.Vision.PoseLandmark landmark].get -> MediaPipeNet.NormalizedLandmark
 MediaPipeNet.Tasks.Vision.PoseModel
 MediaPipeNet.Tasks.Vision.PoseModel.Full = 1 -> MediaPipeNet.Tasks.Vision.PoseModel
 MediaPipeNet.Tasks.Vision.PoseModel.Lite = 0 -> MediaPipeNet.Tasks.Vision.PoseModel
@@ -653,9 +695,9 @@ MediaPipeNet.Tasks.Vision.SegmentationMask.Coverage(float threshold = 0.5) -> fl
 MediaPipeNet.Tasks.Vision.SegmentationMask.Data.get -> float[]!
 MediaPipeNet.Tasks.Vision.SegmentationMask.Height.get -> int
 MediaPipeNet.Tasks.Vision.SegmentationMask.SegmentationMask(int width, int height, float[]! data) -> void
+MediaPipeNet.Tasks.Vision.SegmentationMask.this[int x, int y].get -> float
 MediaPipeNet.Tasks.Vision.SegmentationMask.ToBytes(float? threshold = null) -> byte[]!
 MediaPipeNet.Tasks.Vision.SegmentationMask.Width.get -> int
-MediaPipeNet.Tasks.Vision.SegmentationMask.this[int x, int y].get -> float
 MediaPipeNet.Tasks.Vision.SegmentationResult
 MediaPipeNet.Tasks.Vision.SegmentationResult.<Clone>$() -> MediaPipeNet.Tasks.Vision.SegmentationResult!
 MediaPipeNet.Tasks.Vision.SegmentationResult.CategoryMask.get -> MediaPipeNet.Tasks.Vision.CategoryMask?
@@ -681,8 +723,8 @@ MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.ProcessBatch(System.Collection
 MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.ProcessBatchAsync(System.Collections.Generic.IReadOnlyList<MediaPipeNet.Imaging.MPImage!>! images, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? options = null, int maxDegreeOfParallelism = -1, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TResult!>!>!
 MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.RunImage(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? options) -> TResult!
 MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.RunLiveStream(MediaPipeNet.Imaging.MPImage! image, long timestampMs, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? options) -> bool
-MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.RunVideo(MediaPipeNet.Imaging.MPImage! image, long timestampMs, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? options) -> TResult!
 MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.RunningMode.get -> MediaPipeNet.RunningMode
+MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.RunVideo(MediaPipeNet.Imaging.MPImage! image, long timestampMs, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? options) -> TResult!
 MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.TaskName.get -> string!
 MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.VisionTaskBase(string! taskName, MediaPipeNet.RunningMode runningMode, MediaPipeNet.Tasks.BaseOptions! baseOptions, System.Action<TResult!, MediaPipeNet.Imaging.MPImage!, long>? resultCallback, int maxInFlightFrames) -> void
 MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>
@@ -696,12 +738,6 @@ MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.RunningMode.get -> MediaPip
 MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.RunningMode.init -> void
 MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.VisionTaskOptions() -> void
 MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.VisionTaskOptions(MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>! original) -> void
-abstract MediaPipeNet.Tasks.Vision.VisionTaskBase<TResult>.Process(MediaPipeNet.Imaging.MPImage! image, MediaPipeNet.Tasks.Vision.ImageProcessingOptions? options, bool tracking, long timestampMs) -> TResult!
-abstract MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.<Clone>$() -> MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>!
-const MediaPipeNet.Tasks.Vision.CategoryMask.Unlabeled = 255 -> byte
-const MediaPipeNet.Tasks.Vision.FaceLandmarker.LandmarkCount = 478 -> int
-const MediaPipeNet.Tasks.Vision.HandLandmarker.LandmarkCount = 21 -> int
-const MediaPipeNet.Tasks.Vision.PoseLandmarker.LandmarkCount = 33 -> int
 override MediaPipeNet.Tasks.Vision.ClassificationResult.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.ClassificationResult.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.ClassificationResult.ToString() -> string!
@@ -712,17 +748,24 @@ override MediaPipeNet.Tasks.Vision.FaceDetectorOptions.<Clone>$() -> MediaPipeNe
 override MediaPipeNet.Tasks.Vision.FaceDetectorOptions.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.FaceDetectorOptions.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.FaceDetectorOptions.ToString() -> string!
-override MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Equals(object? obj) -> bool
-override MediaPipeNet.Tasks.Vision.FaceLandmarkResult.GetHashCode() -> int
-override MediaPipeNet.Tasks.Vision.FaceLandmarkResult.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.FaceLandmarker.ResetTracking() -> void
 override MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.<Clone>$() -> MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions!
 override MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Vision.FaceLandmarkResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Vision.FaceLandmarkResult.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.FaceLandmarks.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.FaceLandmarks.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.FaceLandmarks.ToString() -> string!
+override MediaPipeNet.Tasks.Vision.FaceStylizerOptions.<Clone>$() -> MediaPipeNet.Tasks.Vision.FaceStylizerOptions!
+override MediaPipeNet.Tasks.Vision.FaceStylizerOptions.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Vision.FaceStylizerOptions.GetHashCode() -> int
+override MediaPipeNet.Tasks.Vision.FaceStylizerOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Vision.FaceStylizerResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Vision.FaceStylizerResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Vision.FaceStylizerResult.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.GestureRecognitionResult.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.GestureRecognitionResult.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.GestureRecognitionResult.ToString() -> string!
@@ -732,14 +775,14 @@ override MediaPipeNet.Tasks.Vision.GestureRecognizerOptions.Equals(object? obj) 
 override MediaPipeNet.Tasks.Vision.GestureRecognizerOptions.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.GestureRecognizerOptions.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.Graph.InferenceNode.GetContract(MediaPipeNet.Framework.CalculatorContract! contract) -> void
-override MediaPipeNet.Tasks.Vision.HandLandmarkResult.Equals(object? obj) -> bool
-override MediaPipeNet.Tasks.Vision.HandLandmarkResult.GetHashCode() -> int
-override MediaPipeNet.Tasks.Vision.HandLandmarkResult.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.HandLandmarker.ResetTracking() -> void
 override MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.<Clone>$() -> MediaPipeNet.Tasks.Vision.HandLandmarkerOptions!
 override MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Vision.HandLandmarkResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Vision.HandLandmarkResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Vision.HandLandmarkResult.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.HandLandmarks.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.HandLandmarks.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.HandLandmarks.ToString() -> string!
@@ -789,14 +832,14 @@ override MediaPipeNet.Tasks.Vision.ObjectDetectorOptions.<Clone>$() -> MediaPipe
 override MediaPipeNet.Tasks.Vision.ObjectDetectorOptions.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.ObjectDetectorOptions.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.ObjectDetectorOptions.ToString() -> string!
-override MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Equals(object? obj) -> bool
-override MediaPipeNet.Tasks.Vision.PoseLandmarkResult.GetHashCode() -> int
-override MediaPipeNet.Tasks.Vision.PoseLandmarkResult.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.PoseLandmarker.ResetTracking() -> void
 override MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.<Clone>$() -> MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions!
 override MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.ToString() -> string!
+override MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Equals(object? obj) -> bool
+override MediaPipeNet.Tasks.Vision.PoseLandmarkResult.GetHashCode() -> int
+override MediaPipeNet.Tasks.Vision.PoseLandmarkResult.ToString() -> string!
 override MediaPipeNet.Tasks.Vision.PoseLandmarks.Equals(object? obj) -> bool
 override MediaPipeNet.Tasks.Vision.PoseLandmarks.GetHashCode() -> int
 override MediaPipeNet.Tasks.Vision.PoseLandmarks.ToString() -> string!
@@ -825,6 +868,7 @@ override MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.GetHashCode() -> i
 override MediaPipeNet.Tasks.Vision.VisionTaskOptions<TResult>.ToString() -> string!
 override sealed MediaPipeNet.Tasks.Vision.FaceDetectorOptions.Equals(MediaPipeNet.Tasks.Vision.VisionTaskOptions<MediaPipeNet.Tasks.Vision.FaceDetectionResult!>? other) -> bool
 override sealed MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.Equals(MediaPipeNet.Tasks.Vision.VisionTaskOptions<MediaPipeNet.Tasks.Vision.FaceLandmarkResult!>? other) -> bool
+override sealed MediaPipeNet.Tasks.Vision.FaceStylizerOptions.Equals(MediaPipeNet.Tasks.Vision.VisionTaskOptions<MediaPipeNet.Tasks.Vision.FaceStylizerResult!>? other) -> bool
 override sealed MediaPipeNet.Tasks.Vision.GestureRecognizerOptions.Equals(MediaPipeNet.Tasks.Vision.VisionTaskOptions<MediaPipeNet.Tasks.Vision.GestureRecognitionResult!>? other) -> bool
 override sealed MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.Equals(MediaPipeNet.Tasks.Vision.VisionTaskOptions<MediaPipeNet.Tasks.Vision.HandLandmarkResult!>? other) -> bool
 override sealed MediaPipeNet.Tasks.Vision.HolisticLandmarkerOptions.Equals(MediaPipeNet.Tasks.Vision.VisionTaskOptions<MediaPipeNet.Tasks.Vision.HolisticResult!>? other) -> bool
@@ -854,16 +898,24 @@ static MediaPipeNet.Tasks.Vision.FaceDetector.Create(MediaPipeNet.Tasks.Vision.F
 static MediaPipeNet.Tasks.Vision.FaceDetector.CreateAsync(MediaPipeNet.Tasks.Vision.FaceDetectorOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.FaceDetector!>!
 static MediaPipeNet.Tasks.Vision.FaceDetectorOptions.operator !=(MediaPipeNet.Tasks.Vision.FaceDetectorOptions? left, MediaPipeNet.Tasks.Vision.FaceDetectorOptions? right) -> bool
 static MediaPipeNet.Tasks.Vision.FaceDetectorOptions.operator ==(MediaPipeNet.Tasks.Vision.FaceDetectorOptions? left, MediaPipeNet.Tasks.Vision.FaceDetectorOptions? right) -> bool
-static MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Empty.get -> MediaPipeNet.Tasks.Vision.FaceLandmarkResult!
-static MediaPipeNet.Tasks.Vision.FaceLandmarkResult.operator !=(MediaPipeNet.Tasks.Vision.FaceLandmarkResult? left, MediaPipeNet.Tasks.Vision.FaceLandmarkResult? right) -> bool
-static MediaPipeNet.Tasks.Vision.FaceLandmarkResult.operator ==(MediaPipeNet.Tasks.Vision.FaceLandmarkResult? left, MediaPipeNet.Tasks.Vision.FaceLandmarkResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.FaceLandmarker.BlendshapeNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static MediaPipeNet.Tasks.Vision.FaceLandmarker.Create(MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions? options = null) -> MediaPipeNet.Tasks.Vision.FaceLandmarker!
 static MediaPipeNet.Tasks.Vision.FaceLandmarker.CreateAsync(MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.FaceLandmarker!>!
 static MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.operator !=(MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions? left, MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions? right) -> bool
 static MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions.operator ==(MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions? left, MediaPipeNet.Tasks.Vision.FaceLandmarkerOptions? right) -> bool
+static MediaPipeNet.Tasks.Vision.FaceLandmarkResult.Empty.get -> MediaPipeNet.Tasks.Vision.FaceLandmarkResult!
+static MediaPipeNet.Tasks.Vision.FaceLandmarkResult.operator !=(MediaPipeNet.Tasks.Vision.FaceLandmarkResult? left, MediaPipeNet.Tasks.Vision.FaceLandmarkResult? right) -> bool
+static MediaPipeNet.Tasks.Vision.FaceLandmarkResult.operator ==(MediaPipeNet.Tasks.Vision.FaceLandmarkResult? left, MediaPipeNet.Tasks.Vision.FaceLandmarkResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.FaceLandmarks.operator !=(MediaPipeNet.Tasks.Vision.FaceLandmarks? left, MediaPipeNet.Tasks.Vision.FaceLandmarks? right) -> bool
 static MediaPipeNet.Tasks.Vision.FaceLandmarks.operator ==(MediaPipeNet.Tasks.Vision.FaceLandmarks? left, MediaPipeNet.Tasks.Vision.FaceLandmarks? right) -> bool
+static MediaPipeNet.Tasks.Vision.FaceStylizer.ComputeFaceRect(System.Collections.Generic.IReadOnlyList<MediaPipeNet.NormalizedLandmark>! landmarks, int imageWidth, int imageHeight) -> MediaPipeNet.NormalizedRect
+static MediaPipeNet.Tasks.Vision.FaceStylizer.Create(MediaPipeNet.Tasks.Vision.FaceStylizerOptions? options = null) -> MediaPipeNet.Tasks.Vision.FaceStylizer!
+static MediaPipeNet.Tasks.Vision.FaceStylizer.CreateAsync(MediaPipeNet.Tasks.Vision.FaceStylizerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.FaceStylizer!>!
+static MediaPipeNet.Tasks.Vision.FaceStylizerOptions.operator !=(MediaPipeNet.Tasks.Vision.FaceStylizerOptions? left, MediaPipeNet.Tasks.Vision.FaceStylizerOptions? right) -> bool
+static MediaPipeNet.Tasks.Vision.FaceStylizerOptions.operator ==(MediaPipeNet.Tasks.Vision.FaceStylizerOptions? left, MediaPipeNet.Tasks.Vision.FaceStylizerOptions? right) -> bool
+static MediaPipeNet.Tasks.Vision.FaceStylizerResult.Empty.get -> MediaPipeNet.Tasks.Vision.FaceStylizerResult!
+static MediaPipeNet.Tasks.Vision.FaceStylizerResult.operator !=(MediaPipeNet.Tasks.Vision.FaceStylizerResult? left, MediaPipeNet.Tasks.Vision.FaceStylizerResult? right) -> bool
+static MediaPipeNet.Tasks.Vision.FaceStylizerResult.operator ==(MediaPipeNet.Tasks.Vision.FaceStylizerResult? left, MediaPipeNet.Tasks.Vision.FaceStylizerResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.GestureRecognitionResult.Empty.get -> MediaPipeNet.Tasks.Vision.GestureRecognitionResult!
 static MediaPipeNet.Tasks.Vision.GestureRecognitionResult.operator !=(MediaPipeNet.Tasks.Vision.GestureRecognitionResult? left, MediaPipeNet.Tasks.Vision.GestureRecognitionResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.GestureRecognitionResult.operator ==(MediaPipeNet.Tasks.Vision.GestureRecognitionResult? left, MediaPipeNet.Tasks.Vision.GestureRecognitionResult? right) -> bool
@@ -872,13 +924,13 @@ static MediaPipeNet.Tasks.Vision.GestureRecognizer.CreateAsync(MediaPipeNet.Task
 static MediaPipeNet.Tasks.Vision.GestureRecognizerOptions.operator !=(MediaPipeNet.Tasks.Vision.GestureRecognizerOptions? left, MediaPipeNet.Tasks.Vision.GestureRecognizerOptions? right) -> bool
 static MediaPipeNet.Tasks.Vision.GestureRecognizerOptions.operator ==(MediaPipeNet.Tasks.Vision.GestureRecognizerOptions? left, MediaPipeNet.Tasks.Vision.GestureRecognizerOptions? right) -> bool
 static MediaPipeNet.Tasks.Vision.Graph.VisionCalculators.AddVisionCalculators(this MediaPipeNet.Framework.Config.CalculatorRegistry! registry, MediaPipeNet.Tasks.BaseOptions? baseOptions = null) -> MediaPipeNet.Framework.Config.CalculatorRegistry!
-static MediaPipeNet.Tasks.Vision.HandLandmarkResult.Empty.get -> MediaPipeNet.Tasks.Vision.HandLandmarkResult!
-static MediaPipeNet.Tasks.Vision.HandLandmarkResult.operator !=(MediaPipeNet.Tasks.Vision.HandLandmarkResult? left, MediaPipeNet.Tasks.Vision.HandLandmarkResult? right) -> bool
-static MediaPipeNet.Tasks.Vision.HandLandmarkResult.operator ==(MediaPipeNet.Tasks.Vision.HandLandmarkResult? left, MediaPipeNet.Tasks.Vision.HandLandmarkResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.HandLandmarker.Create(MediaPipeNet.Tasks.Vision.HandLandmarkerOptions? options = null) -> MediaPipeNet.Tasks.Vision.HandLandmarker!
 static MediaPipeNet.Tasks.Vision.HandLandmarker.CreateAsync(MediaPipeNet.Tasks.Vision.HandLandmarkerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.HandLandmarker!>!
 static MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.operator !=(MediaPipeNet.Tasks.Vision.HandLandmarkerOptions? left, MediaPipeNet.Tasks.Vision.HandLandmarkerOptions? right) -> bool
 static MediaPipeNet.Tasks.Vision.HandLandmarkerOptions.operator ==(MediaPipeNet.Tasks.Vision.HandLandmarkerOptions? left, MediaPipeNet.Tasks.Vision.HandLandmarkerOptions? right) -> bool
+static MediaPipeNet.Tasks.Vision.HandLandmarkResult.Empty.get -> MediaPipeNet.Tasks.Vision.HandLandmarkResult!
+static MediaPipeNet.Tasks.Vision.HandLandmarkResult.operator !=(MediaPipeNet.Tasks.Vision.HandLandmarkResult? left, MediaPipeNet.Tasks.Vision.HandLandmarkResult? right) -> bool
+static MediaPipeNet.Tasks.Vision.HandLandmarkResult.operator ==(MediaPipeNet.Tasks.Vision.HandLandmarkResult? left, MediaPipeNet.Tasks.Vision.HandLandmarkResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.HandLandmarks.operator !=(MediaPipeNet.Tasks.Vision.HandLandmarks? left, MediaPipeNet.Tasks.Vision.HandLandmarks? right) -> bool
 static MediaPipeNet.Tasks.Vision.HandLandmarks.operator ==(MediaPipeNet.Tasks.Vision.HandLandmarks? left, MediaPipeNet.Tasks.Vision.HandLandmarks? right) -> bool
 static MediaPipeNet.Tasks.Vision.HolisticLandmarker.Create(MediaPipeNet.Tasks.Vision.HolisticLandmarkerOptions? options = null) -> MediaPipeNet.Tasks.Vision.HolisticLandmarker!
@@ -922,13 +974,13 @@ static MediaPipeNet.Tasks.Vision.ObjectDetector.Create(MediaPipeNet.Tasks.Vision
 static MediaPipeNet.Tasks.Vision.ObjectDetector.CreateAsync(MediaPipeNet.Tasks.Vision.ObjectDetectorOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.ObjectDetector!>!
 static MediaPipeNet.Tasks.Vision.ObjectDetectorOptions.operator !=(MediaPipeNet.Tasks.Vision.ObjectDetectorOptions? left, MediaPipeNet.Tasks.Vision.ObjectDetectorOptions? right) -> bool
 static MediaPipeNet.Tasks.Vision.ObjectDetectorOptions.operator ==(MediaPipeNet.Tasks.Vision.ObjectDetectorOptions? left, MediaPipeNet.Tasks.Vision.ObjectDetectorOptions? right) -> bool
-static MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Empty.get -> MediaPipeNet.Tasks.Vision.PoseLandmarkResult!
-static MediaPipeNet.Tasks.Vision.PoseLandmarkResult.operator !=(MediaPipeNet.Tasks.Vision.PoseLandmarkResult? left, MediaPipeNet.Tasks.Vision.PoseLandmarkResult? right) -> bool
-static MediaPipeNet.Tasks.Vision.PoseLandmarkResult.operator ==(MediaPipeNet.Tasks.Vision.PoseLandmarkResult? left, MediaPipeNet.Tasks.Vision.PoseLandmarkResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.PoseLandmarker.Create(MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions? options = null) -> MediaPipeNet.Tasks.Vision.PoseLandmarker!
 static MediaPipeNet.Tasks.Vision.PoseLandmarker.CreateAsync(MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<MediaPipeNet.Tasks.Vision.PoseLandmarker!>!
 static MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.operator !=(MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions? left, MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions? right) -> bool
 static MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions.operator ==(MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions? left, MediaPipeNet.Tasks.Vision.PoseLandmarkerOptions? right) -> bool
+static MediaPipeNet.Tasks.Vision.PoseLandmarkResult.Empty.get -> MediaPipeNet.Tasks.Vision.PoseLandmarkResult!
+static MediaPipeNet.Tasks.Vision.PoseLandmarkResult.operator !=(MediaPipeNet.Tasks.Vision.PoseLandmarkResult? left, MediaPipeNet.Tasks.Vision.PoseLandmarkResult? right) -> bool
+static MediaPipeNet.Tasks.Vision.PoseLandmarkResult.operator ==(MediaPipeNet.Tasks.Vision.PoseLandmarkResult? left, MediaPipeNet.Tasks.Vision.PoseLandmarkResult? right) -> bool
 static MediaPipeNet.Tasks.Vision.PoseLandmarks.operator !=(MediaPipeNet.Tasks.Vision.PoseLandmarks? left, MediaPipeNet.Tasks.Vision.PoseLandmarks? right) -> bool
 static MediaPipeNet.Tasks.Vision.PoseLandmarks.operator ==(MediaPipeNet.Tasks.Vision.PoseLandmarks? left, MediaPipeNet.Tasks.Vision.PoseLandmarks? right) -> bool
 static MediaPipeNet.Tasks.Vision.Processing.Anchor.operator !=(MediaPipeNet.Tasks.Vision.Processing.Anchor left, MediaPipeNet.Tasks.Vision.Processing.Anchor right) -> bool
@@ -967,10 +1019,10 @@ static MediaPipeNet.Tasks.Vision.Processing.SsdAnchors.Generate(MediaPipeNet.Tas
 static MediaPipeNet.Tasks.Vision.Processing.SsdAnchors.GenerateEfficientDet(int inputSize, int minLevel = 3, int maxLevel = 7, int numScales = 3, float anchorScale = 3) -> MediaPipeNet.Tasks.Vision.Processing.Anchor[]!
 static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.FaceFullRange.get -> MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec!
 static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.FaceShortRange.get -> MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec!
-static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.Palm.get -> MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec!
-static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.Pose.get -> MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec!
 static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.operator !=(MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec? left, MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec? right) -> bool
 static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.operator ==(MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec? left, MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec? right) -> bool
+static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.Palm.get -> MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec!
+static MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec.Pose.get -> MediaPipeNet.Tasks.Vision.Processing.SsdDetectorSpec!
 static MediaPipeNet.Tasks.Vision.RecognizedHand.operator !=(MediaPipeNet.Tasks.Vision.RecognizedHand? left, MediaPipeNet.Tasks.Vision.RecognizedHand? right) -> bool
 static MediaPipeNet.Tasks.Vision.RecognizedHand.operator ==(MediaPipeNet.Tasks.Vision.RecognizedHand? left, MediaPipeNet.Tasks.Vision.RecognizedHand? right) -> bool
 static MediaPipeNet.Tasks.Vision.RegionOfInterest.FromKeypoint(float x, float y) -> MediaPipeNet.Tasks.Vision.RegionOfInterest!

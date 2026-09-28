@@ -55,7 +55,7 @@ static int Help()
     Console.WriteLine("""
 
         OPTIONS
-          --provider auto|cpu|directml|cuda|coreml   Execution provider (default auto)
+          --provider auto|cpu|directml|cuda|coreml|nnapi  Execution provider (default auto)
           --models-dir <dir>                          Directory with the .onnx models
           --threads <n>                               Intra-op threads
           --precision fp32|fp16|int8                  Model precision variant (default fp32)
@@ -243,6 +243,7 @@ static BaseOptions CreateBaseOptions(Args cli)
         "directml" or "dml" => ExecutionProvider.DirectML,
         "cuda" => ExecutionProvider.Cuda,
         "coreml" => ExecutionProvider.CoreML,
+        "nnapi" => ExecutionProvider.Nnapi,
         _ => ExecutionProvider.Auto,
     };
     int threads = int.Parse(cli.Get("--threads") ?? "0", System.Globalization.CultureInfo.InvariantCulture);

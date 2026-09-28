@@ -3,7 +3,7 @@
 > Development tracking · Pelacakan pengembangan — Gravicode Studios, led by Kang Fadhil
 > Roadmap: [PLAN.md](PLAN.md)
 
-**Current version:** `0.3.0` · **Status:** 0.1.0 and 0.3.0 released on nuget.org as `Gravicode.MediaPipeNet.*`; the whole 0.2 and 0.3 roadmap is delivered; CI green on Windows, Linux and macOS.
+**Current version:** `1.0.0` · **Status:** 1.0.0 (first stable release) on nuget.org as `Gravicode.MediaPipeNet.*` after 0.1.0 and 0.3.0; all 1.0 exit criteria met; CI green on Windows, Linux and macOS; docs site on GitHub Pages.
 
 ## Requirements status / Status requirement
 
@@ -11,14 +11,14 @@
 
 | ID | Requirement | Status | Where / Di mana |
 |---|---|---|---|
-| FR-1 | Load ONNX models converted from MediaPipe and run inference | ✅ | `tools/model-conversion`, `OnnxModel` — 25 models (+ 23 FP16/INT8 variants), validated vs TFLite and MediaPipe |
-| FR-2 | Task API: face detection, face mesh, hands, pose, selfie segmentation, object detection | ✅ + extra | 16 tasks: + gestures, holistic, image classification, interactive segmentation, image embedding, audio classification, VAD, text classification, text embedding, language detection |
+| FR-1 | Load ONNX models converted from MediaPipe and run inference | ✅ | `tools/model-conversion`, `OnnxModel` — 27 models (+ 26 FP16/INT8 variants), validated vs TFLite and MediaPipe |
+| FR-2 | Task API: face detection, face mesh, hands, pose, selfie segmentation, object detection | ✅ + extra | 17 tasks: + gestures, holistic, image classification, interactive segmentation, face stylization, image embedding, audio classification, VAD, text classification, text embedding, language detection |
 | FR-3 | Inputs: image files, byte[]/Stream, `Image<Rgba32>`, video via `IFrameSource` | ✅ | `MPImage`, `ImageFileFrameSource`, `MemoryFrameSource`, `WebcamFrameSource`, `VideoFileFrameSource` |
 | FR-4 | Graph API: `ICalculatorNode` + `Packet<T>` streams | ✅ | `MediaPipeNet.Framework` |
 | FR-5 | Streaming with timestamps and packet dropping | ✅ | Timestamp bounds, `MaxInFlight`, queue drop, `LiveStreamProcessor` |
 | FR-6 | Strongly-typed, JSON-serializable results | ✅ | `*Result` records, `MediaPipeJson` |
 | FR-7 | Visualization utilities | ✅ | `MediaPipeNet.Visualization` |
-| FR-8 | CPU fallback, automatic execution provider | ✅ | `ExecutionProviderSelector` (CUDA → DirectML → CoreML → CPU) |
+| FR-8 | CPU fallback, automatic execution provider | ✅ | `ExecutionProviderSelector` (CUDA → DirectML → CoreML → NNAPI → CPU) |
 | FR-9 | Model management: download, cache, NuGet model packages | ✅ | `ModelStore`, `Gravicode.MediaPipeNet.Models.*` (downloads activate once published) |
 | FR-10 | Sync and async APIs | ✅ | `Detect`/`DetectAsync`, `CreateAsync` |
 
@@ -26,7 +26,7 @@
 
 | ID | Requirement | Status | Evidence / Bukti |
 |---|---|---|---|
-| NFR-1 | Face detection < 50 ms @ 640×480 on modern 8-core CPU | ✅ | 8.1 ms on a 2017 4-core i7-8650U (BenchmarkDotNet) |
+| NFR-1 | Face detection < 50 ms @ 640×480 on modern 8-core CPU | ✅ | 8.1–8.3 ms on a 2017 4-core i7-8650U (BenchmarkDotNet, GPU benchmark) — a slower machine than the reference, so the bound holds a fortiori |
 | NFR-2 | Windows / Ubuntu / macOS without code changes | ✅ | CI green on windows-latest, ubuntu-latest, macos-latest (all tests incl. golden) |
 | NFR-3 | ≥ 70 % coverage for Core and Tasks | ✅ | Core 99 %, Imaging 96 %, Inference 91 %, Framework 94 %, Tasks.Core 97 %, Tasks.Vision 91 %, Tasks.Audio 83 %, Tasks.Text 89 % |
 | NFR-4 | Semantic versioning | ✅ | `VersionPrefix`/`VersionSuffix`; public API tracked by PublicApiAnalyzers (API review, M6) |
@@ -37,14 +37,17 @@
 
 ## Deliverables / Hasil kerja
 
-- [x] Solution `MediaPipeNet.slnx` — 15 source projects, 11 model packages, 3 samples, 3 test projects, benchmarks
+- [x] Solution `MediaPipeNet.slnx` — 15 source projects, 12 model packages, 3 samples, 3 test projects, 2 benchmark apps
+      (+ `samples/MediaPipeNet.Maui`, built outside the solution)
 - [x] Model conversion + validation tooling (`tools/model-conversion`)
 - [x] Golden references from official MediaPipe Python (`tools/golden`, `tests/assets/golden`)
-- [x] 159 tests (unit, golden cross-validation v1 + v2, precision variants, custom models, streaming)
-- [x] Samples: `BasicUsage`, `GraphApiDemo`, `MediaPipeNet.Gallery` (Avalonia; ID/EN; light/dark; settings; code per case)
+- [x] 166 tests (unit, golden cross-validation v1 + v2 + face stylizer, precision variants, custom models, streaming)
+- [x] Samples: `BasicUsage`, `GraphApiDemo`, `MediaPipeNet.Gallery` (Avalonia; ID/EN; light/dark; settings; code per case),
+      `MediaPipeNet.Maui` (Android / iOS)
 - [x] CLI `mediapipenet-cli` (dotnet tool, installed and smoke-tested from the local feed)
 - [x] Polyglot notebook `notebooks/MediaPipeNet_QuickStart.ipynb`
-- [x] Documentation EN/ID (16 pages each), README EN/ID, screenshots (23 + examples)
+- [x] Documentation EN/ID (16 pages each), README EN/ID, screenshots (24 + examples); site published by
+      `mediapipenet-docs.yml` to https://dotnetvibecoderz.github.io/Vibe_ML/mediapipenet/
 - [x] NuGet packages build (`dotnet pack`) and consume correctly (verified in a fresh project)
 - [x] GitHub Actions (Vibe_ML root): `mediapipenet-ci.yml` (win/linux/macOS build, test, coverage, pack) and
       `mediapipenet-release.yml` (tag `mediapipenet-v*` → test, pack, push to nuget.org, GitHub Release)
@@ -52,8 +55,30 @@
 - [x] Published 0.1.0 to nuget.org via `mediapipenet-release.yml` (19 packages + symbols), GitHub Release `mediapipenet-v0.1.0`
 - [x] CI green on Windows, Linux and macOS
 - [x] 0.3.0: all 0.2 and 0.3 roadmap items (see [PLAN.md](PLAN.md)), released via tag `mediapipenet-v0.3.0`
+- [x] 1.0.0: face stylizer, NNAPI + MAUI sample, GPU benchmarks, static INT8 evaluation, docs site; API baselines
+      moved to `PublicAPI.Shipped.txt`; released via tag `mediapipenet-v1.0.0`
 
 ## Log
+
+### 2026-09-28 — 1.0.0
+
+- **Face stylizer converted to ONNX** (the TFLite fallback was not needed): the generator is a training-mode GAN —
+  resource variables initialized by a `CALL_ONCE` subgraph are frozen to constants, the Flex `FusedBatchNormV3`
+  (`is_training=True`) is lowered to per-instance normalization, the noise injection becomes `RandomNormalLike`.
+  Golden reference from MediaPipe 0.10.21 (the last Python release with the stylizer, own venv `C:\mpo`), compared as
+  the average of 16 runs at 32×32. The first comparison was off by 5.8 / 255: MediaPipe's alignment output (read
+  through a custom graph output) showed a 3 % larger crop — the stylizer bundle carries a different face mesh
+  (192×192, no attention); converting and using it brought the distance to 2.4 (one-pixel crop-centre rounding left).
+  `FaceStylizer` + `Composite`, FP16/INT8 variants (2.4 / 2.8), DI, CLI `stylize`, Gallery "Create" page.
+- **GPU benchmark** (`benchmarks/MediaPipeNet.GpuBenchmark`, Intel UHD 620): the result check exposed a real bug —
+  with `UseIoBinding` on DirectML every task returned results for empty inputs (ONNX Runtime copies a bound CPU input
+  to the device at bind time). Inputs are now re-bound per run on GPU providers. Integrated-GPU numbers published:
+  DirectML does not beat the CPU for these small models; FP16 helps 5–15 %.
+- **Static INT8** evaluated (`evaluate_static_int8.py`, QOperator/QDQ, MinMax/percentile calibration on real images)
+  for the 5 models without INT8: none reaches cosine 0.99 → not shipped.
+- **Mobile**: `ExecutionProvider.Nnapi`; `samples/MediaPipeNet.Maui` builds for Android (not run on a device — no
+  emulator image on the build machine). Blazor WASM in-browser inference deferred to 1.x (needs an async backend).
+- **Docs site**: `mediapipenet-docs.yml` → GitHub Pages.
 
 ### 2026-09-28 — 0.3.0 (0.2 + 0.3 roadmap)
 

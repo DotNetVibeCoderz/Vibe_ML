@@ -20,9 +20,9 @@ mediapipenet-cli help
 | `mediapipenet-cli info` | Version, ONNX Runtime, available execution providers, model cache. |
 
 Tasks: `faces`, `faces-full`, `face-mesh`, `hands`, `gestures`, `pose`, `holistic`, `segment`,
-`segment-multiclass`, `segment-hair`, `segment-deeplab`, `embed`, `objects`, `classify`.
+`segment-multiclass`, `segment-hair`, `segment-deeplab`, `embed`, `stylize`, `objects`, `classify`.
 
-Common options: `--provider auto|cpu|directml|cuda|coreml`, `--threads N`, `--precision fp32|fp16|int8`,
+Common options: `--provider auto|cpu|directml|cuda|coreml|nnapi`, `--threads N`, `--precision fp32|fp16|int8`,
 `--models-dir DIR`, `--no-download`.
 
 ## Examples

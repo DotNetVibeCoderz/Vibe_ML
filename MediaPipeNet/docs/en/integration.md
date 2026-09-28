@@ -26,7 +26,8 @@ builder.Services
     .AddHolisticLandmarker()
     .AddImageSegmenter()
     .AddObjectDetector()
-    .AddImageClassifier();
+    .AddImageClassifier()
+    .AddFaceStylizer();          // also: AddImageEmbedder, AddInteractiveSegmenter, audio and text tasks
 ```
 
 Tasks are registered as **singletons in image mode** — thread-safe, created on first resolution, disposed with the

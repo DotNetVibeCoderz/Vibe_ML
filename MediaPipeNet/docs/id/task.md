@@ -11,7 +11,7 @@ Semua task mengikuti pola yang sama:
 | `RunningMode.LiveStream` | `DetectLiveStream(image, timestampMs)` → `ResultCallback` | Asinkron; mengembalikan `false` bila frame dibuang. |
 
 (`GestureRecognizer` memakai `Recognize…`, `ImageSegmenter` `Segment…`, `ImageClassifier` `Classify…`,
-`ImageEmbedder` `Embed…`.) Semua method menerima `ImageProcessingOptions(RegionOfInterest, RotationDegrees)` opsional.
+`ImageEmbedder` `Embed…`, `FaceStylizer` `Stylize…`.) Semua method menerima `ImageProcessingOptions(RegionOfInterest, RotationDegrees)` opsional.
 
 **Batch** — setiap task vision juga punya `ProcessBatch(images, options, maxDegreeOfParallelism)` /
 `ProcessBatchAsync(…)` untuk beban offline: gambar diproses paralel pada model yang sama (tiap worker menyewa buffer
@@ -202,6 +202,34 @@ using var segmenter = InteractiveSegmenter.Create(new() { OutputCategoryMask = t
 var potongan = segmenter.Segment(image, RegionOfInterest.FromKeypoint(0.62f, 0.5f)).ConfidenceMask;
 var goresan = RegionOfInterest.FromScribble([new(0.3f, 0.6f), new(0.35f, 0.62f), new(0.4f, 0.6f)]);
 ```
+
+## FaceStylizer
+
+![Stilisasi wajah](../images/gallery-stylize.png)
+
+Menggambar ulang wajah paling menonjol dengan sebuah gaya — BlazeFaceStylizer "color sketch" (256×256) resmi yang
+dikonversi ke ONNX. Pipeline-nya sama dengan MediaPipe: face mesh (mesh 192×192 bawaan stylizer) → mata dan mulut →
+persegi berotasi ala `FaceToRectCalculator` (berpusat di antara mata, bergeser 10 % ke arah mulut, sisi
+max(3,6 × mata-ke-mulut, 4 × mata-ke-mata)) → generator → gambar 256×256. Kepala yang miring hasilnya tetap tegak.
+
+```csharp
+using var stylizer = FaceStylizer.Create(new() { OutputFaceAlignment = true });
+using var hasil = stylizer.Stylize(image);          // dispose: gambar memakai buffer pool
+hasil.StylizedImage?.SaveAsPng("sketsa.png");       // null bila tidak ada wajah
+using var tempel = hasil.Composite(image);          // ditempel kembali ke foto, tepi dihaluskan
+Console.WriteLine(hasil.FaceRect);                  // potongan berotasi, ternormalisasi
+```
+
+| Opsi | Default | |
+|---|---|---|
+| `MinFaceDetectionConfidence` / `MinFacePresenceConfidence` | 0,5 | Sama seperti `FaceLandmarker`. |
+| `OutputFaceAlignment` | false | Kembalikan juga potongan 256×256 yang dilihat model. |
+| `Model` | color sketch | Stylizer lain yang dikonversi dengan `convert_models.py`. |
+
+Generator menyuntikkan noise acak (seperti aslinya), jadi dua kali proses hasilnya sedikit berbeda — di MediaPipe
+juga. Terhadap rata-rata 16 kali proses MediaPipe, selisih keluaran 2,4 / 255 per kanal pada 32×32 (sebaran proses
+MediaPipe sendiri 0,2 di sekitar rata-rata itu; sisanya pergeseran satu piksel pusat potongan yang dibulatkan).
+Varian FP16 (14 MB) dan INT8 (7,6 MB) tetap di bawah 2,8. Cara konversi model: [Model](model.md#face-stylizer).
 
 ## ImageEmbedder
 

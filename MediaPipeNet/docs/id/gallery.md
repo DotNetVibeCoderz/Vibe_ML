@@ -46,6 +46,7 @@ ukuran gambar · ringkasan), **Kode C#** (snippet yang mengikuti nilai opsi saat
 | ![Graph API](../images/gallery-graph.png) | ![Benchmark](../images/gallery-benchmark.png) |
 | ![Model](../images/gallery-models.png) | ![Kamera langsung](../images/gallery-live.png) |
 | ![Segmentasi interaktif](../images/gallery-interactive.png) | ![Embedding gambar](../images/gallery-embed.png) |
+| ![Stilisasi wajah](../images/gallery-stylize.png) | |
 | ![Klasifikasi audio](../images/gallery-audio.png) | ![Pemahaman teks](../images/gallery-text.png) |
 
 ## Desain

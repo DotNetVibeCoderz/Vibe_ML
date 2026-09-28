@@ -860,5 +860,72 @@
         ]
       }
     ]
+  },
+  {
+    "id": "face_stylizer_color_sketch",
+    "file": "face_stylizer_color_sketch.onnx",
+    "source": "face_stylizer_color_sketch.task/face_stylizer.tflite",
+    "bytes": 28237573,
+    "sha256": "f854f242ca2b187d57743b55b30404be5f5af81d6bcff1a0f599d62870086776",
+    "inputs": [
+      {
+        "name": "serving_default_input_2:0",
+        "shape": [
+          -1,
+          256,
+          256,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "StatefulPartitionedCall:0",
+        "shape": [
+          -1,
+          256,
+          256,
+          3
+        ]
+      }
+    ]
+  },
+  {
+    "id": "face_landmarks_detector_192",
+    "file": "face_landmarks_detector_192.onnx",
+    "source": "face_stylizer_color_sketch.task/face_landmarks_detector.tflite",
+    "bytes": 1153831,
+    "sha256": "99f180b280cfa556646a4af64f45eae4c891e9a177701ab23d49289c9fdee11b",
+    "inputs": [
+      {
+        "name": "serving_default_input_28:0",
+        "shape": [
+          1,
+          192,
+          192,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "StatefulPartitionedCall:1",
+        "shape": [
+          1,
+          1,
+          1,
+          1434
+        ]
+      },
+      {
+        "name": "StatefulPartitionedCall:0",
+        "shape": [
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    ]
   }
 ]

@@ -185,7 +185,7 @@ public class IntegrationTests
         services.AddMediaPipeNet(o => { o.ModelDirectory = MediaPipeNet.Tests.TestPaths.Models; o.AllowModelDownload = false; })
             .AddFaceLandmarker().AddHandLandmarker().AddGestureRecognizer().AddPoseLandmarker().AddHolisticLandmarker()
             .AddImageSegmenter(o => o with { Model = SegmenterModel.Hair }).AddObjectDetector()
-            .AddImageEmbedder().AddInteractiveSegmenter()
+            .AddImageEmbedder().AddInteractiveSegmenter().AddFaceStylizer()
             .AddAudioClassifier().AddVoiceActivityDetector()
             .AddTextClassifier(o => o with { Model = MediaPipeNet.Tasks.Text.TextClassifierModel.AverageWord })
             .AddTextEmbedder().AddLanguageDetector();
@@ -193,6 +193,7 @@ public class IntegrationTests
         sp.GetRequiredService<ImageSegmenter>().Labels.Should().Equal("background", "hair");
         sp.GetRequiredService<ImageEmbedder>().Dimension.Should().Be(1024);
         sp.GetRequiredService<InteractiveSegmenter>().Should().NotBeNull();
+        sp.GetRequiredService<FaceStylizer>().Options.Model.Should().BeNull();
         sp.GetRequiredService<MediaPipeNet.Tasks.Audio.AudioClassifier>().Should().NotBeNull();
         sp.GetRequiredService<MediaPipeNet.Tasks.Audio.VoiceActivityDetector>().Should().NotBeNull();
         sp.GetRequiredService<MediaPipeNet.Tasks.Text.TextClassifier>().Classify("great").TopCategory.Should().NotBeNull();

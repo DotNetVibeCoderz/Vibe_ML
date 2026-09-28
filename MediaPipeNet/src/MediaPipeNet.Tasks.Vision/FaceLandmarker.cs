@@ -31,6 +31,12 @@ public sealed record FaceLandmarkerOptions : VisionTaskOptions<FaceLandmarkResul
 
     /// <summary>Smooth landmarks over time in video/live-stream mode (single face). Default true.</summary>
     public bool SmoothLandmarks { get; init; } = true;
+
+    /// <summary>
+    /// Face mesh model. Default <see cref="ModelCatalog.FaceLandmarksDetector"/> (256×256 with attention);
+    /// <see cref="ModelCatalog.FaceLandmarksDetector192"/> is the lighter 192×192 mesh MediaPipe's face stylizer uses.
+    /// </summary>
+    public ModelDescriptor? LandmarksModel { get; init; }
 }
 
 /// <summary>
@@ -85,7 +91,7 @@ public sealed class FaceLandmarker : VisionTaskBase<FaceLandmarkResult>
         _landmarkModel = landmarks;
         _blendshapeModel = blendshapes;
         _landmarksOutput = FindOutput(landmarks, LandmarkCount * 3);
-        _presenceOutput = landmarks.GetOutputIndex("Identity_1");
+        _presenceOutput = FindOutput(landmarks, 1);
         CompleteInitialization();
     }
 
@@ -102,7 +108,7 @@ public sealed class FaceLandmarker : VisionTaskBase<FaceLandmarkResult>
         options ??= new FaceLandmarkerOptions();
         var b = options.BaseOptions;
         var det = await ModelLoader.LoadAsync(b, ModelCatalog.FaceDetectionShortRange, cancellationToken).ConfigureAwait(false);
-        var lm = await ModelLoader.LoadAsync(b, ModelCatalog.FaceLandmarksDetector, cancellationToken).ConfigureAwait(false);
+        var lm = await ModelLoader.LoadAsync(b, options.LandmarksModel ?? ModelCatalog.FaceLandmarksDetector, cancellationToken).ConfigureAwait(false);
         var bs = options.OutputFaceBlendshapes
             ? await ModelLoader.LoadAsync(b, ModelCatalog.FaceBlendshapes, cancellationToken).ConfigureAwait(false)
             : null;

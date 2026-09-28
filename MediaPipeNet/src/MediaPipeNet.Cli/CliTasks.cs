@@ -4,6 +4,7 @@ using MediaPipeNet.Tasks.Vision;
 using MediaPipeNet.Visualization;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using MediaPipeNet.Tasks;
 
 namespace MediaPipeNet.Cli;
@@ -48,6 +49,7 @@ internal static class CliTaskFactory
         ["segment-hair"] = "Hair segmentation",
         ["segment-deeplab"] = "DeepLab v3: 21 PASCAL VOC classes",
         ["embed"] = "Image embedding (MobileNet V3, 1024-D)",
+        ["stylize"] = "Face stylization (color sketch), pasted back onto the face",
         ["objects"] = "Object detection (80 COCO classes)",
         ["classify"] = "Image classification (1000 ImageNet classes)",
     };
@@ -75,6 +77,19 @@ internal static class CliTaskFactory
             ImageEmbedder.Create(new() { BaseOptions = b, RunningMode = mode, L2Normalize = true }), (t, i) => t.Embed(i), (t, i, ts) => t.EmbedForVideo(i, ts),
             r => $"{r.Embedding.Dimension}-D embedding: [{string.Join(", ", r.Embedding.Values.Take(6).Select(v => v.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)))}, ...]",
             (_, _) => { }),
+        "stylize" => new CliTask<FaceStylizer, FaceStylizerResult>(
+            FaceStylizer.Create(new() { BaseOptions = b, RunningMode = mode }), (t, i) => t.Stylize(i), (t, i, ts) => t.StylizeForVideo(i, ts),
+            r => r.FaceRect is { } f
+                ? $"face at ({f.XCenter:F3}, {f.YCenter:F3}), size {f.Width:F3}, rotation {f.Rotation:F2} rad; stylized {r.StylizedImage!.Width}x{r.StylizedImage.Height}"
+                : "no face",
+            (canvas, r) =>
+            {
+                using var original = MPImage.FromImage(canvas);
+                using var composite = r.Composite(original);
+                if (composite is null) return;
+                using var pasted = composite.ToImage();
+                canvas.Mutate(c => c.DrawImage(pasted, 1f));
+            }),
         "face-mesh" => new CliTask<FaceLandmarker, FaceLandmarkResult>(
             FaceLandmarker.Create(new() { BaseOptions = b, RunningMode = mode, OutputFaceBlendshapes = true }), (t, i) => t.Detect(i), (t, i, ts) => t.DetectForVideo(i, ts),
             r => $"{r.Faces.Count} face(s)" + string.Concat(r.Faces.Select(f => "; top blendshapes: " + string.Join(", ", f.Blendshapes!.Where(c => c.CategoryName != "_neutral").OrderByDescending(c => c.Score).Take(3)))),

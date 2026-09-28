@@ -72,6 +72,38 @@
     "min_cosine": 0.996965
   },
   {
+    "id": "face_landmarks_detector_192",
+    "precision": "fp16",
+    "file": "face_landmarks_detector_192.fp16.onnx",
+    "bytes": 613117,
+    "sha256": "30629d0053d32ad91bc37c0709a8bbade93b6855747d8b5430bc704e6067b0c0",
+    "min_cosine": 1.0
+  },
+  {
+    "id": "face_landmarks_detector_192",
+    "precision": "int8",
+    "file": "face_landmarks_detector_192.int8.onnx",
+    "bytes": 383689,
+    "sha256": "fd2167cbd53f7f38c62b7bdc0d26e83630b13776ad10326437b6ee71b996651d",
+    "min_cosine": 0.999919
+  },
+  {
+    "id": "face_stylizer_color_sketch",
+    "precision": "fp16",
+    "file": "face_stylizer_color_sketch.fp16.onnx",
+    "bytes": 14277761,
+    "sha256": "e8cc21f4355d96087c1f9ca81a5be83c04677360740b7ab9230dc5ef061cc110",
+    "min_cosine": 0.999428
+  },
+  {
+    "id": "face_stylizer_color_sketch",
+    "precision": "int8",
+    "file": "face_stylizer_color_sketch.int8.onnx",
+    "bytes": 7614233,
+    "sha256": "4a5673818d3e90299950acedee78f7b9f01cd852fdf7dd4167a24cd017a99fac",
+    "min_cosine": 0.994637
+  },
+  {
     "id": "hand_landmarks_detector",
     "precision": "fp16",
     "file": "hand_landmarks_detector.fp16.onnx",

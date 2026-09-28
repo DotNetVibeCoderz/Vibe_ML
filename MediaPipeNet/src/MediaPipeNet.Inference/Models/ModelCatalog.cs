@@ -26,6 +26,8 @@ public static partial class ModelCatalog
     public const string AudioPackage = "Gravicode.MediaPipeNet.Models.Audio";
     /// <summary>NuGet package holding the text models.</summary>
     public const string TextPackage = "Gravicode.MediaPipeNet.Models.Text";
+    /// <summary>NuGet package holding the face stylizer model.</summary>
+    public const string FaceStylizerPackage = "Gravicode.MediaPipeNet.Models.FaceStylizer";
 
     private const string Mp = "https://storage.googleapis.com/mediapipe-models";
 
@@ -143,6 +145,21 @@ public static partial class ModelCatalog
         "acbd5aca6e65b56aa759c4bdb31fc0665be5858d13283768ff31f9d02c4455d1", 12_388_061, SegmentationPackage,
         "MagicTouch", $"{Mp}/interactive_segmenter/magic_touch/float32/latest/magic_touch.tflite");
 
+    /// <summary>Face mesh landmark model (192×192, 478 landmarks, no attention): the mesh bundled with MediaPipe's face stylizer.</summary>
+    public static ModelDescriptor FaceLandmarksDetector192 { get; } = new(
+        "face_landmarks_detector_192", "face_landmarks_detector_192.onnx",
+        "99f180b280cfa556646a4af64f45eae4c891e9a177701ab23d49289c9fdee11b", 1_153_831, FaceStylizerPackage,
+        "Face Mesh 192 (stylizer)", $"{Mp}/face_stylizer/blaze_face_stylizer/float32/latest/face_stylizer_color_sketch.task");
+
+    /// <summary>
+    /// BlazeFaceStylizer "color sketch" generator (256×256 aligned face in, stylized face out). Converted with
+    /// its training-mode batch norms lowered to per-instance normalization and its noise injection kept.
+    /// </summary>
+    public static ModelDescriptor FaceStylizerColorSketch { get; } = new(
+        "face_stylizer_color_sketch", "face_stylizer_color_sketch.onnx",
+        "f854f242ca2b187d57743b55b30404be5f5af81d6bcff1a0f599d62870086776", 28_237_573, FaceStylizerPackage,
+        "Face Stylizer (color sketch)", $"{Mp}/face_stylizer/blaze_face_stylizer/float32/latest/face_stylizer_color_sketch.task");
+
     /// <summary>MobileNet V3 small image embedder (224×224, 1024-D).</summary>
     public static ModelDescriptor MobileNetV3SmallEmbedder { get; } = new(
         "mobilenet_v3_small_embedder", "mobilenet_v3_small_embedder.onnx",
@@ -187,7 +204,7 @@ public static partial class ModelCatalog
         PoseDetection, PoseLandmarksLite, PoseLandmarksFull,
         SelfieSegmenter, EfficientDetLite0, EfficientNetLite0,
         FaceDetectionFullRange, HandRoiRefinement,
-        SelfieMulticlass, HairSegmenter, DeepLabV3, MagicTouch, MobileNetV3SmallEmbedder,
+        SelfieMulticlass, HairSegmenter, DeepLabV3, MagicTouch, MobileNetV3SmallEmbedder, FaceStylizerColorSketch, FaceLandmarksDetector192,
         YamNet, BertClassifier, AverageWordClassifier, BertEmbedder, LanguageDetector,
     ];
 

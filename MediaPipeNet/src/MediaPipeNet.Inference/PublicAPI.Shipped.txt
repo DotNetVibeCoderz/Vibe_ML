@@ -1,4 +1,17 @@
 #nullable enable
+const MediaPipeNet.Inference.Models.BundledModelProvider.FolderName = "models" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.AudioPackage = "Gravicode.MediaPipeNet.Models.Audio" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.FacePackage = "Gravicode.MediaPipeNet.Models.Face" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.FaceStylizerPackage = "Gravicode.MediaPipeNet.Models.FaceStylizer" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.HandPackage = "Gravicode.MediaPipeNet.Models.Hand" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.ImageClassificationPackage = "Gravicode.MediaPipeNet.Models.ImageClassification" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.ImageEmbeddingPackage = "Gravicode.MediaPipeNet.Models.ImageEmbedding" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.ObjectDetectionPackage = "Gravicode.MediaPipeNet.Models.ObjectDetection" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.PosePackage = "Gravicode.MediaPipeNet.Models.Pose" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.QuantizedPackage = "Gravicode.MediaPipeNet.Models.Quantized" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.SegmentationPackage = "Gravicode.MediaPipeNet.Models.Segmentation" -> string!
+const MediaPipeNet.Inference.Models.ModelCatalog.TextPackage = "Gravicode.MediaPipeNet.Models.Text" -> string!
+const MediaPipeNet.Inference.Models.ModelStore.ModelDirectoryEnvironmentVariable = "MEDIAPIPENET_MODELS" -> string!
 MediaPipeNet.Inference.DynamicTensor
 MediaPipeNet.Inference.DynamicTensor.Data.get -> System.Array!
 MediaPipeNet.Inference.DynamicTensor.Data.init -> void
@@ -16,6 +29,7 @@ MediaPipeNet.Inference.ExecutionProvider.CoreML = 4 -> MediaPipeNet.Inference.Ex
 MediaPipeNet.Inference.ExecutionProvider.Cpu = 1 -> MediaPipeNet.Inference.ExecutionProvider
 MediaPipeNet.Inference.ExecutionProvider.Cuda = 2 -> MediaPipeNet.Inference.ExecutionProvider
 MediaPipeNet.Inference.ExecutionProvider.DirectML = 3 -> MediaPipeNet.Inference.ExecutionProvider
+MediaPipeNet.Inference.ExecutionProvider.Nnapi = 5 -> MediaPipeNet.Inference.ExecutionProvider
 MediaPipeNet.Inference.ExecutionProviderSelector
 MediaPipeNet.Inference.InferenceContext
 MediaPipeNet.Inference.InferenceContext.Dispose() -> void
@@ -162,18 +176,6 @@ MediaPipeNet.Inference.TensorSpec.Name.init -> void
 MediaPipeNet.Inference.TensorSpec.Shape.get -> System.Collections.Generic.IReadOnlyList<int>!
 MediaPipeNet.Inference.TensorSpec.Shape.init -> void
 MediaPipeNet.Inference.TensorSpec.TensorSpec(string! Name, System.Collections.Generic.IReadOnlyList<int>! Shape, MediaPipeNet.Inference.TensorDataType ElementType = MediaPipeNet.Inference.TensorDataType.Float32) -> void
-const MediaPipeNet.Inference.Models.BundledModelProvider.FolderName = "models" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.AudioPackage = "Gravicode.MediaPipeNet.Models.Audio" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.FacePackage = "Gravicode.MediaPipeNet.Models.Face" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.HandPackage = "Gravicode.MediaPipeNet.Models.Hand" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.ImageClassificationPackage = "Gravicode.MediaPipeNet.Models.ImageClassification" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.ImageEmbeddingPackage = "Gravicode.MediaPipeNet.Models.ImageEmbedding" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.ObjectDetectionPackage = "Gravicode.MediaPipeNet.Models.ObjectDetection" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.PosePackage = "Gravicode.MediaPipeNet.Models.Pose" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.QuantizedPackage = "Gravicode.MediaPipeNet.Models.Quantized" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.SegmentationPackage = "Gravicode.MediaPipeNet.Models.Segmentation" -> string!
-const MediaPipeNet.Inference.Models.ModelCatalog.TextPackage = "Gravicode.MediaPipeNet.Models.Text" -> string!
-const MediaPipeNet.Inference.Models.ModelStore.ModelDirectoryEnvironmentVariable = "MEDIAPIPENET_MODELS" -> string!
 override MediaPipeNet.Inference.DynamicTensor.GetHashCode() -> int
 override MediaPipeNet.Inference.InferenceOptions.Equals(object? obj) -> bool
 override MediaPipeNet.Inference.InferenceOptions.GetHashCode() -> int
@@ -208,6 +210,8 @@ static MediaPipeNet.Inference.Models.ModelCatalog.FaceBlendshapes.get -> MediaPi
 static MediaPipeNet.Inference.Models.ModelCatalog.FaceDetectionFullRange.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
 static MediaPipeNet.Inference.Models.ModelCatalog.FaceDetectionShortRange.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
 static MediaPipeNet.Inference.Models.ModelCatalog.FaceLandmarksDetector.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.FaceLandmarksDetector192.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
+static MediaPipeNet.Inference.Models.ModelCatalog.FaceStylizerColorSketch.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
 static MediaPipeNet.Inference.Models.ModelCatalog.Find(string! idOrFileName) -> MediaPipeNet.Inference.Models.ModelDescriptor?
 static MediaPipeNet.Inference.Models.ModelCatalog.GestureEmbedder.get -> MediaPipeNet.Inference.Models.ModelDescriptor!
 static MediaPipeNet.Inference.Models.ModelCatalog.GetVariant(MediaPipeNet.Inference.Models.ModelDescriptor! model, MediaPipeNet.Inference.ModelPrecision precision) -> MediaPipeNet.Inference.Models.ModelDescriptor?

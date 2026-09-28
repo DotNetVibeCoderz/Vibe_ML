@@ -20,5 +20,8 @@ internal static class TestPaths
 
     public static string GoldenV2 => Path.Combine(Root, "tests", "assets", "golden", "mediapipe_python_reference_v2.json");
 
+    /// <summary>Face stylizer golden reference (tools/golden/generate_golden_stylizer.py, MediaPipe 0.10.21).</summary>
+    public static string GoldenFaceStylizer => Path.Combine(Root, "tests", "assets", "golden", "mediapipe_face_stylizer_reference.json");
+
     public static string Audio(string name) => Path.Combine(Root, "tests", "assets", "audio", name);
 }

@@ -394,6 +394,11 @@ public sealed class InferenceContext : IDisposable
     {
         if (_binding is not null)
         {
+            // BindInput copies a CPU buffer to the device of a GPU provider at bind time, so on DirectML / CUDA /
+            // CoreML / NNAPI the inputs are re-bound before every run to pick up the new contents. On the CPU
+            // provider the binding shares the buffer and stays valid.
+            if (_model.Provider != ExecutionProvider.Cpu)
+                for (int i = 0; i < _inputs.Length; i++) _binding.BindInput(_inputNames[i], _inputValues[i]);
             _model.Session.RunWithBinding(_runOptions, _binding);
             return;
         }

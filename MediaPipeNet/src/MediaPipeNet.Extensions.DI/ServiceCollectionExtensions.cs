@@ -122,6 +122,10 @@ public static class ServiceCollectionExtensions
     public static IMediaPipeNetBuilder AddInteractiveSegmenter(this IMediaPipeNetBuilder builder, Func<InteractiveSegmenterOptions, InteractiveSegmenterOptions>? configure = null) =>
         Add(builder, b => InteractiveSegmenter.Create(Configure(new InteractiveSegmenterOptions { BaseOptions = b }, configure)));
 
+    /// <summary>Registers a <see cref="FaceStylizer"/> singleton.</summary>
+    public static IMediaPipeNetBuilder AddFaceStylizer(this IMediaPipeNetBuilder builder, Func<FaceStylizerOptions, FaceStylizerOptions>? configure = null) =>
+        Add(builder, b => FaceStylizer.Create(Configure(new FaceStylizerOptions { BaseOptions = b }, configure)));
+
     /// <summary>Registers an <see cref="AudioClassifier"/> singleton (audio-clips mode).</summary>
     public static IMediaPipeNetBuilder AddAudioClassifier(this IMediaPipeNetBuilder builder, Func<AudioClassifierOptions, AudioClassifierOptions>? configure = null) =>
         Add(builder, b => AudioClassifier.Create(Configure(new AudioClassifierOptions { BaseOptions = b }, configure)));

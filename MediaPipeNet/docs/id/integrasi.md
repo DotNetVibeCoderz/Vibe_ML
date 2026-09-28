@@ -26,7 +26,8 @@ builder.Services
     .AddHolisticLandmarker()
     .AddImageSegmenter()
     .AddObjectDetector()
-    .AddImageClassifier();
+    .AddImageClassifier()
+    .AddFaceStylizer();          // juga: AddImageEmbedder, AddInteractiveSegmenter, task audio dan teks
 ```
 
 Task didaftarkan sebagai **singleton dalam mode image** — thread-safe, dibuat saat pertama di-resolve, di-dispose

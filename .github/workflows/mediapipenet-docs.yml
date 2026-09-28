@@ -1,0 +1,62 @@
+# MediaPipe.NET - documentation site (English & Bahasa Indonesia) on GitHub Pages.
+#
+# Builds MediaPipeNet/mkdocs.yml with Material for MkDocs and publishes it under
+# https://dotnetvibecoderz.github.io/Vibe_ML/mediapipenet/ (the repository root of the Pages site only
+# redirects there, leaving room for the other projects of this monorepo).
+#
+# Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+
+name: MediaPipe.NET docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'MediaPipeNet/docs/**'
+      - 'MediaPipeNet/mkdocs.yml'
+      - '.github/workflows/mediapipenet-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: MediaPipeNet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install MkDocs
+        run: pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10"
+      - name: Build site
+        run: |
+          mkdocs build --site-dir ../_site/mediapipenet
+          cat > ../_site/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8"><title>Vibe_ML</title>
+          <meta http-equiv="refresh" content="0; url=mediapipenet/">
+          <a href="mediapipenet/">MediaPipe.NET documentation</a>
+          EOF
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}mediapipenet/
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

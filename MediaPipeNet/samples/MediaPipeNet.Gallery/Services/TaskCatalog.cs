@@ -423,6 +423,60 @@ public static class TaskCatalog
         },
         new GalleryTask
         {
+            Id = "stylize", Category = "create",
+            TitleEn = "Face stylizer", TitleId = "Stilisasi wajah",
+            BlurbEn = "Redraws the most prominent face as a color sketch. The face is aligned upright from its eyes and mouth first, exactly as MediaPipe does, so tilted heads work too.",
+            BlurbId = "Menggambar ulang wajah paling menonjol sebagai sketsa berwarna. Wajah diluruskan dulu dari posisi mata dan mulut, persis seperti MediaPipe, sehingga kepala yang miring pun tetap berhasil.",
+            ModelLabel = "face_stylizer_color_sketch · 256² · GAN",
+            Samples = ["portrait.jpg", "pose.jpg"],
+            SupportsLive = false,
+            Options =
+            [
+                new("paste", "Paste back onto the photo", "Tempel kembali ke foto", OptionKind.Toggle, 0),
+                new("rect", "Show the alignment square", "Tampilkan kotak penyelarasan", OptionKind.Toggle, 1),
+            ],
+            Create = (o, mode, b) => FaceStylizer.Create(new() { BaseOptions = b, RunningMode = mode }),
+            Run = (t, img, ts, o) =>
+            {
+                var d = (FaceStylizer)t;
+                using var r = ts is { } v ? d.StylizeForVideo(img, v) : d.Stylize(img);
+                var overlay = new Overlay();
+                if (r.FaceRect is not { } rect)
+                    return new GalleryOutput(overlay, [], "{}", Loc.Pick("no face found", "wajah tidak ditemukan"));
+                MPImage composed;
+                if (o.B("paste"))
+                {
+                    composed = r.Composite(img)!;
+                    if (o.B("rect")) overlay.AddRoi(rect, img.Width, img.Height, Overlay.Amber);
+                }
+                else
+                {
+                    composed = r.StylizedImage!.Clone();
+                }
+                var rows = new List<ResultRow>
+                {
+                    new(Loc.Pick("Face centre", "Pusat wajah"), $"({rect.XCenter:F3}, {rect.YCenter:F3})"),
+                    new(Loc.Pick("Crop size", "Ukuran potongan"), $"{rect.Width * img.Width:F0} px"),
+                    new(Loc.Pick("Rotation", "Rotasi"), $"{rect.Rotation * 180 / MathF.PI:F1}°"),
+                    new(Loc.Pick("Output", "Keluaran"), $"{r.StylizedImage!.Width}×{r.StylizedImage.Height}"),
+                };
+                return new GalleryOutput(overlay, rows, r.ToJson(indented: true), Loc.Pick("face stylized", "wajah distilisasi"), composed);
+            },
+            Code = o => $$"""
+                using var stylizer = FaceStylizer.Create();
+                using var image = MPImage.Load("portrait.jpg");
+
+                using var result = stylizer.Stylize(image);
+                result.StylizedImage?.SaveAsPng("sketch.png");        // the aligned 256×256 face
+                Console.WriteLine(result.FaceRect);                    // where it was cropped
+
+                // Paste the sketch back onto the photo (feathered edges).
+                using var pasted = result.Composite(image);
+                pasted?.SaveAsPng("portrait-sketch.png");
+                """,
+        },
+        new GalleryTask
+        {
             Id = "embed", Category = "understand",
             TitleEn = "Image embedding", TitleId = "Embedding gambar",
             BlurbEn = "MobileNet V3 turns an image into a 1,024-number fingerprint. Similar pictures get similar vectors — the basis of visual search and de-duplication.",

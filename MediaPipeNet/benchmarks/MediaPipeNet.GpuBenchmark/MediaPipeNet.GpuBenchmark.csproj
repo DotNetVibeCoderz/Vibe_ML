@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    GPU latency table (DirectML). A separate app because the DirectML build of ONNX Runtime replaces the CPU
+    build: an application references either MediaPipeNet or MediaPipeNet.DirectML, never both.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Optimize>true</Optimize>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MediaPipeNet.DirectML\MediaPipeNet.DirectML.csproj" />
+    <ProjectReference Include="..\..\models\MediaPipeNet.Models.All\MediaPipeNet.Models.All.csproj" />
+    <ProjectReference Include="..\..\models\MediaPipeNet.Models.Quantized\MediaPipeNet.Models.Quantized.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\tests\assets\images\*.jpg" Link="images\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

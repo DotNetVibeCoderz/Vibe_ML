@@ -95,7 +95,7 @@ RENAMES = {
     "deeplab_v3.tflite": "deeplab_v3",
     "magic_touch.tflite": "magic_touch",
     "face_stylizer_color_sketch.task/face_detector.tflite": None,
-    "face_stylizer_color_sketch.task/face_landmarks_detector.tflite": None,
+    "face_stylizer_color_sketch.task/face_landmarks_detector.tflite": "face_landmarks_detector_192",  # 192x192 mesh the stylizer aligns with
     "face_stylizer_color_sketch.task/face_stylizer.tflite": "face_stylizer_color_sketch",
     "yamnet.tflite": "yamnet",
     "bert_classifier.tflite": "bert_classifier",
@@ -167,6 +167,55 @@ def densify(path: pathlib.Path) -> pathlib.Path:
     return out
 
 
+def freeze_resource_variables(path: pathlib.Path) -> pathlib.Path:
+    """
+    The face stylizer (a GAN generator exported in training mode) keeps its batch-norm moving averages in
+    resource variables: a CALL_ONCE init subgraph assigns the initial values (VAR_HANDLE + ASSIGN_VARIABLE),
+    and the main graph reads them (READ_VARIABLE) and writes updates back. tf2onnx cannot follow resources,
+    so every READ_VARIABLE output becomes a constant holding the variable's initial value, and the state
+    ops and init subgraph are dropped. The written-back moving averages are never read by the output.
+    """
+    import numpy as np
+    from tensorflow.lite.python import schema_py_generated as schema
+    from tensorflow.lite.tools import flatbuffer_utils
+
+    model = flatbuffer_utils.read_model(str(path))
+    names = {v: k for k, v in schema.BuiltinOperator.__dict__.items() if not k.startswith("_")}
+
+    def opname(op):
+        c = model.operatorCodes[op.opcodeIndex]
+        return c.customCode.decode() if c.customCode else names.get(max(c.builtinCode, c.deprecatedBuiltinCode))
+
+    main_graph = model.subgraphs[0]
+    if not any(opname(op) == "CALL_ONCE" for op in main_graph.operators):
+        return path
+    initial = {}  # shared variable name -> tensor holding its initial value
+    for sub in model.subgraphs[1:]:
+        handles = {op.outputs[0]: op.builtinOptions.sharedName for op in sub.operators if opname(op) == "VAR_HANDLE"}
+        for op in sub.operators:
+            if opname(op) == "ASSIGN_VARIABLE":
+                initial[handles[op.inputs[0]]] = sub.tensors[op.inputs[1]]
+    handles = {op.outputs[0]: op.builtinOptions.sharedName for op in main_graph.operators if opname(op) == "VAR_HANDLE"}
+    kept = []
+    for op in main_graph.operators:
+        name = opname(op)
+        if name in ("CALL_ONCE", "VAR_HANDLE", "ASSIGN_VARIABLE"):
+            continue
+        if name == "READ_VARIABLE":
+            buf = schema.BufferT()
+            buf.data = np.frombuffer(bytes(model.buffers[initial[handles[op.inputs[0]]].buffer].data), np.uint8)
+            model.buffers.append(buf)
+            main_graph.tensors[op.outputs[0]].buffer = len(model.buffers) - 1
+            continue
+        kept.append(op)
+    main_graph.operators = kept
+    model.subgraphs = [main_graph]
+    out = path.with_name(path.stem + "_frozen.tflite")
+    flatbuffer_utils.write_model(model, str(out))
+    print(f"froze {len(initial)} resource variable(s) -> {out.name}")
+    return out
+
+
 def tflite_custom_ops(tflite_path: pathlib.Path) -> dict[str, tuple[str, bytes, list[list[int]]]]:
     """Maps the first output tensor name of every custom op to (op name, custom options, input shapes)."""
     from tensorflow.lite.tools import flatbuffer_utils
@@ -195,10 +244,16 @@ def lower_custom_ops(onnx_path: pathlib.Path, tflite_path: pathlib.Path) -> None
     * MaxPoolingWithArgmax2D     -> MaxPool with Indices output.
     * MaxUnpooling2D             -> MaxUnpool (indices come from the matching MaxPool; both use ONNX's
                                      NCHW index convention, so the pair stays consistent).
+    * FusedBatchNormV3 (training mode, NHWC) -> per-instance normalization over N,H,W with epsilon 0.001:
+                                     (x - mean) / sqrt(var + eps) * scale + offset. The stylizer runs its
+                                     batch norms with is_training=True, so batch statistics, not the
+                                     stored moving averages, normalize the activations.
     """
     import struct
 
+    import numpy as np
     import onnx
+    import onnx.numpy_helper
     from onnx import helper
 
     custom = tflite_custom_ops(tflite_path)
@@ -208,6 +263,28 @@ def lower_custom_ops(onnx_path: pathlib.Path, tflite_path: pathlib.Path) -> None
     changed = []
     for idx, node in enumerate(list(graph.node)):
         op = node.op_type.removeprefix("TFL_")
+        if op == "FusedBatchNormV3":
+            x, scale, offset = node.input[:3]
+            n = (node.name or f"{op}_{idx}").replace(":", "_")
+            eps = f"{n}__eps"
+            graph.initializer.append(onnx.numpy_helper.from_array(np.array(0.001, np.float32), eps))
+            new = [
+                helper.make_node("ReduceMean", [x], [f"{n}__mean"], axes=[0, 1, 2], keepdims=1),
+                helper.make_node("Sub", [x, f"{n}__mean"], [f"{n}__d"]),
+                helper.make_node("Mul", [f"{n}__d", f"{n}__d"], [f"{n}__d2"]),
+                helper.make_node("ReduceMean", [f"{n}__d2"], [f"{n}__var"], axes=[0, 1, 2], keepdims=1),
+                helper.make_node("Add", [f"{n}__var", eps], [f"{n}__ve"]),
+                helper.make_node("Sqrt", [f"{n}__ve"], [f"{n}__std"]),
+                helper.make_node("Div", [f"{n}__d", f"{n}__std"], [f"{n}__n"]),
+                helper.make_node("Mul", [f"{n}__n", scale], [f"{n}__s"]),
+                helper.make_node("Add", [f"{n}__s", offset], [node.output[0]]),
+            ]
+            pos = list(graph.node).index(node)
+            graph.node.remove(node)
+            for k, nn in enumerate(new):
+                graph.node.insert(pos + k, nn)
+            changed.append(op)
+            continue
         if op not in ("Convolution2DTransposeBias", "MaxPoolingWithArgmax2D", "MaxUnpooling2D"):
             continue
         tfl = custom.get(node.output[0])
@@ -256,6 +333,11 @@ def lower_custom_ops(onnx_path: pathlib.Path, tflite_path: pathlib.Path) -> None
         kept_info = [vi for vi in graph.value_info if vi.name not in rewritten or vi.type.tensor_type.elem_type == 1]
         del graph.value_info[:]
         graph.value_info.extend(kept_info)
+        # Constants only the lowered ops consumed (e.g. frozen batch-norm moving averages) are dead now.
+        used = {i for nd in graph.node for i in nd.input} | {o.name for o in graph.output}
+        live = [t for t in graph.initializer if t.name in used]
+        del graph.initializer[:]
+        graph.initializer.extend(live)
         onnx.checker.check_model(model)
         onnx.save(model, str(onnx_path))
         print(f"lowered custom ops in {onnx_path.name}: {sorted(set(changed))}")
@@ -403,7 +485,7 @@ def convert_custom(src: pathlib.Path, model_id: str | None, out: pathlib.Path, o
     dst = out / f"{model_id}.onnx"
     work = out / "_work"
     work.mkdir(exist_ok=True)
-    tfl = densify(src)
+    tfl = freeze_resource_variables(densify(src))
     last_error = None
     for candidate in dict.fromkeys([opset, 14, 15]):  # HardSwish and friends need a newer opset
         try:
@@ -515,7 +597,7 @@ def main() -> int:
         if not dst.exists():
             print(f"convert {logical} -> {dst.name}", flush=True)
             state["use_interpreter"] = model_id not in NO_INTERPRETER
-            tfl = densify(tfl)
+            tfl = freeze_resource_variables(densify(tfl))
             try:
                 if model_id in MANUAL_BUILDERS:
                     MANUAL_BUILDERS[model_id](tfl, dst)

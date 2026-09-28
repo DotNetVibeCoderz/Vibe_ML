@@ -95,18 +95,44 @@ Jalankan sendiri: `dotnet run -c Release --project benchmarks/MediaPipeNet.Bench
 | `CoreML` | `Gravicode.MediaPipeNet` | macOS / Apple silicon |
 | `DirectML` | `Gravicode.MediaPipeNet.DirectML` | Windows, GPU DirectX 12 apa pun |
 | `Cuda` | `Gravicode.MediaPipeNet.Cuda` | Windows/Linux, NVIDIA + CUDA 12 + cuDNN 9 |
+| `Nnapi` | `Microsoft.ML.OnnxRuntime` di aplikasi MAUI | Android 8.1+ (lihat [Platform](platform.md)) |
 
-`ExecutionProvider.Auto` mencoba CUDA → DirectML → CoreML → CPU, melewati provider yang tidak ada di runtime yang
+`ExecutionProvider.Auto` mencoba CUDA → DirectML → CoreML → NNAPI → CPU, melewati provider yang tidak ada di runtime yang
 dimuat atau gagal diinisialisasi (`FallbackToCpu`). Provider yang benar-benar dipakai tersedia di
 `OnnxModel.Provider` dan menjadi tag metrik `mediapipenet.inference.duration`.
 
+### Angka DirectML (GPU terintegrasi)
+
+`benchmarks/MediaPipeNet.GpuBenchmark` (median 30 kali proses, mode image, termasuk pra/pasca-pemrosesan, hasil setiap
+konfigurasi dicek terhadap hasil CPU) pada satu-satunya GPU yang tersedia bagi proyek, **Intel UHD 620** (terintegrasi,
+memori bersama) di samping i7-8650U, ONNX Runtime 1.24.4, dalam ms:
+
+| Task | CPU fp32 | DirectML fp32 | DirectML fp16 | DirectML fp32 + IoBinding |
+|---|---:|---:|---:|---:|
+| FaceDetector | 8,3 | 9,0 | 8,5 | 8,6 |
+| FaceLandmarker | 22,0 | 26,4 | 25,0 | 26,3 |
+| HandLandmarker | 26,7 | 40,6 | 39,9 | 40,5 |
+| PoseLandmarker (full) | 54,3 | 60,2 | 54,0 | 58,6 |
+| ImageSegmenter (multiclass) | 103,5 | 105,9 | 89,6 | 101,7 |
+| ObjectDetector | 45,5 | 67,3 | 61,7 | 67,3 |
+| ImageClassifier | 7,4 | 18,8 | 17,5 | 18,3 |
+| InteractiveSegmenter | 80,4 | 105,3 | 85,3 | 98,1 |
+| FaceStylizer | 455,5 | 468,5 | 414,5 | 465,9 |
+
+- Di GPU terintegrasi DirectML tidak mengalahkan CPU modern untuk model sekecil ini: setiap panggilan membayar salinan
+  host↔device dan dispatch kernel, dan UHD 620 berbagi bandwidth memori dengan CPU. FP16 sedikit membantu (−5 sampai
+  −15 %), paling terasa di model besar (segmentasi, stylizer, MagicTouch). I/O binding tidak menghemat apa pun di sini
+  karena input tetap datang dari memori CPU setiap frame.
+- GPU diskrit (dan CUDA) adalah tempat paket GPU memberi manfaat — terutama stylizer (≈ 1 GFLOP per panggilan),
+  segmentasi, dan beban batch. Proyek tidak punya GPU diskrit untuk diukur; jalankan
+  `dotnet run -c Release --project benchmarks/MediaPipeNet.GpuBenchmark` di GPU Anda (silakan kirim angkanya lewat issue).
+
 Catatan dari pengujian:
 
-- Model MediaPipe berukuran kecil; di GPU **terintegrasi** (Intel UHD 620) DirectML lebih lambat dari CPU (deteksi
-  wajah 16,6 ms vs 8,1 ms) karena overhead transfer. GPU diskrit dan beban batch/background lebih diuntungkan.
-  Ukur dengan halaman Benchmark di Gallery.
 - DirectML tidak mendukung panggilan `Run` konkuren maupun pembuatan sesi konkuren pada satu device; MediaPipe.NET
   menserialisasi keduanya otomatis saat provider DirectML aktif.
 - Gallery memakai provider CPU secara default; ubah provider dan presisi di *Pengaturan*.
 - `UseIoBinding` membuat satu `OrtIoBinding` per konteks pool dan memakainya ulang di setiap run; hasilnya identik
-  (`BatchAndBindingTests`).
+  (`BatchAndBindingTests`). ONNX Runtime menyalin input CPU yang di-bind ke device *saat di-bind*, sehingga pada provider
+  GPU MediaPipe.NET mem-bind ulang input sebelum setiap run (diperbaiki di 1.0 — 0.3 mengembalikan hasil basi dengan
+  DirectML + `UseIoBinding`, yang tertangkap oleh pengecekan hasil di benchmark GPU).
