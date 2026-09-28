@@ -2,7 +2,7 @@
 
 *[English](../hf-gallery.md)*
 
-`samples/HFGallery` adalah aplikasi desktop yang menjalankan sebelas use case HF.Net terhadap model
+`samples/HFGallery` adalah aplikasi desktop yang menjalankan tiga belas use case HF.Net terhadap model
 sungguhan, dan menampilkan hasilnya bersama kode yang menghasilkannya. Tidak ada yang dipalsukan:
 setiap panel yang terlihat adalah keluaran checkpoint yang diunduh dari Hub saat itu juga.
 
@@ -23,7 +23,7 @@ dotnet run --project samples/HFGallery
 
 ---
 
-## Sebelas use case
+## Tiga belas use case
 
 | Use case | Library | Model | Yang ditunjukkan |
 |---|---|---|---|
@@ -35,6 +35,8 @@ dotnet run --project samples/HFGallery
 | Semantic search | GraviTransformers | `bert-base-uncased` | Sekali embed korpus, lalu diperingkat per kueri |
 | Embedding map | GraviTransformers | `bert-base-uncased` | 768 dimensi diproyeksikan ke dua dimensi |
 | Teach it a task | GraviPEFT | `bert-base-uncased` | Adapter LoRA dilatih, lalu dilipat ke dalam bobot |
+| Teach it names | GraviPEFT | `bert-base-uncased` | Adapter LoRA dan token classifier dilatih untuk named entity |
+| Teach it to answer | GraviPEFT | `bert-base-uncased` | Adapter LoRA dan head rentang jawaban dilatih untuk tanya-jawab |
 | Tokenizer | GraviTokenizers | `bert-base-uncased` | Karakter mana menjadi potongan yang mana |
 | Inside a checkpoint | GraviHub | repo apa pun yang punya safetensors | Ke mana sebenarnya 420 MB sebuah model pergi |
 | Diffusion schedules | GraviDiffusers | *tidak ada* | Sisa sinyal pada setiap timestep pelatihan |
@@ -85,6 +87,23 @@ adapter ke dalam bobot lalu mengklasifikasikan masukan itu sekali lagi lewat jal
 dasar. "merged vs not" adalah selisih terbesar antara kedua set probabilitas itu.
 
 ![Teach it a task](../screenshots/hfgallery-lora.png)
+
+## Teach it names
+
+Enam belas kalimat bertag yang disusun dari delapan nama dan delapan kota, lalu sebuah kalimat yang
+tidak memakai satu pun dari mereka. Adapter dan token classifier belajar di mana letak sebuah nama
+dalam kalimat, bukan menghafal daftar nama, dan setiap entity dalam kalimat uji adalah nama yang
+tidak pernah ditunjukkan kepada model.
+
+![Teach it names](../screenshots/hfgallery-lora-names.png)
+
+## Teach it to answer
+
+Dua puluh empat contoh gaya SQuAD, tiga pertanyaan tentang masing-masing dari delapan orang, lalu
+sebuah passage tentang orang lain. Batang-batangnya adalah tiga rentang terbaik; jawabannya disorot
+di tempatnya dalam passage.
+
+![Teach it to answer](../screenshots/hfgallery-lora-answers.png)
 
 ## Inside a checkpoint
 

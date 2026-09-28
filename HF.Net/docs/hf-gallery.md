@@ -2,7 +2,7 @@
 
 *[Bahasa Indonesia](id/hf-gallery.md)*
 
-`samples/HFGallery` is a desktop application that runs eleven HF.Net use cases against real models
+`samples/HFGallery` is a desktop application that runs thirteen HF.Net use cases against real models
 and shows both the answer and the code that produced it. Nothing in it is mocked: every panel you
 see is the output of a checkpoint downloaded from the Hub during that run.
 
@@ -23,7 +23,7 @@ dotnet run --project samples/HFGallery
 
 ---
 
-## The eleven cases
+## The thirteen cases
 
 | Case | Library | Model | What it shows |
 |---|---|---|---|
@@ -35,6 +35,8 @@ dotnet run --project samples/HFGallery
 | Semantic search | GraviTransformers | `bert-base-uncased` | Embed a corpus once, rank it per query |
 | Embedding map | GraviTransformers | `bert-base-uncased` | 768 dimensions projected to two |
 | Teach it a task | GraviPEFT | `bert-base-uncased` | LoRA adapters trained, then merged into the weights |
+| Teach it names | GraviPEFT | `bert-base-uncased` | LoRA adapters and a token classifier trained for named entities |
+| Teach it to answer | GraviPEFT | `bert-base-uncased` | LoRA adapters and an answer-span head trained for question answering |
 | Tokenizer | GraviTokenizers | `bert-base-uncased` | Which characters became which piece |
 | Inside a checkpoint | GraviHub | any repo with safetensors | Where a 420 MB model's bytes actually are |
 | Diffusion schedules | GraviDiffusers | *none* | Signal remaining at each training timestep |
@@ -85,6 +87,22 @@ weights and classifies the input again on the base model's own inference path. "
 the largest difference between the two sets of probabilities.
 
 ![Teach it a task](screenshots/hfgallery-lora.png)
+
+## Teach it names
+
+Sixteen tagged sentences built from eight names and eight cities, then a sentence that uses none
+of them. The adapters and a token classifier learn where a name sits in a sentence, not a list of
+names, and every entity in the test sentence is one the model was never shown.
+
+![Teach it names](screenshots/hfgallery-lora-names.png)
+
+## Teach it to answer
+
+Twenty-four SQuAD-style examples, three questions about each of eight people, and then a passage
+about someone else. The bars are the three best spans; the answer is highlighted where it sits in
+the passage.
+
+![Teach it to answer](screenshots/hfgallery-lora-answers.png)
 
 ## Inside a checkpoint
 

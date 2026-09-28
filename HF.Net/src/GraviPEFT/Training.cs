@@ -43,6 +43,16 @@ public sealed record TrainingOptions
     public IProgress<TrainingProgress>? Progress { get; init; }
 }
 
+/// <summary>One extractive question answering example, in SQuAD's shape.</summary>
+/// <param name="Question">What is asked.</param>
+/// <param name="Context">The passage that answers it.</param>
+/// <param name="Answer">The answer, exactly as it appears in <paramref name="Context"/>.</param>
+/// <param name="AnswerStart">
+/// Index of the answer's first character in the context, SQuAD's <c>answer_start</c>; -1 means its
+/// first occurrence.
+/// </param>
+public sealed record AnswerExample(string Question, string Context, string Answer, int AnswerStart = -1);
+
 /// <summary>Where training has got to.</summary>
 /// <param name="Epoch">The epoch, from 1.</param>
 /// <param name="Step">Optimizer steps taken so far.</param>
@@ -166,6 +176,26 @@ internal static class LoraTrainer
     internal static TrainingReport Fit(
         LoraEncoder encoder, ClassifierHead head, IReadOnlyList<int[]> ids, IReadOnlyList<int> targets,
         TrainingOptions options)
+        => Fit(encoder, head, ids, [.. targets.Select(t => new[] { t })], options);
+
+    /// <summary>Fits every adapter in <paramref name="encoder"/> and <paramref name="head"/>, in place.</summary>
+    /// <param name="encoder">The encoder with its adapters in the loop.</param>
+    /// <param name="head">The classifier to train alongside.</param>
+    /// <param name="ids">Token ids per example, already truncated.</param>
+    /// <param name="targets">
+    /// Targets per example: one class for a sequence head, one per position for a token head, with
+    /// <see cref="LinearHead.Ignored"/> where a position does not count.
+    /// </param>
+    /// <param name="options">Epochs, batch size, learning rate and schedule.</param>
+    /// <param name="typeIds">Segment ids per example, for sentence pairs; <c>null</c> when every position is segment 0.</param>
+    /// <remarks>
+    /// A step's loss is the mean over every target it contains - over examples for a sequence
+    /// head, over labelled tokens for a token head. That is what PyTorch's cross-entropy computes
+    /// on a batch, and it keeps a long sentence from counting for more than its tokens.
+    /// </remarks>
+    internal static TrainingReport Fit(
+        LoraEncoder encoder, LinearHead head, IReadOnlyList<int[]> ids, IReadOnlyList<int[]> targets,
+        TrainingOptions options, IReadOnlyList<int[]>? typeIds = null)
     {
         var started = System.Diagnostics.Stopwatch.StartNew();
         var width = encoder.Hidden;
@@ -199,19 +229,24 @@ internal static class LoraTrainer
             random.Shuffle(order);
             var epochLoss = 0.0;
 
+            var epochUnits = 0;
+
             for (var first = 0; first < order.Length; first += perStep)
             {
-                // The loss of a step is the mean over its examples, however they split into
+                // The loss of a step is the mean over its targets, however they split into
                 // micro-batches; with full micro-batches that is what the reference computes.
                 var count = Math.Min(perStep, order.Length - first);
-                var weight = 1.0 / count;
+                var units = 0;
+                for (var e = first; e < first + count; e++) units += head.Units(targets[order[e]]);
+
+                var weight = units == 0 ? 0.0 : 1.0 / units;
                 var stepLoss = 0.0;
 
                 for (var e = first; e < first + count; e++)
                 {
                     var example = order[e];
                     var tape = new LoraEncoder.Tape();
-                    var hidden = encoder.Forward(ids[example], tape, random);
+                    var hidden = encoder.Forward(ids[example], tape, random, typeIds?[example]);
 
                     var (loss, dHidden) = head.Backward(hidden, ids[example].Length, width, targets[example], weight);
                     encoder.Backward(dHidden, tape, gradients);
@@ -228,11 +263,12 @@ internal static class LoraTrainer
                 head.ClearGradients();
 
                 stepLosses.Add(stepLoss);
-                epochLoss += stepLoss * count;
+                epochLoss += stepLoss * units;
+                epochUnits += units;
                 options.Progress?.Report(new TrainingProgress(epoch, optimizer.Steps, total, stepLoss, rate));
             }
 
-            epochLosses.Add(epochLoss / order.Length);
+            epochLosses.Add(epochUnits == 0 ? 0.0 : epochLoss / epochUnits);
         }
 
         return new TrainingReport(stepLosses, epochLosses, optimizer.Steps, started.Elapsed);
@@ -261,128 +297,3 @@ internal static class LoraTrainer
     }
 }
 
-/// <summary>
-/// A linear classifier over mean-pooled hidden states, trained jointly with the adapters.
-/// </summary>
-/// <remarks>
-/// Mean pooling rather than the <c>[CLS]</c> vector, for the same reason <c>Embed</c> uses it: on a
-/// pretrained encoder that has not been fine-tuned, <c>[CLS]</c> is close to constant, and a head
-/// that starts from it learns slowly. The weights start at a normal with standard deviation 0.02,
-/// the Transformers default. Starting them at zero would be worse than slow: with LoRA's B at zero
-/// as well, every adapter gradient is exactly zero on the first step.
-/// </remarks>
-internal sealed class ClassifierHead
-{
-    internal ClassifierHead(int hidden, int classes, int seed)
-    {
-        Weight = NdArray.Zeros(classes, hidden);
-        Bias = NdArray.Zeros(classes);
-
-        var random = new GraviRandom(seed);
-        var weights = Weight.AsSpan();
-        for (var i = 0; i < weights.Length; i++) weights[i] = 0.02 * random.Normal();
-
-        WeightGradient = new double[Weight.Size];
-        BiasGradient = new double[Bias.Size];
-    }
-
-    /// <summary><c>[classes, hidden]</c>.</summary>
-    internal NdArray Weight { get; }
-
-    /// <summary><c>[classes]</c>.</summary>
-    internal NdArray Bias { get; }
-
-    internal double[] WeightGradient { get; }
-
-    internal double[] BiasGradient { get; }
-
-    internal int Classes => Bias.Size;
-
-    /// <summary>Mean of the rows of <paramref name="hidden"/>.</summary>
-    internal static double[] Pool(double[] hidden, int rows, int width)
-    {
-        var pooled = new double[width];
-        for (var r = 0; r < rows; r++)
-        {
-            for (var d = 0; d < width; d++) pooled[d] += hidden[r * width + d];
-        }
-
-        for (var d = 0; d < width; d++) pooled[d] /= rows;
-        return pooled;
-    }
-
-    internal double[] Logits(ReadOnlySpan<double> pooled)
-    {
-        var width = pooled.Length;
-        var weights = Weight.AsSpan();
-        var bias = Bias.AsSpan();
-        var logits = new double[Classes];
-
-        for (var c = 0; c < logits.Length; c++)
-        {
-            var sum = bias[c];
-            for (var d = 0; d < width; d++) sum += weights[c * width + d] * pooled[d];
-            logits[c] = sum;
-        }
-
-        return logits;
-    }
-
-    internal static double[] Softmax(double[] logits)
-    {
-        var max = logits.Max();
-        var result = new double[logits.Length];
-        var total = 0.0;
-
-        for (var i = 0; i < logits.Length; i++)
-        {
-            result[i] = Math.Exp(logits[i] - max);
-            total += result[i];
-        }
-
-        for (var i = 0; i < result.Length; i++) result[i] /= total;
-        return result;
-    }
-
-    /// <summary>
-    /// Cross-entropy of one example, with its gradient - multiplied by <paramref name="weight"/> -
-    /// accumulated into the head and returned for the hidden states.
-    /// </summary>
-    /// <returns>The loss, and <c>d loss / d hidden</c> shaped <c>[rows, width]</c>.</returns>
-    internal (double Loss, double[] HiddenGradient) Backward(
-        double[] hidden, int rows, int width, int target, double weight)
-    {
-        var pooled = Pool(hidden, rows, width);
-        var probabilities = Softmax(Logits(pooled));
-        var loss = -Math.Log(Math.Max(probabilities[target], double.Epsilon));
-
-        var weights = Weight.AsSpan();
-        var dPooled = new double[width];
-
-        for (var c = 0; c < probabilities.Length; c++)
-        {
-            var dLogit = weight * (probabilities[c] - (c == target ? 1.0 : 0.0));
-            BiasGradient[c] += dLogit;
-
-            for (var d = 0; d < width; d++)
-            {
-                WeightGradient[c * width + d] += dLogit * pooled[d];
-                dPooled[d] += dLogit * weights[c * width + d];
-            }
-        }
-
-        var dHidden = new double[rows * width];
-        for (var r = 0; r < rows; r++)
-        {
-            for (var d = 0; d < width; d++) dHidden[r * width + d] = dPooled[d] / rows;
-        }
-
-        return (loss, dHidden);
-    }
-
-    internal void ClearGradients()
-    {
-        Array.Clear(WeightGradient);
-        Array.Clear(BiasGradient);
-    }
-}

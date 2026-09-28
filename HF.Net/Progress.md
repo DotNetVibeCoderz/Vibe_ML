@@ -7,9 +7,9 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.3.0 — current
+## v0.3.0 — current; main adds token classification and question answering training (unreleased)
 
-**26 projects, 277 tests passing, whole solution builds clean with no warnings.**
+**26 projects, 297 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -24,7 +24,7 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | GraviTokenizers | **Complete** | 29 | WordPiece, BPE, Unigram, `tokenizer.json`, offsets |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
 | GraviTransformers | **Core complete** | 99 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
-| GraviPEFT | **Core complete** | 34 | LoRA training (adapters and a head), apply, merge, save, load; saved adapters load in Python PEFT |
+| GraviPEFT | **Core complete** | 54 | LoRA training for sequence classification, named entities and question answering; apply, merge, save, load; trained heads predict the same in Python |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Core complete** | 22 | ONNX Runtime, provider choice, quantisation with measured error |
 | GraviDiffusers | **Core complete** | 22 | DDPM/DDIM/Euler; SD pipeline needs an ONNX export to exercise |
@@ -68,6 +68,16 @@ These are the checks that establish the stack is actually correct, not merely ru
   from the adapters in the loop and from the merged weights agree to 1e-11. **An adapter trained
   here and loaded into PEFT 0.21 in Python** gives the same hidden states as HF.Net's merged model
   to 7e-7, the float32 rounding of the merged weights, while the adapter moves them by up to 4.
+- **A classifier trained here predicts the same thing in Python.** On BERT the head is
+  `BertForSequenceClassification`'s own (pretrained pooler, trained `classifier`) and is saved as
+  PEFT saves a `SEQ_CLS` head. Loaded into `AutoModelForSequenceClassification` with PEFT 0.21,
+  its class probabilities match HF.Net's to 5e-9, the F32 the file stores, with no warning.
+  Reloaded here with `PEFT.LoadAdapter`, it matches to the same 5e-9.
+- **Named entities and question answering train, and agree with Python.** A token classifier trained
+  on 16 tagged sentences gives Transformers' own pipeline the same spans and labels as
+  `FindEntities`, scores to 5e-11. A QA head trained on 24 SQuAD-style examples gives the same
+  answers as `AutoModelForQuestionAnswering`, scores to 3e-10. Both are right on names and places
+  they were never shown.
 - **Measured against the Python reference** on the same machine in the same session. Tokenization is
   **1.78x faster than the Rust `tokenizers` crate** with byte-identical ids. bert-base takes 111 ms
   managed against torch's 36 ms, and **23.8 ms through ONNX Runtime from .NET, 1.53x faster than
@@ -112,6 +122,13 @@ Each of these was caught by a test or by a live run, not by reading the code.
   PEFT layout, and PEFT in Python placed none of them. It matches tensors to modules by name and
   skips, without an error, any it cannot place. Adapters now take the checkpoint's own module paths
   (`bert.encoder.layer.0.attention.self.query`), and the round trip was checked in Python.
+- **PEFT 0.21 drops `token_type_ids` in `PeftModelForQuestionAnswering.forward`.** Found when
+  HF.Net's QA predictions disagreed with Python's by up to 0.6 in a score, although the encoder and
+  the head matched part for part. Through the wrapper every passage is segment 0. HF.Net follows
+  Transformers' own `BertForQuestionAnswering`; in Python, `merge_and_unload()` gives the same thing.
+- **Entities came back in pieces.** "Kartini" decoded as "Ka", "rti", "ni", because each
+  continuation piece carried the `B-` its word's first piece was trained on. Entities are now decoded
+  a word at a time, Transformers' `aggregation_strategy="first"`.
 - **Adapter initialisation was seeded from `HashCode.Combine`**, which .NET randomises per process,
   so "the same configuration always initialises the same way" was false: two runs of the same
   training gave two loss curves. It is an FNV-1a hash now.
@@ -136,11 +153,11 @@ Each of these was caught by a test or by a live run, not by reading the code.
 
 ### HF Gallery
 
-`samples/HFGallery` — an Avalonia application holding eleven use cases, each running against a real
+`samples/HFGallery` — an Avalonia application holding thirteen use cases, each running against a real
 model and shown next to the code that produced it.
 
 - Image classification, sentiment, fill-mask, named entities, question answering, semantic search,
-  an embedding map, LoRA training, the tokenizer, a checkpoint's byte layout, and the diffusion noise schedules
+  an embedding map, LoRA training for a classifier, for names and for answers, the tokenizer, a checkpoint's byte layout, and the diffusion noise schedules
 - Charts drawn straight into a `DrawingContext`: bars, scatter, lines, treemap, plus a span view
   built from text inlines so wrapping and selection come from the text stack
 - `--list`, `--run <case>` (headless), `--open <case>`, `--light`, and `--capture <png>`, which
@@ -157,7 +174,7 @@ model and shown next to the code that produced it.
 Complete and bilingual. Every page under `docs/` has a counterpart under `docs/id/`:
 
 - `README`, `getting-started`, `benchmarks`, `HFAppGen`, `hf-gallery`, and one page per library
-- Three screenshots of HFAppGen and eleven of HF Gallery, captured from the real windows
+- Three screenshots of HFAppGen and thirteen of HF Gallery, captured from the real windows
 
 ### Continuous integration
 
@@ -181,8 +198,8 @@ Carried into [PLAN.md](PLAN.md):
   are thin)
 - Notebooks under `notebooks/` beyond the two shipped as HFAppGen templates
 - CLIP (its text tower is causal, which this encoder is not)
-- LoRA training beyond sequence classification: token classification and question answering
-  heads, saving the trained head, and batched (padded) training steps
+- Batched (padded) LoRA training steps, and question answering over passages longer than one
+  window (overlapping windows with a stride)
 - A faster GEMM. The linear kernel runs at about 13 GMAC/s, roughly the foundation's packed
   `MatMul`, and loses to it by 1.3x at 577 rows. torch's MKL does about four times that. This is
   the remaining managed-versus-torch gap.
@@ -190,6 +207,20 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-09-28** — Named entities and question answering train. `TrainTokenClassifier` takes words
+and one tag per word, trains the first piece of each word, and `FindEntities` decodes a word at a
+time. `TrainQuestionAnswering` takes SQuAD-style examples and trains `qa_outputs` on sentence pairs,
+which the training encoder now supports. Both heads save in PEFT's layout (`TOKEN_CLS`,
+`QUESTION_ANS`) and agree with Python. Checking the QA one found that PEFT's QA wrapper drops the
+segment ids. Two more gallery cases. 297 tests.
+
+**2026-09-28** — Trained heads save and load. On BERT, `Train` now fits
+`BertForSequenceClassification`'s own head (the frozen pretrained pooler, then `classifier`), and
+`SaveAdapter` writes it the way PEFT writes `SEQ_CLS`. Python loads it and predicts the same thing to
+5e-9. `PEFT.LoadAdapter` takes a local directory, and it restores the classifier, including one
+trained in Python. Label names go in `hfnet_head.json`, because PEFT answers an unknown
+`adapter_config.json` key with advice to upgrade. 283 tests.
 
 **2026-09-25** — v0.3.0, LoRA training. `PeftModel.Train` fits adapters and a mean-pooled classification
 head with AdamW, the Hugging Face linear schedule and gradient clipping. It uses a hand-written

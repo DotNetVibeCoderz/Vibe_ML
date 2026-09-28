@@ -109,6 +109,16 @@ public sealed class TransformerModel : IDisposable
     /// <summary>What the checkpoint load found.</summary>
     public LoadReport Report { get; }
 
+    /// <summary>
+    /// Reads a tensor by its checkpoint name, for the parts of a checkpoint the encoder does not
+    /// hold - GraviPEFT's classifier reads BERT's pooler this way.
+    /// </summary>
+    internal bool TryReadTensor(string name, out NdArray tensor)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _weights.TryRead(name, out tensor);
+    }
+
     /// <summary>Whether the checkpoint carries a sequence classification head.</summary>
     public bool HasClassificationHead => _classifier is not null;
 

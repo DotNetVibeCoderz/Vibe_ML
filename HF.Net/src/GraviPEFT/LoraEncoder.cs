@@ -47,11 +47,14 @@ internal sealed class LoraEncoder
     private readonly Func<double, double> _activation;
     private readonly Func<double, double> _derivative;
     private readonly int _lowest;
+    private readonly double[]? _segmentDelta;
 
     private LoraEncoder(
         Layer[] layers, NdArray tokens, NdArray positions, double[] embeddingScale, double[] embeddingShift,
-        double epsilon, int hidden, int heads, Func<double, double> activation, Func<double, double> derivative)
+        double epsilon, int hidden, int heads, Func<double, double> activation, Func<double, double> derivative,
+        double[]? segmentDelta)
     {
+        _segmentDelta = segmentDelta;
         _layers = layers;
         _tokens = tokens;
         _positions = positions;
@@ -77,8 +80,13 @@ internal sealed class LoraEncoder
     /// <param name="source">The foundation encoder, the model of record.</param>
     /// <param name="config">Supplies the activation and the norm epsilon.</param>
     /// <param name="adapterAt">The adapter on a layer's projection, or <c>null</c> for none.</param>
+    /// <param name="segmentDelta">
+    /// <c>token_type_embeddings[1] - token_type_embeddings[0]</c>, for sentence pairs; segment 0 is
+    /// already folded into the word embeddings.
+    /// </param>
     internal static LoraEncoder Build(
-        Encoder source, PretrainedConfig config, Func<int, Projection, LoraAdapter?> adapterAt)
+        Encoder source, PretrainedConfig config, Func<int, Projection, LoraAdapter?> adapterAt,
+        NdArray? segmentDelta = null)
     {
         var layers = new Layer[source.Layers.Count];
 
@@ -113,7 +121,8 @@ internal sealed class LoraEncoder
             source.Config.HiddenSize,
             source.Config.Heads,
             Activation.For(config.Activation),
-            Activation.DerivativeFor(config.Activation));
+            Activation.DerivativeFor(config.Activation),
+            segmentDelta?.ToArray());
     }
 
     // ------------------------------------------------------------------ forward
@@ -125,7 +134,8 @@ internal sealed class LoraEncoder
     /// adapter dropout off.
     /// </param>
     /// <param name="dropout">Draws the adapter dropout masks; unused without a tape.</param>
-    internal double[] Forward(int[] ids, Tape? tape = null, Random? dropout = null)
+    /// <param name="typeIds">Segment per position for a sentence pair, or <c>null</c> for all segment 0.</param>
+    internal double[] Forward(int[] ids, Tape? tape = null, Random? dropout = null, int[]? typeIds = null)
     {
         var rows = ids.Length;
         var width = _hidden;
@@ -143,7 +153,13 @@ internal sealed class LoraEncoder
         for (var i = 0; i < rows; i++)
         {
             var id = Math.Clamp(ids[i], 0, vocabulary - 1);
-            for (var d = 0; d < width; d++) hidden[i * width + d] = _tokens[id, d] + _positions[i, d];
+            var segment = typeIds is not null && _segmentDelta is not null && typeIds[i] != 0;
+
+            for (var d = 0; d < width; d++)
+            {
+                // Before the embedding norm, in the inference encoder's order of addition.
+                hidden[i * width + d] = _tokens[id, d] + _positions[i, d] + (segment ? _segmentDelta![d] : 0.0);
+            }
         }
 
         hidden = Normalize(hidden, rows, _embeddingScale, _embeddingShift, out _, out _);

@@ -94,6 +94,8 @@ public static class Catalog
         new SearchCase(),
         new EmbeddingMapCase(),
         new LoraCase(),
+        new NamesCase(),
+        new AnswerTrainingCase(),
         new TokenizerCase(),
         new CheckpointCase(),
         new SchedulerCase(),

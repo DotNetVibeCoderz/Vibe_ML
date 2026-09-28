@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.3.0 is published: **26 projects, 277 tests passing**, the whole solution builds clean, and the
-eight libraries are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
+v0.3.0 is published and the eight libraries are on nuget.org as `Gravicode.HFNet.*`. Main is ahead
+of it with trained heads that save and load, and with named-entity and question-answering training
+(unreleased): **26 projects, 297 tests passing**, the whole solution builds clean. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`
@@ -99,6 +100,22 @@ root rather than here — see below.
 - **Adapters must be keyed by the checkpoint's module path** (`bert.encoder.layer.0.attention.self.
   query`). PEFT in Python places tensors by name and skips, without an error, any it cannot place.
   The old `layer.0.query` keys loaded in Python as no adapter at all.
+- **On BERT the trained head is `BertForSequenceClassification`'s**, the frozen pretrained pooler
+  then `classifier`, because that is the only shape PEFT saves completely. RoBERTa's head and
+  DistilBERT's `pre_classifier` are not in PEFT's `modules_to_save`, so on those models the head is
+  mean-pooled and saved in `head.safetensors` for HF.Net only. Label names live in
+  `hfnet_head.json`. Adding them to `adapter_config.json` makes PEFT print advice to upgrade.
+- **A sequence classifier and a token classifier are both `classifier.weight` at `[classes,
+  hidden]`**, in a saved adapter just as in a checkpoint. Only `task_type` (or `hfnet_head.json`)
+  tells them apart when loading; the weights cannot.
+- **PEFT's `PeftModelForQuestionAnswering.forward` drops `token_type_ids`** (0.21, LoRA branch). A QA
+  comparison against Python must go through `merge_and_unload()`, or the passage is read as
+  segment 0 and every score disagrees while each part matches.
+- **Question answering toy tests must not need relative position.** A 2-layer, 8-wide random model
+  cannot learn "the token after 7" in a few hundred steps; it plateaus at ln(context length). Test
+  the QA wiring on a token-identity target and leave "does it really learn" to bert-base.
+- **Adapters and heads are saved as F32**, as PEFT saves them. A save and reload moves predictions
+  by about 5e-9, so tests of a saved tensor compare against `(double)(float)value`.
 - **Never seed from `HashCode.Combine` or `string.GetHashCode`.** .NET randomises both per process.
   Adapter initialisation did this, and two runs of one configuration trained differently.
 - **HF Gallery screenshots: `--open <case> --capture <png>`.** The window renders itself. A screen
@@ -199,7 +216,7 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 277
+dotnet test                                                     # all 297
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

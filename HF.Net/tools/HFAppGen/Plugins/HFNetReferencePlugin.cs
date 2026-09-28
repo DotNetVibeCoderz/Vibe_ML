@@ -227,7 +227,7 @@ public sealed class HFNetReferencePlugin
 
             PEFT (facade)
               PEFT.ApplyLoRA(model, new LoraConfig(Rank: 8, Alpha: 16))
-              PEFT.LoadAdapter(model, "some-user/some-lora", merge: true)
+              PEFT.LoadAdapter(model, "some-user/some-lora", merge: true)   // or a local directory
               PEFT.ReadAdapter("adapter_model.safetensors")
 
             LoraConfig(Rank = 8, Alpha = 16, TargetModules = null, Dropout = 0)
@@ -249,9 +249,16 @@ public sealed class HFNetReferencePlugin
               .Train(texts, labels, options) trains the adapters AND a classifier head together
                                       (backprop through the frozen encoder); returns TrainingReport
               .Merge()                folds adapters into the weights, in place and exactly
+              .TrainTokenClassifier(words, tags, options)   named entities: words and one tag per word
+              .FindEntities(text)     -> Entity(Text, Label, Score, Start, End), word-level spans
+              .TrainQuestionAnswering(examples, options)  examples: new AnswerExample(question, context, answer)
+              .Answer(question, context, topK = 1) -> Answer(Text, Score, Start, End)
               .FitHead(texts, labels) trains a classifier on the frozen embeddings only - the cheap baseline
               .Predict(text) .Score(texts, labels) .HeadLabels
-              .SaveAdapter(directory) .ParameterEfficiency() .IsMerged .Model
+              .SaveAdapter(directory) writes adapters AND the Train() classifier; reload with
+                                      PEFT.LoadAdapter(model, directory) or PeftModel.Load(model, directory)
+              .HeadLoadsInPython      true on BERT: the head is BertForSequenceClassification's own
+              .ParameterEfficiency() .IsMerged .Model
 
             TrainingOptions (a record CLASS: use object initialiser syntax)
               new TrainingOptions { Epochs = 3, BatchSize = 8, GradientAccumulation = 1,
@@ -267,8 +274,10 @@ public sealed class HFNetReferencePlugin
                 about three forward passes per example. Fine for hundreds of examples; for tens of
                 thousands, train with PEFT in Python and load the adapter here.
               Train() after Merge() throws: the update would be counted twice.
-              SaveAdapter writes the adapters only, in the PEFT layout Python loads. The head trained
-                by Train() or FitHead() lives in memory and is not saved.
+              SaveAdapter writes the PEFT layout. On BERT the Train() classifier is saved as PEFT's
+                SEQ_CLS head and loads in Python (AutoModelForSequenceClassification + PeftModel);
+                label names go in hfnet_head.json. On other models the head is mean-pooled and
+                only HF.Net reads it back. A FitHead() head is never saved.
               Merge cannot be undone from the merged weights. Merge to serve, not to swap adapters.
             """,
 

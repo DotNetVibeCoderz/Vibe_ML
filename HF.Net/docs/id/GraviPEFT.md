@@ -15,8 +15,9 @@ using Gravicode.HFNet.GraviPEFT;
 Ia **melatih** adapter LoRA bersama sebuah classification head, dengan backpropagation melewati
 encoder terlatih yang bobotnya sendiri tetap dibekukan. Ia **memasang** adapter, termasuk yang
 dilatih dengan PEFT di Python, dan **melipatnya** ke dalam bobot secara persis. Ia **menyimpan dan
-memuat** tata letak Hugging Face PEFT, dan adapter yang dilatih di sini bisa dimuat di Python. Ia juga
-bisa melatih head saja di atas encoder yang dibekukan, baseline murah yang layak dicoba lebih dulu.
+memuat** tata letak Hugging Face PEFT. Pada BERT, adapter yang dilatih di sini, termasuk
+classifier-nya, bisa dimuat di Python dan memberi prediksi yang sama di sana. Ia juga bisa melatih
+head saja di atas encoder yang dibekukan, baseline murah yang layak dicoba lebih dulu.
 
 ```csharp
 PeftModel.SupportsAdapterTraining   // true, sejak 0.3
@@ -118,15 +119,25 @@ var report = peft.Train(texts, labels, new TrainingOptions
     Progress = new Progress<TrainingProgress>(p => Console.WriteLine($"{p.Step}/{p.TotalSteps} {p.Loss:F4}")),
 });
 
-Console.WriteLine(report);                 // 32 steps in about a minute, loss 0.70 -> ... -> 0.003
+Console.WriteLine(report);                 // 32 steps in a minute or so, loss 0.74 -> ... -> 0.008
 peft.Predict("The staff were not friendly at all.");
 ```
 
 Setiap langkah menjalankan tiap contoh melewati encoder dengan adapter di dalam jalurnya, memasang
-head linear di atas hidden state terakhir yang di-mean-pool, lalu melakukan backpropagation atas
-loss cross-entropy ke `A` dan `B` setiap adapter serta ke head. Setelah itu ia mengambil satu langkah
+classification head di atas hidden state terakhir, lalu melakukan backpropagation atas loss
+cross-entropy ke `A` dan `B` setiap adapter serta ke head. Setelah itu ia mengambil satu langkah
 AdamW. Bobot dasar tidak pernah berubah. Adapter diperbarui di tempat, sehingga `SaveAdapter` dan
 `Merge` sesudahnya melihat nilai hasil pelatihan.
+
+Bentuk head-nya bergantung pada checkpoint:
+
+- **Pada BERT**, head-nya persis milik `BertForSequenceClassification`: baris `[CLS]` melewati pooler
+  pralatih dari checkpoint (dense dan tanh, tetap dibekukan seperti yang dilakukan PEFT), lalu
+  `classifier` yang dilatih. `peft.HeadLoadsInPython` bernilai `true`, dan adapter yang disimpan
+  memberi prediksi yang sama di Python.
+- **Pada model lain**, head-nya `classifier` di atas rata-rata baris. Head bawaan RoBERTa dan
+  DistilBERT punya lapisan yang tidak disimpan PEFT, sehingga head tiruannya pun tidak akan
+  terulang di Python. Head ini disimpan dan dimuat ulang hanya oleh HF.Net.
 
 | Opsi | Bawaan | |
 |---|---|---|
@@ -146,6 +157,65 @@ mengunci ketiganya pada rumus-rumus itu. Satu akibatnya kerap mengejutkan: bila 
 sedikit pun, langkah pertama diambil dengan laju belajar tepat nol, sama seperti di Python.
 `LoraConfig.Dropout` hanya berlaku saat pelatihan.
 
+### Melatih token classifier
+
+Untuk named entity, beri tag pada kata lalu latih classifier di atas setiap token:
+
+```csharp
+IReadOnlyList<string>[] words = [["Ani", "lives", "in", "Bandung", "."], /* ... */];
+IReadOnlyList<string>[] tags  = [["B-PER", "O", "O", "B-LOC", "O"], /* ... */];
+
+peft.TrainTokenClassifier(words, tags, new TrainingOptions { Epochs = 8, BatchSize = 4, LearningRate = 2e-3 });
+
+peft.FindEntities("Kartini moved to Yogyakarta.");   // PER: Kartini, LOC: Yogyakarta
+```
+
+Kata beserta satu tag per kata adalah bentuk dataset gaya CoNLL. Kata-katanya digabung dengan spasi
+lalu di-tokenisasi, dan hanya potongan pertama setiap kata yang dilatih. Itulah
+`label_all_tokens=False` milik Transformers, dan loss-nya adalah rata-rata atas potongan-potongan itu
+dalam satu langkah, seperti cara cross-entropy PyTorch menghitungnya pada satu batch.
+`FindEntities` membaca label setiap kata dari potongan pertamanya, seperti
+`aggregation_strategy="first"`, dan mengembalikan rentang teks asli dengan huruf besar-kecilnya utuh.
+
+Head-nya satu `classifier` di atas setiap token. Hanya itu yang dimiliki model
+`ForTokenClassification` setiap keluarga, jadi token classifier yang disimpan bisa dimuat di Python
+pada RoBERTa dan DistilBERT juga, bukan hanya BERT. Melatih satu jenis head menggantikan jenis
+lainnya, karena keduanya bergantung pada adapter yang sama.
+
+### Melatih tanya-jawab
+
+Untuk tanya-jawab ekstraktif, berikan pertanyaan, bagian teks (passage) yang menjawabnya, dan
+jawabannya persis seperti yang tertulis di sana, dalam bentuk SQuAD:
+
+```csharp
+AnswerExample[] examples =
+[
+    new("Where does Ani live?", "Ani lives in Bandung. Ani works as a teacher.", "Bandung"),
+    new("What does Ani do?",    "Ani lives in Bandung. Ani works as a teacher.", "a teacher"),
+    // ...
+];
+
+peft.TrainQuestionAnswering(examples, new TrainingOptions { Epochs = 10, BatchSize = 4, LearningRate = 2e-3 });
+
+peft.Answer("What does Hendra do?", "Hendra lives in Semarang. Hendra works as a chef.");   // a chef
+```
+
+Head-nya `qa_outputs`, skor awal dan akhir untuk setiap token, dan loss-nya milik Transformers
+sendiri: rata-rata cross-entropy atas posisi awal dan cross-entropy atas posisi akhir. Pertanyaan dan
+passage masuk sebagai pasangan, dengan passage sebagai segmen 1. `AnswerStart` adalah
+`answer_start` milik SQuAD; bila dikosongkan, kemunculan pertama jawaban yang dipakai. Pasangan yang
+lebih panjang dari `MaxLength` kehilangan ujung passage-nya. Jawaban yang terpotong dengan cara itu
+dilatih sebagai menunjuk `[CLS]`, cara Transformers menandai "tidak ada di jendela ini". Passage
+panjang tidak dipecah menjadi jendela-jendela yang bertumpuk, jadi jaga agar tetap di bawah batas.
+
+> **Di Python, lipat dulu sebelum memprediksi.** `PeftModelForQuestionAnswering.forward` milik PEFT
+> 0.21 menerima `token_type_ids` tetapi tidak meneruskannya, sehingga lewat wrapper itu setiap passage
+> dibaca sebagai segmen 0. `BertForQuestionAnswering` milik Transformers sendiri, dan HF.Net,
+> membacanya sebagai segmen 1. Panggil `model.merge_and_unload()` dan prediksinya sama dengan HF.Net
+> hingga 3e-10. Bug yang sama berarti adapter QA yang dilatih di Python dengan PEFT belajar tanpa
+> segmen, sehingga di HF.Net ia berjalan di atas representasi masukan yang sedikit berbeda dari yang
+> dipelajarinya.
+
 ### Mengapa ia punya backward pass sendiri
 
 Fondasi sudah memiliki encoder autodiff, dan encoder itu tidak dipakai karena satu alasan spesifik:
@@ -162,26 +232,39 @@ paling rendah.
 
 - **Gradien.** Setiap entri setiap adapter, pada keenam proyeksi sebuah model dua lapis yang setiap
   bias dan norm-nya digeser dari nilai awalnya, dicocokkan dengan beda-hingga pusat. Selisihnya
-  di bawah 1e-6 untuk GELU eksak maupun GELU tanh, dan tetap begitu saat dropout aktif. Backward
-  pass yang sengaja dibuat salah (skala atensinya dihilangkan) gagal dengan selisih dua kali lipat.
+  di bawah 1e-6 untuk GELU eksak maupun GELU tanh, tetap begitu saat dropout aktif, dan berlaku
+  lewat setiap head: head pooler BERT, head rata-rata, head token, dan head rentang jawaban pada
+  pasangan kalimat. Backward pass yang sengaja dibuat salah (skala
+  atensinya dihilangkan, atau turunan tanh pada pooler) gagal dengan selisih dua sampai tiga kali lipat.
 - **Forward.** Tanpa adapter, forward pass pelatihan sama dengan encoder inferensi hingga 1e-12. Pada
   `bert-base-uncased` sesudah pelatihan, prediksi dari adapter di dalam jalur dan dari bobot yang
-  sudah dilipat sama hingga 6e-12.
-- **Pulang-pergi.** Adapter yang dilatih dan disimpan di sini, lalu dimuat ke PEFT 0.21 di Python,
-  memberi hidden state yang sama dengan model HF.Net yang sudah dilipat hingga 7e-7. Itulah
-  pembulatan float32 dari bobot yang dilipat. Adapternya sendiri menggeser hidden state itu sampai 4.
+  sudah dilipat sama hingga sekitar 1e-10.
+- **Pulang-pergi, di Python.** Adapter dan classifier yang dilatih dan disimpan di sini, lalu dimuat
+  ke PEFT 0.21 bersama `AutoModelForSequenceClassification`, memberi probabilitas kelas yang sama
+  dengan HF.Net hingga **5e-9**, tanpa peringatan dari PEFT. Hidden state-nya sama dengan model
+  HF.Net yang sudah dilipat hingga 7e-7.
+- **Named entity, di Python.** Adapter yang dilatih pada 16 kalimat bertag, dimuat ke
+  `AutoModelForTokenClassification` dengan PEFT, membuat pipeline token-classification milik
+  Transformers sendiri memberi rentang dan label yang sama dengan `FindEntities`, dengan skor yang
+  sama hingga 5e-11. Itu berlaku juga pada nama yang tidak pernah ditunjukkan kepadanya.
+- **Tanya-jawab, di Python.** Adapter yang dilatih pada 24 contoh gaya SQuAD, dimuat ke
+  `AutoModelForQuestionAnswering` lalu dilipat, memberi jawaban yang sama dengan HF.Net dengan skor
+  yang sama hingga 3e-10, pada orang dan tempat yang tidak pernah ditunjukkan kepadanya.
+- **Pulang-pergi, di sini.** Dimuat ulang dengan `PEFT.LoadAdapter`, prediksinya sama dengan model
+  yang disimpan hingga 5e-9. Itulah F32 yang disimpan file-nya, yang juga ditulis PEFT.
 
 ### Biayanya, dan batasnya
 
 - **CPU, satu sekuens sekali jalan, tanpa padding.** Batch adalah satuan perataan, bukan
   vektorisasi. Satu langkah memakan sekitar tiga forward pass per contoh. Di sini, bert-base atas
-  32 kalimat pendek selama 8 epoch memakan 58 sampai 79 detik antar-run.
+  32 kalimat pendek selama 8 epoch memakan 58 sampai 91 detik antar-run.
 - **Memori.** Pelatihan menyimpan salinan float32 dari bobot encoder di samping model rujukan,
   sekitar 340 MB untuk bert-base.
-- **Hanya klasifikasi sekuens**, lewat head yang di-mean-pool. Head klasifikasi token dan tanya-jawab
-  tidak dilatih di sini.
-- **Head tidak disimpan.** `SaveAdapter` menulis adapternya dalam tata letak PEFT. Head yang dilatih
-  `Train` tetap tinggal di memori.
+- **Klasifikasi sekuens, klasifikasi token, dan tanya-jawab ekstraktif.** Passage yang lebih panjang
+  dari `MaxLength` dipotong, tidak dipecah menjadi jendela yang bertumpuk.
+- **Dropout milik encoder dimatikan.** Python melatih BERT dengan dropout 0,1 di setiap blok. Di sini
+  hanya `LoraConfig.Dropout` yang berlaku, pada masukan adapter. Adapter hasilnya tetap sah; hanya
+  saja kedua proses pelatihan itu tidak sama langkah demi langkah.
 - **`Train` sesudah `Merge` ditolak.** Pembaruannya akan terhitung dua kali. Untuk melanjutkan
   pelatihan adapter yang sudah dilipat, muat ulang model dasar lalu pasang adapter tanpa dilipat
   dengan `PeftModel.WithAdapters(model, adapters, merge: false)`.
@@ -196,7 +279,44 @@ peft.SaveAdapter("./my-adapter");
 ```
 
 Menulis `adapter_model.safetensors` dan `adapter_config.json` dalam tata letak PEFT, sehingga hasilnya
-bisa dimuat di Python.
+bisa dimuat di Python. Classifier yang dilatih dengan `Train` ikut tersimpan:
+
+| Head | Ditulis ke | Bisa dimuat di |
+|---|---|---|
+| pooler BERT + `classifier` | `adapter_model.safetensors` sebagai `base_model.model.classifier.*`, `task_type` `SEQ_CLS` | HF.Net dan Python |
+| `classifier` rata-rata | `head.safetensors` | HF.Net |
+| `classifier` token, keluarga apa pun | `adapter_model.safetensors` sebagai `base_model.model.classifier.*`, `task_type` `TOKEN_CLS` | HF.Net dan Python |
+| `qa_outputs`, keluarga apa pun | `adapter_model.safetensors` sebagai `base_model.model.qa_outputs.*`, `task_type` `QUESTION_ANS` | HF.Net, dan Python setelah `merge_and_unload()` |
+
+Nama label dan panjang pemotongan disimpan di `hfnet_head.json`, bukan di `adapter_config.json`,
+tempat PEFT akan menanggapi kunci yang tidak dikenalnya dengan saran untuk upgrade. Head dari
+`FitHead` adalah regresi logistik dan tidak disimpan.
+
+Di Python:
+
+```python
+import json
+from transformers import AutoModelForSequenceClassification
+from peft import PeftModel
+
+labels = {int(k): v for k, v in json.load(open("my-adapter/hfnet_head.json"))["id2label"].items()}
+base = AutoModelForSequenceClassification.from_pretrained(
+    "bert-base-uncased", num_labels=len(labels), id2label=labels)
+model = PeftModel.from_pretrained(base, "my-adapter")
+```
+
+Dan kembali di .NET, dari direktori itu atau dari repositori Hub:
+
+```csharp
+var peft = PEFT.LoadAdapter(model, "./my-adapter");    // merge: true secara bawaan
+peft.Predict("The staff were not friendly at all.");
+```
+
+Adapter yang dilatih di Python dengan `task_type="SEQ_CLS"` pada BERT, atau dengan
+`task_type="TOKEN_CLS"` pada keluarga apa pun, atau dengan `task_type="QUESTION_ANS"`, dimuat dengan
+cara yang sama, beserta head-nya.
+Kedua classifier itu berbentuk sama, jadi `task_type`-lah yang membedakannya. PEFT tidak menyimpan nama label, jadi tanpa `hfnet_head.json` nama-namanya
+kembali sebagai `LABEL_0`, `LABEL_1`, dan seterusnya.
 
 Adapter buatan `ApplyLoRA` diberi kunci berupa **path modul checkpoint itu sendiri**, misalnya
 `bert.encoder.layer.0.attention.self.query`, karena PEFT mencocokkan tensor ke modul berdasarkan

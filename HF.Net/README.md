@@ -115,7 +115,7 @@ Stated plainly, because a library that fails quietly is worse than one that says
 - **LoRA training is CPU-bound and one sequence at a time.** `PeftModel.Train` fits adapters and a
   sequence classification head exactly, which is checked against numerical gradients and against
   PEFT in Python. It suits hundreds of examples. For tens of thousands, train with PEFT in Python
-  and serve the adapter here. Token classification and question answering heads are not trained.
+  and serve the adapter here. Sequence classification, token classification and extractive question answering heads train.
 - **CLIP is not implemented.** Its text tower is causal, which this encoder is not. ViT and DeiT
   are; a windowed or convolutional backbone — Swin, ConvNeXt — is refused by name.
 - **Diffusion needs an ONNX export**, not the PyTorch weights.

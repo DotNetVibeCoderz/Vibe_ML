@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Gravicode.HFNet.GraviHub.Io;
 using Gravicode.HFNet.GraviTransformers;
 using Gravicode.Science.GraviLearn.Linear;
 using Gravicode.Science.GraviNum;
@@ -33,6 +34,8 @@ public sealed class PeftModel
     private readonly TransformerModel _model;
     private LogisticRegression? _head;
     private ClassifierHead? _classifier;
+    private TokenClassifierHead? _tagger;
+    private SpanHead? _answerer;
     private LoraEncoder? _encoder;
     private double[] _headClasses = [];
     private string[] _headLabels = [];
@@ -122,16 +125,145 @@ public sealed class PeftModel
         ArgumentNullException.ThrowIfNull(model);
 
         var adapters = LoraAdapterSet.FromPretrained(adapterRepoId, revision);
-        var peft = new PeftModel(model, adapters, merged: false);
-
-        return merge ? peft.Merge() : peft;
+        return WithAdapters(model, adapters, merge);
     }
 
-    /// <summary>Attaches an already-loaded adapter set.</summary>
+    /// <summary>Loads an adapter saved to a local directory - by <see cref="SaveAdapter"/>, or by PEFT.</summary>
+    /// <param name="model">The base model the adapter was trained against.</param>
+    /// <param name="directory">Holds <c>adapter_model.safetensors</c> (or <c>.bin</c>) and <c>adapter_config.json</c>.</param>
+    /// <param name="merge">Whether to fold the adapter into the weights immediately.</param>
+    /// <remarks>
+    /// A classifier saved with the adapter comes back with it, so <see cref="Predict"/> works
+    /// straight away. That includes one trained in Python with <c>task_type="SEQ_CLS"</c> on a BERT
+    /// model; its labels are then <c>LABEL_0</c>, <c>LABEL_1</c> and so on, because PEFT does not
+    /// save label names.
+    /// </remarks>
+    public static PeftModel Load(TransformerModel model, string directory, bool merge = true)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+
+        if (!Directory.Exists(directory))
+        {
+            throw new DirectoryNotFoundException($"'{directory}' does not exist. SaveAdapter writes a directory; pass that.");
+        }
+
+        var weights = new[] { "adapter_model.safetensors", "adapter_model.bin" }
+            .Select(name => Path.Combine(directory, name))
+            .FirstOrDefault(File.Exists)
+            ?? throw new FileNotFoundException(
+                $"'{directory}' has no adapter_model.safetensors or adapter_model.bin; it is not a PEFT adapter.");
+
+        var configPath = Path.Combine(directory, "adapter_config.json");
+        var config = File.Exists(configPath) ? LoraAdapterSet.ReadConfig(configPath) : new LoraConfig();
+
+        return WithAdapters(model, LoraAdapterSet.Load(weights, config), merge);
+    }
+
+    /// <summary>Attaches an already-loaded adapter set, and the classifier saved with it if any.</summary>
     public static PeftModel WithAdapters(TransformerModel model, LoraAdapterSet adapters, bool merge = true)
     {
         var peft = new PeftModel(model, adapters, merged: false);
+        peft.AttachSavedHead();
         return merge ? peft.Merge() : peft;
+    }
+
+    /// <summary>Restores a classifier saved beside the adapters, when there is one.</summary>
+    /// <exception cref="NotSupportedException">The head needs a BERT pooler this model does not have.</exception>
+    private void AttachSavedHead()
+    {
+        var directory = Adapters.SourceDirectory;
+        var description = directory is null ? null : HeadDescription.Read(directory);
+        LinearHead? head = null;
+
+        // The two classifiers have the same shape, so only the saved task can tell them apart:
+        // hfnet_head.json when HF.Net wrote the adapter, task_type when PEFT did.
+        var isToken = description is not null
+            ? description.Task == "token"
+            : directory is not null && HeadDescription.TaskType(directory) == "TOKEN_CLS";
+
+        if (Adapters.Others.TryGetValue("qa_outputs.weight", out var spanWeight)
+            && Adapters.Others.TryGetValue("qa_outputs.bias", out var spanBias))
+        {
+            head = SpanHead.FromWeights(spanWeight, spanBias);
+        }
+        else if (isToken
+            && Adapters.Others.TryGetValue("classifier.weight", out var tokenWeight)
+            && Adapters.Others.TryGetValue("classifier.bias", out var tokenBias))
+        {
+            head = TokenClassifierHead.FromWeights(tokenWeight, tokenBias);
+        }
+        else if (Adapters.Others.TryGetValue("classifier.weight", out var weight)
+            && Adapters.Others.TryGetValue("classifier.bias", out var bias))
+        {
+            // Saved the way PEFT saves SEQ_CLS: BertForSequenceClassification's classifier, which
+            // reads the pooler. Python-trained adapters arrive like this with no description.
+            var pooler = PoolerOf(_model) ?? throw new NotSupportedException(
+                $"The adapter carries a sequence classifier that reads BERT's pooler, and '{_model.RepoId}' "
+                + "has no pooler.dense weights. Load it onto the BERT model it was trained against.");
+
+            head = ClassifierHead.FromWeights(weight, bias, pooler);
+        }
+        else if (description is { Pooling: "mean" } && Adapters.SourceDirectory is { } source
+            && File.Exists(Path.Combine(source, LoraAdapterSet.HeadWeightsFile)))
+        {
+            var tensors = SafeTensors.ReadAll(Path.Combine(source, LoraAdapterSet.HeadWeightsFile));
+            head = ClassifierHead.FromWeights(tensors["classifier.weight"], tensors["classifier.bias"], pooler: null);
+        }
+
+        if (head is null) return;
+
+        if (head.Weight.Shape[1] != _model.Config.HiddenSize)
+        {
+            throw new InvalidDataException(
+                $"The saved classifier reads {head.Weight.Shape[1]} inputs but '{_model.RepoId}' is "
+                + $"{_model.Config.HiddenSize} wide. It was trained against a different model.");
+        }
+
+        // A span head has no labels: its two outputs are the start and the end.
+        IReadOnlyList<string> labels = head is SpanHead
+            ? []
+            : description?.Labels is { Count: > 0 } named
+                ? named
+                : [.. Enumerable.Range(0, head.Classes).Select(i => $"LABEL_{i}")];
+
+        if (head is not SpanHead && labels.Count != head.Classes)
+        {
+            throw new InvalidDataException(
+                $"{LoraAdapterSet.HeadConfigFile} names {labels.Count} labels but the classifier has {head.Classes} outputs.");
+        }
+
+        _classifier = head as ClassifierHead;
+        _tagger = head as TokenClassifierHead;
+        _answerer = head as SpanHead;
+        _headLabels = [.. labels];
+        _maxLength = description?.MaxLength ?? 512;
+    }
+
+    /// <summary>
+    /// BERT's pretrained pooler, when <paramref name="model"/> is a BERT checkpoint that has one.
+    /// </summary>
+    /// <remarks>
+    /// Only BERT. RoBERTa checkpoints often carry a pooler too, but
+    /// <c>RobertaForSequenceClassification</c> never reads it, and DistilBERT's head adds a
+    /// <c>pre_classifier</c> that PEFT does not save - a head built on either would not be the head
+    /// Python loads.
+    /// </remarks>
+    private static Pooler? PoolerOf(TransformerModel model)
+    {
+        if (!model.Config.ModelType.Equals("bert", StringComparison.OrdinalIgnoreCase)) return null;
+
+        var prefix = model.Report.Prefix;
+        if (!model.TryReadTensor($"{prefix}pooler.dense.weight", out var weight)
+            || !model.TryReadTensor($"{prefix}pooler.dense.bias", out var bias))
+        {
+            return null;
+        }
+
+        var width = model.Config.HiddenSize;
+        if (weight.Size != (long)width * width || bias.Size != width) return null;
+
+        return new Pooler(weight.ToArray(), bias.ToArray());
     }
 
     /// <summary>A seed that depends only on its arguments.</summary>
@@ -316,7 +448,8 @@ public sealed class PeftModel
         }
 
         _encoder = LoraEncoder.Build(
-            _model.Encoder, _model.Config, (layer, projection) => placed.GetValueOrDefault((layer, projection)));
+            _model.Encoder, _model.Config, (layer, projection) => placed.GetValueOrDefault((layer, projection)),
+            _model.Report.SegmentDelta);
 
         return _encoder;
     }
@@ -332,16 +465,26 @@ public sealed class PeftModel
     }
 
     /// <summary>
-    /// A text's mean-pooled features through the adapted encoder: the base model's own inference
+    /// A text's final hidden states through the adapted encoder: the base model's own inference
     /// path when the adapters are merged or still zero, the adapter-in-the-loop path otherwise.
     /// </summary>
-    private double[] Features(string text, int maxLength)
+    private (double[] Hidden, int Rows) Encode(string text, int maxLength)
     {
-        if (!AdaptersChangeOutput()) return _model.Embed(text, maxLength).ToArray();
+        if (!AdaptersChangeOutput())
+        {
+            var hidden = _model.Hidden(text, maxLength);
+            return (hidden.ToArray(), hidden.Shape[0]);
+        }
 
         var ids = Tokenize(text, maxLength);
-        var encoder = TrainingEncoder();
-        return ClassifierHead.Pool(encoder.Forward(ids), ids.Length, encoder.Hidden);
+        return (TrainingEncoder().Forward(ids), ids.Length);
+    }
+
+    /// <summary>A text's mean-pooled features, what <see cref="FitHead"/> fits on.</summary>
+    private double[] Features(string text, int maxLength)
+    {
+        var (hidden, rows) = Encode(text, maxLength);
+        return ClassifierHead.MeanPool(hidden, rows, _model.Config.HiddenSize);
     }
 
     // ------------------------------------------------------------------ head training
@@ -445,6 +588,239 @@ public sealed class PeftModel
 
         if (texts.Count == 0) throw new ArgumentException("Nothing to train on.", nameof(texts));
 
+        var encoder = PrepareTraining(options);
+
+        _maxLength = options.MaxLength;
+        _headLabels = [.. labels.Distinct().Order(StringComparer.Ordinal)];
+        var indexOf = _headLabels.Select((label, i) => (label, i))
+            .ToDictionary(p => p.label, p => p.i, StringComparer.Ordinal);
+
+        var ids = texts.Select(t => Tokenize(t, options.MaxLength)).ToArray();
+        var targets = labels.Select(l => indexOf[l]).ToArray();
+
+        // On BERT the head is BertForSequenceClassification's own, so a saved adapter predicts
+        // the same thing in Python; elsewhere it is a linear layer over the mean row.
+        var head = new ClassifierHead(encoder.Hidden, _headLabels.Length, options.Seed, PoolerOf(_model));
+        var report = LoraTrainer.Fit(encoder, head, ids, targets, options);
+
+        _classifier = head;
+        _tagger = null;
+        _answerer = null;
+        _head = null;
+
+        return report;
+    }
+
+    /// <summary>
+    /// Trains the adapters and a token classifier together, for named entities.
+    /// </summary>
+    /// <param name="words">Each sentence as its words - the form CoNLL-style datasets come in.</param>
+    /// <param name="tags">One tag per word, such as <c>B-PER</c>, <c>I-PER</c> or <c>O</c>.</param>
+    /// <param name="options">Epochs, batch size, learning rate and schedule.</param>
+    /// <returns>The loss curve and how long it took.</returns>
+    /// <remarks>
+    /// <para>
+    /// The head is <c>classifier</c> over every token, which is what each family's
+    /// <c>ForTokenClassification</c> model has, so a saved adapter loads in Python on any of them.
+    /// Only the first piece of each word is trained on, as Transformers' <c>label_all_tokens=False</c>
+    /// does. The loss is the mean over those pieces across a step.
+    /// </para>
+    /// <para>
+    /// Training a token head replaces a sequence head trained earlier, and the reverse: both live on
+    /// the same adapters, and retraining the adapters for one leaves the other reading features it
+    /// was not fitted to.
+    /// </para>
+    /// </remarks>
+    public TrainingReport TrainTokenClassifier(
+        IReadOnlyList<IReadOnlyList<string>> words, IReadOnlyList<IReadOnlyList<string>> tags, TrainingOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(words);
+        ArgumentNullException.ThrowIfNull(tags);
+        options ??= new TrainingOptions();
+
+        if (words.Count != tags.Count)
+        {
+            throw new ArgumentException($"{words.Count} sentences against {tags.Count} tag sequences.", nameof(tags));
+        }
+
+        if (words.Count == 0) throw new ArgumentException("Nothing to train on.", nameof(words));
+
+        for (var i = 0; i < words.Count; i++)
+        {
+            if (words[i].Count != tags[i].Count)
+            {
+                throw new ArgumentException(
+                    $"Sentence {i} has {words[i].Count} words and {tags[i].Count} tags; tags are one per word.", nameof(tags));
+            }
+        }
+
+        var encoder = PrepareTraining(options);
+
+        _maxLength = options.MaxLength;
+        _headLabels = [.. tags.SelectMany(t => t).Distinct().Order(StringComparer.Ordinal)];
+        var indexOf = _headLabels.Select((label, i) => (label, i))
+            .ToDictionary(p => p.label, p => p.i, StringComparer.Ordinal);
+
+        var ids = new int[words.Count][];
+        var targets = new int[words.Count][];
+
+        for (var i = 0; i < words.Count; i++)
+        {
+            var (text, spans) = TokenAlignment.Join(words[i]);
+            var encoding = _model.Tokenizer.Encode(text);
+            var aligned = TokenAlignment.Targets(encoding, spans, [.. tags[i].Select(t => indexOf[t])]);
+            var length = Math.Min(encoding.Length, options.MaxLength);
+
+            ids[i] = encoding.ToIdArray()[..length];
+            targets[i] = aligned[..length];
+        }
+
+        var head = new TokenClassifierHead(encoder.Hidden, _headLabels.Length, options.Seed);
+        var report = LoraTrainer.Fit(encoder, head, ids, targets, options);
+
+        _tagger = head;
+        _classifier = null;
+        _answerer = null;
+        _head = null;
+
+        return report;
+    }
+
+    /// <summary>
+    /// Trains the adapters and an extractive question answering head together.
+    /// </summary>
+    /// <param name="examples">Questions, the passages that answer them, and the answers.</param>
+    /// <param name="options">Epochs, batch size, learning rate and schedule.</param>
+    /// <returns>The loss curve and how long it took.</returns>
+    /// <remarks>
+    /// <para>
+    /// The head is <c>qa_outputs</c>, a start and an end score per token, trained with the loss
+    /// Transformers uses: the mean of a cross-entropy over start positions and one over end
+    /// positions. The question and the passage go in as a pair, so the passage is segment 1.
+    /// </para>
+    /// <para>
+    /// A pair longer than <see cref="TrainingOptions.MaxLength"/> is cut at the end, which cuts the
+    /// passage. An answer that falls past the cut is trained as pointing at <c>[CLS]</c>, which is
+    /// how Transformers marks "not in this window". It does not split long passages into
+    /// overlapping windows; keep passages within the limit.
+    /// </para>
+    /// </remarks>
+    public TrainingReport TrainQuestionAnswering(IReadOnlyList<AnswerExample> examples, TrainingOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(examples);
+        options ??= new TrainingOptions();
+
+        if (examples.Count == 0) throw new ArgumentException("Nothing to train on.", nameof(examples));
+
+        var encoder = PrepareTraining(options);
+
+        var ids = new int[examples.Count][];
+        var types = new int[examples.Count][];
+        var targets = new int[examples.Count][];
+
+        for (var i = 0; i < examples.Count; i++)
+        {
+            var example = examples[i];
+            var start = example.AnswerStart >= 0
+                ? example.AnswerStart
+                : example.Context.IndexOf(example.Answer, StringComparison.Ordinal);
+
+            if (start < 0 || start + example.Answer.Length > example.Context.Length
+                || string.CompareOrdinal(example.Context, start, example.Answer, 0, example.Answer.Length) != 0)
+            {
+                throw new ArgumentException(
+                    $"Example {i}: the answer '{example.Answer}' is not in its context"
+                    + (example.AnswerStart >= 0 ? $" at {example.AnswerStart}" : "") + ". Answers are extracted spans.",
+                    nameof(examples));
+            }
+
+            var encoding = TokenAlignment.Truncate(_model.Tokenizer.Encode(example.Question, example.Context), options.MaxLength);
+            var (first, last) = TokenAlignment.AnswerTokens(encoding, start, start + example.Answer.Length, encoding.Length);
+
+            ids[i] = encoding.ToIdArray();
+            types[i] = [.. encoding.TypeIds];
+            targets[i] = [first, last];
+        }
+
+        var head = new SpanHead(encoder.Hidden, options.Seed);
+        var report = LoraTrainer.Fit(encoder, head, ids, targets, options, types);
+
+        _maxLength = options.MaxLength;
+        _headLabels = [];
+        _answerer = head;
+        _classifier = null;
+        _tagger = null;
+        _head = null;
+
+        return report;
+    }
+
+    /// <summary>Answers a question from a passage with the head trained here or loaded.</summary>
+    /// <param name="question">What to ask.</param>
+    /// <param name="context">The passage the answer must come from.</param>
+    /// <param name="topK">How many candidate spans to return, best first.</param>
+    /// <exception cref="InvalidOperationException">No question answering head has been trained or loaded.</exception>
+    /// <remarks>
+    /// Decoded as <c>TransformerModel.Answer</c> decodes: only passage positions are eligible, the end
+    /// never precedes the start, and the answer is a substring of <paramref name="context"/>.
+    /// </remarks>
+    public IReadOnlyList<Answer> Answer(string question, string context, int topK = 1)
+    {
+        ArgumentNullException.ThrowIfNull(question);
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (_answerer is null)
+        {
+            throw new InvalidOperationException(
+                "No question answering head has been trained or loaded. Call TrainQuestionAnswering, or "
+                + "load an adapter saved with one (task_type QUESTION_ANS).");
+        }
+
+        var encoding = TokenAlignment.Truncate(_model.Tokenizer.Encode(question, context), _maxLength);
+        double[] hidden;
+
+        if (AdaptersChangeOutput())
+        {
+            hidden = TrainingEncoder().Forward(encoding.ToIdArray(), typeIds: [.. encoding.TypeIds]);
+        }
+        else
+        {
+            hidden = _model.Forward(encoding.ToIdArray(), [.. encoding.TypeIds], encoding.ToMaskArray()).ToArray();
+        }
+
+        var (start, end) = _answerer.Logits(hidden, encoding.Length, _model.Config.HiddenSize);
+        return QuestionAnsweringHead.Decode(context, encoding, start, end, topK: topK);
+    }
+
+    /// <summary>Finds the named entities in a text with the token classifier trained here or loaded.</summary>
+    /// <param name="text">The input.</param>
+    /// <exception cref="InvalidOperationException">No token classifier has been trained or loaded.</exception>
+    /// <remarks>
+    /// Each word takes the label predicted for its first piece, the only piece that was trained -
+    /// Transformers' <c>aggregation_strategy="first"</c>. Spans are substrings of
+    /// <paramref name="text"/>, taken from the tokenizer's offsets.
+    /// </remarks>
+    public IReadOnlyList<Entity> FindEntities(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (_tagger is null)
+        {
+            throw new InvalidOperationException(
+                "No token classifier has been trained or loaded. Call TrainTokenClassifier, or load an "
+                + "adapter saved with one (task_type TOKEN_CLS).");
+        }
+
+        var encoding = _model.Tokenizer.Encode(text);
+        var (hidden, rows) = Encode(text, _maxLength);
+        var logits = _tagger.Logits(hidden, rows, _model.Config.HiddenSize);
+
+        return TokenAlignment.Decode(text, encoding, logits, _headLabels);
+    }
+
+    /// <summary>The checks both kinds of training share, and the encoder they train through.</summary>
+    private LoraEncoder PrepareTraining(TrainingOptions options)
+    {
         if (options.Epochs < 1 || options.BatchSize < 1 || options.GradientAccumulation < 1)
         {
             throw new ArgumentOutOfRangeException(
@@ -468,21 +844,7 @@ public sealed class PeftModel
                 + "intermediate.dense or output.dense.");
         }
 
-        _maxLength = options.MaxLength;
-        _headLabels = [.. labels.Distinct().Order(StringComparer.Ordinal)];
-        var indexOf = _headLabels.Select((label, i) => (label, i))
-            .ToDictionary(p => p.label, p => p.i, StringComparer.Ordinal);
-
-        var ids = texts.Select(t => Tokenize(t, options.MaxLength)).ToArray();
-        var targets = labels.Select(l => indexOf[l]).ToArray();
-
-        var head = new ClassifierHead(encoder.Hidden, _headLabels.Length, options.Seed);
-        var report = LoraTrainer.Fit(encoder, head, ids, targets, options);
-
-        _classifier = head;
-        _head = null;
-
-        return report;
+        return encoder;
     }
 
     /// <summary>Classifies a text with the trained head.</summary>
@@ -493,20 +855,24 @@ public sealed class PeftModel
         if (_head is null && _classifier is null)
         {
             throw new InvalidOperationException(
-                "No head has been trained. Call Train or FitHead first, or use Model.Predict to use "
-                + "the checkpoint's own classification head if it has one.");
+                _tagger is not null
+                    ? "This model's head labels tokens, not texts. Use FindEntities."
+                    : _answerer is not null
+                    ? "This model's head extracts answers, not labels. Use Answer."
+                    : "No head has been trained. Call Train or FitHead first, or use Model.Predict to use "
+                        + "the checkpoint's own classification head if it has one.");
         }
-
-        var features = Features(text, _maxLength);
 
         if (_classifier is not null)
         {
-            var scores = ClassifierHead.Softmax(_classifier.Logits(features));
+            var (hidden, rows) = Encode(text, _maxLength);
+            var scores = ClassifierHead.Softmax(_classifier.Logits(hidden, rows, _model.Config.HiddenSize));
             return [.. scores
                 .Select((score, k) => new Prediction(_headLabels[k], score, k))
                 .OrderByDescending(p => p.Score)];
         }
 
+        var features = Features(text, _maxLength);
         var row = NdArray.Zeros(1, features.Length);
         for (var d = 0; d < features.Length; d++) row[0, d] = features[d];
 
@@ -538,7 +904,25 @@ public sealed class PeftModel
 
     /// <summary>Writes the adapters in the Hugging Face PEFT layout.</summary>
     /// <param name="directory">Where to write.</param>
-    public void SaveAdapter(string directory) => Adapters.Save(directory, _model.RepoId);
+    /// <remarks>
+    /// A classifier trained with <see cref="Train"/> is saved with the adapters. On BERT it is saved
+    /// as PEFT saves a <c>SEQ_CLS</c> head, so the directory loads in Python with
+    /// <c>AutoModelForSequenceClassification</c> and <c>PeftModel.from_pretrained</c>; the label
+    /// names go into <c>hfnet_head.json</c>. A head fitted with <see cref="FitHead"/> is a logistic
+    /// regression and is not saved.
+    /// </remarks>
+    public void SaveAdapter(string directory)
+    {
+        LinearHead? trained = (LinearHead?)_classifier ?? (LinearHead?)_tagger ?? _answerer;
+        Adapters.Save(directory, _model.RepoId, trained is null ? null : new SavedHead(trained, _headLabels, _maxLength));
+    }
+
+    /// <summary>
+    /// Whether the trained classifier would load in Python too: always for a token classifier, and
+    /// for a sequence classifier when it sits on BERT's own pooler, as
+    /// <c>BertForSequenceClassification</c>'s does.
+    /// </summary>
+    public bool HeadLoadsInPython => _tagger is not null || _answerer is not null || _classifier?.Pooler is not null;
 
     /// <summary>
     /// How much smaller the adapter is than the encoder it adapts.
@@ -570,12 +954,14 @@ public static class PEFT
     public static PeftModel ApplyLoRA(TransformerModel model, LoraConfig? config = null)
         => PeftModel.ApplyLoRA(model, config);
 
-    /// <summary>Loads a published PEFT adapter onto a base model.</summary>
+    /// <summary>Loads a PEFT adapter onto a base model, from the Hub or from a local directory.</summary>
     /// <param name="model">The base model.</param>
-    /// <param name="adapterRepoId">The adapter repository id.</param>
+    /// <param name="adapter">An adapter repository id, or a directory written by <c>SaveAdapter</c> or by PEFT.</param>
     /// <param name="merge">Whether to fold it into the weights immediately.</param>
-    public static PeftModel LoadAdapter(TransformerModel model, string adapterRepoId, bool merge = true)
-        => PeftModel.FromPretrained(model, adapterRepoId, "main", merge);
+    public static PeftModel LoadAdapter(TransformerModel model, string adapter, bool merge = true)
+        => Directory.Exists(adapter)
+            ? PeftModel.Load(model, adapter, merge)
+            : PeftModel.FromPretrained(model, adapter, "main", merge);
 
     /// <summary>Reads an adapter file without attaching it to anything.</summary>
     public static LoraAdapterSet ReadAdapter(string path) => LoraAdapterSet.Load(path);

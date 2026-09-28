@@ -76,12 +76,19 @@ worth doing for the ecosystem, but nothing here waits on it.
    checkpoint's own module paths. An adapter trained here, loaded into PEFT 0.21 in Python, gives
    the same hidden states as HF.Net's merged model to 7e-7. Before this, `ApplyLoRA` named them
    `layer.0.query`, and Python loaded none of them without saying so.
-4. **What is left:**
-   - **Saving the head.** `Train` fits a mean-pooled linear head that lives only in memory. PEFT's
-     answer is `modules_to_save`, which needs a head shaped like Transformers' own (pooler plus
-     classifier), not this one.
-   - **Token classification and question answering heads.** The encoder's backward pass already
-     supports them; only the loss and the head differ.
+4. ~~**Saving the head.**~~ **Done.** On BERT the head is now `BertForSequenceClassification`'s own
+   (the frozen pretrained pooler, then `classifier`), saved as PEFT saves `SEQ_CLS`. Loaded in Python
+   with `AutoModelForSequenceClassification`, it predicts the same probabilities to 5e-9. Other
+   families keep a mean-pooled head that only HF.Net reads back, because their Transformers heads
+   have layers PEFT does not save.
+5. ~~**Token classification and question answering heads.**~~ **Done.** `TrainTokenClassifier`
+   and `TrainQuestionAnswering`, each head saved in PEFT's layout and agreeing with Python: entity
+   scores to 5e-11, answer scores to 3e-10. Question answering found a PEFT bug worth knowing:
+   `PeftModelForQuestionAnswering.forward` drops `token_type_ids`, so in Python it has to be merged
+   first.
+6. **What is left:**
+   - **Long passages.** Question answering cuts a pair at `MaxLength`. Transformers splits a long
+     passage into overlapping windows (`doc_stride`) and keeps the best answer across them.
    - **Batched steps.** Sequences go through one at a time, unpadded, so a step is about three
      forward passes per example. Padding with a mask would let the linear kernel see many rows
      at once. It needs the attention backward pass to respect the mask, and a gradient check that

@@ -178,9 +178,16 @@ public sealed class LoraAdapterSet
     /// <param name="adapters">Adapters, keyed by the base parameter they adapt.</param>
     /// <param name="config">The configuration they share.</param>
     public LoraAdapterSet(IReadOnlyDictionary<string, LoraAdapter> adapters, LoraConfig config)
+        : this(adapters, config, new Dictionary<string, NdArray>(StringComparer.Ordinal))
+    {
+    }
+
+    private LoraAdapterSet(
+        IReadOnlyDictionary<string, LoraAdapter> adapters, LoraConfig config, IReadOnlyDictionary<string, NdArray> others)
     {
         _adapters = new Dictionary<string, LoraAdapter>(adapters, StringComparer.Ordinal);
         Config = config;
+        Others = others;
     }
 
     /// <summary>The shared configuration.</summary>
@@ -188,6 +195,15 @@ public sealed class LoraAdapterSet
 
     /// <summary>The adapters, keyed by the base parameter path they adapt.</summary>
     public IReadOnlyDictionary<string, LoraAdapter> Adapters => _adapters;
+
+    /// <summary>
+    /// Tensors in the adapter file that are not LoRA pairs, by name with PEFT's prefixes removed -
+    /// <c>classifier.weight</c> from a sequence classification adapter, for instance.
+    /// </summary>
+    internal IReadOnlyDictionary<string, NdArray> Others { get; }
+
+    /// <summary>The directory the adapter file was read from, where a saved head sits beside it.</summary>
+    internal string? SourceDirectory { get; private set; }
 
     /// <summary>Total trainable values across every adapter.</summary>
     public long ParameterCount => _adapters.Values.Sum(a => a.ParameterCount);
@@ -205,6 +221,12 @@ public sealed class LoraAdapterSet
         var config = available.Contains("adapter_config.json")
             ? ReadConfig(Hub.DownloadFile(repoId, "adapter_config.json", revision))
             : new LoraConfig();
+
+        // The head's side files land in the same snapshot directory, where LoadHead finds them.
+        foreach (var extra in (string[])[HeadConfigFile, HeadWeightsFile])
+        {
+            if (available.Contains(extra)) Hub.DownloadFile(repoId, extra, revision);
+        }
 
         if (available.Contains("adapter_model.safetensors"))
         {
@@ -237,12 +259,20 @@ public sealed class LoraAdapterSet
 
         // Pair each lora_A with its lora_B by the base path they share.
         var pairs = new Dictionary<string, (NdArray? A, NdArray? B)>(StringComparer.Ordinal);
+        var others = new Dictionary<string, NdArray>(StringComparer.Ordinal);
 
         foreach (var (name, tensor) in tensors)
         {
             var isA = name.Contains(".lora_A", StringComparison.Ordinal);
             var isB = name.Contains(".lora_B", StringComparison.Ordinal);
-            if (!isA && !isB) continue;
+
+            if (!isA && !isB)
+            {
+                // modules_to_save copies, such as a classifier. Older PEFT releases kept the
+                // wrapper's own path segment in the name; either spelling means the same module.
+                others[Normalize(name).Replace(".modules_to_save", "", StringComparison.Ordinal)] = tensor;
+                continue;
+            }
 
             var basePath = Normalize(name);
             pairs.TryGetValue(basePath, out var pair);
@@ -263,13 +293,33 @@ public sealed class LoraAdapterSet
             adapters[basePath] = LoraAdapter.FromMatrices(a, b, config);
         }
 
-        return new LoraAdapterSet(adapters, config);
+        return new LoraAdapterSet(adapters, config, others)
+        {
+            SourceDirectory = Path.GetDirectoryName(Path.GetFullPath(path)),
+        };
     }
 
     /// <summary>Writes the set in the PEFT layout: weights plus an <c>adapter_config.json</c>.</summary>
     /// <param name="directory">Directory to write into; created if missing.</param>
     /// <param name="baseModelId">The model the adapter was trained against, recorded in the config.</param>
-    public void Save(string directory, string? baseModelId = null)
+    public void Save(string directory, string? baseModelId = null) => Save(directory, baseModelId, head: null);
+
+    /// <summary>The file naming the labels and pooling of a saved head. HF.Net's own; PEFT ignores it.</summary>
+    internal const string HeadConfigFile = "hfnet_head.json";
+
+    /// <summary>A mean-pooled head's weights, which have no PEFT equivalent to be saved as.</summary>
+    internal const string HeadWeightsFile = "head.safetensors";
+
+    /// <summary>Writes the adapters and, when there is one, the classifier trained with them.</summary>
+    /// <remarks>
+    /// A head over BERT's pooler is <c>BertForSequenceClassification</c>'s <c>classifier</c>, so it is
+    /// written the way PEFT writes a <c>modules_to_save</c> module - into the adapter file as
+    /// <c>base_model.model.classifier.*</c>, with <c>task_type</c> <c>SEQ_CLS</c> - and loads in
+    /// Python. A mean-pooled head has no counterpart there and goes into a file of its own. Either
+    /// way the label names go into <c>hfnet_head.json</c> rather than <c>adapter_config.json</c>,
+    /// where PEFT would answer an unknown key with advice to upgrade.
+    /// </remarks>
+    internal void Save(string directory, string? baseModelId, SavedHead? head)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         Directory.CreateDirectory(directory);
@@ -281,12 +331,60 @@ public sealed class LoraAdapterSet
             tensors[$"base_model.model.{basePath}.lora_B.weight"] = adapter.B;
         }
 
+        // A token head is all Transformers' token classifiers have, on every family; a sequence head
+        // matches BertForSequenceClassification only when it reads BERT's pooler.
+        var isToken = head?.Head is TokenClassifierHead;
+        var isSpan = head?.Head is SpanHead;
+        var inPeftLayout = isToken || isSpan || (head?.Head as ClassifierHead)?.Pooler is not null;
+
+        // PEFT saves a modules_to_save module under the module's own name: classifier for the two
+        // classification tasks, qa_outputs for question answering.
+        var module = isSpan ? "qa_outputs" : "classifier";
+        if (inPeftLayout)
+        {
+            tensors[$"base_model.model.{module}.weight"] = head!.Head.Weight;
+            tensors[$"base_model.model.{module}.bias"] = head.Head.Bias;
+        }
+
         SafeTensors.Write(Path.Combine(directory, "adapter_model.safetensors"), tensors);
+
+        // A previous save into the same directory must not leave a head behind that no longer
+        // matches the adapters beside it.
+        foreach (var stale in (string[])[HeadConfigFile, HeadWeightsFile])
+        {
+            var path = Path.Combine(directory, stale);
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        if (head is not null)
+        {
+            if (!inPeftLayout)
+            {
+                SafeTensors.Write(Path.Combine(directory, HeadWeightsFile), new Dictionary<string, NdArray>
+                {
+                    ["classifier.weight"] = head.Head.Weight,
+                    ["classifier.bias"] = head.Head.Bias,
+                });
+            }
+
+            var description = new Dictionary<string, object?>
+            {
+                ["task"] = isSpan ? "question_answering" : isToken ? "token" : "sequence",
+                ["id2label"] = head.Labels.Select((label, i) => (label, i)).ToDictionary(p => p.i.ToString(), p => p.label),
+                ["max_length"] = head.MaxLength,
+            };
+
+            if (!isToken && !isSpan) description["pooling"] = inPeftLayout ? "pooler" : "mean";
+
+            File.WriteAllText(
+                Path.Combine(directory, HeadConfigFile),
+                JsonSerializer.Serialize(description, new JsonSerializerOptions { WriteIndented = true }));
+        }
 
         var config = new Dictionary<string, object?>
         {
             ["peft_type"] = "LORA",
-            ["task_type"] = "FEATURE_EXTRACTION",
+            ["task_type"] = isSpan ? "QUESTION_ANS" : isToken ? "TOKEN_CLS" : inPeftLayout ? "SEQ_CLS" : "FEATURE_EXTRACTION",
             ["base_model_name_or_path"] = baseModelId,
             ["r"] = Config.Rank,
             ["lora_alpha"] = Config.Alpha,
@@ -296,12 +394,15 @@ public sealed class LoraAdapterSet
             ["inference_mode"] = true,
         };
 
+        // What PEFT itself writes for each task: the head is trained and saved in full.
+        if (inPeftLayout) config["modules_to_save"] = isSpan ? new[] { "qa_outputs" } : new[] { "classifier", "score" };
+
         File.WriteAllText(
             Path.Combine(directory, "adapter_config.json"),
             JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    private static LoraConfig ReadConfig(string path)
+    internal static LoraConfig ReadConfig(string path)
     {
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
@@ -337,4 +438,61 @@ public sealed class LoraAdapterSet
     /// <inheritdoc />
     public override string ToString()
         => $"LoraAdapterSet(r={Config.Rank}, {_adapters.Count} adapters, {ParameterCount:N0} parameters)";
+}
+
+/// <summary>A trained classifier and what is needed to use it again.</summary>
+/// <param name="Head">The classifier, and the pooler it reads through if any.</param>
+/// <param name="Labels">Label names, by class index.</param>
+/// <param name="MaxLength">The truncation it was trained with.</param>
+internal sealed record SavedHead(LinearHead Head, IReadOnlyList<string> Labels, int MaxLength);
+
+/// <summary>What <c>hfnet_head.json</c> says.</summary>
+/// <param name="Task"><c>sequence</c> or <c>token</c>.</param>
+/// <param name="Pooling">For a sequence head, <c>pooler</c> or <c>mean</c>.</param>
+/// <param name="Labels">Label names, by class index.</param>
+/// <param name="MaxLength">The truncation the head was trained with.</param>
+internal sealed record HeadDescription(string Task, string Pooling, IReadOnlyList<string> Labels, int MaxLength)
+{
+    /// <summary>
+    /// The <c>task_type</c> in an adapter's <c>adapter_config.json</c>, or <c>null</c> when it has none.
+    /// </summary>
+    /// <remarks>
+    /// A sequence classifier and a token classifier store <c>classifier.weight</c> at the same shape,
+    /// so an adapter trained in Python, which has no <c>hfnet_head.json</c>, can only be told apart
+    /// by this.
+    /// </remarks>
+    internal static string? TaskType(string directory)
+    {
+        var path = Path.Combine(directory, "adapter_config.json");
+        if (!File.Exists(path)) return null;
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        return document.RootElement.TryGetProperty("task_type", out var task) && task.ValueKind == JsonValueKind.String
+            ? task.GetString()
+            : null;
+    }
+
+    /// <summary>Reads the description saved beside an adapter, or returns <c>null</c> when there is none.</summary>
+    internal static HeadDescription? Read(string directory)
+    {
+        var path = Path.Combine(directory, LoraAdapterSet.HeadConfigFile);
+        if (!File.Exists(path)) return null;
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var root = document.RootElement;
+
+        var labels = new SortedDictionary<int, string>();
+        if (root.TryGetProperty("id2label", out var map))
+        {
+            foreach (var entry in map.EnumerateObject()) labels[int.Parse(entry.Name)] = entry.Value.GetString() ?? entry.Name;
+        }
+
+        return new HeadDescription(
+            root.TryGetProperty("task", out var task) ? task.GetString() ?? "sequence" : "sequence",
+            root.TryGetProperty("pooling", out var pooling) && pooling.ValueKind == JsonValueKind.String
+                ? pooling.GetString()!
+                : "pooler",
+            [.. labels.Values],
+            root.TryGetProperty("max_length", out var max) ? max.GetInt32() : 512);
+    }
 }

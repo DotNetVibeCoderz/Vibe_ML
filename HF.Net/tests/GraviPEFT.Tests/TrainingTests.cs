@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Gravicode.HFNet.GraviHub.Io;
 using Gravicode.HFNet.GraviPEFT;
 using Gravicode.HFNet.GraviTransformers;
 using Gravicode.Science.GraviNum;
@@ -106,23 +108,35 @@ public sealed class GradientTests
         var random = dropoutSeed is null ? null : new Random(dropoutSeed.Value);
         var hidden = encoder.Forward(Sentence, tape, random);
 
-        var probabilities = ClassifierHead.Softmax(head.Logits(ClassifierHead.Pool(hidden, Sentence.Length, Hidden)));
+        var probabilities = ClassifierHead.Softmax(head.Logits(hidden, Sentence.Length, Hidden));
         return -Math.Log(probabilities[target]);
     }
 
-    [Theory]
-    [InlineData("gelu", 0.0)]
-    [InlineData("gelu_new", 0.0)]
-    [InlineData("gelu", 0.25)]
-    public void Every_adapter_gradient_agrees_with_numerical_differentiation(string activation, double dropout)
+    /// <summary>A pooler with random weights, standing in for BERT's pretrained one.</summary>
+    internal static Pooler RandomPooler(int seed)
     {
+        var random = new GraviRandom(seed);
+        return new Pooler(
+            [.. Enumerable.Range(0, Hidden * Hidden).Select(_ => 0.4 * random.Normal(0, 1))],
+            [.. Enumerable.Range(0, Hidden).Select(_ => 0.1 * random.Normal(0, 1))]);
+    }
+
+    [Theory]
+    [InlineData("gelu", 0.0, false)]
+    [InlineData("gelu_new", 0.0, false)]
+    [InlineData("gelu", 0.25, false)]
+    [InlineData("gelu", 0.0, true)]
+    public void Every_adapter_gradient_agrees_with_numerical_differentiation(string activation, double dropout, bool pooler)
+    {
+        // With the pooler the loss reaches the encoder only through the [CLS] row, and through a
+        // tanh - a different path from the mean head's, so it is checked on its own.
         // The v0.3 milestone, as PLAN.md words it: a numerically differentiated loss and the
         // backward pass agreeing to 1e-6 on a two-layer model. With dropout the same seed draws the
         // same masks for every evaluation, so the loss is still a fixed smooth function.
         var (source, config) = TinyModel(7, activation);
         var adapters = EveryProjection(dropout);
         var encoder = LoraEncoder.Build(source, config, (l, p) => adapters[(l, p)]);
-        var head = new ClassifierHead(Hidden, 3, seed: 5);
+        var head = new ClassifierHead(Hidden, 3, seed: 5, pooler ? RandomPooler(8) : null);
         const int Target = 1;
         int? seed = dropout > 0 ? 1234 : null;
 
@@ -379,7 +393,7 @@ public sealed class TrainerTests
         for (var i = 0; i < ids.Count; i++)
         {
             var hidden = encoder.Forward(ids[i]);
-            var logits = head.Logits(ClassifierHead.Pool(hidden, ids[i].Length, 8));
+            var logits = head.Logits(ClassifierHead.MeanPool(hidden, ids[i].Length, 8));
             if ((logits[1] > logits[0] ? 1 : 0) == targets[i]) correct++;
         }
 
@@ -454,5 +468,110 @@ public sealed class AdapterNameTests
         Assert.Equal((int)(hash & 0x7FFFFFFF), PeftModel.StableSeed(3, "query"));
         Assert.NotEqual(PeftModel.StableSeed(0, "query"), PeftModel.StableSeed(0, "value"));
         Assert.NotEqual(PeftModel.StableSeed(0, "query"), PeftModel.StableSeed(1, "query"));
+    }
+}
+
+/// <summary>The classifier over BERT's pooler, and how a trained head is saved and read back.</summary>
+public sealed class HeadTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "hfnet-head", Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+    }
+
+    [Fact]
+    public void The_pooler_is_tanh_of_a_dense_layer_over_the_first_row()
+    {
+        // BertPooler: hidden_states[:, 0] through Linear, then tanh. Written out naively here.
+        var pooler = GradientTests.RandomPooler(3);
+        var head = new ClassifierHead(8, 2, seed: 1, pooler);
+        var random = new GraviRandom(4);
+        double[] hidden = [.. Enumerable.Range(0, 3 * 8).Select(_ => random.Normal(0, 1))];
+
+        var pooled = head.Pool(hidden, rows: 3, width: 8);
+
+        for (var o = 0; o < 8; o++)
+        {
+            var sum = pooler.Bias[o];
+            for (var i = 0; i < 8; i++) sum += pooler.Weight[o * 8 + i] * hidden[i];
+            Assert.True(Math.Abs(Math.Tanh(sum) - pooled[o]) < 1e-15, $"[{o}]");
+        }
+    }
+
+    /// <summary>What a weight becomes on disk: F32, as PEFT writes it.</summary>
+    private static double[] AsSaved(NdArray values) => [.. values.ToArray().Select(v => (double)(float)v)];
+
+    private static LoraAdapterSet OneAdapter()
+        => new(new Dictionary<string, LoraAdapter>
+        {
+            ["bert.encoder.layer.0.attention.self.query"] = new LoraAdapter(8, 8, new LoraConfig(Rank: 2)),
+        }, new LoraConfig(Rank: 2));
+
+    [Fact]
+    public void A_head_over_the_pooler_is_saved_where_PEFT_saves_a_SEQ_CLS_classifier()
+    {
+        // The names and config keys below are what PEFT 0.21 itself wrote for
+        // BertForSequenceClassification with task_type=SEQ_CLS.
+        var head = new ClassifierHead(8, 3, seed: 2, GradientTests.RandomPooler(5));
+        OneAdapter().Save(_directory, "bert-base-uncased", new SavedHead(head, ["neg", "neu", "pos"], 64));
+
+        var tensors = SafeTensors.ReadAll(Path.Combine(_directory, "adapter_model.safetensors"));
+        Assert.Contains("base_model.model.classifier.weight", tensors.Keys);
+        Assert.Contains("base_model.model.classifier.bias", tensors.Keys);
+        Assert.Equal(AsSaved(head.Weight), tensors["base_model.model.classifier.weight"].ToArray());
+
+        using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(_directory, "adapter_config.json")));
+        Assert.Equal("SEQ_CLS", config.RootElement.GetProperty("task_type").GetString());
+        Assert.Equal(["classifier", "score"], config.RootElement.GetProperty("modules_to_save").EnumerateArray().Select(e => e.GetString()));
+        Assert.False(config.RootElement.TryGetProperty("id2label", out _), "PEFT answers unknown config keys with advice to upgrade");
+
+        var description = HeadDescription.Read(_directory)!;
+        Assert.Equal("pooler", description.Pooling);
+        Assert.Equal(["neg", "neu", "pos"], description.Labels);
+        Assert.Equal(64, description.MaxLength);
+        Assert.False(File.Exists(Path.Combine(_directory, LoraAdapterSet.HeadWeightsFile)));
+    }
+
+    [Fact]
+    public void Reading_the_adapter_back_recovers_the_classifier_under_its_module_name()
+    {
+        var head = new ClassifierHead(8, 2, seed: 2, GradientTests.RandomPooler(5));
+        OneAdapter().Save(_directory, null, new SavedHead(head, ["a", "b"], 128));
+
+        var read = LoraAdapterSet.Load(Path.Combine(_directory, "adapter_model.safetensors"));
+
+        Assert.Single(read.Adapters);
+        Assert.Equal(AsSaved(head.Weight), read.Others["classifier.weight"].ToArray());
+        Assert.Equal(AsSaved(head.Bias), read.Others["classifier.bias"].ToArray());
+        Assert.Equal(Path.GetFullPath(_directory), read.SourceDirectory);
+    }
+
+    [Fact]
+    public void A_mean_pooled_head_has_no_PEFT_form_and_goes_into_a_file_of_its_own()
+    {
+        var head = new ClassifierHead(8, 2, seed: 2);
+        OneAdapter().Save(_directory, null, new SavedHead(head, ["a", "b"], 128));
+
+        var adapter = SafeTensors.ReadAll(Path.Combine(_directory, "adapter_model.safetensors"));
+        Assert.DoesNotContain(adapter.Keys, k => k.Contains("classifier"));
+
+        using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(_directory, "adapter_config.json")));
+        Assert.Equal("FEATURE_EXTRACTION", config.RootElement.GetProperty("task_type").GetString());
+
+        var saved = SafeTensors.ReadAll(Path.Combine(_directory, LoraAdapterSet.HeadWeightsFile));
+        Assert.Equal(AsSaved(head.Weight), saved["classifier.weight"].ToArray());
+        Assert.Equal("mean", HeadDescription.Read(_directory)!.Pooling);
+    }
+
+    [Fact]
+    public void Saving_without_a_head_removes_one_left_by_an_earlier_save()
+    {
+        OneAdapter().Save(_directory, null, new SavedHead(new ClassifierHead(8, 2, seed: 2), ["a", "b"], 128));
+        OneAdapter().Save(_directory, null, head: null);
+
+        Assert.False(File.Exists(Path.Combine(_directory, LoraAdapterSet.HeadConfigFile)));
+        Assert.False(File.Exists(Path.Combine(_directory, LoraAdapterSet.HeadWeightsFile)));
     }
 }

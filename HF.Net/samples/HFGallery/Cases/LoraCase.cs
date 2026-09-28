@@ -75,7 +75,11 @@ internal sealed class LoraCase : GalleryCase
         Console.WriteLine(report);                 // loss per epoch
         Console.WriteLine(peft.Predict(review)[0]);
 
-        peft.SaveAdapter("my-adapter");            // PEFT layout
+        // Adapters and classifier, in the layout PEFT writes for SEQ_CLS: it loads in
+        // Python with AutoModelForSequenceClassification, and here with LoadAdapter.
+        peft.SaveAdapter("my-adapter");
+        var again = PEFT.LoadAdapter(model, "my-adapter");
+
         peft.Merge();                              // fold into the weights to serve
         """;
 
@@ -135,6 +139,216 @@ internal sealed class LoraCase : GalleryCase
                 ("train accuracy", $"{trainAccuracy:P0}"),
                 ("steps", report.Steps.ToString()),
                 ("merged vs not", $"{drift:E1}"),
+                ("head", peft.HeadLoadsInPython ? "BERT pooler + classifier, loads in Python" : "mean-pooled, HF.Net only"),
+            ],
+        };
+    }
+}
+
+/// <summary>Trains LoRA adapters and a token classifier to find people and places.</summary>
+/// <remarks>
+/// Sixteen sentences, eight names and eight cities, and a test sentence that uses neither. What it
+/// has to learn is where a name goes in a sentence, not a list of names.
+/// </remarks>
+internal sealed class NamesCase : GalleryCase
+{
+    public override string Title => "Teach it names";
+    public override string Blurb => "Train LoRA adapters to tag people and places, from 16 tagged sentences.";
+    public override string Library => "GraviPEFT";
+    public override string Model => "bert-base-uncased";
+    public override string InputLabel => "A sentence to tag after training";
+
+    public override string? DefaultInput => "Kartini moved to Yogyakarta, and Hendra stayed in Semarang.";
+
+    private static readonly string[] People = ["Ani", "Budi", "Siti", "Joko", "Maria", "Ahmad", "Dewi", "Rudi"];
+    private static readonly string[] Places = ["Bandung", "Jakarta", "Surabaya", "Medan", "Bogor", "Malang", "Depok", "Solo"];
+
+    public override string Code => """
+        using Gravicode.HFNet.GraviPEFT;
+        using Gravicode.HFNet.GraviTransformers;
+
+        using var model = TransformerModel.Load("bert-base-uncased");
+        var peft = PEFT.ApplyLoRA(model, new LoraConfig(Rank: 8, Alpha: 16));
+
+        // Words and one tag per word, the way CoNLL-style datasets come.
+        IReadOnlyList<string>[] words = [["Ani", "lives", "in", "Bandung", "."], ...];
+        IReadOnlyList<string>[] tags  = [["B-PER", "O", "O", "B-LOC", "O"], ...];
+
+        peft.TrainTokenClassifier(words, tags, new TrainingOptions
+        {
+            Epochs = 8,
+            BatchSize = 4,
+            LearningRate = 2e-3,
+        });
+
+        foreach (var entity in peft.FindEntities(sentence))
+            Console.WriteLine($"{entity.Label} {entity.Text}");
+
+        peft.SaveAdapter("ner-adapter");    // task_type TOKEN_CLS: loads in Python too
+        """;
+
+    private static int CategoryOf(string label) => label == "PER" ? 0 : 1;
+
+    public override async Task<CaseResult> RunAsync(
+        string input, string second, IProgress<string> progress, CancellationToken token)
+    {
+        // Its own copy: the shared one must stay the plain pretrained model for the other cases.
+        progress.Report($"Loading a private copy of {Model}.");
+        using var model = await Task.Run(() => TransformerModel.Load(Model), token).ConfigureAwait(false);
+
+        var words = new List<IReadOnlyList<string>>();
+        var tags = new List<IReadOnlyList<string>>();
+
+        for (var i = 0; i < 16; i++)
+        {
+            var who = People[i % People.Length];
+            var where = Places[i * 3 % Places.Length];
+
+            if (i % 2 == 0)
+            {
+                words.Add([who, "lives", "in", where, "."]);
+                tags.Add(["B-PER", "O", "O", "B-LOC", "O"]);
+            }
+            else
+            {
+                words.Add(["Yesterday", who, "drove", "to", where, "."]);
+                tags.Add(["O", "B-PER", "O", "O", "B-LOC", "O"]);
+            }
+        }
+
+        var peft = PEFT.ApplyLoRA(model, new LoraConfig(Rank: 8, Alpha: 16));
+        var report = await Task.Run(() => peft.TrainTokenClassifier(words, tags, new TrainingOptions
+        {
+            Epochs = 8,
+            BatchSize = 4,
+            LearningRate = 2e-3,
+            Progress = new Progress<TrainingProgress>(p =>
+            {
+                if (p.Step % 4 == 0 || p.Step == p.TotalSteps) progress.Report($"step {p.Step}/{p.TotalSteps}  loss {p.Loss:F4}");
+            }),
+        }), token).ConfigureAwait(false);
+
+        var entities = await Task.Run(() => peft.FindEntities(input), token).ConfigureAwait(false);
+        var unseen = entities.Count(e => !People.Contains(e.Text) && !Places.Contains(e.Text));
+
+        return new CaseResult
+        {
+            Summary = $"{entities.Count} entities, {unseen} of them names it was never shown. "
+                + $"{report.Steps} steps in {report.Elapsed.TotalSeconds:F0} s.",
+
+            Spans = new SpanText(input, [.. entities.Select(
+                e => new SpanMark(e.Start, e.End, e.Label, e.Score, CategoryOf(e.Label)))]),
+
+            Legend = ["PER", "LOC"],
+
+            Lines = [new Series("training loss", report.StepLosses, 0)],
+            XLabel = "optimizer step",
+
+            Facts =
+            [
+                ("sentences", words.Count.ToString()),
+                ("labels", string.Join(", ", peft.HeadLabels)),
+                ("loss", $"{report.EpochLosses[0]:F3} → {report.EpochLosses[^1]:F4}"),
+                ("head", "classifier per token, loads in Python"),
+            ],
+        };
+    }
+}
+
+/// <summary>Trains LoRA adapters and an answer-span head from a couple of dozen question and answer pairs.</summary>
+internal sealed class AnswerTrainingCase : GalleryCase
+{
+    public override string Title => "Teach it to answer";
+    public override string Blurb => "Train LoRA adapters to extract answers, from 24 SQuAD-style examples.";
+    public override string Library => "GraviPEFT";
+    public override string Model => "bert-base-uncased";
+    public override string InputLabel => "A question about the passage";
+    public override string SecondInputLabel => "The passage";
+
+    public override string? DefaultInput => "What does Hendra do?";
+    public override string? DefaultSecondInput => "Hendra lives in Semarang. Hendra works as a chef.";
+
+    private static readonly string[] People = ["Ani", "Budi", "Siti", "Joko", "Maria", "Ahmad", "Dewi", "Rudi"];
+    private static readonly string[] Places = ["Bandung", "Jakarta", "Surabaya", "Medan", "Bogor", "Malang", "Depok", "Solo"];
+    private static readonly string[] Jobs = ["a teacher", "a nurse", "a farmer", "an engineer", "a driver", "a baker", "a pilot", "a tailor"];
+
+    public override string Code => """
+        using Gravicode.HFNet.GraviPEFT;
+        using Gravicode.HFNet.GraviTransformers;
+
+        using var model = TransformerModel.Load("bert-base-uncased");
+        var peft = PEFT.ApplyLoRA(model, new LoraConfig(Rank: 8, Alpha: 16));
+
+        // SQuAD's shape: a question, the passage, and the answer as it appears there.
+        AnswerExample[] examples =
+        [
+            new("Where does Ani live?", "Ani lives in Bandung. Ani works as a teacher.", "Bandung"),
+            // ...
+        ];
+
+        peft.TrainQuestionAnswering(examples, new TrainingOptions
+        {
+            Epochs = 10,
+            BatchSize = 4,
+            LearningRate = 2e-3,
+        });
+
+        Console.WriteLine(peft.Answer(question, passage)[0]);
+        peft.SaveAdapter("qa-adapter");     // task_type QUESTION_ANS
+        """;
+
+    public override async Task<CaseResult> RunAsync(
+        string input, string second, IProgress<string> progress, CancellationToken token)
+    {
+        progress.Report($"Loading a private copy of {Model}.");
+        using var model = await Task.Run(() => TransformerModel.Load(Model), token).ConfigureAwait(false);
+
+        var examples = new List<AnswerExample>();
+        for (var i = 0; i < 8; i++)
+        {
+            var place = Places[i * 3 % 8];
+            var job = Jobs[i * 5 % 8];
+            var context = $"{People[i]} lives in {place}. {People[i]} works as {job}.";
+
+            examples.Add(new AnswerExample($"Where does {People[i]} live?", context, place));
+            examples.Add(new AnswerExample($"What does {People[i]} do?", context, job));
+            examples.Add(new AnswerExample($"Who lives in {place}?", context, People[i]));
+        }
+
+        var peft = PEFT.ApplyLoRA(model, new LoraConfig(Rank: 8, Alpha: 16));
+        var report = await Task.Run(() => peft.TrainQuestionAnswering(examples, new TrainingOptions
+        {
+            Epochs = 10,
+            BatchSize = 4,
+            LearningRate = 2e-3,
+            Progress = new Progress<TrainingProgress>(p =>
+            {
+                if (p.Step % 6 == 0 || p.Step == p.TotalSteps) progress.Report($"step {p.Step}/{p.TotalSteps}  loss {p.Loss:F4}");
+            }),
+        }), token).ConfigureAwait(false);
+
+        var answers = await Task.Run(() => peft.Answer(input, second, topK: 3), token).ConfigureAwait(false);
+        var best = answers[0];
+
+        return new CaseResult
+        {
+            Summary = best.IsEmpty
+                ? "No answer found in the passage."
+                : $"\"{best.Text}\" at {best.Score:P1}, after {report.Steps} steps in {report.Elapsed.TotalSeconds:F0} s.",
+
+            Spans = best.IsEmpty ? null : new SpanText(second, [new SpanMark(best.Start, best.End, "answer", best.Score, 0)]),
+            Legend = ["answer"],
+
+            Bars = [.. answers.Where(a => !a.IsEmpty).Select(a => new Datum(a.Text, a.Score, 0))],
+
+            Lines = [new Series("training loss", report.StepLosses, 0)],
+            XLabel = "optimizer step",
+
+            Facts =
+            [
+                ("examples", examples.Count.ToString()),
+                ("loss", $"{report.EpochLosses[0]:F3} → {report.EpochLosses[^1]:F4}"),
+                ("head", "qa_outputs, start and end per token"),
             ],
         };
     }
