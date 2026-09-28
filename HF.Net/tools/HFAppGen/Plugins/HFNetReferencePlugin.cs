@@ -264,15 +264,16 @@ public sealed class HFNetReferencePlugin
               new TrainingOptions { Epochs = 3, BatchSize = 8, GradientAccumulation = 1,
                                     LearningRate = 5e-4, WeightDecay = 0, WarmupFraction = 0,
                                     MaxGradientNorm = 1, MaxLength = 128, Seed = 42,
+                                    DocStride = null /* QA only: window overlap, default MaxLength/3 */,
                                     Progress = new Progress<TrainingProgress>(p => ...) }
               TrainingProgress(Epoch, Step, TotalSteps, Loss, LearningRate)
               TrainingReport .StepLosses .EpochLosses .Steps .Elapsed
 
             GOTCHAS
               PeftModel.SupportsAdapterTraining is TRUE (since 0.3). Train() uses AdamW and a linear
-                schedule, as the Hugging Face Trainer does, on the CPU, one sequence at a time -
-                about three forward passes per example. Fine for hundreds of examples; for tens of
-                thousands, train with PEFT in Python and load the adapter here.
+                schedule, as the Hugging Face Trainer does, on the CPU, packing each micro-batch into
+                one pass. Fine for hundreds of examples; for tens of thousands, train with PEFT in
+                Python and load the adapter here.
               Train() after Merge() throws: the update would be counted twice.
               SaveAdapter writes the PEFT layout. On BERT the Train() classifier is saved as PEFT's
                 SEQ_CLS head and loads in Python (AutoModelForSequenceClassification + PeftModel);

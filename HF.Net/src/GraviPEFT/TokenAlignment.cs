@@ -204,15 +204,63 @@ internal static class TokenAlignment
         return first < 0 || last < 0 || last < first ? (0, 0) : (first, last);
     }
 
-    /// <summary>The first <paramref name="length"/> positions of an encoding.</summary>
-    internal static Encoding Truncate(Encoding encoding, int length)
-        => encoding.Length <= length
-            ? encoding
-            : new Encoding(
-                [.. encoding.Ids.Take(length)],
-                [.. encoding.Tokens.Take(length)],
-                [.. encoding.AttentionMask.Take(length)],
-                [.. encoding.TypeIds.Take(length)],
-                [.. encoding.SpecialTokensMask.Take(length)],
-                [.. encoding.Offsets.Take(length)]);
+    /// <summary>
+    /// Splits a question-and-passage encoding into windows of at most <paramref name="maxLength"/>
+    /// tokens that each hold the whole question and an overlapping slice of the passage.
+    /// </summary>
+    /// <param name="full">The untruncated encoding: <c>[CLS] question [SEP] passage [SEP]</c>.</param>
+    /// <param name="maxLength">Tokens per window, special tokens included.</param>
+    /// <param name="stride">How many passage tokens consecutive windows share.</param>
+    /// <remarks>
+    /// This is Transformers' <c>truncation="only_second"</c> with <c>return_overflowing_tokens</c>
+    /// and <c>stride</c>. The overlap is what keeps an answer that straddles a window boundary whole
+    /// in at least one window. Offsets are copied from the full encoding, so they still index the
+    /// passage.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The question alone leaves no room for any passage.</exception>
+    internal static IReadOnlyList<Encoding> Windows(Encoding full, int maxLength, int stride)
+    {
+        if (full.Length <= maxLength) return [full];
+
+        var question = new List<int>();
+        var passage = new List<int>();
+        var closing = -1;
+
+        for (var i = 0; i < full.Length; i++)
+        {
+            if (full.TypeIds[i] == 0) question.Add(i);
+            else if (full.SpecialTokensMask[i] == 0) passage.Add(i);
+            else closing = i;
+        }
+
+        var room = maxLength - question.Count - (closing >= 0 ? 1 : 0);
+        if (room < 1 || passage.Count == 0)
+        {
+            throw new ArgumentException(
+                $"The question takes {question.Count} of the {maxLength} tokens a window holds, leaving no "
+                + "room for the passage. Shorten the question or raise MaxLength.", nameof(full));
+        }
+
+        var step = Math.Max(1, room - Math.Clamp(stride, 0, room - 1));
+        var windows = new List<Encoding>();
+
+        for (var first = 0; ; first += step)
+        {
+            var slice = passage.Skip(first).Take(room);
+            IEnumerable<int> positions = [.. question, .. slice, .. closing >= 0 ? [closing] : Array.Empty<int>()];
+            var chosen = positions.ToArray();
+
+            windows.Add(new Encoding(
+                [.. chosen.Select(i => full.Ids[i])],
+                [.. chosen.Select(i => full.Tokens[i])],
+                [.. chosen.Select(i => full.AttentionMask[i])],
+                [.. chosen.Select(i => full.TypeIds[i])],
+                [.. chosen.Select(i => full.SpecialTokensMask[i])],
+                [.. chosen.Select(i => full.Offsets[i])]));
+
+            if (first + room >= passage.Count) break;
+        }
+
+        return windows;
+    }
 }

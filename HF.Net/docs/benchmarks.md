@@ -223,7 +223,7 @@ model you actually have.
 | Running an encoder in production | **ONNX through GraviOptimum** — faster than torch, from .NET |
 | Running an encoder to understand it, or checking an export | **HF.Net managed** — 3x torch on a sentence, and exact to 1e-13 in float64 |
 | Training LoRA on hundreds of examples | **HF.Net** — `PeftModel.Train`, exact, and the adapter loads in Python PEFT; see [GraviPEFT](GraviPEFT.md) |
-| Training at scale | **Python.** HF.Net trains on the CPU one sequence at a time; train there and serve the adapter here |
+| Training at scale | **Python.** HF.Net trains on the CPU at about 11-12 GMAC/s; train there and serve the adapter here |
 
 ## Reproducing this
 

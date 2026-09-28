@@ -36,6 +36,13 @@ public sealed record TrainingOptions
     /// <summary>Truncation limit in tokens.</summary>
     public int MaxLength { get; init; } = 128;
 
+    /// <summary>
+    /// For question answering: how many passage tokens overlapping windows share when a passage does
+    /// not fit in <see cref="MaxLength"/>. <c>null</c> means a third of <see cref="MaxLength"/>,
+    /// the ratio of Transformers' own defaults (128 of 384).
+    /// </summary>
+    public int? DocStride { get; init; }
+
     /// <summary>Seeds shuffling, the head's initialisation and adapter dropout.</summary>
     public int Seed { get; init; } = 42;
 
@@ -242,16 +249,33 @@ internal static class LoraTrainer
                 var weight = units == 0 ? 0.0 : 1.0 / units;
                 var stepLoss = 0.0;
 
-                for (var e = first; e < first + count; e++)
+                // Each micro-batch is packed end to end and run as one forward and one backward
+                // pass: the rows of all its examples go through the linear layers together, while
+                // attention stays inside each example.
+                for (var micro = first; micro < first + count; micro += options.BatchSize)
                 {
-                    var example = order[e];
+                    var members = order[micro..Math.Min(micro + options.BatchSize, first + count)];
+                    var lengths = members.Select(m => ids[m].Length).ToArray();
+                    var packed = members.SelectMany(m => ids[m]).ToArray();
+                    var segments = typeIds is null ? null : members.SelectMany(m => typeIds[m]).ToArray();
+
                     var tape = new LoraEncoder.Tape();
-                    var hidden = encoder.Forward(ids[example], tape, random, typeIds?[example]);
+                    var hidden = encoder.Forward(packed, tape, random, segments, lengths);
+                    var dHidden = new double[hidden.Length];
 
-                    var (loss, dHidden) = head.Backward(hidden, ids[example].Length, width, targets[example], weight);
+                    var offset = 0;
+                    for (var k = 0; k < members.Length; k++)
+                    {
+                        var rows = lengths[k];
+                        var own = hidden.AsSpan(offset * width, rows * width).ToArray();
+                        var (loss, dOwn) = head.Backward(own, rows, width, targets[members[k]], weight);
+
+                        dOwn.CopyTo(dHidden, offset * width);
+                        stepLoss += loss * weight;
+                        offset += rows;
+                    }
+
                     encoder.Backward(dHidden, tape, gradients);
-
-                    stepLoss += loss * weight;
                 }
 
                 ClipGradients(parameters, options.MaxGradientNorm);

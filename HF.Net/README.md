@@ -112,7 +112,7 @@ Stated plainly, because a library that fails quietly is worse than one that says
 
 - **Decoder-only models** — GPT, Llama, Mistral — are **refused**, not half-loaded. They need causal
   masking and rotary positions this encoder does not have.
-- **LoRA training is CPU-bound and one sequence at a time.** `PeftModel.Train` fits adapters and a
+- **LoRA training runs on the CPU, bound by the linear kernel.** `PeftModel.Train` fits adapters and a
   sequence classification head exactly, which is checked against numerical gradients and against
   PEFT in Python. It suits hundreds of examples. For tens of thousands, train with PEFT in Python
   and serve the adapter here. Sequence classification, token classification and extractive question answering heads train.

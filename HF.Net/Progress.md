@@ -7,9 +7,9 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.4.0 — current
+## v0.4.0 — current; main adds packed training steps and long-passage QA (unreleased)
 
-**26 projects, 297 tests passing, whole solution builds clean with no warnings.**
+**26 projects, 304 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -24,7 +24,7 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | GraviTokenizers | **Complete** | 29 | WordPiece, BPE, Unigram, `tokenizer.json`, offsets |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
 | GraviTransformers | **Core complete** | 99 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
-| GraviPEFT | **Core complete** | 54 | LoRA training for sequence classification, named entities and question answering; apply, merge, save, load; trained heads predict the same in Python |
+| GraviPEFT | **Core complete** | 61 | LoRA training for sequence classification, named entities and question answering; apply, merge, save, load; trained heads predict the same in Python |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Core complete** | 22 | ONNX Runtime, provider choice, quantisation with measured error |
 | GraviDiffusers | **Core complete** | 22 | DDPM/DDIM/Euler; SD pipeline needs an ONNX export to exercise |
@@ -198,8 +198,6 @@ Carried into [PLAN.md](PLAN.md):
   are thin)
 - Notebooks under `notebooks/` beyond the two shipped as HFAppGen templates
 - CLIP (its text tower is causal, which this encoder is not)
-- Batched (padded) LoRA training steps, and question answering over passages longer than one
-  window (overlapping windows with a stride)
 - A faster GEMM. The linear kernel runs at about 13 GMAC/s, roughly the foundation's packed
   `MatMul`, and loses to it by 1.3x at 577 rows. torch's MKL does about four times that. This is
   the remaining managed-versus-torch gap.
@@ -207,6 +205,11 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-09-28** — v0.3 complete. Training steps pack each micro-batch end to end: the linear layers
+see all its rows at once, attention stays inside each example, and nothing is padded. That was
+1.25x on bert-base, and it leaves training bound by the linear kernel. Question answering splits a
+long passage into overlapping windows (`DocStride`) in training and in `Answer`. 304 tests.
 
 **2026-09-28** — v0.4.0. Named entities and question answering train. `TrainTokenClassifier` takes words
 and one tag per word, trains the first piece of each word, and `FindEntities` decodes a word at a

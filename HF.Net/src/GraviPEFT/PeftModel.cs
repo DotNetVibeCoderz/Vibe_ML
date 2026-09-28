@@ -40,6 +40,7 @@ public sealed class PeftModel
     private double[] _headClasses = [];
     private string[] _headLabels = [];
     private int _maxLength = 512;
+    private int _docStride = 128;
 
     private PeftModel(TransformerModel model, LoraAdapterSet adapters, bool merged)
     {
@@ -238,6 +239,7 @@ public sealed class PeftModel
         _answerer = head as SpanHead;
         _headLabels = [.. labels];
         _maxLength = description?.MaxLength ?? 512;
+        _docStride = description?.DocStride ?? _maxLength / 3;
     }
 
     /// <summary>
@@ -568,10 +570,10 @@ public sealed class PeftModel
     /// <see cref="Merge"/> afterwards see the trained values.
     /// </para>
     /// <para>
-    /// Sequences are processed one at a time, unpadded, so no position is ever masked; the batch is
-    /// a unit of averaging, not of vectorisation. On a CPU a step costs roughly three forward
-    /// passes per example. For more than a few thousand examples, train with PEFT in Python and
-    /// load the adapter here with <see cref="FromPretrained"/>.
+    /// Each micro-batch is packed end to end and run as one pass, so no position is padded or
+    /// masked; attention stays inside each example. The step is bound by the linear kernel. For
+    /// more than a few thousand examples, train with PEFT in Python and load the adapter here with
+    /// <see cref="FromPretrained"/>.
     /// </para>
     /// </remarks>
     public TrainingReport Train(
@@ -699,10 +701,10 @@ public sealed class PeftModel
     /// positions. The question and the passage go in as a pair, so the passage is segment 1.
     /// </para>
     /// <para>
-    /// A pair longer than <see cref="TrainingOptions.MaxLength"/> is cut at the end, which cuts the
-    /// passage. An answer that falls past the cut is trained as pointing at <c>[CLS]</c>, which is
-    /// how Transformers marks "not in this window". It does not split long passages into
-    /// overlapping windows; keep passages within the limit.
+    /// A passage too long for <see cref="TrainingOptions.MaxLength"/> is split into overlapping
+    /// windows, each holding the whole question, and each window is an example of its own - as
+    /// Transformers' preprocessing does it. A window that does not contain the whole answer is
+    /// trained as pointing at <c>[CLS]</c>, which is how Transformers marks "not in this window".
     /// </para>
     /// </remarks>
     public TrainingReport TrainQuestionAnswering(IReadOnlyList<AnswerExample> examples, TrainingOptions? options = null)
@@ -714,9 +716,10 @@ public sealed class PeftModel
 
         var encoder = PrepareTraining(options);
 
-        var ids = new int[examples.Count][];
-        var types = new int[examples.Count][];
-        var targets = new int[examples.Count][];
+        var stride = options.DocStride ?? options.MaxLength / 3;
+        var ids = new List<int[]>();
+        var types = new List<int[]>();
+        var targets = new List<int[]>();
 
         for (var i = 0; i < examples.Count; i++)
         {
@@ -734,18 +737,22 @@ public sealed class PeftModel
                     nameof(examples));
             }
 
-            var encoding = TokenAlignment.Truncate(_model.Tokenizer.Encode(example.Question, example.Context), options.MaxLength);
-            var (first, last) = TokenAlignment.AnswerTokens(encoding, start, start + example.Answer.Length, encoding.Length);
+            var full = _model.Tokenizer.Encode(example.Question, example.Context);
+            foreach (var window in TokenAlignment.Windows(full, options.MaxLength, stride))
+            {
+                var (first, last) = TokenAlignment.AnswerTokens(window, start, start + example.Answer.Length, window.Length);
 
-            ids[i] = encoding.ToIdArray();
-            types[i] = [.. encoding.TypeIds];
-            targets[i] = [first, last];
+                ids.Add(window.ToIdArray());
+                types.Add([.. window.TypeIds]);
+                targets.Add([first, last]);
+            }
         }
 
         var head = new SpanHead(encoder.Hidden, options.Seed);
         var report = LoraTrainer.Fit(encoder, head, ids, targets, options, types);
 
         _maxLength = options.MaxLength;
+        _docStride = stride;
         _headLabels = [];
         _answerer = head;
         _classifier = null;
@@ -762,7 +769,9 @@ public sealed class PeftModel
     /// <exception cref="InvalidOperationException">No question answering head has been trained or loaded.</exception>
     /// <remarks>
     /// Decoded as <c>TransformerModel.Answer</c> decodes: only passage positions are eligible, the end
-    /// never precedes the start, and the answer is a substring of <paramref name="context"/>.
+    /// never precedes the start, and the answer is a substring of <paramref name="context"/>. A
+    /// passage longer than one window is read in the same overlapping windows training used, and
+    /// the best spans across all of them are returned.
     /// </remarks>
     public IReadOnlyList<Answer> Answer(string question, string context, int topK = 1)
     {
@@ -776,20 +785,28 @@ public sealed class PeftModel
                 + "load an adapter saved with one (task_type QUESTION_ANS).");
         }
 
-        var encoding = TokenAlignment.Truncate(_model.Tokenizer.Encode(question, context), _maxLength);
-        double[] hidden;
+        var candidates = new List<Answer>();
 
-        if (AdaptersChangeOutput())
+        foreach (var window in TokenAlignment.Windows(_model.Tokenizer.Encode(question, context), _maxLength, _docStride))
         {
-            hidden = TrainingEncoder().Forward(encoding.ToIdArray(), typeIds: [.. encoding.TypeIds]);
-        }
-        else
-        {
-            hidden = _model.Forward(encoding.ToIdArray(), [.. encoding.TypeIds], encoding.ToMaskArray()).ToArray();
+            var hidden = AdaptersChangeOutput()
+                ? TrainingEncoder().Forward(window.ToIdArray(), typeIds: [.. window.TypeIds])
+                : _model.Forward(window.ToIdArray(), [.. window.TypeIds], window.ToMaskArray()).ToArray();
+
+            var (start, end) = _answerer.Logits(hidden, window.Length, _model.Config.HiddenSize);
+            candidates.AddRange(QuestionAnsweringHead.Decode(context, window, start, end, topK: Math.Max(1, topK)));
         }
 
-        var (start, end) = _answerer.Logits(hidden, encoding.Length, _model.Config.HiddenSize);
-        return QuestionAnsweringHead.Decode(context, encoding, start, end, topK: topK);
+        // A span inside the overlap is scored once per window that holds it; keep its best.
+        var best = candidates
+            .Where(a => !a.IsEmpty)
+            .GroupBy(a => (a.Start, a.End))
+            .Select(g => g.MaxBy(a => a.Score))
+            .OrderByDescending(a => a.Score)
+            .Take(Math.Max(1, topK))
+            .ToList();
+
+        return best.Count > 0 ? best : [new Answer("", 0, 0, 0)];
     }
 
     /// <summary>Finds the named entities in a text with the token classifier trained here or loaded.</summary>
@@ -914,7 +931,10 @@ public sealed class PeftModel
     public void SaveAdapter(string directory)
     {
         LinearHead? trained = (LinearHead?)_classifier ?? (LinearHead?)_tagger ?? _answerer;
-        Adapters.Save(directory, _model.RepoId, trained is null ? null : new SavedHead(trained, _headLabels, _maxLength));
+        Adapters.Save(
+            directory,
+            _model.RepoId,
+            trained is null ? null : new SavedHead(trained, _headLabels, _maxLength, _answerer is null ? null : _docStride));
     }
 
     /// <summary>

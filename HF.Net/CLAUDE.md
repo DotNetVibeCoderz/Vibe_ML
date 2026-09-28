@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.4.0 is published: **26 projects, 297 tests passing**, the whole solution builds clean, and the
-eight libraries are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
+v0.4.0 is published and the eight libraries are on nuget.org as `Gravicode.HFNet.*`. Main is ahead
+of it with packed training steps and long-passage question answering (unreleased): **26 projects,
+304 tests passing**, the whole solution builds clean. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`
@@ -113,6 +114,10 @@ root rather than here — see below.
 - **Question answering toy tests must not need relative position.** A 2-layer, 8-wide random model
   cannot learn "the token after 7" in a few hundred steps; it plateaus at ln(context length). Test
   the QA wiring on a token-identity target and leave "does it really learn" to bert-base.
+- **Training packs, it does not pad.** `LoraEncoder.Forward(ids, lengths: ...)` takes several
+  sequences end to end; attention runs per block and positions restart per sequence. Anything
+  that attends across rows must respect `lengths`, or packed examples leak into each other and
+  `Packed_sequences_come_out_as_each_one_alone` fails.
 - **Adapters and heads are saved as F32**, as PEFT saves them. A save and reload moves predictions
   by about 5e-9, so tests of a saved tensor compare against `(double)(float)value`.
 - **Never seed from `HashCode.Combine` or `string.GetHashCode`.** .NET randomises both per process.
@@ -215,7 +220,7 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 297
+dotnet test                                                     # all 304
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

@@ -148,7 +148,8 @@ Bentuk head-nya bergantung pada checkpoint:
 | `WeightDecay` | 0 | terpisah, gaya AdamW; bias dikecualikan |
 | `WarmupFraction` | 0 | warm-up linear, lalu turun linear sampai nol |
 | `MaxGradientNorm` | 1.0 | clipping norma global; 0 mematikannya |
-| `MaxLength` | 128 | pemotongan, dalam token |
+| `MaxLength` | 128 | pemotongan, dalam token; untuk tanya-jawab, ukuran jendela |
+| `DocStride` | `MaxLength / 3` | hanya tanya-jawab: token yang dibagi oleh jendela passage yang bertumpuk |
 | `Seed` | 42 | pengacakan, inisialisasi head, dropout adapter |
 
 Optimizer, jadwal dan clipping-nya adalah milik `Trainer` Hugging Face, ditulis ulang dari
@@ -203,10 +204,15 @@ peft.Answer("What does Hendra do?", "Hendra lives in Semarang. Hendra works as a
 Head-nya `qa_outputs`, skor awal dan akhir untuk setiap token, dan loss-nya milik Transformers
 sendiri: rata-rata cross-entropy atas posisi awal dan cross-entropy atas posisi akhir. Pertanyaan dan
 passage masuk sebagai pasangan, dengan passage sebagai segmen 1. `AnswerStart` adalah
-`answer_start` milik SQuAD; bila dikosongkan, kemunculan pertama jawaban yang dipakai. Pasangan yang
-lebih panjang dari `MaxLength` kehilangan ujung passage-nya. Jawaban yang terpotong dengan cara itu
-dilatih sebagai menunjuk `[CLS]`, cara Transformers menandai "tidak ada di jendela ini". Passage
-panjang tidak dipecah menjadi jendela-jendela yang bertumpuk, jadi jaga agar tetap di bawah batas.
+`answer_start` milik SQuAD; bila dikosongkan, kemunculan pertama jawaban yang dipakai.
+
+Passage yang terlalu panjang untuk `MaxLength` dipecah menjadi jendela-jendela yang bertumpuk, masing-
+masing memuat seluruh pertanyaan dan sepotong passage yang berbagi `DocStride` token dengan jendela
+berikutnya. Itulah `truncation="only_second"` dengan `stride` milik Transformers. Setiap jendela
+menjadi satu contoh pelatihan. Jendela yang tidak memuat jawaban secara utuh dilatih sebagai menunjuk
+`[CLS]`, cara Transformers menandai "tidak ada di jendela ini". `Answer` membaca passage panjang
+dengan jendela yang sama dan mengembalikan rentang terbaik dari semuanya. Pada bert-base dengan
+jendela 48 token, ia menjawab dari kalimat keempat sebuah pasangan sepanjang 84 token.
 
 > **Di Python, lipat dulu sebelum memprediksi.** `PeftModelForQuestionAnswering.forward` milik PEFT
 > 0.21 menerima `token_type_ids` tetapi tidak meneruskannya, sehingga lewat wrapper itu setiap passage
@@ -255,13 +261,19 @@ paling rendah.
 
 ### Biayanya, dan batasnya
 
-- **CPU, satu sekuens sekali jalan, tanpa padding.** Batch adalah satuan perataan, bukan
-  vektorisasi. Satu langkah memakan sekitar tiga forward pass per contoh. Di sini, bert-base atas
-  32 kalimat pendek selama 8 epoch memakan 58 sampai 91 detik antar-run.
+- **CPU, satu micro-batch per pass, dipadatkan (packed) alih-alih diberi padding.** Contoh-contoh
+  dalam satu micro-batch disusun berurutan dan melewati lapisan linear sebagai satu matriks,
+  sementara atensi tetap di dalam masing-masing contoh dan position embedding dimulai ulang pada
+  setiap contoh. Tidak ada padding, jadi tidak ada yang terbuang atau perlu di-mask, dan sebuah test
+  mengunci pass yang dipadatkan agar sama dengan menjalankan contoh satu per satu. Memadatkan 8
+  kalimat pendek 1,25x lebih cepat daripada satu per satu pada bert-base (45 detik dibanding 55 detik
+  untuk 256 pass contoh). Kira-kira sejauh itulah manfaat pemadatan: pada 80 baris, kernel linear
+  sudah berjalan di 11-12 GMAC/s, dan sekitar tiga perempat waktu satu langkah dihabiskan di sana.
+  GEMM yang lebih cepat, yang direncanakan untuk v0.4, adalah yang akan mempercepatnya lebih jauh.
 - **Memori.** Pelatihan menyimpan salinan float32 dari bobot encoder di samping model rujukan,
   sekitar 340 MB untuk bert-base.
-- **Klasifikasi sekuens, klasifikasi token, dan tanya-jawab ekstraktif.** Passage yang lebih panjang
-  dari `MaxLength` dipotong, tidak dipecah menjadi jendela yang bertumpuk.
+- **Klasifikasi sekuens, klasifikasi token, dan tanya-jawab ekstraktif.** Passage yang panjang
+  memakan satu pass per jendela, baik saat pelatihan maupun saat menjawab.
 - **Dropout milik encoder dimatikan.** Python melatih BERT dengan dropout 0,1 di setiap blok. Di sini
   hanya `LoraConfig.Dropout` yang berlaku, pada masukan adapter. Adapter hasilnya tetap sah; hanya
   saja kedua proses pelatihan itu tidak sama langkah demi langkah.

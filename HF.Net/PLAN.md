@@ -86,13 +86,18 @@ worth doing for the ecosystem, but nothing here waits on it.
    scores to 5e-11, answer scores to 3e-10. Question answering found a PEFT bug worth knowing:
    `PeftModelForQuestionAnswering.forward` drops `token_type_ids`, so in Python it has to be merged
    first.
-6. **What is left:**
-   - **Long passages.** Question answering cuts a pair at `MaxLength`. Transformers splits a long
-     passage into overlapping windows (`doc_stride`) and keeps the best answer across them.
-   - **Batched steps.** Sequences go through one at a time, unpadded, so a step is about three
-     forward passes per example. Padding with a mask would let the linear kernel see many rows
-     at once. It needs the attention backward pass to respect the mask, and a gradient check that
-     covers padded positions.
+6. ~~**Batched steps.**~~ **Done, by packing rather than padding.** A micro-batch's examples are
+   laid end to end: the linear layers see all their rows at once, while attention runs block by
+   block and positions restart per example. There is no padding and so no mask, and tests pin the
+   packed forward pass and gradients to the examples run one at a time. The gain was a measured
+   1.25x on bert-base. It stops there because the linear kernel is then the bound (11-12 GMAC/s at
+   80 rows), which makes the faster GEMM under v0.4 the next speed-up for training as well.
+7. ~~**Long passages.**~~ **Done.** A passage too long for `MaxLength` is split into overlapping
+   windows (`DocStride`), as Transformers' `truncation="only_second"` with `stride` does, both in
+   training and in `Answer`.
+
+v0.3 is complete. Route (a), contributing biased attention to the foundation's tape, remains open,
+but nothing depends on it now.
 
 ## v0.4 — performance
 

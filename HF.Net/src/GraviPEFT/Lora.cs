@@ -375,6 +375,7 @@ public sealed class LoraAdapterSet
             };
 
             if (!isToken && !isSpan) description["pooling"] = inPeftLayout ? "pooler" : "mean";
+            if (head.DocStride is { } stride) description["doc_stride"] = stride;
 
             File.WriteAllText(
                 Path.Combine(directory, HeadConfigFile),
@@ -444,14 +445,16 @@ public sealed class LoraAdapterSet
 /// <param name="Head">The classifier, and the pooler it reads through if any.</param>
 /// <param name="Labels">Label names, by class index.</param>
 /// <param name="MaxLength">The truncation it was trained with.</param>
-internal sealed record SavedHead(LinearHead Head, IReadOnlyList<string> Labels, int MaxLength);
+/// <param name="DocStride">For question answering, the overlap between passage windows.</param>
+internal sealed record SavedHead(LinearHead Head, IReadOnlyList<string> Labels, int MaxLength, int? DocStride = null);
 
 /// <summary>What <c>hfnet_head.json</c> says.</summary>
 /// <param name="Task"><c>sequence</c> or <c>token</c>.</param>
 /// <param name="Pooling">For a sequence head, <c>pooler</c> or <c>mean</c>.</param>
 /// <param name="Labels">Label names, by class index.</param>
 /// <param name="MaxLength">The truncation the head was trained with.</param>
-internal sealed record HeadDescription(string Task, string Pooling, IReadOnlyList<string> Labels, int MaxLength)
+/// <param name="DocStride">For question answering, the overlap between passage windows.</param>
+internal sealed record HeadDescription(string Task, string Pooling, IReadOnlyList<string> Labels, int MaxLength, int? DocStride = null)
 {
     /// <summary>
     /// The <c>task_type</c> in an adapter's <c>adapter_config.json</c>, or <c>null</c> when it has none.
@@ -493,6 +496,7 @@ internal sealed record HeadDescription(string Task, string Pooling, IReadOnlyLis
                 ? pooling.GetString()!
                 : "pooler",
             [.. labels.Values],
-            root.TryGetProperty("max_length", out var max) ? max.GetInt32() : 512);
+            root.TryGetProperty("max_length", out var max) ? max.GetInt32() : 512,
+            root.TryGetProperty("doc_stride", out var stride) ? stride.GetInt32() : null);
     }
 }

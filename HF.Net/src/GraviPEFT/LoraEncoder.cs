@@ -135,48 +135,74 @@ internal sealed class LoraEncoder
     /// </param>
     /// <param name="dropout">Draws the adapter dropout masks; unused without a tape.</param>
     /// <param name="typeIds">Segment per position for a sentence pair, or <c>null</c> for all segment 0.</param>
-    internal double[] Forward(int[] ids, Tape? tape = null, Random? dropout = null, int[]? typeIds = null)
+    /// <param name="lengths">
+    /// When several sequences are packed end to end in <paramref name="ids"/>, how long each one is;
+    /// <c>null</c> for a single sequence.
+    /// </param>
+    /// <remarks>
+    /// Packing is how a training step is batched without padding. Every layer but attention works
+    /// row by row, so the packed rows go through them together - which is what gives the linear
+    /// kernel enough rows to be efficient - while attention stays inside each sequence and position
+    /// embeddings restart at each one. The result is each sequence's own forward pass, stacked.
+    /// </remarks>
+    internal double[] Forward(
+        int[] ids, Tape? tape = null, Random? dropout = null, int[]? typeIds = null, int[]? lengths = null)
     {
         var rows = ids.Length;
         var width = _hidden;
+        lengths ??= [rows];
 
-        if (rows > _positions.Shape[0])
+        if (lengths.Sum() != rows || lengths.Any(n => n < 1))
         {
             throw new ArgumentException(
-                $"The sequence is {rows} tokens but the model has {_positions.Shape[0]} position "
+                $"The packed lengths sum to {lengths.Sum()} but there are {rows} ids.", nameof(lengths));
+        }
+
+        if (lengths.Max() > _positions.Shape[0])
+        {
+            throw new ArgumentException(
+                $"A sequence is {lengths.Max()} tokens but the model has {_positions.Shape[0]} position "
                 + "embeddings. Truncate it with maxLength.", nameof(ids));
         }
 
         var vocabulary = _tokens.Shape[0];
         var hidden = new double[rows * width];
 
-        for (var i = 0; i < rows; i++)
+        var row = 0;
+        foreach (var length in lengths)
         {
-            var id = Math.Clamp(ids[i], 0, vocabulary - 1);
-            var segment = typeIds is not null && _segmentDelta is not null && typeIds[i] != 0;
-
-            for (var d = 0; d < width; d++)
+            for (var position = 0; position < length; position++, row++)
             {
-                // Before the embedding norm, in the inference encoder's order of addition.
-                hidden[i * width + d] = _tokens[id, d] + _positions[i, d] + (segment ? _segmentDelta![d] : 0.0);
+                var id = Math.Clamp(ids[row], 0, vocabulary - 1);
+                var segment = typeIds is not null && _segmentDelta is not null && typeIds[row] != 0;
+
+                for (var d = 0; d < width; d++)
+                {
+                    // Before the embedding norm, in the inference encoder's order of addition.
+                    hidden[row * width + d] = _tokens[id, d] + _positions[position, d] + (segment ? _segmentDelta![d] : 0.0);
+                }
             }
         }
 
         hidden = Normalize(hidden, rows, _embeddingScale, _embeddingShift, out _, out _);
 
-        if (tape is not null) tape.Rows = rows;
+        if (tape is not null)
+        {
+            tape.Rows = rows;
+            tape.Lengths = lengths;
+        }
 
         foreach (var layer in _layers)
         {
             var record = tape is null ? null : new LayerTape();
-            hidden = LayerForward(layer, hidden, rows, record, tape is null ? null : dropout);
+            hidden = LayerForward(layer, hidden, rows, lengths, record, tape is null ? null : dropout);
             tape?.Layers.Add(record!);
         }
 
         return hidden;
     }
 
-    private double[] LayerForward(Layer layer, double[] x, int rows, LayerTape? tape, Random? dropout)
+    private double[] LayerForward(Layer layer, double[] x, int rows, int[] lengths, LayerTape? tape, Random? dropout)
     {
         var width = _hidden;
         var inner = layer.Intermediate.Outputs;
@@ -187,7 +213,7 @@ internal sealed class LoraEncoder
             AddLora(layer, p, x, rows, qkv, 3 * width, (int)p * width, tape, dropout);
         }
 
-        var context = Attend(qkv, rows, out var probabilities);
+        var context = Attend(qkv, rows, lengths, out var probabilities);
 
         var attended = layer.AttentionOutput.Apply(context, rows);
         AddLora(layer, Projection.AttentionOutput, context, rows, attended, width, 0, tape, dropout);
@@ -273,57 +299,82 @@ internal sealed class LoraEncoder
         if (tape is not null) tape.Lora[(int)projection] = new LoraTape(source, factors, u);
     }
 
-    /// <summary>Softmax attention over every head, keeping the probabilities for the backward pass.</summary>
-    private double[] Attend(double[] qkv, int rows, out double[][] probabilities)
+    /// <summary>Where each packed sequence starts, and where its attention block starts.</summary>
+    private static (int[] Rows, int[] Blocks) Offsets(int[] lengths)
+    {
+        var rows = new int[lengths.Length];
+        var blocks = new int[lengths.Length + 1];
+
+        for (var s = 1; s < lengths.Length; s++) rows[s] = rows[s - 1] + lengths[s - 1];
+        for (var s = 0; s < lengths.Length; s++) blocks[s + 1] = blocks[s] + lengths[s] * lengths[s];
+
+        return (rows, blocks);
+    }
+
+    /// <summary>
+    /// Softmax attention over every head, each sequence attending only to itself, keeping the
+    /// probabilities for the backward pass.
+    /// </summary>
+    /// <remarks>
+    /// Probabilities are stored per head as the sequences' square blocks one after another, so a
+    /// packed batch keeps the sum of its squared lengths rather than the square of their sum.
+    /// </remarks>
+    private double[] Attend(double[] qkv, int rows, int[] lengths, out double[][] probabilities)
     {
         var width = _hidden;
         var heads = _heads;
         var size = width / heads;
         var stride = 3 * width;
         var scale = 1.0 / Math.Sqrt(size);
+        var (starts, blocks) = Offsets(lengths);
+        var sequences = lengths.Length;
 
         var result = new double[rows * width];
         var weights = new double[heads][];
+        for (var head = 0; head < heads; head++) weights[head] = new double[blocks[^1]];
 
-        Parallel.For(0, heads, head =>
+        Parallel.For(0, heads * sequences, item =>
         {
-            var k = new double[rows * size];
-            var v = new double[rows * size];
-            for (var j = 0; j < rows; j++)
+            var head = item / sequences;
+            var sequence = item % sequences;
+            var first = starts[sequence];
+            var n = lengths[sequence];
+
+            var k = new double[n * size];
+            var v = new double[n * size];
+            for (var j = 0; j < n; j++)
             {
-                Array.Copy(qkv, j * stride + width + head * size, k, j * size, size);
-                Array.Copy(qkv, j * stride + 2 * width + head * size, v, j * size, size);
+                Array.Copy(qkv, (first + j) * stride + width + head * size, k, j * size, size);
+                Array.Copy(qkv, (first + j) * stride + 2 * width + head * size, v, j * size, size);
             }
 
-            var p = new double[rows * rows];
-            for (var i = 0; i < rows; i++)
+            var p = weights[head].AsSpan(blocks[sequence], n * n);
+            for (var i = 0; i < n; i++)
             {
-                var query = qkv.AsSpan(i * stride + head * size, size);
-                var row = p.AsSpan(i * rows, rows);
+                var query = qkv.AsSpan((first + i) * stride + head * size, size);
+                var row = p.Slice(i * n, n);
 
                 var largest = double.NegativeInfinity;
-                for (var j = 0; j < rows; j++)
+                for (var j = 0; j < n; j++)
                 {
                     row[j] = Simd.Dot(query, k.AsSpan(j * size, size)) * scale;
                     if (row[j] > largest) largest = row[j];
                 }
 
                 var total = 0.0;
-                for (var j = 0; j < rows; j++)
+                for (var j = 0; j < n; j++)
                 {
                     row[j] = Math.Exp(row[j] - largest);
                     total += row[j];
                 }
 
-                var target = result.AsSpan(i * width + head * size, size);
-                for (var j = 0; j < rows; j++)
+                var target = result.AsSpan((first + i) * width + head * size, size);
+                for (var j = 0; j < n; j++)
                 {
                     row[j] /= total;
                     Simd.Axpy(row[j], v.AsSpan(j * size, size), target);
                 }
             }
-
-            weights[head] = p;
         });
 
         probabilities = weights;
@@ -407,7 +458,7 @@ internal sealed class LoraEncoder
             var dContext = layer.AttentionOutput.ApplyTransposed(daPre, rows);
             LoraBackward(layer, Projection.AttentionOutput, record, daPre, rows, width, 0, dContext, gradients);
 
-            var dQkv = AttendBackward(dContext, record.QueryKeyValue, record.Probabilities, rows);
+            var dQkv = AttendBackward(dContext, record.QueryKeyValue, record.Probabilities, rows, tape.Lengths);
 
             double[]? dx = null;
             if (needInput)
@@ -484,46 +535,57 @@ internal sealed class LoraEncoder
     }
 
     /// <summary>The gradient of the stacked query/key/value projection from the context's.</summary>
-    private double[] AttendBackward(double[] dContext, double[] qkv, double[][] probabilities, int rows)
+    private double[] AttendBackward(double[] dContext, double[] qkv, double[][] probabilities, int rows, int[] lengths)
     {
         var width = _hidden;
         var heads = _heads;
         var size = width / heads;
         var stride = 3 * width;
         var scale = 1.0 / Math.Sqrt(size);
+        var (starts, blocks) = Offsets(lengths);
+        var sequences = lengths.Length;
 
         var result = new double[rows * stride];
 
-        Parallel.For(0, heads, head =>
+        // Each (head, sequence) pair writes only its own columns of its own rows, so they run in
+        // parallel without sharing a single element.
+        Parallel.For(0, heads * sequences, item =>
         {
-            var p = probabilities[head];
-            var dScores = new double[rows];
+            var head = item / sequences;
+            var sequence = item % sequences;
+            var first = starts[sequence];
+            var n = lengths[sequence];
 
-            for (var i = 0; i < rows; i++)
+            var p = probabilities[head].AsSpan(blocks[sequence], n * n);
+            var dScores = new double[n];
+
+            for (var i = 0; i < n; i++)
             {
-                var dc = dContext.AsSpan(i * width + head * size, size);
-                var row = p.AsSpan(i * rows, rows);
+                var dc = dContext.AsSpan((first + i) * width + head * size, size);
+                var row = p.Slice(i * n, n);
 
                 // dV_j += P_ij dC_i, and dP_ij = dC_i . V_j
                 var weighted = 0.0;
-                for (var j = 0; j < rows; j++)
+                for (var j = 0; j < n; j++)
                 {
-                    Simd.Axpy(row[j], dc, result.AsSpan(j * stride + 2 * width + head * size, size));
-                    dScores[j] = Simd.Dot(dc, qkv.AsSpan(j * stride + 2 * width + head * size, size));
+                    var at = (first + j) * stride + 2 * width + head * size;
+                    Simd.Axpy(row[j], dc, result.AsSpan(at, size));
+                    dScores[j] = Simd.Dot(dc, qkv.AsSpan(at, size));
                     weighted += row[j] * dScores[j];
                 }
 
                 // Through the softmax, then the scale: dS_ij = P_ij (dP_ij - sum_k P_ik dP_ik).
-                var query = qkv.AsSpan(i * stride + head * size, size);
-                var dQuery = result.AsSpan(i * stride + head * size, size);
+                var query = qkv.AsSpan((first + i) * stride + head * size, size);
+                var dQuery = result.AsSpan((first + i) * stride + head * size, size);
 
-                for (var j = 0; j < rows; j++)
+                for (var j = 0; j < n; j++)
                 {
                     var ds = row[j] * (dScores[j] - weighted) * scale;
                     if (ds == 0) continue;
 
-                    Simd.Axpy(ds, qkv.AsSpan(j * stride + width + head * size, size), dQuery);
-                    Simd.Axpy(ds, query, result.AsSpan(j * stride + width + head * size, size));
+                    var at = (first + j) * stride + width + head * size;
+                    Simd.Axpy(ds, qkv.AsSpan(at, size), dQuery);
+                    Simd.Axpy(ds, query, result.AsSpan(at, size));
                 }
             }
         });
@@ -581,6 +643,9 @@ internal sealed class LoraEncoder
     internal sealed class Tape
     {
         internal int Rows { get; set; }
+
+        /// <summary>The packed sequences' lengths; one entry for a single sequence.</summary>
+        internal int[] Lengths { get; set; } = [];
 
         internal List<LayerTape> Layers { get; } = [];
     }

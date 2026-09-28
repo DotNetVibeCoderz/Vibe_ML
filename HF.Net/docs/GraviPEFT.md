@@ -147,7 +147,8 @@ The head depends on the checkpoint:
 | `WeightDecay` | 0 | decoupled, AdamW-style; biases are exempt |
 | `WarmupFraction` | 0 | linear warm-up, then linear decay to zero |
 | `MaxGradientNorm` | 1.0 | global norm clipping; 0 turns it off |
-| `MaxLength` | 128 | truncation, in tokens |
+| `MaxLength` | 128 | truncation, in tokens; for question answering, the window size |
+| `DocStride` | `MaxLength / 3` | question answering only: tokens shared by overlapping passage windows |
 | `Seed` | 42 | shuffling, head initialisation, adapter dropout |
 
 The optimizer, the schedule and the clipping are the Hugging Face `Trainer`'s, written out from
@@ -201,10 +202,15 @@ peft.Answer("What does Hendra do?", "Hendra lives in Semarang. Hendra works as a
 The head is `qa_outputs`, a start and an end score for every token, and the loss is Transformers'
 own: the mean of a cross-entropy over start positions and one over end positions. The question
 and the passage go in as a pair, with the passage as segment 1. `AnswerStart` is SQuAD's
-`answer_start`; leave it out and the first occurrence of the answer is used. A pair longer than
-`MaxLength` loses the end of its passage. An answer cut off that way is trained as pointing at
-`[CLS]`, which is how Transformers marks "not in this window". Long passages are not split into
-overlapping windows, so keep them within the limit.
+`answer_start`; leave it out and the first occurrence of the answer is used.
+
+A passage too long for `MaxLength` is split into overlapping windows, each holding the whole question
+and a slice of the passage that shares `DocStride` tokens with the next. This is Transformers'
+`truncation="only_second"` with `stride`. Every window is a training example. One that does not hold
+the whole answer is trained as pointing at `[CLS]`, which is how Transformers marks "not in this
+window". `Answer` reads a long passage in the same windows and returns the best spans across all of
+them. On bert-base with windows of 48 tokens, it answers from the fourth sentence of an 84-token
+pair.
 
 > **In Python, merge before you predict.** PEFT 0.21's `PeftModelForQuestionAnswering.forward`
 > accepts `token_type_ids` and does not pass them on, so through the wrapper every passage is read as
@@ -251,13 +257,18 @@ thrown away, and nothing is propagated below the lowest adapted layer at all.
 
 ### What it costs, and where it stops
 
-- **CPU, one sequence at a time, unpadded.** The batch is a unit of averaging, not of vectorisation.
-  A step costs about three forward passes per example. Here, bert-base on 32 short sentences for
-  8 epochs took 58 to 91 s across runs.
+- **CPU, one micro-batch per pass, packed rather than padded.** A micro-batch's examples are laid end
+  to end and go through the linear layers as one matrix, while attention stays inside each example
+  and position embeddings restart at each one. Nothing is padded, so nothing is wasted or masked, and
+  a test pins the packed pass to the examples run one at a time. Packing 8 short sentences was 1.25x
+  faster than one at a time on bert-base (45 s against 55 s for 256 example passes). That is about
+  as far as packing goes: at 80 rows the linear kernel already runs at its 11-12 GMAC/s, and about
+  three quarters of a step is spent in it. A faster GEMM, planned for v0.4, is what speeds this up
+  further.
 - **Memory.** Training holds a float32 copy of the encoder's weights beside the model of record,
   about 340 MB for bert-base.
-- **Sequence classification, token classification and extractive question answering.** Passages
-  longer than `MaxLength` are cut, not split into overlapping windows.
+- **Sequence classification, token classification and extractive question answering.** A long
+  passage costs one pass per window, in training and in answering.
 - **The encoder's own dropout is off.** Python trains BERT with dropout 0.1 inside every block. Here
   only `LoraConfig.Dropout` applies, on the adapters' input. The trained adapter is valid either
   way; the two training runs are just not step-for-step the same.

@@ -217,4 +217,87 @@ public sealed class QuestionAnsweringTests : IDisposable
         var read = LoraAdapterSet.Load(Path.Combine(_directory, "adapter_model.safetensors"));
         Assert.Equal([2, 8], read.Others["qa_outputs.weight"].Shape.ToArray());
     }
+
+    /// <summary>
+    /// [CLS] q1 q2 [SEP] c0 .. c9 [SEP]: a two-token question and a ten-token passage whose tokens
+    /// are the words "w0".."w9", so passage token k sits at characters 3k..3k+2.
+    /// </summary>
+    private static Encoding LongPassage()
+    {
+        var ids = new List<int> { 101, 1, 2, 102 };
+        var tokens = new List<string> { "[CLS]", "q1", "q2", "[SEP]" };
+        var types = new List<int> { 0, 0, 0, 0 };
+        var special = new List<int> { 1, 0, 0, 1 };
+        var offsets = new List<(int, int)> { (0, 0), (0, 2), (3, 5), (0, 0) };
+
+        for (var k = 0; k < 10; k++)
+        {
+            ids.Add(10 + k);
+            tokens.Add($"w{k}");
+            types.Add(1);
+            special.Add(0);
+            offsets.Add((3 * k, 3 * k + 2));
+        }
+
+        ids.Add(102);
+        tokens.Add("[SEP]");
+        types.Add(1);
+        special.Add(1);
+        offsets.Add((0, 0));
+
+        return new Encoding(ids, tokens, [.. Enumerable.Repeat(1, ids.Count)], types, special, offsets);
+    }
+
+    [Fact]
+    public void A_passage_that_fits_is_one_window()
+    {
+        var encoding = LongPassage();
+        var windows = TokenAlignment.Windows(encoding, maxLength: 64, stride: 5);
+
+        Assert.Same(encoding, Assert.Single(windows));
+    }
+
+    [Fact]
+    public void A_long_passage_is_split_into_overlapping_windows_that_each_hold_the_question()
+    {
+        // Eight tokens per window: four for [CLS] q1 q2 [SEP], one for the closing [SEP], three for
+        // the passage. A stride of one shares one passage token between neighbours, so the windows
+        // start at passage tokens 0, 2, 4, 6 and 8.
+        var windows = TokenAlignment.Windows(LongPassage(), maxLength: 8, stride: 1);
+
+        Assert.Equal(5, windows.Count);
+        Assert.All(windows, w =>
+        {
+            Assert.True(w.Length <= 8);
+            Assert.Equal(["[CLS]", "q1", "q2", "[SEP]"], w.Tokens.Take(4));
+            Assert.Equal("[SEP]", w.Tokens[^1]);
+        });
+
+        string[][] passages = [.. windows.Select(w => w.Tokens.Skip(4).SkipLast(1).ToArray())];
+        Assert.Equal(["w0", "w1", "w2"], passages[0]);
+        Assert.Equal(["w2", "w3", "w4"], passages[1]);
+        Assert.Equal(["w8", "w9"], passages[4]);
+        Assert.Equal(Enumerable.Range(0, 10).Select(k => $"w{k}"), passages.SelectMany(p => p).Distinct());
+
+        // Offsets still index the passage, not the window.
+        Assert.Equal((6, 8), windows[1].Offsets[4]);
+    }
+
+    [Fact]
+    public void An_answer_across_a_boundary_is_whole_in_the_window_that_overlaps_it()
+    {
+        // "w3 w4" is characters 9..14. The first window ends at w2 and cannot hold it; the second,
+        // w2 to w4, holds it at its positions 5 and 6.
+        var windows = TokenAlignment.Windows(LongPassage(), maxLength: 8, stride: 1);
+
+        Assert.Equal((0, 0), TokenAlignment.AnswerTokens(windows[0], 9, 14, windows[0].Length));
+        Assert.Equal((5, 6), TokenAlignment.AnswerTokens(windows[1], 9, 14, windows[1].Length));
+    }
+
+    [Fact]
+    public void A_question_that_fills_the_window_is_refused_by_name()
+    {
+        var error = Assert.Throws<ArgumentException>(() => TokenAlignment.Windows(LongPassage(), maxLength: 5, stride: 1));
+        Assert.Contains("question", error.Message);
+    }
 }
