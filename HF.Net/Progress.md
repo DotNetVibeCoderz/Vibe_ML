@@ -7,7 +7,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.4.0 — current; main adds packed training steps and long-passage QA (unreleased)
+## v0.5.0 — current
 
 **26 projects, 304 tests passing, whole solution builds clean with no warnings.**
 
@@ -206,7 +206,7 @@ Carried into [PLAN.md](PLAN.md):
 
 ## Log
 
-**2026-09-28** — v0.3 complete. Training steps pack each micro-batch end to end: the linear layers
+**2026-09-28** — v0.5.0; v0.3 complete. Training steps pack each micro-batch end to end: the linear layers
 see all its rows at once, attention stays inside each example, and nothing is padded. That was
 1.25x on bert-base, and it leaves training bound by the linear kernel. Question answering splits a
 long passage into overlapping windows (`DocStride`) in training and in `Answer`. 304 tests.
