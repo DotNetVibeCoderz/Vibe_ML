@@ -7,7 +7,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.3.0 — current; main adds token classification and question answering training (unreleased)
+## v0.4.0 — current
 
 **26 projects, 297 tests passing, whole solution builds clean with no warnings.**
 
@@ -208,7 +208,7 @@ Carried into [PLAN.md](PLAN.md):
 
 ## Log
 
-**2026-09-28** — Named entities and question answering train. `TrainTokenClassifier` takes words
+**2026-09-28** — v0.4.0. Named entities and question answering train. `TrainTokenClassifier` takes words
 and one tag per word, trains the first piece of each word, and `FindEntities` decodes a word at a
 time. `TrainQuestionAnswering` takes SQuAD-style examples and trains `qa_outputs` on sentence pairs,
 which the training encoder now supports. Both heads save in PEFT's layout (`TOKEN_CLS`,
