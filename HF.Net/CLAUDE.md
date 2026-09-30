@@ -166,6 +166,10 @@ root rather than here — see below.
   Training wraps its forward pass in `ComputeOptions.Exact()`.
 - **GPT-2 stores `Conv1D` weights `[inputs, outputs]`** - transposed from every other layer - and ties
   `lm_head` to `wte`.
+- **ONNX Runtime 1.24.1 cannot load on Linux.** Its managed assembly imports the native library as
+  `onnxruntime.dll`, so .NET probes `libonnxruntime.dll.so` and never finds `libonnxruntime.so`. 1.24.4
+  imports `onnxruntime`. Windows passes either way, so only the Ubuntu CI job shows it - and only once
+  a test actually opens a session. Check a new ORT version on Linux before pinning it.
 - **Heredocs with large C# or Markdown content fail in this environment.** Use the Write tool for
   anything substantial.
 
