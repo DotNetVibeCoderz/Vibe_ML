@@ -15,11 +15,10 @@ on:
     paths:
       - 'GravicodeScience/**'
       - '.github/workflows/gravicode-science-*.yml'
-      - '.github/workflows/ci.yml'
   pull_request:
     paths:
       - 'GravicodeScience/**'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/gravicode-science-*.yml'
   workflow_dispatch:
 
 defaults:

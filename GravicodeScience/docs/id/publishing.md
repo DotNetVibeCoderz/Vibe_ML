@@ -84,7 +84,7 @@ Paketnya jatuh ke `artifacts/packages/`, yang diabaikan git.
 
 | Job | Berjalan di | Yang dikerjakan |
 |---|---|---|
-| `build` | ubuntu-latest, windows-latest | Restore, build Release, jalankan 1.049 tes, unggah `.trx` |
+| `build` | ubuntu-latest, windows-latest | Restore, build Release, jalankan 1.059 tes, unggah `.trx` |
 | `notebooks` | ubuntu-latest | Mengompilasi setiap sel kode dari keenam notebook |
 | `pack` | ubuntu-latest | Memaketkan keenam pustaka dan mengunggahnya sebagai artifact |
 
@@ -104,18 +104,18 @@ menggantungkan paketnya pada IDE.
 
 ### Berkas alur kerja berada di akar repositori
 
-GitHub hanya membaca alur kerja dari `.github/workflows/` di akar repositori. Berkas-berkas ini
-disimpan di sini, berdampingan dengan proyek yang dijelaskannya, jadi setelah meng-clone Vibe_ML
-keduanya perlu ditempatkan di akar:
+GitHub hanya membaca alur kerja dari `.github/workflows/` di akar repositori, jadi di sanalah
+keduanya berada: `Vibe_ML/.github/workflows/gravicode-science-ci.yml` dan
+`gravicode-science-release.yml`. Dulu keduanya disimpan di sini, berdampingan dengan proyeknya, di
+tempat yang tidak pernah dijalankan - proyek ini tidak punya CI sama sekali sampai 1.1.0.
+
+Setiap langkah menyetel `working-directory: GravicodeScience` dan pemicunya disaring pada
+`GravicodeScience/**`, sehingga perubahan di bagian lain monorepo diabaikan. Rilis dilakukan dengan tag:
 
 ```bash
-mkdir -p .github/workflows
-cp GravicodeScience/.github/workflows/*.yml .github/workflows/
+git tag gravicode-science-v1.1.0
+git push origin gravicode-science-v1.1.0
 ```
-
-Keduanya memang sudah ditulis untuk tata letak itu: setiap langkah menyetel
-`working-directory: GravicodeScience` dan pemicunya disaring pada `GravicodeScience/**`, sehingga
-perubahan di bagian lain monorepo diabaikan.
 
 ## Sebelum penerbitan pertama
 

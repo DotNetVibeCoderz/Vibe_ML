@@ -80,7 +80,7 @@ Packages land in `artifacts/packages/`, which is gitignored.
 
 | Job | Runs on | What it does |
 |---|---|---|
-| `build` | ubuntu-latest, windows-latest | Restore, build Release, run all 1,049 tests, upload the `.trx` |
+| `build` | ubuntu-latest, windows-latest | Restore, build Release, run all 1,059 tests, upload the `.trx` |
 | `notebooks` | ubuntu-latest | Compiles every code cell of all six notebooks |
 | `pack` | ubuntu-latest | Packs the six libraries and uploads them as an artifact |
 
@@ -99,18 +99,17 @@ three known warnings, and failing on those would gate the packages on the IDE.
 
 ### The workflow files live at the repository root
 
-GitHub reads workflows only from `.github/workflows/` at the root of a repository. These files are
-kept here beside the project they describe, so after cloning Vibe_ML they need to be in place at
-the root:
+GitHub reads workflows only from `.github/workflows/` at the root of a repository, so they are
+there: `Vibe_ML/.github/workflows/gravicode-science-ci.yml` and `gravicode-science-release.yml`. They
+used to be kept here beside the project, where nothing ran them - this project had no CI until 1.1.0.
+
+Every step sets `working-directory: GravicodeScience` and the triggers are filtered on
+`GravicodeScience/**`, so they ignore changes elsewhere in the monorepo. A release is a tag:
 
 ```bash
-mkdir -p .github/workflows
-cp GravicodeScience/.github/workflows/*.yml .github/workflows/
+git tag gravicode-science-v1.1.0
+git push origin gravicode-science-v1.1.0
 ```
-
-They are already written for that layout: every step sets `working-directory: GravicodeScience`
-and the triggers are filtered on `GravicodeScience/**`, so they ignore changes elsewhere in the
-monorepo.
 
 ## Before the first publish
 
