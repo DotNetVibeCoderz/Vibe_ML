@@ -59,7 +59,8 @@ public class TransformerTapeTests
         var rng = new GraviRandom(7);
         var attention = new MultiHeadAttention(config, rng);
 
-        // The tape version keeps no bias on the projections, so zero them to compare like for like.
+        // This overload takes no biases, so zero them to compare like for like. The overload with
+        // biases is compared with the biases in place in BiasedAttentionTapeTests.
         foreach (var layer in new[] { attention.Query, attention.Key, attention.Value, attention.Output })
             for (var j = 0; j < layer.Bias.Size; j++)
                 layer.Bias.SetAt(j, 0.0);

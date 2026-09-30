@@ -70,6 +70,17 @@ public static class TransformerTape
     }
 
     /// <summary>
+    /// The exact Gaussian error linear unit, <c>0.5 x (1 + erf(x / sqrt 2))</c>.
+    /// </summary>
+    /// <remarks>
+    /// What a Hugging Face config means by <c>hidden_act: "gelu"</c> - BERT's and ViT's. The tanh
+    /// form <see cref="Gelu"/> differs from it by up to about 4e-4 per value, so a model trained with
+    /// one and run with the other is a slightly different model, and so is its gradient.
+    /// </remarks>
+    public static Tensor GeluExact(Tensor x)
+        => Tensor.Constant(0.5) * x * (Tensor.Constant(1.0) + (x * Tensor.Constant(1.0 / Math.Sqrt(2.0))).Erf());
+
+    /// <summary>
     /// Softmax across each row.
     /// </summary>
     /// <remarks>
@@ -113,6 +124,34 @@ public static class TransformerTape
     /// </remarks>
     public static Tensor MultiHeadAttention(Tensor x, Tensor query, Tensor key, Tensor value,
         Tensor output, int heads, int[]? attentionMask = null)
+        => MultiHeadAttention(x, query, key, value, output, heads, attentionMask, null, null, null, null);
+
+    /// <summary>
+    /// Multi-head scaled dot-product self-attention with a bias on each projection, as every
+    /// pretrained BERT has.
+    /// </summary>
+    /// <param name="x">One row per token.</param>
+    /// <param name="query">Query projection, width by width.</param>
+    /// <param name="key">Key projection.</param>
+    /// <param name="value">Value projection.</param>
+    /// <param name="output">Projection applied to the concatenated heads.</param>
+    /// <param name="heads">Number of attention heads.</param>
+    /// <param name="attentionMask">Optional per-token mask; zero marks padding.</param>
+    /// <param name="queryBias">Bias added after the query projection, or <c>null</c> for none.</param>
+    /// <param name="keyBias">Bias added after the key projection, or <c>null</c>.</param>
+    /// <param name="valueBias">Bias added after the value projection, or <c>null</c>.</param>
+    /// <param name="outputBias">Bias added after the output projection, or <c>null</c>.</param>
+    /// <remarks>
+    /// Without the biases this is a slightly different model from the one a checkpoint describes,
+    /// and a gradient taken through it is the gradient of that different model: it trains, it
+    /// converges, and the adapters or weights it produces are quietly wrong for the real one. The
+    /// query bias does matter to the scores - it adds a per-head term to every one of them - while
+    /// the key bias adds a constant to each query's row, which the softmax cancels; both are kept
+    /// because a checkpoint has both.
+    /// </remarks>
+    public static Tensor MultiHeadAttention(Tensor x, Tensor query, Tensor key, Tensor value,
+        Tensor output, int heads, int[]? attentionMask,
+        Tensor? queryBias, Tensor? keyBias, Tensor? valueBias, Tensor? outputBias)
     {
         var length = x.Shape[0];
         var width = x.Shape[1];
@@ -135,9 +174,9 @@ public static class TransformerTape
             maskBias = Tensor.Constant(bias);
         }
 
-        var q = x.MatMul(query);
-        var k = x.MatMul(key);
-        var v = x.MatMul(value);
+        var q = queryBias is null ? x.MatMul(query) : x.MatMul(query) + queryBias;
+        var k = keyBias is null ? x.MatMul(key) : x.MatMul(key) + keyBias;
+        var v = valueBias is null ? x.MatMul(value) : x.MatMul(value) + valueBias;
 
         Tensor? combined = null;
         for (var head = 0; head < heads; head++)
@@ -154,7 +193,8 @@ public static class TransformerTape
             combined = combined is null ? attended : TensorOps.ConcatColumns(combined, attended);
         }
 
-        return combined!.MatMul(output);
+        var projected = combined!.MatMul(output);
+        return outputBias is null ? projected : projected + outputBias;
     }
 
     /// <summary>Weights of one encoder block, as tape parameters.</summary>
@@ -169,12 +209,54 @@ public static class TransformerTape
         Tensor OutputProjection, Tensor OutputBias,
         Tensor OutputGamma, Tensor OutputBeta)
     {
-        /// <summary>Every parameter, for handing to an optimiser.</summary>
+        /// <summary>Bias after the query projection; <c>null</c> for none, as a freshly built block has.</summary>
+        public Tensor? QueryBias { get; init; }
+
+        /// <summary>Bias after the key projection.</summary>
+        public Tensor? KeyBias { get; init; }
+
+        /// <summary>Bias after the value projection.</summary>
+        public Tensor? ValueBias { get; init; }
+
+        /// <summary>Bias after the attention output projection.</summary>
+        public Tensor? AttentionOutputBias { get; init; }
+
+        /// <summary>Every parameter, for handing to an optimiser - the biases too, when present.</summary>
         public IEnumerable<Tensor> Parameters =>
         [
             Query, Key, Value, AttentionOutput, AttentionGamma, AttentionBeta,
             Intermediate, IntermediateBias, OutputProjection, OutputBias, OutputGamma, OutputBeta,
+            .. new[] { QueryBias, KeyBias, ValueBias, AttentionOutputBias }.OfType<Tensor>(),
         ];
+
+        /// <summary>
+        /// Copies a block's weights onto the tape, attention biases included - the pretrained
+        /// weights a checkpoint loaded into the forward-only classes, made trainable.
+        /// </summary>
+        /// <param name="layer">The block to copy.</param>
+        /// <remarks>
+        /// The tensors are copies: training them leaves <paramref name="layer"/> as it was.
+        /// </remarks>
+        public static EncoderWeights From(TransformerEncoderLayer layer)
+        {
+            ArgumentNullException.ThrowIfNull(layer);
+            static Tensor Copy(NdArray values) => Tensor.Parameter(values.Copy());
+
+            var attention = layer.Attention;
+            return new EncoderWeights(
+                Copy(attention.Query.Weights), Copy(attention.Key.Weights), Copy(attention.Value.Weights),
+                Copy(attention.Output.Weights),
+                Copy(layer.AttentionNorm.Gamma), Copy(layer.AttentionNorm.Beta),
+                Copy(layer.Intermediate.Weights), Copy(layer.Intermediate.Bias),
+                Copy(layer.OutputProjection.Weights), Copy(layer.OutputProjection.Bias),
+                Copy(layer.OutputNorm.Gamma), Copy(layer.OutputNorm.Beta))
+            {
+                QueryBias = Copy(attention.Query.Bias),
+                KeyBias = Copy(attention.Key.Bias),
+                ValueBias = Copy(attention.Value.Bias),
+                AttentionOutputBias = Copy(attention.Output.Bias),
+            };
+        }
     }
 
     /// <summary>
@@ -186,16 +268,27 @@ public static class TransformerTape
     /// its input rather than a fresh representation, so the gradient has a short path back to the
     /// embeddings however deep the stack is.
     /// </remarks>
-    public static Tensor EncoderLayer(Tensor x, EncoderWeights w, int heads, int[]? attentionMask = null)
+    /// <param name="x">One row per token.</param>
+    /// <param name="w">The block's weights; its attention biases are applied when present.</param>
+    /// <param name="heads">Number of attention heads.</param>
+    /// <param name="attentionMask">Optional per-token mask; zero marks padding.</param>
+    /// <param name="exactGelu">
+    /// Whether the feed-forward uses the exact GELU - what BERT's and ViT's configs mean by "gelu" -
+    /// rather than the tanh approximation the forward-only classes use.
+    /// </param>
+    /// <param name="epsilon">The layer norms' epsilon: 1e-12 for BERT, 1e-5 for RoBERTa.</param>
+    public static Tensor EncoderLayer(Tensor x, EncoderWeights w, int heads, int[]? attentionMask = null,
+        bool exactGelu = false, double epsilon = 1e-12)
     {
         var attended = LayerNorm(
-            x + MultiHeadAttention(x, w.Query, w.Key, w.Value, w.AttentionOutput, heads, attentionMask),
-            w.AttentionGamma, w.AttentionBeta);
+            x + MultiHeadAttention(x, w.Query, w.Key, w.Value, w.AttentionOutput, heads, attentionMask,
+                w.QueryBias, w.KeyBias, w.ValueBias, w.AttentionOutputBias),
+            w.AttentionGamma, w.AttentionBeta, epsilon);
 
-        var expanded = Dense(Gelu(Dense(attended, w.Intermediate, w.IntermediateBias)),
-            w.OutputProjection, w.OutputBias);
+        var inner = Dense(attended, w.Intermediate, w.IntermediateBias);
+        var expanded = Dense(exactGelu ? GeluExact(inner) : Gelu(inner), w.OutputProjection, w.OutputBias);
 
-        return LayerNorm(attended + expanded, w.OutputGamma, w.OutputBeta);
+        return LayerNorm(attended + expanded, w.OutputGamma, w.OutputBeta, epsilon);
     }
 
     /// <summary>

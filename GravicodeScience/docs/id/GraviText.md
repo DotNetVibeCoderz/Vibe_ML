@@ -204,10 +204,33 @@ model.LossHistory;                       // rata-rata loss per epoch
 ```
 
 Lapisannya tersedia terpisah untuk membangun hal lain — `TransformerTape.LayerNorm`,
-`MultiHeadAttention`, `EncoderLayer`, `Gelu`, `SoftmaxRows`, `Embed`, `MeanPool`. Semuanya tersusun
+`MultiHeadAttention`, `EncoderLayer`, `Gelu`, `GeluExact`, `SoftmaxRows`, `Embed`, `MeanPool`. Semuanya tersusun
 dari operasi tape yang sudah ada untuk graph network; tidak satu pun butuh kernel khusus, jadi
 tidak satu pun butuh penurunan rumus sendiri. Periksa lapisan yang Anda tulis dengan
 `GradientCheck`.
+
+### Fine-tuning blok yang sudah terlatih
+
+```csharp
+// Blok dari checkpoint yang dimuat ke kelas forward-only, dibuat bisa dilatih - termasuk bias
+// attention-nya.
+var weights = TransformerTape.EncoderWeights.From(model.Layers[0]);
+var y = TransformerTape.EncoderLayer(x, weights, heads: 12, exactGelu: true, epsilon: 1e-12);
+```
+
+BERT yang sudah terlatih punya bias pada setiap proyeksi query, key, value, dan keluaran
+attention-nya, dan `"gelu"` di konfigurasinya berarti GELU eksak berbasis erf. Attention di tape
+menerima bias tersebut (overload `MultiHeadAttention` dengan `queryBias` ... `outputBias`, atau
+properti bias opsional pada `EncoderWeights`), dan `exactGelu: true` memilih `GeluExact`, yang
+dibangun di atas `Erf` milik tape. Tanpa keduanya, gradien yang diambil di sini adalah gradien model
+yang sedikit berbeda dari checkpoint-nya: ia tetap berlatih dan konvergen, dan hasilnya diam-diam
+keliru untuk model yang sebenarnya.
+
+`EncoderWeights.From` menyalin bobot sebuah blok - tensornya salinan, jadi melatihnya tidak mengubah
+blok aslinya - dan tape kemudian menghitung persis apa yang dihitung blok itu, sampai 1e-10 di
+pengujian. Gradien setiap bias, serta `Erf` dan `GeluExact`, diperiksa terhadap beda hingga. Bias
+key adalah satu-satunya parameter yang gradiennya selalu nol: ia menambahkan nilai yang sama ke
+setiap skor dalam baris sebuah query, dan softmax meniadakannya.
 
 > **Ini bukan cara memperoleh BERT.** Model yang dilatih di sini hanya belajar dari korpus yang
 > Anda berikan, dan beberapa ratus dokumen tidak akan menghasilkan pemahaman bahasa yang umum —

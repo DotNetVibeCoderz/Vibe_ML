@@ -48,6 +48,9 @@ public sealed partial class Tensor
     /// <summary>Logistic sigmoid.</summary>
     public Tensor Sigmoid() => TensorOps.Sigmoid(this);
 
+    /// <summary>The error function.</summary>
+    public Tensor Erf() => TensorOps.Erf(this);
+
     /// <summary>Rectified linear unit.</summary>
     public Tensor Relu() => TensorOps.Relu(this);
 

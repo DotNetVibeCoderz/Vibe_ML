@@ -200,9 +200,31 @@ model.LossHistory;                       // mean loss per epoch
 ```
 
 The layers are available on their own for building something else — `TransformerTape.LayerNorm`,
-`MultiHeadAttention`, `EncoderLayer`, `Gelu`, `SoftmaxRows`, `Embed`, `MeanPool`. Every one of them
+`MultiHeadAttention`, `EncoderLayer`, `Gelu`, `GeluExact`, `SoftmaxRows`, `Embed`, `MeanPool`. Every one of them
 composes from tape operations that already existed for the graph networks; none needed a bespoke
 kernel, so none needed its own derivation. Check any layer you write with `GradientCheck`.
+
+### Fine-tuning a pretrained block
+
+```csharp
+// A block from a checkpoint loaded into the forward-only classes, made trainable - its attention
+// biases included.
+var weights = TransformerTape.EncoderWeights.From(model.Layers[0]);
+var y = TransformerTape.EncoderLayer(x, weights, heads: 12, exactGelu: true, epsilon: 1e-12);
+```
+
+A pretrained BERT has a bias on each of its query, key, value and attention-output projections,
+and its config's `"gelu"` means the exact, erf-based GELU. The tape's attention takes those biases
+(`MultiHeadAttention`'s overload with `queryBias` ... `outputBias`, or the optional bias properties
+on `EncoderWeights`), and `exactGelu: true` selects `GeluExact`, built on the tape's `Erf`. Without
+them a gradient taken here is the gradient of a slightly different model from the checkpoint's:
+it trains and converges, and what it produces is quietly wrong for the real model.
+
+`EncoderWeights.From` copies a block's weights - the tensors are copies, so training them leaves the
+block as it was - and the tape then computes exactly what the block computes, to 1e-10 in tests. The
+gradient of every bias, and of `Erf` and `GeluExact`, is checked against finite differences. The key
+bias is the one parameter whose gradient is always zero: it adds the same amount to every score in a
+query's row, and the softmax cancels it.
 
 > **This is not a way to obtain BERT.** A model trained here learns only from the corpus you give
 > it, and a few hundred documents will not produce general language understanding — what they can

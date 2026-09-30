@@ -157,6 +157,22 @@ public static class TensorOps
         });
     }
 
+    /// <summary>The error function, element-wise.</summary>
+    /// <remarks>
+    /// Its derivative is <c>2 / sqrt(pi) * exp(-x^2)</c>, the normal density scaled - which is what
+    /// lets the exact, erf-based GELU that BERT and ViT use be differentiated on the tape, rather
+    /// than only its tanh approximation.
+    /// </remarks>
+    public static Tensor Erf(Tensor a)
+    {
+        var value = Map(a.Value, MathUtil.Erf);
+        return Tensor.Derived(value, [a], g =>
+        {
+            var derivative = Map(a.Value, x => 2.0 / Math.Sqrt(Math.PI) * Math.Exp(-x * x));
+            a.AccumulateGradient(UFunc.Multiply(g, derivative));
+        });
+    }
+
     /// <summary>Logistic sigmoid.</summary>
     public static Tensor Sigmoid(Tensor a)
     {

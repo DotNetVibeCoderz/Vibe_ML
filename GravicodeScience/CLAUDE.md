@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 v0.1.0 is implemented and complete against `requirements.md`: 24 projects, ~15.5k lines of library
-code, **1,049 tests passing**, six samples that run end to end, six notebooks, six benchmark suites,
+code, **1,059 tests passing**, six samples that run end to end, six notebooks, six benchmark suites,
 and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -58,6 +58,11 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
   finishing on 20k samples.
 - **`KMeans` runs Lloyd's loop on raw `double[]` buffers**, not through the `NdArray` indexer.
   The indexer's stride maths and bounds checks cost 4× in that loop.
+- **The tape's attention takes biases, and the exact GELU exists (`GeluExact`, on `Erf`).** A
+  pretrained BERT has both; the old bias-free attention and tanh GELU made any gradient the gradient
+  of a slightly different model. `EncoderWeights.From(layer)` copies a block with its biases. The
+  key bias's gradient is identically zero (softmax cancels a per-row constant), so gradient checks on
+  it compare zeros - test it for smallness, not relative agreement.
 - **The autodiff tape is slower than finite differences below ~50 parameters.** It allocates a node
   per operation; `2d` cheap scalar evaluations beat that on a small log posterior. It wins by
   growing dimension, not per call — `MeanFieldVariational` switches at 32 parameters for this
@@ -259,10 +264,11 @@ The six libraries under `src/` pack as `Gravicode.Science.*`; everything else is
   and the package version cannot disagree.
 - **`GraviNum` is pushed to NuGet first.** Every other package depends on it, and a dependency that
   is not yet indexed leaves the dependents unrestorable for a few minutes.
-- **Workflows live at the *repository* root, not here.** GravicodeScience is a subdirectory of the
-  Vibe_ML monorepo and GitHub reads `.github/workflows/` only from the root. The files in
-  `.github/workflows/` are written for that layout — `working-directory: GravicodeScience` on every
-  step, triggers filtered on `GravicodeScience/**` — and have to be copied up after cloning.
+- **Workflows live at the *repository* root, not here**: `Vibe_ML/.github/workflows/
+  gravicode-science-ci.yml` and `gravicode-science-release.yml`. GitHub reads workflows only from the
+  root, and they used to sit in `GravicodeScience/.github/workflows/`, where nothing ran them - this
+  project had no CI at all until 1.1.0. Every step has `working-directory: GravicodeScience` and the
+  triggers are filtered on `GravicodeScience/**`. Release with a `gravicode-science-v*` tag.
 - **`tools/verify/notebook_cells.py` is the CI job that catches what nothing else can.** A notebook
   is JSON; it validates whether or not the C# inside compiles. Run it after touching any notebook.
 - **`testkey.txt` is gitignored and holds live keys.** Check it is not in git history before the

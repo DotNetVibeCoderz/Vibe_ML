@@ -26,7 +26,7 @@ dotnet build Gravicode.Science.sln -c Release
 dotnet test
 ```
 
-Seluruh rangkaian tes (1.049 tes) selesai dalam sekitar satu setengah menit.
+Seluruh rangkaian tes (1.059 tes) selesai dalam sekitar satu setengah menit.
 
 ## Menambahkan library ke proyek Anda
 

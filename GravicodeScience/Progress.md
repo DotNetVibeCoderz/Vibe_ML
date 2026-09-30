@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v1.0.0 · **Target framework**: .NET 10 · **Tests**: 1,049 passing, 0 failing
+**Release**: v1.0.0 · **Target framework**: .NET 10 · **Tests**: 1,059 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -123,7 +123,7 @@ against — two unrelated routes to the same factorisation.
 - [x] **v0.5** `GraviLearn.Distributed` — partitioning, weighted gradient averaging, two transports
 - [x] **v0.5** `DistributedForest` — bit-identical to single-process training
 
-### GraviText — 171 tests
+### GraviText — 181 tests
 
 - [x] Whitespace, regex, character and WordPiece tokenizers; sentence splitter
 - [x] WordPiece vocabulary training
@@ -146,6 +146,9 @@ against — two unrelated routes to the same factorisation.
 - [x] **v0.4** Decoder stack with causal masking and greedy/top-k/nucleus sampling
 - [x] **v0.5** `TransformerCheckpoint` — loads every parameter, verified against NumPy to 2.6e-07
 - [x] **v0.5** `TfidfVectorizer.TransformSparse` — sparse output to match `CountVectorizer`
+- [x] Biased attention and the exact GELU on the tape — `EncoderWeights.From` makes a pretrained block
+  trainable, attention biases included; matches the forward-only block to 1e-10, every bias gradient
+  checked by finite differences
 
 ⚠️ **No pretrained weights.** Documented at the top of [GraviText.md](docs/GraviText.md) and printed
 by the sample at runtime. The architecture can now be *trained* on your own labelled text via
@@ -292,7 +295,8 @@ Each is now covered by a regression test.
 
 See [PLAN.md](PLAN.md). **v0.4 is complete**, and **five of six v0.5 items are done**: Arrow
 interchange, out-of-core dataframes, sparse training paths, the pretrained-weight loader, and the
-distributed-training coordination layer. The suite grew from 962 to 1,049 tests.
+distributed-training coordination layer. The suite grew from 962 to 1,049 tests, then to 1,059 with
+biased attention on the tape.
 
 Three of those were verified against something outside this repository rather than against
 themselves — Arrow both ways against pyarrow, the checkpoint loader against an independent NumPy

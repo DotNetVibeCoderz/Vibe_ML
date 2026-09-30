@@ -26,7 +26,7 @@ dotnet build Gravicode.Science.sln -c Release
 dotnet test
 ```
 
-The whole test suite (1,049 tests) runs in about a minute and a half.
+The whole test suite (1,059 tests) runs in about a minute and a half.
 
 ## Adding the libraries to a project
 
