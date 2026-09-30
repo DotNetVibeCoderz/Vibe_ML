@@ -302,4 +302,59 @@ public sealed class KernelTests
         var error = Assert.Throws<NotSupportedException>(() => Activation.DerivativeFor("swish"));
         Assert.Contains("swish", error.Message);
     }
+
+    // ------------------------------------------------------------------ gemm
+
+    [Theory]
+    [InlineData(7, 600, 25)]     // three depth blocks, the last partial; a padded last panel; 7 rows pad to 8
+    [InlineData(37, 700, 100)]   // enough work to split across threads
+    [InlineData(1, 1, 1)]
+    public void The_gemm_agrees_with_naive_products_in_both_directions(int rows, int inputs, int outputs)
+    {
+        // Depths past 256 run as several blocks, each after the first adding onto what the last
+        // left in the result - a path the smaller layer tests never reach.
+        var weight = Matrix(outputs, inputs, 61);
+        var x = Values(rows * inputs, 62);
+        var dy = Values(rows * outputs, 63);
+
+        var layer = Linear.From(weight, null);
+        var forward = layer.Apply(x, rows);
+        var backward = layer.ApplyTransposed(dy, rows);
+
+        var expectedForward = new double[rows * outputs];
+        var expectedBackward = new double[rows * inputs];
+
+        for (var r = 0; r < rows; r++)
+        {
+            for (var o = 0; o < outputs; o++)
+            {
+                var sum = 0.0;
+                for (var i = 0; i < inputs; i++) sum += x[r * inputs + i] * weight[o, i];
+                expectedForward[r * outputs + o] = sum;
+            }
+
+            for (var i = 0; i < inputs; i++)
+            {
+                var sum = 0.0;
+                for (var o = 0; o < outputs; o++) sum += dy[r * outputs + o] * weight[o, i];
+                expectedBackward[r * inputs + i] = sum;
+            }
+        }
+
+        Close(expectedForward, forward, 1e-11, "y");
+        Close(expectedBackward, backward, 1e-11, "dx");
+    }
+
+    [Fact]
+    public void Packing_keeps_every_weight_where_it_can_be_read_back()
+    {
+        var weights = Values(25 * 13, 64).Select(v => (float)v).ToArray();
+        var packed = Gemm.Pack(weights, inputs: 13, outputs: 25);
+
+        Assert.Equal(Gemm.Panels(25) * 13 * Gemm.Width, packed.Length);
+        for (var o = 0; o < 25; o++)
+        {
+            for (var i = 0; i < 13; i++) Assert.Equal(weights[o * 13 + i], Gemm.At(packed, 13, o, i));
+        }
+    }
 }

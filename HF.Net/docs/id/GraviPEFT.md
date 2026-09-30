@@ -265,11 +265,10 @@ paling rendah.
   dalam satu micro-batch disusun berurutan dan melewati lapisan linear sebagai satu matriks,
   sementara atensi tetap di dalam masing-masing contoh dan position embedding dimulai ulang pada
   setiap contoh. Tidak ada padding, jadi tidak ada yang terbuang atau perlu di-mask, dan sebuah test
-  mengunci pass yang dipadatkan agar sama dengan menjalankan contoh satu per satu. Memadatkan 8
-  kalimat pendek 1,25x lebih cepat daripada satu per satu pada bert-base (45 detik dibanding 55 detik
-  untuk 256 pass contoh). Kira-kira sejauh itulah manfaat pemadatan: pada 80 baris, kernel linear
-  sudah berjalan di 11-12 GMAC/s, dan sekitar tiga perempat waktu satu langkah dihabiskan di sana.
-  GEMM yang lebih cepat, yang direncanakan untuk v0.4, adalah yang akan mempercepatnya lebih jauh.
+  mengunci pass yang dipadatkan agar sama dengan menjalankan contoh satu per satu. Pada bert-base,
+  32 kalimat pendek selama 8 epoch memakan 20 detik bila dipadatkan 8 sekaligus, dibanding 37 detik
+  satu per satu. GEMM dengan blok register paling diuntungkan oleh baris yang lebih banyak, jadi
+  pemadatan inilah yang membuatnya bisa berjalan pada kecepatan penuh.
 - **Memori.** Pelatihan menyimpan salinan float32 dari bobot encoder di samping model rujukan,
   sekitar 340 MB untuk bert-base.
 - **Klasifikasi sekuens, klasifikasi token, dan tanya-jawab ekstraktif.** Passage yang panjang

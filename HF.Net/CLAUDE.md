@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.5.0 is published: **26 projects, 304 tests passing**, the whole solution builds clean, and the
-eight libraries are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
+v0.5.0 is published and the eight libraries are on nuget.org as `Gravicode.HFNet.*`. Main is ahead
+of it with a register-blocked GEMM (unreleased): **26 projects, 308 tests passing**, the whole
+solution builds clean. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`
@@ -85,10 +86,13 @@ root rather than here — see below.
 - **Position interpolation must be torch's bicubic exactly**: `a = -0.75` (not `-0.5`), half-pixel
   source coordinate *not* clamped at zero, edge taps clamped. Each wrong choice moves values by
   hundredths and still gives confident answers.
-- **The managed encoder is accurate first and fast second.** Its linear kernel runs at roughly the
-  foundation's packed `MatMul` rate (about 13 GMAC/s here). It beats `MatMul` below about 200 rows
-  and loses by 1.3x at 577 (ViT at 384 px). For throughput the answer is an ONNX export through
-  GraviOptimum — see [docs/benchmarks.md](docs/benchmarks.md).
+- **The linear layers are a register-blocked GEMM (`Gemm.cs`).** Weights live as float32 panels of
+  12 outputs; the kernel holds a 4x12 block in twelve AVX registers and widens each 256-input slice
+  of a panel into a per-thread double buffer once, reused by every 4-row block. Do not widen inside
+  the inner loop (measured 40% slower: the conversion shares a port with FMA), and do not read
+  weights through `Span` slices there (bounds checks cost 1.7x). About 35-54 GMAC/s at 80 rows on
+  this 4-core laptop, against 12 for the dot-product kernel it replaced. The transposed product
+  gathers from the same panels, so no second copy of the weights exists.
 - **LoRA training has its own forward pass.** `GraviPEFT/LoraEncoder.cs` re-implements the text
   encoder's forward pass, with adapters in the loop and a tape for its hand-written backward pass.
   It reuses `Linear`, `Activation` and `Simd` from `Kernels.cs` through `InternalsVisibleTo`.
@@ -219,7 +223,7 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 304
+dotnet test                                                     # all 308
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

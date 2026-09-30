@@ -3,11 +3,11 @@
   "platform": "Microsoft Windows 10.0.26200",
   "processor": "8 logical cores",
   "configuration": "Release",
-  "tokenizer_single_ms": 0.0108,
-  "tokenizer_single_median_ms": 0.0124,
-  "tokenizer_batch_1000_ms": 8.7042,
-  "tokenizer_batch_1000_median_ms": 10.1398,
-  "tokenizer_docs_per_second": 114887.06601410813,
+  "tokenizer_single_ms": 0.0089,
+  "tokenizer_single_median_ms": 0.0099,
+  "tokenizer_batch_1000_ms": 6.2075,
+  "tokenizer_batch_1000_median_ms": 8.4276,
+  "tokenizer_docs_per_second": 161095.44905356425,
   "tokenizer_reference_ids": [
     101,
     7592,
@@ -36,93 +36,93 @@
     ".",
     "[SEP]"
   ],
-  "safetensors_header_ms": 0.7863,
-  "safetensors_one_tensor_ms": 149.2505,
+  "safetensors_header_ms": 0.4753,
+  "safetensors_one_tensor_ms": 184.8506,
   "safetensors_tensor_count": 206,
   "safetensors_file_mb": 420.0456314086914,
-  "inference_base_single_ms": 111.2789,
-  "inference_base_single_median_ms": 118.0131,
-  "inference_base_batch8_ms": 1104.403,
+  "inference_base_single_ms": 48.0552,
+  "inference_base_single_median_ms": 55.871,
+  "inference_base_batch8_ms": 386.3261,
   "inference_base_tokens": 12,
-  "inference_tiny_single_ms": 0.9521,
-  "inference_tiny_single_median_ms": 1.1291,
-  "inference_tiny_batch8_ms": 5.5943,
+  "inference_tiny_single_ms": 0.8299,
+  "inference_tiny_single_median_ms": 1.0692,
+  "inference_tiny_batch8_ms": 2.6991,
   "inference_tiny_tokens": 12,
   "fillmask_france": [
     {
       "token": "paris",
-      "score": 0.41678775407556795
+      "score": 0.41678775407556373
     },
     {
       "token": "lille",
-      "score": 0.07141640278171409
+      "score": 0.07141640278171386
     },
     {
       "token": "lyon",
-      "score": 0.06339241209019147
+      "score": 0.06339241209019195
     },
     {
       "token": "marseille",
-      "score": 0.044447293579658535
+      "score": 0.04444729357965903
     },
     {
       "token": "tours",
-      "score": 0.03029705860343756
+      "score": 0.03029705860343773
     }
   ],
   "fillmask_player": [
     {
       "token": "regular",
-      "score": 0.5489171261274716
+      "score": 0.5489171261274663
     },
     {
       "token": "key",
-      "score": 0.19474677604908122
+      "score": 0.19474677604908353
     },
     {
       "token": "former",
-      "score": 0.058151084546653506
+      "score": 0.05815108454665461
     },
     {
       "token": "capped",
-      "score": 0.02157533169550665
+      "score": 0.021575331695506524
     },
     {
       "token": "prominent",
-      "score": 0.013642564889810202
+      "score": 0.013642564889810341
     }
   ],
-  "vision_single_ms": 1963.851,
-  "vision_single_median_ms": 2013.5955,
+  "vision_single_ms": 947.8515,
+  "vision_single_median_ms": 1006.9181,
   "vision_top5": [
     {
       "label": "binder, ring-binder",
       "index": 446,
-      "score": 0.11869402629335508
+      "score": 0.1186940262933558
     },
     {
       "label": "coil, spiral, volute, whorl, helix",
       "index": 506,
-      "score": 0.04463827106985474
+      "score": 0.04463827106985486
     },
     {
       "label": "screen, CRT screen",
       "index": 782,
-      "score": 0.043354941939034455
+      "score": 0.043354941939034525
     },
     {
       "label": "television, television system",
       "index": 851,
-      "score": 0.0315982656115756
+      "score": 0.031598265611575624
     },
     {
       "label": "rubber eraser, rubber, pencil eraser",
       "index": 767,
-      "score": 0.024121684775198913
+      "score": 0.024121684775198868
     }
   ],
   "onnx_provider": "Cpu",
-  "onnx_base_single_ms": 23.7754,
-  "onnx_base_single_median_ms": 25.716,
-  "onnx_base_max_abs_error": 4.691827064640108E-06
+  "onnx_base_single_ms": 31.4687,
+  "onnx_base_single_median_ms": 35.4158,
+  "onnx_base_max_abs_error": 4.691827061975573E-06
 }

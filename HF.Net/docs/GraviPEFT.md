@@ -260,11 +260,9 @@ thrown away, and nothing is propagated below the lowest adapted layer at all.
 - **CPU, one micro-batch per pass, packed rather than padded.** A micro-batch's examples are laid end
   to end and go through the linear layers as one matrix, while attention stays inside each example
   and position embeddings restart at each one. Nothing is padded, so nothing is wasted or masked, and
-  a test pins the packed pass to the examples run one at a time. Packing 8 short sentences was 1.25x
-  faster than one at a time on bert-base (45 s against 55 s for 256 example passes). That is about
-  as far as packing goes: at 80 rows the linear kernel already runs at its 11-12 GMAC/s, and about
-  three quarters of a step is spent in it. A faster GEMM, planned for v0.4, is what speeds this up
-  further.
+  a test pins the packed pass to the examples run one at a time. On bert-base, 32 short sentences
+  for 8 epochs take 20 s packed 8 at a time, against 37 s one at a time. The register-blocked GEMM
+  gains the most from more rows, so the packing is what lets it run at speed.
 - **Memory.** Training holds a float32 copy of the encoder's weights beside the model of record,
   about 340 MB for bert-base.
 - **Sequence classification, token classification and extractive question answering.** A long

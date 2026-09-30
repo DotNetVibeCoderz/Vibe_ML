@@ -89,9 +89,8 @@ worth doing for the ecosystem, but nothing here waits on it.
 6. ~~**Batched steps.**~~ **Done, by packing rather than padding.** A micro-batch's examples are
    laid end to end: the linear layers see all their rows at once, while attention runs block by
    block and positions restart per example. There is no padding and so no mask, and tests pin the
-   packed forward pass and gradients to the examples run one at a time. The gain was a measured
-   1.25x on bert-base. It stops there because the linear kernel is then the bound (11-12 GMAC/s at
-   80 rows), which makes the faster GEMM under v0.4 the next speed-up for training as well.
+   packed forward pass and gradients to the examples run one at a time. With the register-blocked
+   GEMM from v0.4, packing 8 sentences makes a step 1.8x faster than one at a time.
 7. ~~**Long passages.**~~ **Done.** A passage too long for `MaxLength` is split into overlapping
    windows (`DocStride`), as Transformers' `truncation="only_second"` with `stride` does, both in
    training and in `Answer`.
@@ -115,10 +114,11 @@ but nothing depends on it now.
    which is why the managed encoder still agrees with torch in float64 to about 1e-13. Going fully
    float32 would double SIMD width once more, at the cost of that agreement, and would move the
    comparison target to torch's own float32. Worth doing only as an opt-in mode.
-4. **A better GEMM for long sequences.** The linear kernel (4 rows x 2 outputs, float32 weights
-   widened on the fly) runs at roughly the foundation's packed `MatMul` rate. It is faster below
-   about 200 rows and 1.3x slower at 577 (ViT at 384 px). A packed panel with a wider register tile
-   is the known next step.
+4. ~~**A better GEMM.**~~ **Done.** Weights are packed into float32 panels of twelve outputs, and a
+   4x12 register-blocked kernel runs the product, widening each panel slice once per call. From about
+   12 GMAC/s to 35-54 at 80 rows. bert-base went from 111 ms to 48 ms (torch: 38 ms), ViT-base from
+   1,964 ms to 948 ms, and a LoRA training step about 2.2x faster, all with unchanged results. What
+   separates it from torch now is mostly float64 against float32, which is item 3.
 5. **KV caching** if and when decoder models arrive — generation is quadratic without it.
 
 ## v0.5 — diffusion in earnest

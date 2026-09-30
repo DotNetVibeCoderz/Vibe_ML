@@ -16,7 +16,7 @@ Encoder terkelola di [GraviTransformers](GraviTransformers.md) menghitung dalam 
 dengan torch hingga sekitar 1e-13. Ia ada supaya model bisa dimuat, diperiksa dan dipahami dalam
 .NET murni. Permintaan produksi sebaiknya lewat ekspor ONNX yang berjalan di kernel presisi tunggal
 yang ditulis untuk perangkat kerasnya. Pada `bert-base-uncased`, satu kalimat 12 token memakan
-**23,8 ms** lewat jalur ini, melawan 36,4 ms di torch dan 111 ms secara terkelola. Lihat
+**31,5 ms** lewat jalur ini, melawan 37,6 ms di torch dan 48,1 ms secara terkelola. Lihat
 [benchmark](benchmarks.md).
 
 ```csharp

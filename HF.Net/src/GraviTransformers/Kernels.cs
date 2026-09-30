@@ -62,77 +62,6 @@ internal static class Simd
 
         for (; i < x.Length; i++) y[i] += alpha * x[i];
     }
-
-    /// <summary>
-    /// Four input rows against two float32 weight rows: eight dot products from
-    /// one pass over the weights.
-    /// </summary>
-    /// <remarks>
-    /// The shape is what makes the linear layer fast. One dot at a time is load-bound - two loads
-    /// per multiply-add - and reading each weight row once per input row streams the whole matrix
-    /// from memory once per row. Here each widened weight vector feeds four multiply-adds and each
-    /// input vector two, and eight independent accumulators hide the latency.
-    /// </remarks>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal static void Dot4x2(
-        ReadOnlySpan<double> a0, ReadOnlySpan<double> a1, ReadOnlySpan<double> a2, ReadOnlySpan<double> a3,
-        ReadOnlySpan<float> w0, ReadOnlySpan<float> w1, Span<double> sums)
-    {
-        var floats = Vector<float>.Count;
-        var doubles = Vector<double>.Count;
-
-        Vector<double> c00 = default, c10 = default, c20 = default, c30 = default;
-        Vector<double> c01 = default, c11 = default, c21 = default, c31 = default;
-
-        var i = 0;
-        for (; i <= w0.Length - floats; i += floats)
-        {
-            Vector.Widen(new Vector<float>(w0[i..]), out var low0, out var high0);
-            Vector.Widen(new Vector<float>(w1[i..]), out var low1, out var high1);
-            var j = i + doubles;
-
-            var x = new Vector<double>(a0[i..]);
-            var y = new Vector<double>(a0[j..]);
-            c00 = Vector.FusedMultiplyAdd(y, high0, Vector.FusedMultiplyAdd(x, low0, c00));
-            c01 = Vector.FusedMultiplyAdd(y, high1, Vector.FusedMultiplyAdd(x, low1, c01));
-
-            x = new Vector<double>(a1[i..]);
-            y = new Vector<double>(a1[j..]);
-            c10 = Vector.FusedMultiplyAdd(y, high0, Vector.FusedMultiplyAdd(x, low0, c10));
-            c11 = Vector.FusedMultiplyAdd(y, high1, Vector.FusedMultiplyAdd(x, low1, c11));
-
-            x = new Vector<double>(a2[i..]);
-            y = new Vector<double>(a2[j..]);
-            c20 = Vector.FusedMultiplyAdd(y, high0, Vector.FusedMultiplyAdd(x, low0, c20));
-            c21 = Vector.FusedMultiplyAdd(y, high1, Vector.FusedMultiplyAdd(x, low1, c21));
-
-            x = new Vector<double>(a3[i..]);
-            y = new Vector<double>(a3[j..]);
-            c30 = Vector.FusedMultiplyAdd(y, high0, Vector.FusedMultiplyAdd(x, low0, c30));
-            c31 = Vector.FusedMultiplyAdd(y, high1, Vector.FusedMultiplyAdd(x, low1, c31));
-        }
-
-        sums[0] = Vector.Sum(c00);
-        sums[1] = Vector.Sum(c10);
-        sums[2] = Vector.Sum(c20);
-        sums[3] = Vector.Sum(c30);
-        sums[4] = Vector.Sum(c01);
-        sums[5] = Vector.Sum(c11);
-        sums[6] = Vector.Sum(c21);
-        sums[7] = Vector.Sum(c31);
-
-        for (; i < w0.Length; i++)
-        {
-            sums[0] += a0[i] * w0[i];
-            sums[1] += a1[i] * w0[i];
-            sums[2] += a2[i] * w0[i];
-            sums[3] += a3[i] * w0[i];
-            sums[4] += a0[i] * w1[i];
-            sums[5] += a1[i] * w1[i];
-            sums[6] += a2[i] * w1[i];
-            sums[7] += a3[i] * w1[i];
-        }
-    }
 }
 
 /// <summary>The feed-forward activations a config's <c>hidden_act</c> can name.</summary>
@@ -290,24 +219,21 @@ internal static class Activation
 }
 
 /// <summary>
-/// A fully connected layer: float32 weights in <c>(outputs, inputs)</c> order, double activations.
+/// A fully connected layer: float32 weights packed for <see cref="Gemm"/>, double activations.
 /// </summary>
 /// <remarks>
-/// <c>(outputs, inputs)</c> is the order Hugging Face stores, and it is the order that lets each
-/// dot product walk contiguous memory. The obvious alternative - transposing to
-/// <c>(inputs, outputs)</c> and striding - measured five times slower than a plain sequential loop.
+/// Built from the <c>(outputs, inputs)</c> order Hugging Face stores and kept in
+/// <see cref="Gemm"/>'s panels of twelve outputs, which is what lets the product run as a
+/// register-blocked kernel rather than one dot product at a time.
 /// </remarks>
 internal sealed class Linear
 {
-    private const int OutputTile = 64;
-    private const int RowTile = 32;
-
-    private readonly float[] _weights;   // [outputs, inputs]
+    private readonly float[] _packed;    // Gemm panels of W, which is [outputs, inputs]
     private readonly double[] _bias;     // [outputs]
 
     private Linear(float[] weights, double[] bias, int inputs, int outputs)
     {
-        _weights = weights;
+        _packed = Gemm.Pack(weights, inputs, outputs);
         _bias = bias;
         Inputs = inputs;
         Outputs = outputs;
@@ -382,68 +308,44 @@ internal sealed class Linear
         }
 
         return new Linear(
-            [.. layers.SelectMany(l => l._weights)],
+            [.. layers.SelectMany(l => l.RowMajor())],
             [.. layers.SelectMany(l => l._bias)],
             inputs,
             layers.Sum(l => l.Outputs));
     }
 
+    /// <summary>The weights back in <c>(outputs, inputs)</c> order.</summary>
+    private float[] RowMajor()
+    {
+        var weights = new float[Outputs * Inputs];
+        for (var o = 0; o < Outputs; o++)
+        {
+            for (var i = 0; i < Inputs; i++) weights[o * Inputs + i] = Gemm.At(_packed, Inputs, o, i);
+        }
+
+        return weights;
+    }
+
     /// <summary>Applies the layer to <paramref name="rows"/> row-major rows of <paramref name="input"/>.</summary>
     /// <remarks>
-    /// Split into tiles of outputs and rows, and the tiles run in parallel. Tiling by output alone
-    /// is what gives a twelve-token sentence any parallelism at all; tiling by row as well keeps
-    /// the slice of input a tile reads small enough to stay in cache.
+    /// The product runs in <see cref="Gemm"/>; the bias and the activation are applied here, per
+    /// element, afterwards.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal double[] Apply(double[] input, int rows, Func<double, double>? activation = null)
     {
-        var inputs = Inputs;
         var outputs = Outputs;
-        var result = new double[rows * outputs];
+        var result = Gemm.Multiply(input, rows, _packed, Inputs, outputs);
 
-        var outputTiles = (outputs + OutputTile - 1) / OutputTile;
-        var rowTiles = (rows + RowTile - 1) / RowTile;
-
-        Parallel.For(0, outputTiles * rowTiles, tile =>
+        for (var r = 0; r < rows; r++)
         {
-            var firstOutput = (tile % outputTiles) * OutputTile;
-            var firstRow = (tile / outputTiles) * RowTile;
-            var endOutput = Math.Min(firstOutput + OutputTile, outputs);
-            var endRow = Math.Min(firstRow + RowTile, rows);
-
-            Span<double> sums = stackalloc double[8];
-
-            for (var o = firstOutput; o < endOutput; o += 2)
+            var row = result.AsSpan(r * outputs, outputs);
+            for (var o = 0; o < outputs; o++)
             {
-                var pair = o + 1 < endOutput;
-                var w0 = _weights.AsSpan(o * inputs, inputs);
-                var w1 = pair ? _weights.AsSpan((o + 1) * inputs, inputs) : w0;
-
-                for (var r = firstRow; r < endRow; r += 4)
-                {
-                    // A partial block repeats its last row rather than branching inside the kernel;
-                    // the repeated sums are computed and not stored.
-                    var count = Math.Min(4, endRow - r);
-                    Simd.Dot4x2(
-                        input.AsSpan(r * inputs, inputs),
-                        input.AsSpan((r + Math.Min(1, count - 1)) * inputs, inputs),
-                        input.AsSpan((r + Math.Min(2, count - 1)) * inputs, inputs),
-                        input.AsSpan((r + Math.Min(3, count - 1)) * inputs, inputs),
-                        w0, w1, sums);
-
-                    for (var k = 0; k < count; k++)
-                    {
-                        var value = sums[k] + _bias[o];
-                        result[(r + k) * outputs + o] = activation is null ? value : activation(value);
-
-                        if (!pair) continue;
-
-                        value = sums[4 + k] + _bias[o + 1];
-                        result[(r + k) * outputs + o + 1] = activation is null ? value : activation(value);
-                    }
-                }
+                var value = row[o] + _bias[o];
+                row[o] = activation is null ? value : activation(value);
             }
-        });
+        }
 
         return result;
     }
@@ -453,86 +355,11 @@ internal sealed class Linear
     /// of <paramref name="gradient"/> shaped <c>[rows, outputs]</c>.
     /// </summary>
     /// <remarks>
-    /// The backward pass of <see cref="Apply"/> without a transposed copy of the weights, which for
-    /// bert-base would be another 340 MB. Each weight row is a contiguous run of inputs, so it is
-    /// streamed once per block of four gradient rows and added, scaled, into four accumulators; a
-    /// block of inputs keeps those accumulators in the first-level cache.
+    /// The backward pass of <see cref="Apply"/>, from the same packed weights, with no transposed
+    /// copy kept - for bert-base that would be another 340 MB.
     /// </remarks>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal double[] ApplyTransposed(double[] gradient, int rows)
-    {
-        const int InputTile = 128;
-
-        var inputs = Inputs;
-        var outputs = Outputs;
-        var result = new double[rows * inputs];
-
-        var inputTiles = (inputs + InputTile - 1) / InputTile;
-        var rowBlocks = (rows + 3) / 4;
-
-        Parallel.For(0, inputTiles * rowBlocks, tile =>
-        {
-            var first = (tile % inputTiles) * InputTile;
-            var width = Math.Min(InputTile, inputs - first);
-            var row = (tile / inputTiles) * 4;
-            var count = Math.Min(4, rows - row);
-
-            var floats = Vector<float>.Count;
-            var doubles = Vector<double>.Count;
-            var sums = new double[4 * InputTile];
-
-            for (var o = 0; o < outputs; o++)
-            {
-                var w = _weights.AsSpan(o * inputs + first, width);
-                var c0 = gradient[row * outputs + o];
-                var c1 = count > 1 ? gradient[(row + 1) * outputs + o] : 0.0;
-                var c2 = count > 2 ? gradient[(row + 2) * outputs + o] : 0.0;
-                var c3 = count > 3 ? gradient[(row + 3) * outputs + o] : 0.0;
-                if (c0 == 0 && c1 == 0 && c2 == 0 && c3 == 0) continue;
-
-                var s0 = sums.AsSpan(0, width);
-                var s1 = sums.AsSpan(InputTile, width);
-                var s2 = sums.AsSpan(2 * InputTile, width);
-                var s3 = sums.AsSpan(3 * InputTile, width);
-
-                var v0 = new Vector<double>(c0);
-                var v1 = new Vector<double>(c1);
-                var v2 = new Vector<double>(c2);
-                var v3 = new Vector<double>(c3);
-
-                var i = 0;
-                for (; i <= width - floats; i += floats)
-                {
-                    Vector.Widen(new Vector<float>(w[i..]), out var low, out var high);
-                    var j = i + doubles;
-
-                    Vector.FusedMultiplyAdd(v0, low, new Vector<double>(s0[i..])).CopyTo(s0[i..]);
-                    Vector.FusedMultiplyAdd(v0, high, new Vector<double>(s0[j..])).CopyTo(s0[j..]);
-                    Vector.FusedMultiplyAdd(v1, low, new Vector<double>(s1[i..])).CopyTo(s1[i..]);
-                    Vector.FusedMultiplyAdd(v1, high, new Vector<double>(s1[j..])).CopyTo(s1[j..]);
-                    Vector.FusedMultiplyAdd(v2, low, new Vector<double>(s2[i..])).CopyTo(s2[i..]);
-                    Vector.FusedMultiplyAdd(v2, high, new Vector<double>(s2[j..])).CopyTo(s2[j..]);
-                    Vector.FusedMultiplyAdd(v3, low, new Vector<double>(s3[i..])).CopyTo(s3[i..]);
-                    Vector.FusedMultiplyAdd(v3, high, new Vector<double>(s3[j..])).CopyTo(s3[j..]);
-                }
-
-                for (; i < width; i++)
-                {
-                    s0[i] += c0 * w[i];
-                    s1[i] += c1 * w[i];
-                    s2[i] += c2 * w[i];
-                    s3[i] += c3 * w[i];
-                }
-            }
-
-            for (var k = 0; k < count; k++)
-            {
-                Array.Copy(sums, k * InputTile, result, (row + k) * inputs + first, width);
-            }
-        });
-
-        return result;
-    }
+        => Gemm.MultiplyTransposed(gradient, rows, _packed, Inputs, Outputs);
 }
 
 /// <summary>A layer norm over each row.</summary>

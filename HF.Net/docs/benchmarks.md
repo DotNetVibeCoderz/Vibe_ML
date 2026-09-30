@@ -74,12 +74,12 @@ One forward pass over 12 tokens.
 
 | Model | Python (torch) | HF.Net (managed) | |
 |---|---:|---:|---|
-| bert-base-uncased, 1 document | 36.4 ms | 111 ms | 3.1x slower |
-| bert-base-uncased, 8 documents | 161 ms | 1,104 ms | 6.9x slower |
-| bert-tiny, 1 document | 1.17 ms | 0.95 ms | **1.22x faster** |
+| bert-base-uncased, 1 document | 37.6 ms | 48.1 ms | 1.28x slower |
+| bert-base-uncased, 8 documents | 175 ms | 386 ms | 2.2x slower |
+| bert-tiny, 1 document | 1.15 ms | 0.83 ms | **1.39x faster** |
 
-The previous version of this page recorded **300–600 ms** for one bert-base document and 1,736 ms
-for eight. What changed is described below; what did not change is the precision. The managed
+Earlier versions of this page recorded **300–600 ms** for one bert-base document, then 111 ms.
+What changed is described below; what did not change is the precision. The managed
 encoder agrees with torch **in float64 to about 1e-13** on bert-base's hidden states, which is the
 number that says the speed was not bought with correctness.
 
@@ -99,10 +99,14 @@ Four changes, each measured before it was kept:
    copies each head's keys and values into contiguous blocks, makes every score one vectorised dot
    product, and splits the work by head and block of queries. The inner loop is **about 20x
    faster**, with results equal to 1e-15.
-2. **One linear kernel for everything.** It computes four input rows against two weight rows per
-   pass, over tiles of outputs and rows run in parallel. For a 12-token input it is **4.4x faster**
-   than the foundation's packed `MatMul`, and 1.35x faster at 197 rows. At 577 rows it is still
-   1.3x slower, which is the next item on the list.
+2. **One linear kernel for everything: a register-blocked GEMM.** The weights sit in panels of
+   twelve outputs, and the inner kernel holds a 4-row by 12-output block of the result in twelve AVX
+   registers: one broadcast input, three weight vectors, twelve fused multiply-adds per step. The
+   dot-product kernel it replaced needed a load for every multiply-add. The float32 weights are
+   widened into a per-thread buffer 256 inputs at a time and reused by every group of four rows.
+   Widening inside the inner loop instead was 40% slower, because the conversion competes with the
+   multiply-adds for the same port. Single-threaded it runs at 17.6 GMAC/s against the old kernel's
+   5.6; across the cores, 35-54 GMAC/s at 80 rows and about 40 at 577, against about 12 before.
 3. **Weights in float32, activations in double.** Every checkpoint stores F32 or narrower, so
    float32 holds the weights exactly while halving the bytes streamed per forward pass.
    Activations and every sum stay `double`, which is why the 1e-13 agreement survived.
@@ -117,11 +121,12 @@ rounded erf. The ViT patch embedding was reading pixels through an indexer that 
 
 ### What is left
 
-The single-document gap is the arithmetic rate. The kernel runs at about 13 GMAC/s on this machine,
-roughly what the foundation's packed `MatMul` manages; torch's float32 MKL kernels do about four
-times that. Eight documents at once is almost pure arithmetic, so that row moved least (1.6x). The
-two known steps are a packed GEMM with a wider register tile and, as an opt-in, float32
-activations. Both are in [PLAN.md](../PLAN.md).
+The GEMM took one bert-base document from 111 ms to 48 ms and eight from 1,104 ms to 386 ms, with
+the same results: fill-mask still agrees with torch to the fourth decimal of a percentage, and ViT's
+top five to 6e-16. What remains of the gap is precision. torch runs float32 and does twice the
+multiply-adds per instruction; HF.Net keeps every activation and sum in `double`, which is what the
+1e-13 agreement rests on. An opt-in float32 mode is in [PLAN.md](../PLAN.md). On ViT, the
+feed-forward's exact GELU and attention over 197 positions are now a larger share of the time.
 
 ### Vision
 
@@ -130,10 +135,11 @@ rather than a photograph, so no resampler sits between them.
 
 | Model | Python (torch) | HF.Net (managed) | |
 |---|---:|---:|---|
-| vit-base-patch16-224, 1 image | 226 ms | 1,964 ms | 8.7x slower |
+| vit-base-patch16-224, 1 image | 214 ms | 948 ms | 4.4x slower |
 
-The previous version of this page recorded **12 seconds**. At 384 px, which needs the position
-embeddings interpolated, it is 6.8 s against 45.8 s before.
+Earlier versions of this page recorded **12 seconds**, then 1,964 ms. At 384 px, which needs the
+position embeddings interpolated, it was 6.8 s with the previous linear kernel, against 45.8 s
+before that.
 
 ### The production path — faster than torch
 
@@ -142,9 +148,9 @@ through GraviOptimum on ONNX Runtime's CPU provider:
 
 | Path | One document, 12 tokens | against torch |
 |---|---:|---|
-| torch (Python) | 36.4 ms | — |
-| HF.Net managed | 111 ms | 3.1x slower |
-| **HF.Net through ONNX Runtime** | **23.8 ms** | **1.53x faster** |
+| torch (Python) | 37.6 ms | — |
+| HF.Net managed | 48.1 ms | 1.28x slower |
+| **HF.Net through ONNX Runtime** | **31.5 ms** | **1.19x faster** |
 
 The ONNX hidden states differ from the managed ones by at most **4.7e-6**, the size of float32
 arithmetic. The previous version of this page measured this path on a tiny test model because no
@@ -223,7 +229,7 @@ model you actually have.
 | Running an encoder in production | **ONNX through GraviOptimum** — faster than torch, from .NET |
 | Running an encoder to understand it, or checking an export | **HF.Net managed** — 3x torch on a sentence, and exact to 1e-13 in float64 |
 | Training LoRA on hundreds of examples | **HF.Net** — `PeftModel.Train`, exact, and the adapter loads in Python PEFT; see [GraviPEFT](GraviPEFT.md) |
-| Training at scale | **Python.** HF.Net trains on the CPU at about 11-12 GMAC/s; train there and serve the adapter here |
+| Training at scale | **Python.** HF.Net trains on the CPU, a few seconds per epoch of a few dozen sentences; train there and serve the adapter here |
 
 ## Reproducing this
 

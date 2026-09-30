@@ -128,12 +128,12 @@ method and caveats in **[docs/benchmarks.md](docs/benchmarks.md)**.
 
 | | Python | HF.Net | |
 |---|---:|---:|---|
-| Tokenize 1,000 documents | 15.5 ms | **8.7 ms** | **1.78x faster** |
-| Open a 420 MB checkpoint, list 206 tensors | 0.49 ms | 0.79 ms | level |
-| Read one 30,522 × 768 tensor | 0.49 ms | 149 ms | 306x slower |
-| bert-base forward pass, 1 document | 36.4 ms | 111 ms | 3.1x slower |
-| ViT-base forward pass, 1 image | 226 ms | 1.96 s | 8.7x slower |
-| **bert-base through ONNX Runtime, from .NET** | 36.4 ms | **23.8 ms** | **1.53x faster** |
+| Tokenize 1,000 documents | 14.0 ms | **6.2 ms** | **2.25x faster** |
+| Open a 420 MB checkpoint, list 206 tensors | 0.48 ms | 0.48 ms | level |
+| Read one 30,522 × 768 tensor | 0.48 ms | 185 ms | 384x slower |
+| bert-base forward pass, 1 document | 37.6 ms | 48.1 ms | 1.28x slower |
+| ViT-base forward pass, 1 image | 214 ms | 948 ms | 4.4x slower |
+| **bert-base through ONNX Runtime, from .NET** | 37.6 ms | **31.5 ms** | **1.19x faster** |
 
 **Tokenization is faster than the Rust `tokenizers` crate, and the ids are identical.** Reading a
 tensor is slower because every value is widened to `double` — paid once at load time. Managed

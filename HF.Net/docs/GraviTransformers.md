@@ -339,9 +339,10 @@ checkpoints, which are exactly the ones that have it.
 
 Inference runs on HF.Net's own kernels, shared by the text and vision encoders. Weights are held as
 float32, which is exact because every checkpoint stores F32 or narrower. Activations and sums are
-`double`. On one 12-token sentence `bert-base-uncased` takes about **111 ms** against torch's 36 ms,
-and its hidden states agree with torch in float64 to about **1e-13**. For throughput, export to ONNX
-and use [GraviOptimum](GraviOptimum.md): the same model there takes 24 ms, faster than torch.
+`double`. The linear layers run as a register-blocked GEMM over float32 weight panels. On one
+12-token sentence `bert-base-uncased` takes about **48 ms** against torch's 38 ms, and its hidden
+states agree with torch in float64 to about **1e-13**. For throughput, export to ONNX and use
+[GraviOptimum](GraviOptimum.md): the same model there takes about 31 ms, faster than torch.
 
 `Encoder` is the model of record, but inference runs on a compiled copy of its parameters. If you
 change them - by hand, or through anything other than `PeftModel.Merge`, which does it for you -

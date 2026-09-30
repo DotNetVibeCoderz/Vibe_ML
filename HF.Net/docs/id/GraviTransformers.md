@@ -341,10 +341,11 @@ sebagian besar checkpoint dasar, yang justru merekalah yang memilikinya.
 
 Inferensi berjalan di atas kernel milik HF.Net sendiri, yang dipakai bersama oleh encoder teks dan
 vision. Bobot disimpan sebagai float32 — eksak, karena setiap checkpoint menyimpan F32 atau lebih
-sempit — sedangkan aktivasi dan penjumlahan dalam `double`. Untuk satu kalimat 12 token,
-`bert-base-uncased` memakan sekitar **111 ms** melawan 36 ms milik torch, dan hidden state-nya
-sepakat dengan torch dalam float64 hingga sekitar **1e-13**. Untuk throughput, ekspor ke ONNX dan
-pakai [GraviOptimum](GraviOptimum.md): model yang sama di sana memakan 24 ms, lebih cepat daripada
+sempit — sedangkan aktivasi dan penjumlahan dalam `double`. Lapisan linear berjalan sebagai GEMM
+dengan blok register di atas panel bobot float32. Untuk satu kalimat 12 token, `bert-base-uncased`
+memakan sekitar **48 ms** melawan 38 ms milik torch, dan hidden state-nya sepakat dengan torch dalam
+float64 hingga sekitar **1e-13**. Untuk throughput, ekspor ke ONNX dan pakai
+[GraviOptimum](GraviOptimum.md): model yang sama di sana memakan sekitar 31 ms, lebih cepat daripada
 torch.
 
 `Encoder` adalah model acuan, tetapi inferensi berjalan pada salinan terkompilasi dari parameternya.

@@ -7,9 +7,9 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.5.0 — current
+## v0.5.0 — current; main adds a register-blocked GEMM (unreleased)
 
-**26 projects, 304 tests passing, whole solution builds clean with no warnings.**
+**26 projects, 308 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -23,7 +23,7 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | GraviHub | **Complete** | 27 | Hub client, cache, safetensors, PyTorch pickle reader |
 | GraviTokenizers | **Complete** | 29 | WordPiece, BPE, Unigram, `tokenizer.json`, offsets |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
-| GraviTransformers | **Core complete** | 99 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
+| GraviTransformers | **Core complete** | 103 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
 | GraviPEFT | **Core complete** | 61 | LoRA training for sequence classification, named entities and question answering; apply, merge, save, load; trained heads predict the same in Python |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Core complete** | 22 | ONNX Runtime, provider choice, quantisation with measured error |
@@ -79,9 +79,9 @@ These are the checks that establish the stack is actually correct, not merely ru
   answers as `AutoModelForQuestionAnswering`, scores to 3e-10. Both are right on names and places
   they were never shown.
 - **Measured against the Python reference** on the same machine in the same session. Tokenization is
-  **1.78x faster than the Rust `tokenizers` crate** with byte-identical ids. bert-base takes 111 ms
-  managed against torch's 36 ms, and **23.8 ms through ONNX Runtime from .NET, 1.53x faster than
-  torch**. ViT-base takes 1.96 s against 226 ms. See [docs/benchmarks.md](docs/benchmarks.md).
+  **2.25x faster than the Rust `tokenizers` crate** with byte-identical ids. bert-base takes 48 ms
+  managed against torch's 38 ms, and **31 ms through ONNX Runtime from .NET, faster than torch**.
+  ViT-base takes 948 ms against 214 ms. See [docs/benchmarks.md](docs/benchmarks.md).
 
 ### Found and fixed during development
 
@@ -198,13 +198,19 @@ Carried into [PLAN.md](PLAN.md):
   are thin)
 - Notebooks under `notebooks/` beyond the two shipped as HFAppGen templates
 - CLIP (its text tower is causal, which this encoder is not)
-- A faster GEMM. The linear kernel runs at about 13 GMAC/s, roughly the foundation's packed
-  `MatMul`, and loses to it by 1.3x at 577 rows. torch's MKL does about four times that. This is
-  the remaining managed-versus-torch gap.
+- An opt-in float32 activation mode, which is most of what still separates managed inference
+  from torch
 
 ---
 
 ## Log
+
+**2026-09-30** — A register-blocked GEMM. Weights move into float32 panels of twelve outputs, and a
+4x12 kernel holds its block of the result in AVX registers, widening each panel slice once per call.
+The linear layers went from about 12 GMAC/s to 35-54 at 80 rows. bert-base went from 111 ms to 48 ms
+(torch 38 ms), ViT-base from 1,964 ms to 948 ms, and a LoRA training step 2.2x faster, all with
+unchanged results. The first attempt to use the dot-product kernel better found that `Span`
+slicing in its inner loop cost 1.7x on its own. 308 tests.
 
 **2026-09-28** — v0.5.0; v0.3 complete. Training steps pack each micro-batch end to end: the linear layers
 see all its rows at once, attention stays inside each example, and nothing is padded. That was
