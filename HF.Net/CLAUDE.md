@@ -4,9 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.5.0 is published and the eight libraries are on nuget.org as `Gravicode.HFNet.*`. Main is ahead
-of it with a register-blocked GEMM (unreleased): **26 projects, 308 tests passing**, the whole
-solution builds clean. `requirements.md` remains the specification of record;
+v0.6.0 is published: **26 projects, 308 tests passing**, the whole solution builds clean, and the
+eight libraries are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`

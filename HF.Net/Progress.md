@@ -7,7 +7,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.5.0 — current; main adds a register-blocked GEMM (unreleased)
+## v0.6.0 — current
 
 **26 projects, 308 tests passing, whole solution builds clean with no warnings.**
 
@@ -205,7 +205,7 @@ Carried into [PLAN.md](PLAN.md):
 
 ## Log
 
-**2026-09-30** — A register-blocked GEMM. Weights move into float32 panels of twelve outputs, and a
+**2026-09-30** — v0.6.0, a register-blocked GEMM. Weights move into float32 panels of twelve outputs, and a
 4x12 kernel holds its block of the result in AVX registers, widening each panel slice once per call.
 The linear layers went from about 12 GMAC/s to 35-54 at 80 rows. bert-base went from 111 ms to 48 ms
 (torch 38 ms), ViT-base from 1,964 ms to 948 ms, and a LoRA training step 2.2x faster, all with
