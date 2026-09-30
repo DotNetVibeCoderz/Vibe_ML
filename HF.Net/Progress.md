@@ -7,7 +7,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.7.0 — current
+## v0.8.0 — current
 
 **27 projects, 440 tests passing, whole solution builds clean with no warnings.**
 

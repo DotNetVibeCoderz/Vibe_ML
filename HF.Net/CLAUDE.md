@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.7.0 is published: **27 projects, 440 tests passing**, the whole solution builds clean, and the
+v0.8.0 is published: **27 projects, 440 tests passing**, the whole solution builds clean, and the
 eight libraries are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
