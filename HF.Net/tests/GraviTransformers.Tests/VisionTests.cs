@@ -592,8 +592,8 @@ public sealed class VisionTests
     [Fact]
     public void An_unknown_activation_is_refused_by_name()
     {
-        var error = Assert.Throws<NotSupportedException>(() => Activation.For("swish"));
-        Assert.Contains("'swish'", error.Message, StringComparison.Ordinal);
+        var error = Assert.Throws<NotSupportedException>(() => Activation.For("mish"));
+        Assert.Contains("'mish'", error.Message, StringComparison.Ordinal);
         Assert.Contains("ONNX", error.Message, StringComparison.Ordinal);
     }
 

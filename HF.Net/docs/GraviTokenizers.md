@@ -54,22 +54,35 @@ HfTokenizer.FromDirectory("tokenizer/");                 // any of the layouts, 
 tokenizer.WithPadToken("!");                             // the model's own pad token (SD 2.x uses "!")
 ```
 
-Checked against Python's `tokenizers` on the BERT, GPT-2, CLIP and XLM-R tokenizers, over texts with
-accents, CJK, emoji, code and runs of whitespace and punctuation: 11 of 56 cases differed, and now
-none do. The CLIP, `Split` and `Precompiled` cases are pinned in the test suite. Six differences were
-fixed, each of which produced plausible ids:
+Twelve tokenizers - bert-base-uncased, gpt2, xlm-roberta-base, roberta-base, CLIP, T5, TinyLlama,
+Llama 2, Llama 3, Qwen2.5, SmolLM2 and Pythia - are compared with Python's `tokenizers` over sixteen
+texts: accents precomposed and decomposed, CJK, emoji, rare scripts that need byte fallback, code with
+indentation, runs of spaces and newlines, numbers, and special tokens in the middle of text. All 192
+encodings give the same ids and all 192 decodings the same text. Getting there fixed, among others:
 
 - **`Split` with `invert` and `behavior`.** CLIP's pre-tokenizer keeps the regex *matches*, not the
   gaps between them, and `MergedWithPrevious`/`MergedWithNext` fold the pieces the way the Rust crate
   does.
-- **Normalizer before the byte-level mapping**, not after: lower-casing `Ġ`-mapped text changes nothing.
-- **A `model` with no `type`** is inferred - `merges` means BPE, an array `vocab` Unigram - instead of
-  assumed to be WordPiece, which broke GPT-2 and crashed on XLM-R.
-- **CJK ideographs** become one token each in BERT's pre-tokenizer.
-- **SentencePiece's `Precompiled` normalizer** runs its double-array trie over the `precompiled_charsmap`,
-  grapheme by grapheme as the Rust crate does. It had been skipped, and XLM-R's full-width and
-  compatibility characters tokenized differently.
-- **Unigram** fuses consecutive unknown pieces into one `<unk>`.
+- **`Digits` removed the digits.** It isolates them now - one piece per digit with `individual_digits`
+  - where "3.14" used to become ".".
+- **`ByteLevel` with `use_regex: false`** (Llama 3, Qwen2) no longer splits again with GPT-2's
+  expression after the tokenizer's own `Split`.
+- **SentencePiece-style BPE**, as Llama 2, Mistral and TinyLlama use: `byte_fallback` turns a
+  character missing from the vocabulary into its UTF-8 bytes as `<0xXX>` pieces, `fuse_unk` joins
+  unknowns, `ignore_merges` returns a word already in the vocabulary whole, and the initial symbols are
+  Unicode scalar values rather than grapheme clusters, as in the Rust crate.
+- **A missing `pre_tokenizer`** means the whole text is one piece, as the reference does. Splitting on
+  whitespace instead lost Llama 2's newlines and runs of spaces.
+- **Decoders run as a chain** - `Replace`, `ByteFallback`, `Fuse`, `Strip`, `Metaspace` (which strips
+  only the first token's space), `ByteLevel` (whose unmappable added tokens keep their own bytes), and
+  `WordPiece` with its clean-up of the space before punctuation.
+- **Added tokens** are matched as the reference matches them: those marked `normalized` in the
+  normalized text by their normalized form, so Llama 2's " <s>" is one token; `lstrip`/`rstrip` absorb
+  the whitespace beside them; and decoding prints them, and skips only the special ones the reference
+  skips.
+- **Unicode normalization** - see below.
+- **CJK ideographs** become one token each in BERT's pre-tokenizer, **SentencePiece's `Precompiled`**
+  normalizer runs its double-array trie, and **Unigram** fuses consecutive unknown pieces.
 
 Loading a CLIP vocabulary as GPT-2's is the mistake that matters most in practice: the ids look
 reasonable and every Stable Diffusion prompt is encoded wrongly. `FromPretrained` recognises CLIP by
@@ -216,12 +229,13 @@ exploring and for samples; anything with a model should use that model's own.
 ## A note on normalization
 
 These libraries build with `InvariantGlobalization`, under which `String.Normalize` silently returns
-its input unchanged. Accent stripping therefore goes through an explicit folding table - a
-decomposition-based implementation would look correct, compile, and quietly do nothing. `NFC`,
-`NFD`, `NFKC` and `NFKD` entries in a `tokenizer.json` are accepted and ignored for the same reason,
-which is the honest behaviour: pretending to normalize would be worse, and refusing to load would
-reject most real tokenizers. SentencePiece's `Precompiled` normalizer is different: it carries its own
-table, and that table is applied exactly.
+its input unchanged. So HF.Net carries its own Unicode normalization (`UnicodeNormalization`, all four
+forms) from tables generated out of Python's `unicodedata` - Unicode 15.0, 5,857 decompositions,
+941 compositions - and `tokenizer.json`'s `NFC`, `NFD`, `NFKC` and `NFKD` apply it. Before, they were
+ignored, and Qwen2, Pythia and CLIP, which compose with NFC, saw "e" followed by a combining accent as
+two characters where the reference sees "é". The tables are pinned against `unicodedata` on 148 strings
+in each form. BERT's accent stripping still uses its folding table, now also dropping a lone combining
+mark; SentencePiece's `Precompiled` normalizer carries its own table.
 
 ## See also
 

@@ -30,6 +30,7 @@ public sealed partial class HfTokenizer
     private readonly PostProcessor _postProcessor;
     private readonly Dictionary<string, AddedToken> _addedTokens;
     private readonly HashSet<int> _specialIds;
+    private readonly Dictionary<int, string> _addedById;
 
     /// <summary>Assembles a tokenizer from its stages.</summary>
     /// <param name="model">The subword model.</param>
@@ -53,9 +54,25 @@ public sealed partial class HfTokenizer
         _postProcessor = postProcessor ?? PostProcessor.None;
 
         _addedTokens = (addedTokens ?? []).ToDictionary(t => t.Content, StringComparer.Ordinal);
-        _specialIds = [.. (addedTokens ?? []).Where(t => t.Special).Select(t => t.Id)];
+        // The reference keeps a "normalized" added token under its normalized form - Llama 2's <s> is
+        // "▁<s>" - and that form is both what decoding prints and what the special-token check looks
+        // up. So "<s>" is not found, and Llama 2 keeps it in skip-special decoding where TinyLlama
+        // (not normalized) and RoBERTa (no normalizer, so the form is unchanged) drop it.
+        _addedById = new Dictionary<int, string>();
+        _specialIds = [];
+        foreach (var token in addedTokens ?? [])
+        {
+            var stored = token.Normalized && normalizer is not null ? normalizer.Normalize(token.Content) : token.Content;
+            _addedById.TryAdd(token.Id, stored);
+            if (token.Special && stored == token.Content) _specialIds.Add(token.Id);
+        }
 
-        foreach (var id in _postProcessor.SpecialTokens.Values) _specialIds.Add(id);
+        // Template tokens count as special unless the tokenizer's own list says otherwise - a bare
+        // vocab.txt has no list at all.
+        foreach (var id in _postProcessor.SpecialTokens.Values)
+        {
+            if (!_addedById.ContainsKey(id)) _specialIds.Add(id);
+        }
 
         PadId = ResolveId("[PAD]", "<pad>");
         UnknownId = ResolveId("[UNK]", "<unk>");
@@ -543,7 +560,9 @@ public sealed partial class HfTokenizer
         {
             if (skipSpecialTokens && _specialIds.Contains(id)) continue;
 
-            var token = _model.TokenOf(id);
+            // Added tokens first, as the reference looks them up: Pythia's runs of spaces are added
+            // tokens outside the model's vocabulary, and looking only there dropped them.
+            var token = _addedById.TryGetValue(id, out var added) ? added : _model.TokenOf(id);
             if (token.Length > 0) tokens.Add(token);
         }
 
@@ -564,7 +583,20 @@ public sealed partial class HfTokenizer
     {
         var result = new List<(int, string, int, int, bool)>();
 
-        foreach (var segment in SplitOnAddedTokens(text))
+        // The reference matches added tokens in two passes: those marked "normalized: false" in the
+        // raw text, then - after normalizing what lies between them - those marked "normalized: true"
+        // by their own normalized form. Llama 2's <s> is the second kind: its normalizer turns " <s>"
+        // into "▁<s>", so the space before it belongs to the token and must not become a piece.
+        // BERT's normalizer runs per word, after the split, as it always has.
+        var normalizeFirst = _normalizer is not null and not BertNormalizer;
+        var rawTokens = normalizeFirst
+            ? _addedTokens.Values.Where(t => !t.Normalized).Select(t => (t.Content, t)).ToList()
+            : [.. _addedTokens.Values.Select(t => (t.Content, t))];
+        var normalizedTokens = normalizeFirst
+            ? _addedTokens.Values.Where(t => t.Normalized).Select(t => (_normalizer!.Normalize(t.Content), t)).Where(p => p.Item1.Length > 0).ToList()
+            : [];
+
+        foreach (var segment in SplitOn(text, rawTokens))
         {
             if (segment.Added is { } added)
             {
@@ -576,45 +608,57 @@ public sealed partial class HfTokenizer
             // afterwards is equivalent for BERT's normalizer, whose pieces are plain words, but not
             // after a byte-level split: lowercasing the byte alphabet turns the byte 0xC3, written
             // 'Ã', into 'ã' - another byte - and every accented letter gets the wrong id.
-            var normalizeFirst = _normalizer is not null and not BertNormalizer;
-            var (source, map) = normalizeFirst ? NormalizeAligned(segment.Text) : (segment.Text, null);
+            var (normalizedText, map) = normalizeFirst ? NormalizeAligned(segment.Text) : (segment.Text, null);
 
-            foreach (var preToken in _preTokenizer.Split(source))
+            foreach (var part in SplitOn(normalizedText, normalizedTokens))
             {
-                var word = normalizeFirst || _normalizer is null ? preToken.Word : _normalizer.Normalize(preToken.Word);
-                if (word.Length == 0) continue;
-
-                // Positions back in the caller's text: through the alignment when the text was
-                // normalized first, directly otherwise.
-                var originalStart = map is null ? preToken.Start : map[preToken.Start];
-                var originalEnd = map is null ? preToken.End : map[preToken.End];
-                var originalWord = segment.Text[originalStart..originalEnd];
-
-                var pieces = _model.Tokenize(word);
-
-                // Subword pieces get their own span where the arithmetic is sound: normalization
-                // must have preserved length, and the pieces' surface forms must add back up to the
-                // word. Lowercasing satisfies both; accent folding and the byte alphabet do not, and
-                // there each piece honestly reports the whole word rather than a span that would be
-                // off by a few characters in a way no caller could detect.
-                var surfaces = new string[pieces.Count];
-                var total = 0;
-                for (var i = 0; i < pieces.Count; i++)
+                if (part.Added is { } inner)
                 {
-                    surfaces[i] = Surface(pieces[i]);
-                    total += surfaces[i].Length;
+                    var from = map is null ? part.Start : map[part.Start];
+                    var to = map is null ? part.End : map[part.End];
+                    result.Add((inner.Id, inner.Content, segment.Start + from, segment.Start + to, inner.Special));
+                    continue;
                 }
 
-                var aligned = word.Length == originalWord.Length && total == originalWord.Length;
-                var cursor = segment.Start + originalStart;
-
-                for (var i = 0; i < pieces.Count; i++)
+                foreach (var preToken in _preTokenizer.Split(part.Text))
                 {
-                    var start = aligned ? cursor : segment.Start + originalStart;
-                    var end = aligned ? cursor + surfaces[i].Length : segment.Start + originalEnd;
-                    cursor = end;
+                    var word = normalizeFirst || _normalizer is null ? preToken.Word : _normalizer.Normalize(preToken.Word);
+                    if (word.Length == 0) continue;
 
-                    result.Add((_model.IdOf(pieces[i]), pieces[i], start, end, false));
+                    // Positions back in the caller's text: through the alignment when the text was
+                    // normalized first, directly otherwise.
+                    var startInSegment = part.Start + preToken.Start;
+                    var endInSegment = part.Start + preToken.End;
+                    var originalStart = map is null ? startInSegment : map[startInSegment];
+                    var originalEnd = map is null ? endInSegment : map[endInSegment];
+                    var originalWord = segment.Text[originalStart..originalEnd];
+
+                    var pieces = _model.Tokenize(word);
+
+                    // Subword pieces get their own span where the arithmetic is sound: normalization
+                    // must have preserved length, and the pieces' surface forms must add back up to the
+                    // word. Lowercasing satisfies both; accent folding and the byte alphabet do not, and
+                    // there each piece honestly reports the whole word rather than a span that would be
+                    // off by a few characters in a way no caller could detect.
+                    var surfaces = new string[pieces.Count];
+                    var total = 0;
+                    for (var i = 0; i < pieces.Count; i++)
+                    {
+                        surfaces[i] = Surface(pieces[i]);
+                        total += surfaces[i].Length;
+                    }
+
+                    var aligned = word.Length == originalWord.Length && total == originalWord.Length;
+                    var cursor = segment.Start + originalStart;
+
+                    for (var i = 0; i < pieces.Count; i++)
+                    {
+                        var start = aligned ? cursor : segment.Start + originalStart;
+                        var end = aligned ? cursor + surfaces[i].Length : segment.Start + originalEnd;
+                        cursor = end;
+
+                        result.Add((_model.IdOf(pieces[i]), pieces[i], start, end, false));
+                    }
                 }
             }
         }
@@ -679,9 +723,10 @@ public sealed partial class HfTokenizer
     /// pre-tokenizer at it splits it into punctuation and letters and it is never recovered, which
     /// is how a control token silently turns into five ordinary ones.
     /// </remarks>
-    private List<(string Text, int Start, int End, AddedToken? Added)> SplitOnAddedTokens(string text)
+    private static List<(string Text, int Start, int End, AddedToken? Added)> SplitOn(
+        string text, IReadOnlyList<(string Pattern, AddedToken Token)> tokens)
     {
-        if (_addedTokens.Count == 0) return [(text, 0, text.Length, null)];
+        if (tokens.Count == 0) return text.Length == 0 ? [] : [(text, 0, text.Length, null)];
 
         var segments = new List<(string, int, int, AddedToken?)>();
         var cursor = 0;
@@ -689,18 +734,19 @@ public sealed partial class HfTokenizer
         while (cursor < text.Length)
         {
             var bestIndex = -1;
+            var bestPattern = "";
             AddedToken? bestToken = null;
 
-            foreach (var added in _addedTokens.Values)
+            foreach (var (pattern, added) in tokens)
             {
-                var at = text.IndexOf(added.Content, cursor, StringComparison.Ordinal);
+                var at = text.IndexOf(pattern, cursor, StringComparison.Ordinal);
                 if (at < 0) continue;
 
                 // Earliest wins; on a tie the longer token wins, so <s> cannot pre-empt <sep>.
-                if (bestIndex < 0 || at < bestIndex
-                    || (at == bestIndex && added.Content.Length > bestToken!.Value.Content.Length))
+                if (bestIndex < 0 || at < bestIndex || (at == bestIndex && pattern.Length > bestPattern.Length))
                 {
                     bestIndex = at;
+                    bestPattern = pattern;
                     bestToken = added;
                 }
             }
@@ -711,11 +757,16 @@ public sealed partial class HfTokenizer
                 break;
             }
 
-            if (bestIndex > cursor) segments.Add((text[cursor..bestIndex], cursor, bestIndex, null));
+            // lstrip and rstrip absorb the whitespace beside the token into it.
+            var matchStart = bestIndex;
+            var matchEnd = bestIndex + bestPattern.Length;
+            if (bestToken!.Value.LStrip) while (matchStart > cursor && char.IsWhiteSpace(text[matchStart - 1])) matchStart--;
+            if (bestToken.Value.RStrip) while (matchEnd < text.Length && char.IsWhiteSpace(text[matchEnd])) matchEnd++;
 
-            var end = bestIndex + bestToken!.Value.Content.Length;
-            segments.Add((bestToken.Value.Content, bestIndex, end, bestToken));
-            cursor = end;
+            if (matchStart > cursor) segments.Add((text[cursor..matchStart], cursor, matchStart, null));
+
+            segments.Add((bestToken.Value.Content, matchStart, matchEnd, bestToken));
+            cursor = matchEnd;
         }
 
         return segments;

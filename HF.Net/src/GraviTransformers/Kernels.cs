@@ -72,17 +72,17 @@ internal static class Simd
     /// so the result is the same to the last bit; only the loads are shared.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal static void Scores(ReadOnlySpan<double> query, double[] keys, int count, int size, double scale, double[] scores)
+    internal static void Scores(ReadOnlySpan<double> query, double[] keys, int count, int size, double scale, double[] scores, int firstRow = 0)
     {
         var width = Vector<double>.Count;
         var j = 0;
 
         for (; j + 4 <= count; j += 4)
         {
-            var k0 = keys.AsSpan(j * size, size);
-            var k1 = keys.AsSpan((j + 1) * size, size);
-            var k2 = keys.AsSpan((j + 2) * size, size);
-            var k3 = keys.AsSpan((j + 3) * size, size);
+            var k0 = keys.AsSpan((firstRow + j) * size, size);
+            var k1 = keys.AsSpan((firstRow + j + 1) * size, size);
+            var k2 = keys.AsSpan((firstRow + j + 2) * size, size);
+            var k3 = keys.AsSpan((firstRow + j + 3) * size, size);
             Vector<double> s0 = default, s1 = default, s2 = default, s3 = default;
 
             var i = 0;
@@ -110,7 +110,7 @@ internal static class Simd
             scores[j + 3] = d3 * scale;
         }
 
-        for (; j < count; j++) scores[j] = Dot(query, keys.AsSpan(j * size, size)) * scale;
+        for (; j < count; j++) scores[j] = Dot(query, keys.AsSpan((firstRow + j) * size, size)) * scale;
     }
 
     /// <summary>
@@ -122,17 +122,17 @@ internal static class Simd
     /// are the same to the last bit.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal static void Combine(double[] weights, double[] values, int count, int size, Span<double> target)
+    internal static void Combine(double[] weights, double[] values, int count, int size, Span<double> target, int firstRow = 0)
     {
         var width = Vector<double>.Count;
         var j = 0;
 
         for (; j + 4 <= count; j += 4)
         {
-            var v0 = values.AsSpan(j * size, size);
-            var v1 = values.AsSpan((j + 1) * size, size);
-            var v2 = values.AsSpan((j + 2) * size, size);
-            var v3 = values.AsSpan((j + 3) * size, size);
+            var v0 = values.AsSpan((firstRow + j) * size, size);
+            var v1 = values.AsSpan((firstRow + j + 1) * size, size);
+            var v2 = values.AsSpan((firstRow + j + 2) * size, size);
+            var v3 = values.AsSpan((firstRow + j + 3) * size, size);
             var w0 = new Vector<double>(weights[j]);
             var w1 = new Vector<double>(weights[j + 1]);
             var w2 = new Vector<double>(weights[j + 2]);
@@ -160,7 +160,7 @@ internal static class Simd
             }
         }
 
-        for (; j < count; j++) Axpy(weights[j], values.AsSpan(j * size, size), target);
+        for (; j < count; j++) Axpy(weights[j], values.AsSpan((firstRow + j) * size, size), target);
     }
 }
 
@@ -181,9 +181,10 @@ internal static class Activation
         "gelu_new" or "gelu_pytorch_tanh" or "gelu_fast" => Activations.Gelu,
         "relu" => Activations.Relu,
         "quick_gelu" => QuickGelu,
+        "silu" or "swish" => Silu,
         _ => throw new NotSupportedException(
             $"The config asks for the activation '{name}'. This encoder runs gelu, gelu_new, "
-            + "gelu_pytorch_tanh, gelu_fast, quick_gelu and relu; export the model to ONNX and use "
+            + "gelu_pytorch_tanh, gelu_fast, quick_gelu, silu and relu; export the model to ONNX and use "
             + "GraviOptimum for anything else."),
     };
 
@@ -199,10 +200,21 @@ internal static class Activation
         "gelu_new" or "gelu_pytorch_tanh" or "gelu_fast" => TanhGeluDerivative,
         "relu" => x => x > 0 ? 1.0 : 0.0,
         "quick_gelu" => QuickGeluDerivative,
+        "silu" or "swish" => SiluDerivative,
         _ => throw new NotSupportedException(
             $"The config asks for the activation '{name}', which has no derivative here; only gelu, "
             + "gelu_new, gelu_pytorch_tanh, gelu_fast, quick_gelu and relu can be trained through."),
     };
+
+    /// <summary>Llama's SiLU, <c>x * sigmoid(x)</c>, computed as torch does: <c>x / (1 + exp(-x))</c>.</summary>
+    internal static double Silu(double x) => x / (1 + Math.Exp(-x));
+
+    /// <summary><c>s + x s (1 - s)</c> with <c>s = sigmoid(x)</c>.</summary>
+    internal static double SiluDerivative(double x)
+    {
+        var s = 1 / (1 + Math.Exp(-x));
+        return s + x * s * (1 - s);
+    }
 
     /// <summary>CLIP's <c>x * sigmoid(1.702 x)</c>, a third form of GELU that is neither of the other two.</summary>
     internal static double QuickGelu(double x) => x / (1 + Math.Exp(-1.702 * x));

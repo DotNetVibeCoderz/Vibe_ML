@@ -9,7 +9,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ## v0.7.0 — current
 
-**27 projects, 414 tests passing, whole solution builds clean with no warnings.**
+**27 projects, 440 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -22,9 +22,9 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | Library | State | Tests | Notes |
 |---|---|---|---|
 | GraviHub | **Complete** | 27 | Hub client, cache, safetensors, PyTorch pickle reader |
-| GraviTokenizers | **Complete** | 50 | WordPiece, BPE, Unigram, CLIP, `tokenizer.json`, offsets; matches Python on BERT, GPT-2, CLIP and XLM-R |
+| GraviTokenizers | **Complete** | 57 | WordPiece, BPE, Unigram, CLIP, `tokenizer.json`, offsets; matches Python on BERT, GPT-2, CLIP and XLM-R |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
-| GraviTransformers | **Complete** | 128 | BERT-family encoders, GPT-2 with a KV cache, ViT, CLIP; streaming for models larger than memory; opt-in float32 |
+| GraviTransformers | **Complete** | 147 | BERT-family encoders, GPT-2/Llama/Mistral/Qwen/NeoX decoders with a KV cache, ViT, CLIP; streaming for models larger than memory; opt-in float32 |
 | GraviPEFT | **Complete** | 69 | LoRA and prefix tuning, trained here and loaded in Python and the reverse |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Complete** | 25 | ONNX Runtime, float16, weight overrides, model-file reading, quantisation with measured error |
@@ -235,13 +235,24 @@ there and HF.Net is a subdirectory.
 
 Carried into [PLAN.md](PLAN.md):
 
-- Rotary-position decoders (Llama, Mistral, GPT-NeoX), which need their own block
 - Compiling the notebooks' C# in CI; today CI checks their structure only
-- Route (a) of v0.3, biased attention in the foundation's autodiff tape - nothing here depends on it
+- Holding a tied embedding table once rather than twice
+- Checking TinyLlama and Llama 3.2 against transformers. SmolLM2-135M, Pythia-160m, Qwen2.5-0.5B and
+  Qwen3-0.6B give the same prompt ids and the same 30 greedy tokens; the run exhausted the machine's
+  memory before the last two and has to be redone one model per process
 
 ---
 
 ## Log
+
+**2026-10-01** — Rotary-position decoders and the foundation's biased attention. `CausalLanguageModel`
+runs Llama, Mistral, Qwen2, Qwen3 and GPT-NeoX beside GPT-2, each matching transformers in float64 to
+1e-10 with token-for-token generation, on a growable KV cache with grouped-query attention and sliding
+windows. The tokenizers behind them match Python on twelve families, encode and decode: SentencePiece
+BPE with byte fallback, the Rust crate's decoder chain, added tokens matched in normalized text,
+`Digits` that no longer deleted digits, and Unicode normalization from generated tables, since
+`String.Normalize` is a no-op under InvariantGlobalization. GravicodeScience's tape gained attention
+biases and the exact GELU, and its CI now runs from the repository root. 440 tests.
 
 **2026-10-01** — Everything the v0.2-v0.5 plans left open. Stable Diffusion rebuilt to reproduce
 diffusers' pipelines to the pixel, with image to image, inpainting, AUTOMATIC1111 emphasis and LoRA,

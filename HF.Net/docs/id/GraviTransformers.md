@@ -1,6 +1,6 @@
 # GraviTransformers
 
-**Model Hugging Face terlatih: encoder keluarga BERT, GPT-2, ViT, dan CLIP.**
+**Model Hugging Face terlatih: encoder keluarga BERT; decoder GPT-2, Llama, Mistral, Qwen, dan Pythia; ViT dan CLIP.**
 
 Padanan `transformers`. Pustaka andalan.
 
@@ -289,32 +289,60 @@ berkas gambar yang sama.
 ## Pembangkitan teks
 
 ```csharp
-using var gpt = CausalLanguageModel.Load("gpt2");
+using var model = CausalLanguageModel.Load("HuggingFaceTB/SmolLM2-135M");   // atau gpt2, Qwen/Qwen2.5-0.5B, ...
 
-gpt.Generate("The lighthouse keeper opened the door and", new GenerationSettings(MaxNewTokens: 40));
-// " saw a man in a white suit and a black suit with a black hat. ..."
+model.Generate("The lighthouse keeper opened the door and", new GenerationSettings(MaxNewTokens: 40));
 
-foreach (var piece in gpt.Stream(prompt, new GenerationSettings(
+foreach (var piece in model.Stream(prompt, new GenerationSettings(
              MaxNewTokens: 60, Sample: true, Temperature: 0.8, TopP: 0.95, RepetitionPenalty: 1.2, Seed: 1)))
     Console.Write(piece);
 ```
 
-GPT-2 beserta fine-tune dan distilasinya (`gpt2`, `distilgpt2`, `gpt2-medium` dan sejenisnya).
-Dekode greedy mengembalikan apa yang dikembalikan `generate(do_sample=False)` milik transformers,
-token demi token, dan logit-nya sepakat dengan torch dalam float64 sampai 1e-11. Penalti pengulangan
-memakai aturan transformers; sampling menerapkan temperature, top-k, dan top-p dalam urutan
-transformers, dari generator ber-seed (yang tidak mereproduksi tarikan acak torch).
+`CausalLanguageModel` menjalankan empat keluarga blok, dipilih dari `model_type` di konfigurasi:
 
-Pembangkitan menyimpan **cache key/value**: key dan value sebuah token tidak pernah berubah setelah
-dihitung, jadi setiap token baru hanya memakan satu baris melalui jaringan, bukan seluruh teks lagi.
-Sekitar 22 token per detik untuk `gpt2` di CPU laptop, 25 dalam presisi tunggal.
+| `model_type` | Checkpoint | Apa yang dilakukan bloknya |
+|---|---|---|
+| `gpt2` | gpt2, distilgpt2, gpt2-medium | posisi yang dipelajari, LayerNorm, GELU, bobot `Conv1D` |
+| `llama` | Llama 2/3, TinyLlama, SmolLM2 | posisi rotary, RMSNorm, feed-forward SiLU bergerbang, grouped-query attention |
+| `mistral` | Mistral | seperti Llama, dengan jendela attention geser |
+| `qwen2`, `qwen3` | Qwen2.5, Qwen3 | seperti Llama, dengan bias query/key/value (Qwen2) atau norm per head (Qwen3) |
+| `gpt_neox` | Pythia | posisi rotary pada sebagian tiap head, LayerNorm, residual paralel |
+
+Penskalaan rotary `linear` dan `llama3` (milik Llama 3.1/3.2) diterapkan; `yarn`, `dynamic`, dan
+`longrope`, yang mengubah posisi sesuai panjang teks, ditolak dengan menyebut namanya. Begitu pula
+decoder lain - Gemma, Phi-3, Falcon, mixture of experts - disertai arahan ke ONNX.
+
+**Cara pemeriksaannya.** Untuk setiap keluarga, checkpoint acak kecil dijalankan di transformers
+dalam float64, dengan tiga tempat yang tetap dihitung transformers dalam float32 - RMSNorm, sudut
+rotary, dan softmax eager - dialihkan ke float64, sehingga yang dibandingkan adalah aritmetika yang
+sama. Logit di setiap posisi sepakat sampai 1e-10, dan generasi greedy melalui cache sama dengan
+`generate` milik transformers token demi token: grouped-query attention, kedua penskalaan rotary,
+jendela geser yang lebih pendek dari masukan, bias Qwen2, norm per head Qwen3 dan lebar head yang
+bukan hidden / heads, rotasi sebagian Pythia dengan kedua susunan residual. `gpt2` sendiri memberi
+teks greedy transformers kata demi kata, dan SmolLM2-135M, Pythia-160m, Qwen2.5-0.5B, serta
+Qwen3-0.6B memberi 30 token greedy pertama transformers secara identik. Dibanding eksekusi float32
+biasa transformers, logit model sungguhan berbeda di digit keenam atau ketujuh, yang bisa mengubah
+pilihan greedy bila dua token nyaris seri.
+
+**Prompt** dienkode seperti `tokenizer(prompt)` milik transformers mengenkodenya, termasuk special
+token - token awal teks Llama di depan, tidak ada pada GPT-2. Model chat mengharapkan templat chat-nya;
+terapkan dulu ke teksnya. Generasi berhenti di token akhir mana pun milik model, termasuk yang
+tercantum di `generation_config.json` (`<|eot_id|>` Llama 3).
+
+Generasi menyimpan **cache key/value** yang tumbuh seiring teks, bukan disiapkan untuk seluruh konteks
+model: key dan value sebuah token tidak pernah berubah setelah dihitung, jadi setiap token baru hanya
+memakan satu baris melalui jaringan. Sekitar 22 token per detik untuk `gpt2` di CPU laptop, 25 dalam
+presisi tunggal. Dengan grouped-query attention, cache hanya menyimpan head key/value.
 
 Dua detail checkpoint yang perlu diketahui. GPT-2 menyimpan proyeksinya sebagai `Conv1D`, lapisan
 linear yang disimpan `[masukan, keluaran]` - kebalikan dari semua lapisan lain di Hub - dan dibalik
-saat dimuat. Lapisan keluarannya adalah tabel embedding token itu sendiri.
+saat dimuat. NeoX menggabungkan query, key, dan value per head, `[q_h | k_h | v_h]` untuk setiap head
+bergiliran, dan dikelompokkan ulang saat dimuat. Kesalahan pada salah satunya menghasilkan model yang
+berjalan dan mengeluarkan omong kosong yang terdengar lancar.
 
-Decoder dengan posisi rotary - Llama, Mistral, GPT-NeoX - punya blok berbeda dan ditolak dengan
-menyebut namanya, disertai arahan ke ONNX.
+**Memori.** Bobot disimpan sebagai float32. Checkpoint dengan embedding terikat saat ini menyimpan
+tabel tokennya dua kali - sekali untuk pencarian, sekali dikemas untuk lapisan keluaran - jadi model 1B
+dengan kosakata 128 ribu token butuh sekitar 1 GB lebih dari bobotnya.
 
 ## Presisi
 
@@ -472,7 +500,7 @@ Encoder tidak butuh KV cache - setiap posisi toh memperhatikan semua posisi lain
 
 ## Batasan
 
-- Decoder selain keluarga GPT-2, dan arsitektur encoder-decoder, ditolak.
+- Decoder selain GPT-2, Llama, Mistral, Qwen2/3, dan GPT-NeoX, serta arsitektur encoder-decoder, ditolak.
 - `ClipModel` membaca checkpoint CLIP lengkap; SigLIP dan ALIGN ditolak.
 - Aktivasi selain `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python`, `quick_gelu`
   dan `relu` ditolak saat memuat, dengan menyebut namanya.

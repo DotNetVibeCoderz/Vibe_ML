@@ -275,6 +275,14 @@ internal static class AccentFolding
 
         foreach (var character in text)
         {
+            // A combining mark on its own - an accent written as a separate character - is what
+            // stripping accents removes after the reference's NFD; there is nothing to fold it to.
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character)
+                == System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
             var lower = char.ToLowerInvariant(character);
             upperCaseShift = character != lower;
 
@@ -592,7 +600,11 @@ public sealed partial record SplitPreTokenizer(string Pattern, bool Invert = fal
 /// the original text, and reporting its indices would make every span wrong for non-ASCII input.
 /// </para>
 /// </remarks>
-public sealed partial record ByteLevelPreTokenizer(bool AddPrefixSpace = true) : IPreTokenizer
+/// <param name="UseRegex">
+/// Whether to split with GPT-2's expression before mapping to bytes. Llama 3 and Qwen2 turn it off:
+/// their own <c>Split</c> runs first, and splitting again with GPT-2's expression cut "(x" apart.
+/// </param>
+public sealed partial record ByteLevelPreTokenizer(bool AddPrefixSpace = true, bool UseRegex = true) : IPreTokenizer
 {
     /// <summary>The GPT-2 splitting expression, which keeps a leading space with its word.</summary>
     [GeneratedRegex(@"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+",
@@ -604,6 +616,11 @@ public sealed partial record ByteLevelPreTokenizer(bool AddPrefixSpace = true) :
     {
         var source = AddPrefixSpace && text.Length > 0 && text[0] != ' ' ? " " + text : text;
         var shift = source.Length - text.Length;
+
+        if (!UseRegex)
+        {
+            return source.Length == 0 ? [] : [new PreToken(ByteAlphabet.Encode(source), 0, text.Length)];
+        }
 
         var tokens = new List<PreToken>();
         foreach (Match match in Splitter().Matches(source))
@@ -662,6 +679,18 @@ public static class ByteAlphabet
         return builder.ToString();
     }
 
+    /// <summary>The bytes a token maps back to, or <c>null</c> when any character is outside the alphabet.</summary>
+    public static byte[]? TryDecodeBytes(string mapped)
+    {
+        var bytes = new byte[mapped.Length];
+        for (var i = 0; i < mapped.Length; i++)
+        {
+            if (!CharToByte.TryGetValue(mapped[i], out bytes[i])) return null;
+        }
+
+        return bytes;
+    }
+
     /// <summary>Recovers the original text from the byte alphabet.</summary>
     public static string Decode(string mapped)
     {
@@ -680,13 +709,22 @@ public static class ByteAlphabet
 /// </summary>
 /// <param name="Replacement">The marker character, <c>U+2581</c> by convention.</param>
 /// <param name="AddPrefixSpace">Whether to prepend a space before replacing.</param>
-public sealed record MetaspacePreTokenizer(char Replacement = '▁', bool AddPrefixSpace = true) : IPreTokenizer
+/// <param name="SplitWords">
+/// Whether each marker starts a new piece. With <c>split: false</c>, as some newer tokenizers set, the
+/// whole text is one piece with its spaces replaced.
+/// </param>
+public sealed record MetaspacePreTokenizer(char Replacement = '▁', bool AddPrefixSpace = true, bool SplitWords = true) : IPreTokenizer
 {
     /// <inheritdoc />
     public IReadOnlyList<PreToken> Split(string text)
     {
         var source = AddPrefixSpace && (text.Length == 0 || text[0] != ' ') ? " " + text : text;
         var shift = source.Length - text.Length;
+
+        if (!SplitWords)
+        {
+            return source.Length == 0 ? [] : [new PreToken(source.Replace(' ', Replacement), 0, text.Length)];
+        }
 
         var tokens = new List<PreToken>();
         var builder = new StringBuilder();

@@ -299,8 +299,8 @@ public sealed class KernelTests
     [Fact]
     public void An_activation_with_no_derivative_is_refused_by_name()
     {
-        var error = Assert.Throws<NotSupportedException>(() => Activation.DerivativeFor("swish"));
-        Assert.Contains("swish", error.Message);
+        var error = Assert.Throws<NotSupportedException>(() => Activation.DerivativeFor("mish"));
+        Assert.Contains("mish", error.Message);
     }
 
     // ------------------------------------------------------------------ gemm

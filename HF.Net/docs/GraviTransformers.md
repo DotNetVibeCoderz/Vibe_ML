@@ -1,6 +1,6 @@
 # GraviTransformers
 
-**Pretrained Hugging Face models: BERT-family encoders, GPT-2, ViT and CLIP.**
+**Pretrained Hugging Face models: BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT and CLIP.**
 
 Mirrors `transformers`. The flagship library.
 
@@ -284,32 +284,59 @@ image file.
 ## Text generation
 
 ```csharp
-using var gpt = CausalLanguageModel.Load("gpt2");
+using var model = CausalLanguageModel.Load("HuggingFaceTB/SmolLM2-135M");   // or gpt2, Qwen/Qwen2.5-0.5B, ...
 
-gpt.Generate("The lighthouse keeper opened the door and", new GenerationSettings(MaxNewTokens: 40));
-// " saw a man in a white suit and a black suit with a black hat. ..."
+model.Generate("The lighthouse keeper opened the door and", new GenerationSettings(MaxNewTokens: 40));
 
-foreach (var piece in gpt.Stream(prompt, new GenerationSettings(
+foreach (var piece in model.Stream(prompt, new GenerationSettings(
              MaxNewTokens: 60, Sample: true, Temperature: 0.8, TopP: 0.95, RepetitionPenalty: 1.2, Seed: 1)))
     Console.Write(piece);
 ```
 
-GPT-2 and its fine-tunes and distillations (`gpt2`, `distilgpt2`, `gpt2-medium` and the like).
-Greedy decoding returns what transformers' `generate(do_sample=False)` returns, token for token, and
-the logits agree with torch in float64 to 1e-11. The repetition penalty is transformers' rule;
-sampling applies temperature, top-k and top-p in transformers' order, from a seeded generator (which
-does not reproduce torch's draws).
+`CausalLanguageModel` runs four block families, chosen from the config's `model_type`:
 
-Generation keeps a **key/value cache**: a token's keys and values never change once computed, so each
-new token costs one row through the network rather than the whole text again. About 22 tokens a
-second for `gpt2` on a laptop CPU, 25 in single precision.
+| `model_type` | Checkpoints | What the block does |
+|---|---|---|
+| `gpt2` | gpt2, distilgpt2, gpt2-medium | learned positions, LayerNorm, GELU, `Conv1D` weights |
+| `llama` | Llama 2/3, TinyLlama, SmolLM2 | rotary positions, RMSNorm, gated SiLU feed-forward, grouped-query attention |
+| `mistral` | Mistral | as Llama, with a sliding attention window |
+| `qwen2`, `qwen3` | Qwen2.5, Qwen3 | as Llama, with query/key/value biases (Qwen2) or a norm on each head (Qwen3) |
+| `gpt_neox` | Pythia | rotary positions on part of each head, LayerNorm, parallel residual |
 
-Two details of the checkpoint worth knowing. GPT-2 stores its projections as `Conv1D`, a linear layer
-kept `[inputs, outputs]` - the transpose of every other layer on the Hub - and they are turned round on
-load. And the output layer is the token embedding table itself.
+Rotary scaling `linear` and `llama3` (Llama 3.1/3.2's) are applied; `yarn`, `dynamic` and
+`longrope`, which change the positions with the length of the text, are refused by name. So are
+other decoders - Gemma, Phi-3, Falcon, mixtures of experts - with a pointer to ONNX.
 
-Rotary-position decoders - Llama, Mistral, GPT-NeoX - have a different block and are refused by
-name, with a pointer to ONNX.
+**How it is checked.** For each family a tiny random checkpoint is run in transformers in float64,
+with the three places transformers computes in float32 even there - RMSNorm, the rotary angles and
+the eager softmax - switched to float64, so the comparison is of the same arithmetic. The logits at
+every position agree to 1e-10, and greedy generation through the cache is transformers' `generate`
+token for token: grouped-query attention, both rotary scalings, a sliding window shorter than the
+input, Qwen2's biases, Qwen3's per-head norms and a head width that is not hidden / heads, Pythia's
+partial rotation with both residual layouts. `gpt2` itself gives transformers' greedy text word for
+word, and SmolLM2-135M, Pythia-160m, Qwen2.5-0.5B and Qwen3-0.6B give transformers' first 30 greedy
+tokens identically. Against transformers' ordinary float32 run a real model's logits differ in the
+sixth or seventh digit, which can change a greedy choice where two tokens are all but tied.
+
+**Prompts** are encoded as transformers' `tokenizer(prompt)` encodes them, special tokens included -
+Llama's begin-of-text token in front, nothing on GPT-2. Chat models expect their chat template; apply
+it to the text first. Generation stops at any of the model's end tokens, including the extra ones a
+`generation_config.json` lists (Llama 3's `<|eot_id|>`).
+
+Generation keeps a **key/value cache**, grown as the text grows rather than sized for the model's
+full context: a token's keys and values never change once computed, so each new token costs one row
+through the network. About 22 tokens a second for `gpt2` on a laptop CPU, 25 in single precision.
+With grouped-query attention the cache holds only the key/value heads.
+
+Two checkpoint details worth knowing. GPT-2 stores its projections as `Conv1D`, a linear layer kept
+`[inputs, outputs]` - the transpose of every other layer on the Hub - and they are turned round on
+load. NeoX fuses query, key and value head by head, `[q_h | k_h | v_h]` for each head in turn, and
+they are regrouped on load. Either mistake would give a model that runs and produces fluent-looking
+noise.
+
+**Memory.** Weights are held as float32. A checkpoint with tied embeddings currently holds its token
+table twice - once for the lookup, once packed for the output layer - so a 1B model with a
+128k-token vocabulary needs about 1 GB more than its weights.
 
 ## Precision
 
@@ -465,7 +492,7 @@ An encoder needs no KV cache - every position attends to every other one anyway.
 
 ## Limits
 
-- Decoders other than GPT-2's family, and encoder-decoder architectures, are refused.
+- Decoders other than GPT-2, Llama, Mistral, Qwen2/3 and GPT-NeoX, and encoder-decoder architectures, are refused.
 - `ClipModel` reads full CLIP checkpoints; SigLIP and ALIGN are refused.
 - Activations other than `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python`,
   `quick_gelu` and `relu` are refused at load time, by name.

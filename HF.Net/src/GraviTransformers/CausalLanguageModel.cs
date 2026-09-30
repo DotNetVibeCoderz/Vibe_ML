@@ -35,93 +35,23 @@ public sealed record GenerationSettings(
     public static GenerationSettings Greedy { get; } = new();
 }
 
-/// <summary>A GPT-2 checkpoint's <c>config.json</c>.</summary>
-public sealed record CausalLanguageModelConfig
-{
-    /// <summary>The architecture family.</summary>
-    public required string ModelType { get; init; }
-
-    /// <summary>Token vocabulary size.</summary>
-    public required int VocabularySize { get; init; }
-
-    /// <summary>How many tokens the model can attend over, prompt and continuation together.</summary>
-    public required int MaxPositions { get; init; }
-
-    /// <summary>Width of every hidden state.</summary>
-    public required int HiddenSize { get; init; }
-
-    /// <summary>How many blocks.</summary>
-    public required int Layers { get; init; }
-
-    /// <summary>Attention heads per block.</summary>
-    public required int Heads { get; init; }
-
-    /// <summary>Width of the feed-forward layer.</summary>
-    public required int IntermediateSize { get; init; }
-
-    /// <summary>The feed-forward activation; GPT-2's is <c>gelu_new</c>, the tanh approximation.</summary>
-    public required string Activation { get; init; }
-
-    /// <summary>Epsilon inside every layer norm.</summary>
-    public required double LayerNormEpsilon { get; init; }
-
-    /// <summary>The end-of-text token, or <c>null</c> when the config names none.</summary>
-    public int? EndTokenId { get; init; }
-
-    /// <summary>The model families this runs.</summary>
-    public static IReadOnlySet<string> Supported { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "gpt2" };
-
-    /// <summary>Reads a <c>config.json</c>.</summary>
-    /// <exception cref="NotSupportedException">It describes a model this does not run.</exception>
-    public static CausalLanguageModelConfig Load(string path)
-    {
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
-        var root = document.RootElement;
-
-        var type = root.TryGetProperty("model_type", out var t) ? t.GetString() ?? "" : "";
-        if (!Supported.Contains(type))
-        {
-            throw new NotSupportedException(
-                $"This is a '{type}' model. CausalLanguageModel runs GPT-2 and its fine-tunes and distillations "
-                + "(model_type gpt2: gpt2, distilgpt2, gpt2-medium and the like). Rotary-position decoders such as "
-                + "Llama, Mistral or GPT-NeoX have a different block; export them to ONNX and use GraviOptimum.");
-        }
-
-        if (root.TryGetProperty("scale_attn_by_inverse_layer_idx", out var inverse) && inverse.GetBoolean())
-        {
-            throw new NotSupportedException("scale_attn_by_inverse_layer_idx is set; this runs GPT-2's standard attention scaling only.");
-        }
-
-        var hidden = Int(root, "n_embd");
-        return new CausalLanguageModelConfig
-        {
-            ModelType = type,
-            VocabularySize = Int(root, "vocab_size"),
-            MaxPositions = Int(root, "n_positions"),
-            HiddenSize = hidden,
-            Layers = Int(root, "n_layer"),
-            Heads = Int(root, "n_head"),
-            IntermediateSize = root.TryGetProperty("n_inner", out var inner) && inner.ValueKind == JsonValueKind.Number ? inner.GetInt32() : 4 * hidden,
-            Activation = root.TryGetProperty("activation_function", out var act) ? act.GetString() ?? "gelu_new" : "gelu_new",
-            LayerNormEpsilon = root.TryGetProperty("layer_norm_epsilon", out var eps) ? eps.GetDouble() : 1e-5,
-            EndTokenId = root.TryGetProperty("eos_token_id", out var eos) && eos.ValueKind == JsonValueKind.Number ? eos.GetInt32() : null,
-        };
-    }
-
-    private static int Int(JsonElement root, string name)
-        => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
-            ? value.GetInt32()
-            : throw new InvalidDataException($"The config has no '{name}'; guessing it would build a model of the wrong shape.");
-}
-
 /// <summary>
-/// A decoder-only language model that continues text: GPT-2 and its descendants.
+/// A decoder-only language model that continues text: GPT-2, Llama, Mistral, Qwen2, Qwen3 and GPT-NeoX
+/// (Pythia), with their fine-tunes and distillations.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The blueprint's GPT. The block is pre-norm, like ViT's, and attends <b>causally</b>, like CLIP's
-/// text tower: each position sees only itself and the positions before it, which is what lets the
-/// model be trained to predict the next token and then asked to.
+/// The blueprint's GPT. Every block is pre-norm and attends <b>causally</b>: each position sees
+/// only itself and the positions before it, which is what lets the model be trained to predict the
+/// next token and then asked to.
+/// </para>
+/// <para>
+/// Three block families. GPT-2 adds learned position vectors to the tokens. Llama and its
+/// descendants rotate each query and key by an angle that grows with position (rotary embeddings),
+/// normalize with RMSNorm, gate their feed-forward (<c>down(silu(gate(x)) * up(x))</c>) and may share
+/// one key/value head among several query heads (grouped-query attention); Mistral adds a sliding
+/// window, Qwen2 query/key/value biases, Qwen3 a norm on each head. GPT-NeoX rotates part of each head
+/// and runs attention and feed-forward side by side from the same input.
 /// </para>
 /// <para>
 /// Generation keeps a <b>key/value cache</b>. A token's keys and values never change once computed,
@@ -131,17 +61,17 @@ public sealed record CausalLanguageModelConfig
 /// <para>
 /// GPT-2 stores its projections as <c>Conv1D</c>, which is a linear layer with the matrix kept
 /// <c>[inputs, outputs]</c> - the transpose of every other layer on the Hub. They are turned the
-/// right way round on load; a model that skipped it would run and produce fluent-looking noise. The
-/// output layer is the token embedding table itself.
+/// right way round on load; a model that skipped it would run and produce fluent-looking noise.
+/// NeoX fuses its query, key and value projections head by head, and they are regrouped on load.
 /// </para>
 /// </remarks>
 public sealed class CausalLanguageModel : IDisposable
 {
-    private readonly float[] _tokenTable;       // [vocab, hidden], also the output layer's weights
-    private readonly double[] _positions;       // [maxPositions, hidden]
-    private readonly DecoderBlock[] _blocks;
-    private readonly Norm _finalNorm;
-    private readonly Linear _output;            // the token table as a linear layer, no bias
+    private readonly float[] _tokenTable;       // [vocab, hidden]
+    private readonly double[]? _positions;      // GPT-2's learned positions, [maxPositions, hidden]
+    private readonly IDecoderLayer[] _blocks;
+    private readonly Func<double[], int, double[]> _finalNorm;
+    private readonly Linear _output;            // the output layer, often the token table itself
     private bool _disposed;
 
     private CausalLanguageModel(string id, CausalLanguageModelConfig config, HfTokenizer? tokenizer, WeightStore weights)
@@ -149,20 +79,69 @@ public sealed class CausalLanguageModel : IDisposable
         Id = id;
         Config = config;
         Tokenizer = tokenizer;
-
-        var prefix = weights.Contains("transformer.wte.weight") ? "transformer." : "";
         Activation.For(config.Activation);
 
-        var table = weights.Read($"{prefix}wte.weight");
-        _tokenTable = new float[table.Size];
-        for (var i = 0; i < _tokenTable.Length; i++) _tokenTable[i] = (float)table.At(i);
+        var hidden = config.HiddenSize;
+        switch (config.Family)
+        {
+            case DecoderFamily.Gpt2:
+            {
+                var prefix = weights.Contains("transformer.wte.weight") ? "transformer." : "";
+                _tokenTable = weights.ReadFloats($"{prefix}wte.weight");
+                _positions = weights.Read($"{prefix}wpe.weight").AsContiguous().ToArray();
+                _blocks = [.. Enumerable.Range(0, config.Layers).Select(i => (IDecoderLayer)Gpt2Block.Load(weights, $"{prefix}h.{i}", config))];
+                _finalNorm = Norm.Load(weights, $"{prefix}ln_f", hidden, config.LayerNormEpsilon).Apply;
+                _output = OutputLayer(weights, "lm_head.weight", tied: true);
+                break;
+            }
 
-        // A checkpoint may carry its own output layer; GPT-2's is tied to the embeddings.
-        _output = weights.TryRead("lm_head.weight", out var head) ? Linear.From(head, null) : Linear.From(table, null);
+            case DecoderFamily.Llama:
+            {
+                var prefix = weights.Contains("model.embed_tokens.weight") ? "model." : "";
+                var rotary = new RotaryEmbedding(config);
+                _tokenTable = weights.ReadFloats($"{prefix}embed_tokens.weight");
+                _blocks = [.. Enumerable.Range(0, config.Layers).Select(i => (IDecoderLayer)LlamaBlock.Load(weights, $"{prefix}layers.{i}", config, rotary))];
+                _finalNorm = new RmsNorm(weights.ReadRange($"{prefix}norm.weight", 0, hidden), config.LayerNormEpsilon).Apply;
+                _output = OutputLayer(weights, "lm_head.weight", config.TieEmbeddings);
+                break;
+            }
 
-        _positions = weights.Read($"{prefix}wpe.weight").AsContiguous().ToArray();
-        _blocks = [.. Enumerable.Range(0, config.Layers).Select(i => DecoderBlock.Load(weights, $"{prefix}h.{i}", config))];
-        _finalNorm = Norm.Load(weights, $"{prefix}ln_f", config.HiddenSize, config.LayerNormEpsilon);
+            default:
+            {
+                var prefix = weights.Contains("gpt_neox.embed_in.weight") ? "gpt_neox." : "";
+                var rotary = new RotaryEmbedding(config);
+                _tokenTable = weights.ReadFloats($"{prefix}embed_in.weight");
+                _blocks = [.. Enumerable.Range(0, config.Layers).Select(i => (IDecoderLayer)NeoXBlock.Load(weights, $"{prefix}layers.{i}", config, rotary))];
+                _finalNorm = Norm.Load(weights, $"{prefix}final_layer_norm", hidden, config.LayerNormEpsilon).Apply;
+                _output = OutputLayer(weights, "embed_out.weight", config.TieEmbeddings);
+                break;
+            }
+        }
+
+        if (_tokenTable.Length != (long)config.VocabularySize * hidden)
+        {
+            throw new InvalidDataException(
+                $"The token table holds {_tokenTable.Length} values; {config.VocabularySize} tokens of width {hidden} need "
+                + $"{(long)config.VocabularySize * hidden}. The config and the weights disagree.");
+        }
+    }
+
+    /// <summary>The output layer: the checkpoint's own when it has one, else the token table.</summary>
+    private Linear OutputLayer(WeightStore weights, string name, bool tied)
+    {
+        var hidden = Config.HiddenSize;
+        if (weights.Contains(name))
+        {
+            var outputs = weights.ShapeOf(name)[0];
+            return Linear.FromFloats(weights.ReadFloats(name), new double[outputs], hidden, outputs);
+        }
+
+        if (!tied)
+        {
+            throw new InvalidDataException($"The checkpoint has no '{name}' and does not tie its output layer to the embeddings.");
+        }
+
+        return Linear.FromFloats(_tokenTable, new double[Config.VocabularySize], hidden, Config.VocabularySize);
     }
 
     /// <summary>The repository or directory this came from.</summary>
@@ -174,8 +153,11 @@ public sealed class CausalLanguageModel : IDisposable
     /// <summary>The tokenizer, or <c>null</c> for a directory that holds none.</summary>
     public HfTokenizer? Tokenizer { get; }
 
-    /// <summary>Downloads a GPT-2 checkpoint from the Hub and loads it.</summary>
-    /// <param name="repoId">A model id such as <c>gpt2</c> or <c>distilgpt2</c>.</param>
+    /// <summary>Downloads a decoder checkpoint from the Hub and loads it.</summary>
+    /// <param name="repoId">
+    /// A model id such as <c>gpt2</c>, <c>HuggingFaceTB/SmolLM2-135M</c>, <c>Qwen/Qwen2.5-0.5B</c> or
+    /// <c>EleutherAI/pythia-160m</c>.
+    /// </param>
     /// <param name="revision">A branch, tag or commit.</param>
     public static CausalLanguageModel Load(string repoId, string revision = "main")
     {
@@ -188,7 +170,7 @@ public sealed class CausalLanguageModel : IDisposable
         return new CausalLanguageModel(repoId, config, tokenizer, weights);
     }
 
-    /// <summary>Loads a GPT-2 checkpoint from a directory.</summary>
+    /// <summary>Loads a decoder checkpoint from a directory.</summary>
     /// <param name="directory">A folder holding <c>config.json</c>, the weights and, optionally, the tokenizer.</param>
     public static CausalLanguageModel Open(string directory)
     {
@@ -209,10 +191,15 @@ public sealed class CausalLanguageModel : IDisposable
     /// <param name="prompt">The text to continue.</param>
     /// <param name="settings">How to choose tokens; greedy by default.</param>
     /// <returns>The continuation only, without the prompt.</returns>
+    /// <remarks>
+    /// The prompt is encoded as transformers' <c>tokenizer(prompt)</c> encodes it, special tokens and
+    /// all - Llama's begin-of-text token in front, nothing for GPT-2. Chat models expect their chat
+    /// template around the prompt; apply it to the text before calling this.
+    /// </remarks>
     public string Generate(string prompt, GenerationSettings? settings = null)
     {
         var tokenizer = RequireTokenizer();
-        var ids = tokenizer.Encode(prompt, addSpecialTokens: false).Ids;
+        var ids = tokenizer.Encode(prompt).Ids;
 
         return tokenizer.Decode([.. GenerateIds(ids, settings)]);
     }
@@ -226,7 +213,7 @@ public sealed class CausalLanguageModel : IDisposable
     public IEnumerable<string> Stream(string prompt, GenerationSettings? settings = null)
     {
         var tokenizer = RequireTokenizer();
-        var ids = tokenizer.Encode(prompt, addSpecialTokens: false).Ids;
+        var ids = tokenizer.Encode(prompt).Ids;
 
         var generated = new List<int>();
         var shown = 0;
@@ -269,8 +256,9 @@ public sealed class CausalLanguageModel : IDisposable
 
     private IEnumerable<int> Run(IReadOnlyList<int> prompt, GenerationSettings options)
     {
-        var cache = new KeyValueCache(Config);
+        var cache = NewCache();
         var seen = new List<int>(prompt);
+        var ends = Config.EndTokenIds.ToHashSet();
         var random = options.Seed is { } seed ? new Random(seed) : new Random();
 
         var logits = LastLogits(Step(prompt, cache), prompt.Count);
@@ -280,7 +268,7 @@ public sealed class CausalLanguageModel : IDisposable
             var next = Choose(logits, seen, options, random);
             yield return next;
 
-            if (options.StopAtEndToken && next == Config.EndTokenId) yield break;
+            if (options.StopAtEndToken && ends.Contains(next)) yield break;
             if (seen.Count + 1 >= Config.MaxPositions) yield break;   // the context is full
 
             seen.Add(next);
@@ -299,8 +287,8 @@ public sealed class CausalLanguageModel : IDisposable
             throw new ArgumentException($"The model takes 1 to {Config.MaxPositions} tokens; got {ids.Count}.", nameof(ids));
         }
 
-        var hidden = Step(ids, new KeyValueCache(Config));
-        return _output.Apply(_finalNorm.Apply(hidden, ids.Count), ids.Count);
+        var hidden = Step(ids, NewCache());
+        return _output.Apply(_finalNorm(hidden, ids.Count), ids.Count);
     }
 
     /// <summary>Runs new tokens through every block, extending the cache, and returns their hidden states.</summary>
@@ -309,16 +297,22 @@ public sealed class CausalLanguageModel : IDisposable
         var width = Config.HiddenSize;
         var start = cache.Length;
         var hidden = new double[ids.Count * width];
+        cache.Reserve(start + ids.Count);
 
         for (var t = 0; t < ids.Count; t++)
         {
             var id = ids[t];
             if ((uint)id >= (uint)Config.VocabularySize) throw new ArgumentOutOfRangeException(nameof(ids), id, "Token id outside the vocabulary.");
 
-            for (var d = 0; d < width; d++) hidden[t * width + d] = _tokenTable[id * width + d] + _positions[(start + t) * width + d];
+            for (var d = 0; d < width; d++)
+            {
+                hidden[t * width + d] = _positions is null
+                    ? _tokenTable[(long)id * width + d]
+                    : _tokenTable[(long)id * width + d] + _positions[(start + t) * width + d];
+            }
         }
 
-        for (var layer = 0; layer < _blocks.Length; layer++) hidden = _blocks[layer].Forward(hidden, ids.Count, cache, layer);
+        for (var layer = 0; layer < _blocks.Length; layer++) hidden = _blocks[layer].Forward(hidden, ids.Count, cache, layer, start);
 
         cache.Length += ids.Count;
         return hidden;
@@ -329,8 +323,10 @@ public sealed class CausalLanguageModel : IDisposable
     {
         var width = Config.HiddenSize;
         var last = hidden.AsSpan((rows - 1) * width, width).ToArray();
-        return _output.Apply(_finalNorm.Apply(last, 1), 1);
+        return _output.Apply(_finalNorm(last, 1), 1);
     }
+
+    private KeyValueCache NewCache() => new(Config.Layers, Config.KeyValueHeads, Config.HeadSize);
 
     /// <summary>
     /// The next token, after transformers' logits processors in their order: repetition penalty,
@@ -411,163 +407,7 @@ public sealed class CausalLanguageModel : IDisposable
 
     /// <inheritdoc />
     public override string ToString()
-        => $"{Id} ({Config.ModelType}: {Config.Layers} layers, {Config.HiddenSize} hidden, {Config.MaxPositions} positions)";
-}
-
-/// <summary>Every layer's keys and values for the tokens seen so far.</summary>
-internal sealed class KeyValueCache
-{
-    internal KeyValueCache(CausalLanguageModelConfig config)
-    {
-        var size = config.HiddenSize / config.Heads;
-        Keys = new double[config.Layers][][];
-        Values = new double[config.Layers][][];
-
-        for (var layer = 0; layer < config.Layers; layer++)
-        {
-            Keys[layer] = new double[config.Heads][];
-            Values[layer] = new double[config.Heads][];
-            for (var head = 0; head < config.Heads; head++)
-            {
-                Keys[layer][head] = new double[config.MaxPositions * size];
-                Values[layer][head] = new double[config.MaxPositions * size];
-            }
-        }
-    }
-
-    /// <summary><c>[layer][head][position * headSize + d]</c>.</summary>
-    internal double[][][] Keys { get; }
-
-    /// <summary><c>[layer][head][position * headSize + d]</c>.</summary>
-    internal double[][][] Values { get; }
-
-    /// <summary>How many positions are filled.</summary>
-    internal int Length { get; set; }
-}
-
-/// <summary>One GPT-2 block: pre-norm, causal attention over a cache, pre-norm feed-forward.</summary>
-internal sealed class DecoderBlock
-{
-    private readonly Norm _first;
-    private readonly Linear _queryKeyValue;   // c_attn, [q | k | v]
-    private readonly Linear _projection;      // attn.c_proj
-    private readonly Norm _second;
-    private readonly Linear _up;              // mlp.c_fc
-    private readonly Linear _down;            // mlp.c_proj
-    private readonly Func<double, double> _activation;
-    private readonly int _heads;
-
-    private DecoderBlock(Norm first, Linear queryKeyValue, Linear projection, Norm second, Linear up, Linear down, Func<double, double> activation, int heads)
-    {
-        _first = first;
-        _queryKeyValue = queryKeyValue;
-        _projection = projection;
-        _second = second;
-        _up = up;
-        _down = down;
-        _activation = activation;
-        _heads = heads;
-    }
-
-    internal static DecoderBlock Load(WeightStore weights, string prefix, CausalLanguageModelConfig config)
-    {
-        var hidden = config.HiddenSize;
-        return new DecoderBlock(
-            Norm.Load(weights, $"{prefix}.ln_1", hidden, config.LayerNormEpsilon),
-            Conv1D(weights, $"{prefix}.attn.c_attn", hidden, 3 * hidden),
-            Conv1D(weights, $"{prefix}.attn.c_proj", hidden, hidden),
-            Norm.Load(weights, $"{prefix}.ln_2", hidden, config.LayerNormEpsilon),
-            Conv1D(weights, $"{prefix}.mlp.c_fc", hidden, config.IntermediateSize),
-            Conv1D(weights, $"{prefix}.mlp.c_proj", config.IntermediateSize, hidden),
-            Activation.For(config.Activation),
-            config.Heads);
-    }
-
-    /// <summary>A GPT-2 <c>Conv1D</c>: a linear layer stored <c>[inputs, outputs]</c>, turned to <c>[outputs, inputs]</c>.</summary>
-    private static Linear Conv1D(WeightStore weights, string name, int inputs, int outputs)
-    {
-        var stored = weights.Read($"{name}.weight");
-        if (stored.Rank != 2 || stored.Shape[0] != inputs || stored.Shape[1] != outputs)
-        {
-            throw new InvalidDataException(
-                $"'{name}.weight' is [{string.Join(", ", stored.Shape.ToArray())}]; a GPT-2 Conv1D from {inputs} to {outputs} is [{inputs}, {outputs}].");
-        }
-
-        var source = stored.AsContiguous().ToArray();
-        var turned = new double[source.Length];
-        for (var i = 0; i < inputs; i++)
-        {
-            for (var o = 0; o < outputs; o++) turned[o * inputs + i] = source[i * outputs + o];
-        }
-
-        return Linear.From(new NdArray(turned, outputs, inputs), weights.Read($"{name}.bias"));
-    }
-
-    internal double[] Forward(double[] hidden, int rows, KeyValueCache cache, int layer)
-    {
-        var attended = Add(hidden, _projection.Apply(Attend(_first.Apply(hidden, rows), rows, cache, layer), rows));
-        return Add(attended, _down.Apply(_up.Apply(_second.Apply(attended, rows), rows, _activation), rows));
-    }
-
-    /// <summary>
-    /// Appends the new rows' keys and values to the cache, then lets each new row attend over every
-    /// cached position up to and including its own.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private double[] Attend(double[] input, int rows, KeyValueCache cache, int layer)
-    {
-        var hidden = _projection.Outputs;
-        var size = hidden / _heads;
-        var stride = 3 * hidden;
-        var start = cache.Length;
-        var scale = 1.0 / Math.Sqrt(size);
-        var projected = _queryKeyValue.Apply(input, rows);
-
-        var keys = cache.Keys[layer];
-        var values = cache.Values[layer];
-        for (var head = 0; head < _heads; head++)
-        {
-            for (var r = 0; r < rows; r++)
-            {
-                Array.Copy(projected, r * stride + hidden + head * size, keys[head], (start + r) * size, size);
-                Array.Copy(projected, r * stride + 2 * hidden + head * size, values[head], (start + r) * size, size);
-            }
-        }
-
-        var result = new double[rows * hidden];
-        Parallel.For(0, _heads * rows, item =>
-        {
-            var head = item / rows;
-            var r = item % rows;
-            var seen = start + r + 1;
-            var query = projected.AsSpan(r * stride + head * size, size);
-            var k = keys[head];
-            var v = values[head];
-
-            var weights = new double[seen];
-            Simd.Scores(query, k, seen, size, scale, weights);
-
-            var largest = double.NegativeInfinity;
-            for (var j = 0; j < seen; j++) if (weights[j] > largest) largest = weights[j];
-
-            var total = 0.0;
-            for (var j = 0; j < seen; j++)
-            {
-                weights[j] = Math.Exp(weights[j] - largest);
-                total += weights[j];
-            }
-
-            for (var j = 0; j < seen; j++) weights[j] /= total;
-            Simd.Combine(weights, v, seen, size, result.AsSpan(r * hidden + head * size, size));
-        });
-
-        return result;
-    }
-
-    private static double[] Add(double[] a, double[] b)
-    {
-        var result = new double[a.Length];
-        for (var i = 0; i < a.Length; i++) result[i] = a[i] + b[i];
-        return result;
-    }
+        => $"{Id} ({Config.ModelType}: {Config.Layers} layers, {Config.HiddenSize} hidden, {Config.Heads} heads"
+            + (Config.KeyValueHeads != Config.Heads ? $" sharing {Config.KeyValueHeads} key/value heads" : "")
+            + $", {Config.MaxPositions:N0} positions)";
 }

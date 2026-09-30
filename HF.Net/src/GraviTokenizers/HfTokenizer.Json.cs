@@ -27,7 +27,10 @@ public sealed partial class HfTokenizer
             tokens.Add(new AddedToken(
                 entry.GetProperty("id").GetInt32(),
                 entry.GetProperty("content").GetString() ?? "",
-                entry.TryGetProperty("special", out var special) && special.ValueKind == JsonValueKind.True));
+                entry.TryGetProperty("special", out var special) && special.ValueKind == JsonValueKind.True,
+                entry.TryGetProperty("normalized", out var normalized) && normalized.ValueKind == JsonValueKind.True,
+                entry.TryGetProperty("lstrip", out var lstrip) && lstrip.ValueKind == JsonValueKind.True,
+                entry.TryGetProperty("rstrip", out var rstrip) && rstrip.ValueKind == JsonValueKind.True));
         }
 
         return tokens;
@@ -62,7 +65,10 @@ public sealed partial class HfTokenizer
                 model.TryGetProperty("continuing_subword_prefix", out var bpePrefix)
                     && bpePrefix.ValueKind == JsonValueKind.String ? bpePrefix.GetString() ?? "" : "",
                 model.TryGetProperty("end_of_word_suffix", out var suffix)
-                    && suffix.ValueKind == JsonValueKind.String ? suffix.GetString() ?? "" : ""),
+                    && suffix.ValueKind == JsonValueKind.String ? suffix.GetString() ?? "" : "",
+                Flag(model, "byte_fallback"),
+                Flag(model, "fuse_unk"),
+                Flag(model, "ignore_merges")),
 
             "Unigram" => ReadUnigram(model),
 
@@ -70,6 +76,9 @@ public sealed partial class HfTokenizer
                 $"Tokenizer model '{type}' is not supported. WordPiece, BPE and Unigram are."),
         };
     }
+
+    private static bool Flag(JsonElement node, string name)
+        => node.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
     private static Dictionary<string, int> ReadVocabulary(JsonElement vocabulary)
     {
@@ -162,6 +171,9 @@ public sealed partial class HfTokenizer
             case "Replace":
                 return ParseReplace(node);
 
+            case "Prepend":
+                return new PrependNormalizer(node.TryGetProperty("prepend", out var prepend) ? prepend.GetString() ?? "" : "");
+
             // SentencePiece models carry their normalization as a table, which is read exactly.
             case "Precompiled":
                 return node.TryGetProperty("precompiled_charsmap", out var map)
@@ -169,9 +181,19 @@ public sealed partial class HfTokenizer
                     ? new PrecompiledNormalizer(charsmap)
                     : null;
 
-            // NFC, NFD, NFKC and NFKD are no-ops under InvariantGlobalization, which the whole
-            // stack builds with, and Nmt only drops control characters these inputs rarely have.
-            case "NFC" or "NFD" or "NFKC" or "NFKD" or "Nmt":
+            // Unicode normalization from HF.Net's own tables: String.Normalize is a no-op under
+            // InvariantGlobalization, which left "e" + U+0301 uncomposed where Qwen2's NFC composes it.
+            case "NFC":
+                return new Unicode.UnicodeNormalizer(Unicode.NormalizationForm.C);
+            case "NFD":
+                return new Unicode.UnicodeNormalizer(Unicode.NormalizationForm.D);
+            case "NFKC":
+                return new Unicode.UnicodeNormalizer(Unicode.NormalizationForm.KC);
+            case "NFKD":
+                return new Unicode.UnicodeNormalizer(Unicode.NormalizationForm.KD);
+
+            // Nmt only drops control characters these inputs rarely have.
+            case "Nmt":
                 return null;
 
             case "StripAccents":
@@ -204,9 +226,10 @@ public sealed partial class HfTokenizer
     {
         if (!root.TryGetProperty(property, out var node) || node.ValueKind != JsonValueKind.Object)
         {
-            // No pre-tokenizer means the model is applied to the whole input. Whitespace splitting
-            // is the safe stand-in and matches what the reference does for a bare Unigram.
-            return new WhitespacePreTokenizer();
+            // No pre-tokenizer means the model is applied to the whole input, as the reference does.
+            // Llama 2 relies on it: its spaces are "▁" by then, and splitting on whitespace instead
+            // lost newlines and runs of spaces the model encodes.
+            return new WholeTextPreTokenizer();
         }
 
         return ParsePreTokenizer(node);
@@ -240,21 +263,29 @@ public sealed partial class HfTokenizer
             case "ByteLevel":
                 return new ByteLevelPreTokenizer(
                     !node.TryGetProperty("add_prefix_space", out var prefix)
-                    || prefix.ValueKind != JsonValueKind.False);
+                    || prefix.ValueKind != JsonValueKind.False,
+                    !node.TryGetProperty("use_regex", out var useRegex) || useRegex.ValueKind != JsonValueKind.False);
 
             case "Metaspace":
                 return new MetaspacePreTokenizer(
                     node.TryGetProperty("replacement", out var replacement)
                         && (replacement.GetString() ?? "▁").Length > 0
                         ? (replacement.GetString() ?? "▁")[0] : '▁',
-                    !node.TryGetProperty("add_prefix_space", out var addPrefix)
-                    || addPrefix.ValueKind != JsonValueKind.False);
+                    // Older files say add_prefix_space; newer ones prepend_scheme ("always",
+                    // "first", "never").
+                    node.TryGetProperty("prepend_scheme", out var scheme) && scheme.ValueKind == JsonValueKind.String
+                        ? scheme.GetString() != "never"
+                        : !node.TryGetProperty("add_prefix_space", out var addPrefix) || addPrefix.ValueKind != JsonValueKind.False,
+                    !node.TryGetProperty("split", out var split) || split.ValueKind != JsonValueKind.False);
 
             case "Split":
                 return ParseSplit(node);
 
+            // Digits are isolated, not removed: one piece per digit with individual_digits, one per run
+            // otherwise.
             case "Digits":
-                return new SplitPreTokenizer(@"\d+", Invert: false);
+                return new SplitPreTokenizer(
+                    Flag(node, "individual_digits") ? @"\d" : @"\d+", Invert: false, Behavior: SplitBehavior.Isolated);
 
             case null:
                 return new WhitespacePreTokenizer();
@@ -292,47 +323,70 @@ public sealed partial class HfTokenizer
     {
         if (!root.TryGetProperty(property, out var node) || node.ValueKind != JsonValueKind.Object)
         {
-            return new WhitespaceDecoder();
+            return new SequenceDecoder([new WhitespaceStep()]);
         }
 
-        var type = node.TryGetProperty("type", out var kind) ? kind.GetString() : null;
-
-        return type switch
-        {
-            "WordPiece" => new WordPieceDecoder(
-                node.TryGetProperty("prefix", out var prefix) ? prefix.GetString() ?? "##" : "##"),
-
-            "ByteLevel" => new ByteLevelDecoder(),
-
-            "Metaspace" => new MetaspaceDecoder(
-                node.TryGetProperty("replacement", out var replacement)
-                    && (replacement.GetString() ?? "▁").Length > 0
-                    ? (replacement.GetString() ?? "▁")[0] : '▁'),
-
-            // A decoder sequence is usually Metaspace plus cosmetic strip steps; the first stage is
-            // what determines how pieces rejoin.
-            "Sequence" => ReadFirstDecoder(node),
-
-            _ => new WhitespaceDecoder(),
-        };
+        return new SequenceDecoder(DecoderSteps(node));
     }
 
-    private static IDecoder ReadFirstDecoder(JsonElement node)
+    /// <summary>The decoder as a chain of steps, a sequence flattened in order.</summary>
+    private static List<IDecoderStep> DecoderSteps(JsonElement node)
     {
-        if (!node.TryGetProperty("decoders", out var children) || children.ValueKind != JsonValueKind.Array)
-        {
-            return new WhitespaceDecoder();
-        }
+        var type = node.TryGetProperty("type", out var kind) ? kind.GetString() : null;
 
-        foreach (var child in children.EnumerateArray())
+        switch (type)
         {
-            var type = child.TryGetProperty("type", out var kind) ? kind.GetString() : null;
-            if (type is "ByteLevel") return new ByteLevelDecoder();
-            if (type is "Metaspace") return new MetaspaceDecoder();
-            if (type is "WordPiece") return new WordPieceDecoder();
-        }
+            case "Sequence":
+                var steps = new List<IDecoderStep>();
+                if (node.TryGetProperty("decoders", out var children) && children.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var child in children.EnumerateArray()) steps.AddRange(DecoderSteps(child));
+                }
 
-        return new WhitespaceDecoder();
+                return steps;
+
+            case "WordPiece":
+                return [new WordPieceStep(
+                    node.TryGetProperty("prefix", out var prefix) ? prefix.GetString() ?? "##" : "##",
+                    !node.TryGetProperty("cleanup", out var cleanup) || cleanup.ValueKind != JsonValueKind.False)];
+
+            case "ByteLevel":
+                return [new ByteLevelStep()];
+
+            case "Metaspace":
+                return [new MetaspaceStep(
+                    node.TryGetProperty("replacement", out var replacement) && (replacement.GetString() ?? "▁").Length > 0
+                        ? (replacement.GetString() ?? "▁")[0] : '▁',
+                    node.TryGetProperty("prepend_scheme", out var scheme) && scheme.ValueKind == JsonValueKind.String
+                        ? scheme.GetString() != "never"
+                        : !node.TryGetProperty("add_prefix_space", out var addPrefix) || addPrefix.ValueKind != JsonValueKind.False)];
+
+            case "Replace":
+            {
+                var content = node.TryGetProperty("content", out var c) ? c.GetString() ?? "" : "";
+                var pattern = node.GetProperty("pattern");
+                return pattern.TryGetProperty("Regex", out var regex)
+                    ? [new ReplaceStep(regex.GetString() ?? "", content, IsRegex: true)]
+                    : [new ReplaceStep(pattern.TryGetProperty("String", out var literal) ? literal.GetString() ?? "" : "", content)];
+            }
+
+            case "ByteFallback":
+                return [new ByteFallbackStep()];
+
+            case "Fuse":
+                return [new FuseStep()];
+
+            case "Strip":
+                return [new StripStep(
+                    node.TryGetProperty("content", out var strip) && (strip.GetString() ?? " ").Length > 0 ? (strip.GetString() ?? " ")[0] : ' ',
+                    node.TryGetProperty("start", out var start) ? start.GetInt32() : 0,
+                    node.TryGetProperty("stop", out var stop) ? stop.GetInt32() : 0)];
+
+            default:
+                throw new NotSupportedException(
+                    $"Decoder '{type}' is not supported. WordPiece, ByteLevel, Metaspace, Replace, ByteFallback, "
+                    + "Fuse, Strip and sequences of them are.");
+        }
     }
 
     private static PostProcessor ReadPostProcessor(JsonElement root, string property)

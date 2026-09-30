@@ -19,7 +19,7 @@
 | [GraviHub](GraviHub.md) | Klien Hub, safetensors, checkpoint PyTorch | `huggingface_hub` |
 | [GraviTokenizers](GraviTokenizers.md) | WordPiece, BPE, Unigram, `tokenizer.json` | `tokenizers` |
 | [GraviDatasets](GraviDatasets.md) | Berkas, dataset Hub, split, streaming | `datasets` |
-| [GraviTransformers](GraviTransformers.md) | Encoder dan task head, GPT-2, ViT, CLIP | `transformers` |
+| [GraviTransformers](GraviTransformers.md) | Encoder dan task head; GPT-2, Llama, Mistral, Qwen, Pythia; ViT, CLIP | `transformers` |
 | [GraviPEFT](GraviPEFT.md) | LoRA dan prefix tuning | `peft` |
 | [GraviAccelerate](GraviAccelerate.md) | Perangkat, sharding, pengukuran | `accelerate` |
 | [GraviOptimum](GraviOptimum.md) | ONNX Runtime, kuantisasi | `optimum` |

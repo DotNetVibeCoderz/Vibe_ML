@@ -210,8 +210,10 @@ public sealed class HFNetReferencePlugin
               Detects the name prefix, the DistilBERT block layout, and the transpose convention.
               LoadReport: .Loaded .Missing .Prefix .IsComplete
 
-            CausalLanguageModel - GPT-2 family text generation (gpt2, distilgpt2, gpt2-medium ...)
-              CausalLanguageModel.Load("gpt2")  /  CausalLanguageModel.Open(directory)
+            CausalLanguageModel - text generation: GPT-2, Llama (Llama 2/3, TinyLlama, SmolLM2),
+              Mistral, Qwen2, Qwen3, GPT-NeoX (Pythia)
+              CausalLanguageModel.Load("HuggingFaceTB/SmolLM2-135M")  /  .Load("gpt2")  /  .Open(directory)
+              .Config.Family (Gpt2 | Llama | GptNeoX) .Config.EndTokenIds
               .Generate(prompt, new GenerationSettings(MaxNewTokens: 50))  -> continuation only
               .Stream(prompt, settings)          -> IEnumerable<string>, text as it arrives
               .GenerateIds(promptIds, settings)  -> IEnumerable<int>
@@ -231,8 +233,8 @@ public sealed class HFNetReferencePlugin
               .Processor.Read(path) -> [3, 224, 224] pixels, prepared exactly as transformers does
 
             GOTCHAS
-              Llama, Mistral, GPT-NeoX and other rotary-position decoders are REFUSED: only GPT-2's
-                block is implemented. Export them to ONNX and use GraviOptimum.
+              Gemma, Phi-3, Falcon and mixture-of-experts decoders, and YaRN/dynamic RoPE scaling, are
+                REFUSED. There is no chat-template engine: build the chat prompt text yourself.
               JPEG files decode slightly differently here than in PIL (one level on some pixels);
                 PNG input gives exactly the reference's pixels.
               Inference is double precision on the CPU. For throughput, export to ONNX and use

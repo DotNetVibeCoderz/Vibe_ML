@@ -139,10 +139,22 @@ with `onnxruntime/sd-turbo` marked CUDA-only.
 
 ## Next
 
-- **Rotary-position decoders** - Llama, Mistral, GPT-NeoX. The causal attention and the KV cache exist
-  now; what is missing is the block (rotary positions, RMSNorm, gated feed-forward, grouped queries).
+- ~~**Rotary-position decoders**~~ **Done.** Llama, Mistral, Qwen2, Qwen3 and GPT-NeoX on the same
+  cached attention: rotary positions (with linear and Llama 3 scaling), RMSNorm, the gated feed-forward,
+  grouped-query attention, Mistral's sliding window, Qwen3's per-head norms, Pythia's partial rotation
+  and parallel residual. Each matches transformers in float64 to 1e-10, generation token for token. The
+  tokenizers they need - SentencePiece-style BPE with byte fallback, decoder chains, Unicode
+  normalization from HF.Net's own tables - give Python's ids and text on twelve tokenizer families.
+- ~~**Route (a) of v0.3**~~ **Done, in the foundation.** GravicodeScience's tape has attention biases and
+  the exact GELU (`Erf`, `GeluExact`), and `EncoderWeights.From(layer)` makes a pretrained block
+  trainable; it matches the forward-only block to 1e-10, every bias gradient checked by finite
+  differences. Released as Gravicode.Science 1.1.0.
 - **Compile the notebooks in CI**, not just validate their JSON.
-- **Route (a) of v0.3**, biased attention in the foundation's autodiff tape, for the wider ecosystem.
+- **Hold tied embeddings once.** A tied checkpoint keeps its token table twice today - about 1 GB extra
+  on a 1B model with a 128k vocabulary.
+- **Real-model checks for TinyLlama and Llama 3.2**, one model per process. SmolLM2-135M, Pythia-160m,
+  Qwen2.5-0.5B and Qwen3-0.6B already give transformers' 30 greedy tokens identically; the run that
+  was to check the last two, six models in one process, ran the machine out of memory.
 
 ## Continuous
 

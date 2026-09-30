@@ -55,22 +55,37 @@ HfTokenizer.FromDirectory("tokenizer/");                 // tata letak mana pun,
 tokenizer.WithPadToken("!");                             // token pad milik model (SD 2.x memakai "!")
 ```
 
-Dicocokkan dengan `tokenizers` Python pada tokenizer BERT, GPT-2, CLIP, dan XLM-R, atas teks berisi
-aksen, CJK, emoji, kode, serta deretan spasi dan tanda baca: 11 dari 56 kasus berbeda, dan kini tidak
-ada. Kasus CLIP, `Split`, dan `Precompiled` dipatok di rangkaian uji. Enam perbedaan diperbaiki,
-yang masing-masing menghasilkan id yang tampak wajar:
+Dua belas tokenizer - bert-base-uncased, gpt2, xlm-roberta-base, roberta-base, CLIP, T5, TinyLlama,
+Llama 2, Llama 3, Qwen2.5, SmolLM2, dan Pythia - dibandingkan dengan `tokenizers` Python atas enam
+belas teks: aksen yang sudah tersusun maupun terurai, CJK, emoji, aksara langka yang butuh byte
+fallback, kode dengan indentasi, deretan spasi dan baris baru, angka, dan special token di tengah teks.
+Semua 192 encoding memberi id yang sama dan semua 192 decoding memberi teks yang sama. Untuk sampai ke
+sana, antara lain diperbaiki:
 
 - **`Split` dengan `invert` dan `behavior`.** Pre-tokenizer CLIP menyimpan *hasil cocokan* regex, bukan
   celah di antaranya, dan `MergedWithPrevious`/`MergedWithNext` melipat potongannya seperti crate Rust.
-- **Normalizer sebelum pemetaan byte-level**, bukan sesudahnya: mengecilkan huruf teks yang sudah
-  dipetakan ke `Ġ` tidak mengubah apa pun.
-- **`model` tanpa `type`** disimpulkan - `merges` berarti BPE, `vocab` berupa array berarti Unigram -
-  alih-alih dianggap WordPiece, yang merusak GPT-2 dan membuat XLM-R gagal.
-- **Ideogram CJK** menjadi satu token masing-masing di pre-tokenizer BERT.
-- **Normalizer `Precompiled` milik SentencePiece** menjalankan trie double-array-nya atas
-  `precompiled_charsmap`, grafem demi grafem seperti crate Rust. Sebelumnya ia dilewati, dan karakter
-  lebar-penuh serta kompatibilitas XLM-R ter-tokenisasi berbeda.
-- **Unigram** menggabungkan potongan tak dikenal yang berurutan menjadi satu `<unk>`.
+- **`Digits` menghapus angka.** Kini ia memisahkannya - satu potongan per digit dengan
+  `individual_digits` - padahal dulu "3.14" menjadi ".".
+- **`ByteLevel` dengan `use_regex: false`** (Llama 3, Qwen2) tidak lagi memecah ulang dengan ekspresi
+  GPT-2 setelah `Split` milik tokenizer itu sendiri.
+- **BPE bergaya SentencePiece**, seperti dipakai Llama 2, Mistral, dan TinyLlama: `byte_fallback`
+  mengubah karakter yang tidak ada di kosakata menjadi byte UTF-8-nya sebagai potongan `<0xXX>`,
+  `fuse_unk` menggabungkan token tak dikenal, `ignore_merges` mengembalikan kata yang sudah ada di
+  kosakata secara utuh, dan simbol awalnya adalah nilai skalar Unicode, bukan klaster grafem, seperti di
+  crate Rust.
+- **`pre_tokenizer` yang tidak ada** berarti seluruh teks satu potongan, seperti rujukannya.
+  Memecah pada spasi justru menghilangkan baris baru dan deretan spasi Llama 2.
+- **Decoder berjalan sebagai rantai** - `Replace`, `ByteFallback`, `Fuse`, `Strip`, `Metaspace` (yang
+  hanya membuang spasi token pertama), `ByteLevel` (yang added token tak terpetakannya mempertahankan
+  byte-nya sendiri), dan `WordPiece` dengan pembersihan spasi sebelum tanda baca.
+- **Added token** dicocokkan seperti rujukan mencocokkannya: yang bertanda `normalized` dicari di teks
+  yang sudah dinormalisasi dengan bentuk ternormalisasinya, jadi " <s>" Llama 2 menjadi satu token;
+  `lstrip`/`rstrip` menyerap spasi di sebelahnya; dan decoding mencetaknya, serta hanya melewati special
+  token yang juga dilewati rujukannya.
+- **Normalisasi Unicode** - lihat di bawah.
+- **Ideogram CJK** menjadi satu token masing-masing di pre-tokenizer BERT, normalizer **`Precompiled`**
+  milik SentencePiece menjalankan trie double-array-nya, dan **Unigram** menggabungkan potongan tak
+  dikenal yang berurutan.
 
 Memuat kosakata CLIP sebagai milik GPT-2 adalah kesalahan yang paling berpengaruh dalam praktik: id-nya
 tampak wajar dan setiap prompt Stable Diffusion dienkode keliru. `FromPretrained` mengenali CLIP dari
@@ -220,11 +235,14 @@ tersebut.
 ## Catatan tentang normalisasi
 
 Pustaka ini dibangun dengan `InvariantGlobalization`, yang membuat `String.Normalize` diam-diam
-mengembalikan masukannya apa adanya. Karena itu pengupasan aksen memakai tabel pelipatan eksplisit —
-implementasi berbasis dekomposisi akan tampak benar, ter-compile, dan tidak melakukan apa-apa. Entri
-`NFC`, `NFD`, `NFKC` dan `NFKD` di sebuah `tokenizer.json` diterima lalu diabaikan dengan alasan yang
-sama, dan itulah perilaku yang jujur: berpura-pura menormalkan lebih buruk, sementara menolak memuat
-akan menolak hampir semua tokenizer sungguhan.
+mengembalikan masukannya tanpa perubahan. Karena itu HF.Net membawa normalisasi Unicode sendiri
+(`UnicodeNormalization`, keempat bentuknya) dari tabel yang dihasilkan dari `unicodedata` Python -
+Unicode 15.0, 5.857 dekomposisi, 941 komposisi - dan `NFC`, `NFD`, `NFKC`, serta `NFKD` di
+`tokenizer.json` memakainya. Sebelumnya semua itu diabaikan, dan Qwen2, Pythia, serta CLIP, yang
+menyusun dengan NFC, melihat "e" diikuti aksen kombinasi sebagai dua karakter padahal rujukannya
+melihat "é". Tabelnya dipatok terhadap `unicodedata` pada 148 string di setiap bentuk. Penghapusan
+aksen BERT tetap memakai tabel pelipatannya, kini juga membuang tanda kombinasi yang berdiri sendiri;
+normalizer `Precompiled` milik SentencePiece membawa tabelnya sendiri.
 
 ## Lihat juga
 

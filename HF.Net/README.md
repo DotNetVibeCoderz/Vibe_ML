@@ -34,7 +34,7 @@ Each mirrors a package in the Python Hugging Face stack.
 | **GraviHub** | `huggingface_hub` | Hub download and upload, a readable local cache, and readers for the formats the Hub serves: **safetensors** and **`pytorch_model.bin`** |
 | **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE, Unigram and CLIP, loading `tokenizer.json` — with character offsets that point back into the original text |
 | **GraviDatasets** | `datasets` | CSV, Parquet, JSON and JSON Lines, Hub datasets, splits, streaming and memory-mapped reads |
-| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders, GPT-2, ViT and CLIP: classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification — and streaming for models larger than memory |
+| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT and CLIP: classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification — and streaming for models larger than memory |
 | **GraviPEFT** | `peft` | LoRA and prefix tuning in the Hugging Face PEFT format — train, apply, merge, save, load |
 | **GraviAccelerate** | `accelerate` | Device selection across CPU SIMD and ILGPU, sharding, weighted gradient averaging, honest throughput measurement |
 | **GraviOptimum** | `optimum` | ONNX Runtime inference with an explicitly chosen execution provider, and weight quantisation that reports its measured error |
@@ -99,7 +99,9 @@ PIL's own algorithm, reproduced to the byte, because that is what the model was 
 
 **Writes.** `gpt2` continues *"The lighthouse keeper opened the door and"* with exactly the words
 transformers' `generate` produces, through a key/value cache, at about 22 tokens a second on a laptop
-CPU.
+CPU. Llama, Mistral, Qwen2, Qwen3 and GPT-NeoX (Pythia) run too - rotary positions, grouped-query
+attention, sliding windows - and match transformers in float64 to 1e-10, with the tokenizers
+(SentencePiece byte fallback included) giving Python's ids on all twelve families tested.
 
 **Draws.** Stable Diffusion 1.5 from its ONNX export, with the same seed and settings as diffusers'
 own pipeline, gives the same picture - to the pixel on float32 exports, to 55 dB on float16 ones -
@@ -118,8 +120,9 @@ difference applied per position.
 
 Stated plainly, because a library that fails quietly is worse than one that says no:
 
-- **Rotary-position decoders** — Llama, Mistral, GPT-NeoX — are **refused**, not half-loaded. GPT-2
-  and its family run; those have a different block. Export them to ONNX and use GraviOptimum.
+- **Other decoders** — Gemma, Phi-3, Falcon, mixtures of experts — and YaRN or dynamic rotary scaling
+  are **refused**, not half-loaded. GPT-2, Llama, Mistral, Qwen2/3 and GPT-NeoX run. There is no chat
+  template engine: apply a chat model's template to the text yourself.
 - **LoRA training runs on the CPU, bound by the linear kernel.** `PeftModel.Train` fits adapters and a
   sequence classification head exactly, which is checked against numerical gradients and against
   PEFT in Python. It suits hundreds of examples. For tens of thousands, train with PEFT in Python
@@ -224,7 +227,7 @@ See [docs/HFAppGen.md](docs/HFAppGen.md).
 ```
 src/            one class library per Gravi* project
 samples/        a Gravi*.Console app per library, plus HFGallery — fifteen use cases in an Avalonia window
-tests/          Gravi*.Tests — 414 tests, no network required
+tests/          Gravi*.Tests — 440 tests, no network required
 benchmarks/     HFNet.Benchmarks (BenchmarkDotNet, every library) and comparison/ (against Python)
 notebooks/      .NET Interactive notebooks: 01 getting started, 02 performance, 03 GPT-2 and CLIP,
                 04 LoRA and prefix tuning, 05 Stable Diffusion

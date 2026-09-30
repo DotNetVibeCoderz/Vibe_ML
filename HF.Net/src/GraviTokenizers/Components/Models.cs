@@ -121,6 +121,9 @@ public sealed class BpeModel : ITokenizerModel
     private readonly string? _unknownToken;
     private readonly string _continuingPrefix;
     private readonly string _endOfWordSuffix;
+    private readonly bool _byteFallback;
+    private readonly bool _fuseUnknown;
+    private readonly bool _ignoreMerges;
 
     /// <summary>Creates a BPE model.</summary>
     /// <param name="vocabulary">Piece to id.</param>
@@ -128,18 +131,30 @@ public sealed class BpeModel : ITokenizerModel
     /// <param name="unknownToken">The piece for unrepresentable input, or null to drop it.</param>
     /// <param name="continuingPrefix">A marker for non-initial pieces, usually empty.</param>
     /// <param name="endOfWordSuffix">A marker for the final piece of a word, usually empty.</param>
+    /// <param name="byteFallback">
+    /// Whether a character missing from the vocabulary becomes its UTF-8 bytes as <c>&lt;0xXX&gt;</c>
+    /// pieces rather than the unknown token - SentencePiece's byte fallback, which Llama 2 and Mistral use.
+    /// </param>
+    /// <param name="fuseUnknown">Whether consecutive unknown characters become one unknown piece.</param>
+    /// <param name="ignoreMerges">Whether a word already in the vocabulary is returned whole, unmerged - Llama 3's setting.</param>
     public BpeModel(
         IReadOnlyDictionary<string, int> vocabulary,
         IReadOnlyList<(string Left, string Right)> merges,
         string? unknownToken = null,
         string continuingPrefix = "",
-        string endOfWordSuffix = "")
+        string endOfWordSuffix = "",
+        bool byteFallback = false,
+        bool fuseUnknown = false,
+        bool ignoreMerges = false)
     {
         _vocabulary = new Dictionary<string, int>(vocabulary, StringComparer.Ordinal);
         _byId = WordPieceModel.BuildReverse(vocabulary);
         _unknownToken = unknownToken;
         _continuingPrefix = continuingPrefix;
         _endOfWordSuffix = endOfWordSuffix;
+        _byteFallback = byteFallback;
+        _fuseUnknown = fuseUnknown;
+        _ignoreMerges = ignoreMerges;
 
         _ranks = new Dictionary<(string, string), int>(merges.Count);
         for (var i = 0; i < merges.Count; i++) _ranks.TryAdd(merges[i], i);
@@ -159,28 +174,58 @@ public sealed class BpeModel : ITokenizerModel
     public string TokenOf(int id) => id >= 0 && id < _byId.Length ? _byId[id] : "";
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Words are cached, because real text repeats them. A long "word" - the whole input, when a
+    /// tokenizer has no pre-tokenizer, as Llama 2's does not - is not: every distinct text would
+    /// stay in the cache for the life of the tokenizer.
+    /// </remarks>
     public IReadOnlyList<string> Tokenize(string word)
-        => _cache.GetOrAdd(word, static (key, self) => self.Merge(key), this);
+        => word.Length <= 64 ? _cache.GetOrAdd(word, static (key, self) => self.Merge(key), this) : Merge(word);
 
     private string[] Merge(string word)
     {
         if (word.Length == 0) return [];
+        if (_ignoreMerges && _vocabulary.ContainsKey(word)) return [word];
 
-        // Start from characters, honouring the two optional markers a trained model may carry.
-        var symbols = new List<string>(word.Length);
-        var elements = System.Globalization.StringInfo.GetTextElementEnumerator(word);
-        while (elements.MoveNext()) symbols.Add((string)elements.Current);
+        // Start from characters - Unicode scalar values, as the reference does, not grapheme
+        // clusters: an accent written as a combining mark is its own symbol there.
+        var runes = word.EnumerateRunes().Select(r => r.ToString()).ToList();
+        var symbols = new List<string>(runes.Count);
+        var lastUnknown = false;
 
-        if (symbols.Count == 0) return [];
-
-        if (_continuingPrefix.Length > 0)
+        for (var i = 0; i < runes.Count; i++)
         {
-            for (var i = 1; i < symbols.Count; i++) symbols[i] = _continuingPrefix + symbols[i];
-        }
+            var symbol = runes[i];
+            if (i > 0 && _continuingPrefix.Length > 0) symbol = _continuingPrefix + symbol;
+            if (i == runes.Count - 1 && _endOfWordSuffix.Length > 0) symbol += _endOfWordSuffix;
 
-        if (_endOfWordSuffix.Length > 0)
-        {
-            symbols[^1] += _endOfWordSuffix;
+            if (_vocabulary.ContainsKey(symbol) || (_unknownToken is null && !_byteFallback))
+            {
+                symbols.Add(symbol);
+                lastUnknown = false;
+                continue;
+            }
+
+            if (_byteFallback)
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(runes[i]);
+                var pieces = bytes.Select(b => $"<0x{b:X2}>").ToArray();
+                if (pieces.All(_vocabulary.ContainsKey))
+                {
+                    symbols.AddRange(pieces);
+                    lastUnknown = false;
+                    continue;
+                }
+            }
+
+            if (_unknownToken is null)
+            {
+                symbols.Add(symbol);
+                continue;
+            }
+
+            if (!(_fuseUnknown && lastUnknown)) symbols.Add(_unknownToken);
+            lastUnknown = true;
         }
 
         while (symbols.Count > 1)
@@ -201,14 +246,6 @@ public sealed class BpeModel : ITokenizerModel
 
             symbols[bestIndex] += symbols[bestIndex + 1];
             symbols.RemoveAt(bestIndex + 1);
-        }
-
-        if (_unknownToken is not null)
-        {
-            for (var i = 0; i < symbols.Count; i++)
-            {
-                if (!_vocabulary.ContainsKey(symbols[i])) symbols[i] = _unknownToken;
-            }
         }
 
         return [.. symbols];
@@ -335,8 +372,14 @@ public sealed class UnigramModel(IReadOnlyList<(string Piece, double LogProbabil
 /// <summary>A special token the tokenizer inserts or recognises verbatim.</summary>
 /// <param name="Id">Its vocabulary id.</param>
 /// <param name="Content">Its literal text.</param>
-/// <param name="Special">Whether it is marked special, and so masked out of model attention targets.</param>
-public readonly record struct AddedToken(int Id, string Content, bool Special)
+/// <param name="Special">Whether it is marked special: masked out of model attention targets, and dropped when decoding skips special tokens.</param>
+/// <param name="Normalized">
+/// Whether it is matched in the normalized text rather than the raw input - so its own normalized
+/// form is what is looked for. Llama 2's <c>&lt;s&gt;</c> is, and there the space before it becomes part of it.
+/// </param>
+/// <param name="LStrip">Whether whitespace to its left is absorbed into it.</param>
+/// <param name="RStrip">Whether whitespace to its right is absorbed into it.</param>
+public readonly record struct AddedToken(int Id, string Content, bool Special, bool Normalized = false, bool LStrip = false, bool RStrip = false)
 {
     /// <inheritdoc />
     public override string ToString() => $"{Content} (#{Id})";
