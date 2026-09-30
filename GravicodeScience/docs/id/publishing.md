@@ -43,7 +43,7 @@ git tag gravicode-science-v1.0.0
 git push origin gravicode-science-v1.0.0
 ```
 
-Tag-nya diberi awalan karena `v1.0.0` polos akan ambigu di sebuah monorepo. `release.yml`
+Tag-nya diberi awalan karena `v1.0.0` polos akan ambigu di sebuah monorepo. `gravicode-science-release.yml`
 menangkapnya, memeriksa bahwa ia terbaca sebagai versi semantik, mem-build, **menjalankan seluruh
 rangkaian tes**, memaketkan pada versi itu, lalu mendorongnya ke nuget.org.
 

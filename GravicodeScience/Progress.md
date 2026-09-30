@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v1.0.0 · **Target framework**: .NET 10 · **Tests**: 1,059 passing, 0 failing
+**Release**: v1.1.0 · **Target framework**: .NET 10 · **Tests**: 1,059 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 

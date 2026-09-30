@@ -42,7 +42,7 @@ git tag gravicode-science-v1.0.0
 git push origin gravicode-science-v1.0.0
 ```
 
-The tag is prefixed because a bare `v1.0.0` would be ambiguous in a monorepo. `release.yml` picks
+The tag is prefixed because a bare `v1.0.0` would be ambiguous in a monorepo. `gravicode-science-release.yml` picks
 it up, checks it parses as a semantic version, builds, **runs the whole test suite**, packs at
 that version and pushes to nuget.org.
 
