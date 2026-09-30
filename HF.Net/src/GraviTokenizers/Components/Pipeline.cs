@@ -86,6 +86,125 @@ public sealed record StripNormalizer(bool Left = true, bool Right = true) : INor
     }
 }
 
+/// <summary>
+/// SentencePiece's precompiled normalizer: the <c>precompiled_charsmap</c> a <c>Precompiled</c>
+/// entry in <c>tokenizer.json</c> carries, read as the lookup table it is.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The map is SentencePiece's NFKC-with-extras, compiled into a double-array trie from input bytes
+/// to normalized strings. Reading it directly gives exactly the normalization the model was trained
+/// with, on every platform: .NET's own <c>string.Normalize</c> is a no-op under invariant
+/// globalization, which this stack builds with, and skipping the step turned characters such as
+/// <c>™</c> into unknown tokens on XLM-RoBERTa and T5.
+/// </para>
+/// <para>
+/// The layout is darts-clone's, as SentencePiece writes it and the Rust <c>tokenizers</c> crate reads
+/// it: a little-endian <c>uint32</c> byte count, that many bytes of trie units, then the
+/// NUL-separated replacement strings. Each grapheme shorter than six bytes is looked up whole; a
+/// longer one, or one with no entry, character by character.
+/// </para>
+/// </remarks>
+public sealed class PrecompiledNormalizer : INormalizer
+{
+    private readonly uint[] _trie;
+    private readonly byte[] _normalized;
+
+    /// <summary>Reads a base64 <c>precompiled_charsmap</c>.</summary>
+    public PrecompiledNormalizer(string base64CharsMap)
+    {
+        var bytes = Convert.FromBase64String(base64CharsMap);
+        if (bytes.Length < 4) throw new InvalidDataException("The precompiled_charsmap is too short to hold a trie.");
+
+        var trieBytes = (int)BitConverter.ToUInt32(bytes, 0);
+        if (trieBytes < 0 || 4 + trieBytes > bytes.Length || trieBytes % 4 != 0)
+        {
+            throw new InvalidDataException("The precompiled_charsmap declares a trie larger than itself.");
+        }
+
+        _trie = new uint[trieBytes / 4];
+        Buffer.BlockCopy(bytes, 4, _trie, 0, trieBytes);
+        _normalized = bytes[(4 + trieBytes)..];
+    }
+
+    /// <inheritdoc />
+    public string Normalize(string text)
+    {
+        if (text.Length == 0 || _trie.Length == 0) return text;
+
+        var result = new System.Text.StringBuilder(text.Length);
+        var elements = System.Globalization.StringInfo.GetTextElementEnumerator(text);
+
+        while (elements.MoveNext())
+        {
+            var grapheme = (string)elements.Current;
+
+            if (System.Text.Encoding.UTF8.GetByteCount(grapheme) < 6 && Transform(grapheme) is { } whole)
+            {
+                result.Append(whole);
+                continue;
+            }
+
+            foreach (var rune in grapheme.EnumerateRunes())
+            {
+                var part = rune.ToString();
+                result.Append(Transform(part) ?? part);
+            }
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>The replacement for <paramref name="chunk"/>, from its shortest prefix in the trie.</summary>
+    private string? Transform(string chunk)
+    {
+        var key = System.Text.Encoding.UTF8.GetBytes(chunk);
+
+        // darts-clone common prefix search; the first hit is the one the reference uses.
+        uint position = 0;
+        var unit = _trie[position];
+        position ^= Offset(unit);
+
+        foreach (var c in key)
+        {
+            if (c == 0) break;
+
+            position ^= c;
+            if (position >= _trie.Length) return null;
+
+            unit = _trie[position];
+            if (Label(unit) != c) return null;
+
+            position ^= Offset(unit);
+            if (HasLeaf(unit))
+            {
+                if (position >= _trie.Length) return null;
+                var index = (int)Value(_trie[position]);
+                return ReadString(index);
+            }
+        }
+
+        return null;
+    }
+
+    private string ReadString(int index)
+    {
+        if (index < 0 || index >= _normalized.Length) return "";
+
+        var end = index;
+        while (end < _normalized.Length && _normalized[end] != 0) end++;
+        return System.Text.Encoding.UTF8.GetString(_normalized, index, end - index);
+    }
+
+    private static bool HasLeaf(uint unit) => ((unit >> 8) & 1) == 1;
+
+    private static uint Value(uint unit) => unit & ((1u << 31) - 1);
+
+    private static uint Label(uint unit) => unit & ((1u << 31) | 0xFF);
+
+    private static uint Offset(uint unit) => (unit >> 10) << (int)((unit & (1u << 9)) >> 6);
+}
+
 /// <summary>Replaces every occurrence of a pattern.</summary>
 /// <param name="Pattern">The text or regular expression to look for.</param>
 /// <param name="Replacement">What to put in its place.</param>
@@ -250,10 +369,15 @@ public sealed class BertPreTokenizer : IPreTokenizer
                 if (start >= 0) tokens.Add(new PreToken(text[start..i], start, i));
                 start = -1;
             }
-            else if (IsPunctuation(character))
+            else if (IsPunctuation(character) || IsCjk(text, i, out _))
             {
+                // Punctuation and CJK ideographs are pieces of their own. BERT's
+                // handle_chinese_chars does this for CJK: without it a run of ideographs is one
+                // "word", longer than any vocabulary entry, and the whole run becomes [UNK].
+                var width = IsCjk(text, i, out var length) ? length : 1;
                 if (start >= 0) tokens.Add(new PreToken(text[start..i], start, i));
-                tokens.Add(new PreToken(text[i].ToString(), i, i + 1));
+                tokens.Add(new PreToken(text.Substring(i, width), i, i + width));
+                i += width - 1;
                 start = -1;
             }
             else if (start < 0)
@@ -264,6 +388,30 @@ public sealed class BertPreTokenizer : IPreTokenizer
 
         if (start >= 0) tokens.Add(new PreToken(text[start..], start, text.Length));
         return tokens;
+    }
+
+    /// <summary>
+    /// Whether a CJK ideograph starts at <paramref name="index"/>, and how many UTF-16 units it takes.
+    /// </summary>
+    /// <remarks>
+    /// The ranges are Transformers' <c>_is_chinese_char</c>: the CJK Unified Ideographs and their
+    /// extensions, and the compatibility ideographs. Hiragana, katakana and Hangul are not in them,
+    /// and the reference does not isolate them either.
+    /// </remarks>
+    internal static bool IsCjk(string text, int index, out int length)
+    {
+        length = 1;
+        int code = text[index];
+
+        if (char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+        {
+            code = char.ConvertToUtf32(text[index], text[index + 1]);
+            length = 2;
+        }
+
+        return code is (>= 0x4E00 and <= 0x9FFF) or (>= 0x3400 and <= 0x4DBF) or (>= 0x20000 and <= 0x2A6DF)
+            or (>= 0x2A700 and <= 0x2B73F) or (>= 0x2B740 and <= 0x2B81F) or (>= 0x2B820 and <= 0x2CEAF)
+            or (>= 0xF900 and <= 0xFAFF) or (>= 0x2F800 and <= 0x2FA1F);
     }
 
     /// <summary>
@@ -310,12 +458,40 @@ public sealed class PunctuationPreTokenizer : IPreTokenizer
     }
 }
 
+/// <summary>What a split does with the text its pattern marks as a delimiter.</summary>
+/// <remarks>The five behaviours of the Rust <c>tokenizers</c> crate, by the same names.</remarks>
+public enum SplitBehavior
+{
+    /// <summary>Delimiters are dropped.</summary>
+    Removed,
+
+    /// <summary>Each delimiter becomes a piece of its own.</summary>
+    Isolated,
+
+    /// <summary>Each delimiter is appended to the piece before it.</summary>
+    MergedWithPrevious,
+
+    /// <summary>Each delimiter is prepended to the piece after it.</summary>
+    MergedWithNext,
+
+    /// <summary>Runs of consecutive delimiters become one piece.</summary>
+    Contiguous,
+}
+
 /// <summary>Splits on a regular expression.</summary>
 /// <param name="Pattern">The expression.</param>
 /// <param name="Invert">
-/// When false the matches are the delimiters; when true the matches are the pieces to keep.
+/// When false the matches are the delimiters; when true everything <i>between</i> matches is, so
+/// with <see cref="SplitBehavior.Removed"/> the matches are the pieces kept.
 /// </param>
-public sealed partial record SplitPreTokenizer(string Pattern, bool Invert = false) : IPreTokenizer
+/// <param name="Behavior">What becomes of the delimiters.</param>
+/// <remarks>
+/// <c>invert</c> and <c>behavior</c> are independent in <c>tokenizer.json</c>, and reading only one
+/// of them is a quiet disaster: CLIP's pre-tokenizer is <c>Removed</c> with <c>invert: true</c> -
+/// keep the words - and reading it as <c>Removed</c> alone drops every word and keeps the spaces.
+/// </remarks>
+public sealed partial record SplitPreTokenizer(string Pattern, bool Invert = false, SplitBehavior Behavior = SplitBehavior.Removed)
+    : IPreTokenizer
 {
     private Regex? _compiled;
 
@@ -323,29 +499,79 @@ public sealed partial record SplitPreTokenizer(string Pattern, bool Invert = fal
     public IReadOnlyList<PreToken> Split(string text)
     {
         _compiled ??= new Regex(Pattern, RegexOptions.Compiled);
-        var tokens = new List<PreToken>();
 
-        if (Invert)
-        {
-            foreach (Match match in _compiled.Matches(text))
-            {
-                if (match.Length > 0) tokens.Add(new PreToken(match.Value, match.Index, match.Index + match.Length));
-            }
-            return tokens;
-        }
-
+        // The text as alternating spans, each marked delimiter or not.
+        var spans = new List<(int Start, int End, bool Delimiter)>();
         var cursor = 0;
         foreach (Match match in _compiled.Matches(text))
         {
-            if (match.Index > cursor)
-            {
-                tokens.Add(new PreToken(text[cursor..match.Index], cursor, match.Index));
-            }
+            if (match.Length == 0) continue;
+            if (match.Index > cursor) spans.Add((cursor, match.Index, Invert));
+            spans.Add((match.Index, match.Index + match.Length, !Invert));
             cursor = match.Index + match.Length;
         }
 
-        if (cursor < text.Length) tokens.Add(new PreToken(text[cursor..], cursor, text.Length));
-        return tokens;
+        if (cursor < text.Length) spans.Add((cursor, text.Length, Invert));
+
+        // Each behaviour below is the Rust tokenizers crate's fold, including its rule that a
+        // delimiter only merges when the span before it (or after it) was not a delimiter too:
+        // "the-final--countdown" split on "-" merged with the previous piece is
+        // ["the-", "final-", "-", "countdown"], not ["the-", "final--", "countdown"].
+        var pieces = new List<(int Start, int End)>();
+
+        switch (Behavior)
+        {
+            case SplitBehavior.Removed:
+                pieces.AddRange(spans.Where(s => !s.Delimiter).Select(s => (s.Start, s.End)));
+                break;
+
+            case SplitBehavior.Isolated:
+                pieces.AddRange(spans.Select(s => (s.Start, s.End)));
+                break;
+
+            case SplitBehavior.Contiguous:
+            {
+                var previousDelimiter = false;
+                foreach (var (start, end, delimiter) in spans)
+                {
+                    if (delimiter && previousDelimiter) pieces[^1] = (pieces[^1].Start, end);
+                    else pieces.Add((start, end));
+                    previousDelimiter = delimiter;
+                }
+
+                break;
+            }
+
+            case SplitBehavior.MergedWithPrevious:
+            {
+                var previousDelimiter = false;
+                foreach (var (start, end, delimiter) in spans)
+                {
+                    if (delimiter && !previousDelimiter && pieces.Count > 0) pieces[^1] = (pieces[^1].Start, end);
+                    else pieces.Add((start, end));
+                    previousDelimiter = delimiter;
+                }
+
+                break;
+            }
+
+            case SplitBehavior.MergedWithNext:
+            {
+                var previousDelimiter = false;
+                for (var i = spans.Count - 1; i >= 0; i--)
+                {
+                    var (start, end, delimiter) = spans[i];
+                    if (delimiter && !previousDelimiter && pieces.Count > 0) pieces[^1] = (start, pieces[^1].End);
+                    else pieces.Add((start, end));
+                    previousDelimiter = delimiter;
+                }
+
+                pieces.Reverse();
+                break;
+            }
+        }
+
+        return [.. pieces.Select(p => new PreToken(text[p.Start..p.End], p.Start, p.End))];
     }
 }
 

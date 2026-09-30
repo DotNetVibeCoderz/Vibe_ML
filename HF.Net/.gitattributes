@@ -2,3 +2,6 @@
 *.png binary
 *.parquet binary
 *.ipynb text eol=lf
+# Test fixtures are reference data: tokenizer files and model configs must reach every checkout byte for
+# byte, or a merges.txt with CRLF line endings changes what the tokenizer under test reads.
+tests/**/Fixtures/** -text

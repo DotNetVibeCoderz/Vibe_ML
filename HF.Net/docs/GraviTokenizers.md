@@ -46,6 +46,35 @@ HfTokenizer.FromGpt2Files("vocab.json", "merges.txt");
 
 A loader that only understands the first cannot open a large share of the older and smaller models.
 
+## Checked against the reference
+
+```csharp
+HfTokenizer.FromClipFiles("vocab.json", "merges.txt");   // CLIP: Stable Diffusion's and CLIP's text encoders
+HfTokenizer.FromDirectory("tokenizer/");                 // any of the layouts, from disk
+tokenizer.WithPadToken("!");                             // the model's own pad token (SD 2.x uses "!")
+```
+
+Checked against Python's `tokenizers` on the BERT, GPT-2, CLIP and XLM-R tokenizers, over texts with
+accents, CJK, emoji, code and runs of whitespace and punctuation: 11 of 56 cases differed, and now
+none do. The CLIP, `Split` and `Precompiled` cases are pinned in the test suite. Six differences were
+fixed, each of which produced plausible ids:
+
+- **`Split` with `invert` and `behavior`.** CLIP's pre-tokenizer keeps the regex *matches*, not the
+  gaps between them, and `MergedWithPrevious`/`MergedWithNext` fold the pieces the way the Rust crate
+  does.
+- **Normalizer before the byte-level mapping**, not after: lower-casing `Ġ`-mapped text changes nothing.
+- **A `model` with no `type`** is inferred - `merges` means BPE, an array `vocab` Unigram - instead of
+  assumed to be WordPiece, which broke GPT-2 and crashed on XLM-R.
+- **CJK ideographs** become one token each in BERT's pre-tokenizer.
+- **SentencePiece's `Precompiled` normalizer** runs its double-array trie over the `precompiled_charsmap`,
+  grapheme by grapheme as the Rust crate does. It had been skipped, and XLM-R's full-width and
+  compatibility characters tokenized differently.
+- **Unigram** fuses consecutive unknown pieces into one `<unk>`.
+
+Loading a CLIP vocabulary as GPT-2's is the mistake that matters most in practice: the ids look
+reasonable and every Stable Diffusion prompt is encoded wrongly. `FromPretrained` recognises CLIP by
+`tokenizer_class` or by its `<|startoftext|>` token.
+
 ## Encoding
 
 ```csharp
@@ -191,7 +220,8 @@ its input unchanged. Accent stripping therefore goes through an explicit folding
 decomposition-based implementation would look correct, compile, and quietly do nothing. `NFC`,
 `NFD`, `NFKC` and `NFKD` entries in a `tokenizer.json` are accepted and ignored for the same reason,
 which is the honest behaviour: pretending to normalize would be worse, and refusing to load would
-reject most real tokenizers.
+reject most real tokenizers. SentencePiece's `Precompiled` normalizer is different: it carries its own
+table, and that table is applied exactly.
 
 ## See also
 

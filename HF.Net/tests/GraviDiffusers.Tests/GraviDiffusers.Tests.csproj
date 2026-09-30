@@ -13,6 +13,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Tiny ONNX Stable Diffusion exports and diffusers' images for them; see Fixtures/make_fixtures.py. -->
+    <None Include="Fixtures\**" Exclude="Fixtures\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\GraviDiffusers\GraviDiffusers.csproj" />
   </ItemGroup>
 

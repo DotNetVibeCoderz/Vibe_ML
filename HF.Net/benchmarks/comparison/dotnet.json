@@ -3,11 +3,11 @@
   "platform": "Microsoft Windows 10.0.26200",
   "processor": "8 logical cores",
   "configuration": "Release",
-  "tokenizer_single_ms": 0.0089,
-  "tokenizer_single_median_ms": 0.0099,
-  "tokenizer_batch_1000_ms": 6.2075,
-  "tokenizer_batch_1000_median_ms": 8.4276,
-  "tokenizer_docs_per_second": 161095.44905356425,
+  "tokenizer_single_ms": 0.0118,
+  "tokenizer_single_median_ms": 0.013,
+  "tokenizer_batch_1000_ms": 9.6012,
+  "tokenizer_batch_1000_median_ms": 11.8839,
+  "tokenizer_docs_per_second": 104153.64746073406,
   "tokenizer_reference_ids": [
     101,
     7592,
@@ -36,18 +36,24 @@
     ".",
     "[SEP]"
   ],
-  "safetensors_header_ms": 0.4753,
-  "safetensors_one_tensor_ms": 184.8506,
+  "safetensors_header_ms": 0.7102,
+  "safetensors_one_tensor_ms": 185.1788,
   "safetensors_tensor_count": 206,
   "safetensors_file_mb": 420.0456314086914,
-  "inference_base_single_ms": 48.0552,
-  "inference_base_single_median_ms": 55.871,
-  "inference_base_batch8_ms": 386.3261,
+  "inference_base_single_ms": 59.4896,
+  "inference_base_single_median_ms": 68.2228,
+  "inference_base_batch8_ms": 427.732,
   "inference_base_tokens": 12,
-  "inference_tiny_single_ms": 0.8299,
-  "inference_tiny_single_median_ms": 1.0692,
-  "inference_tiny_batch8_ms": 2.6991,
+  "inference_base_single_f32_ms": 45.0006,
+  "inference_base_batch8_f32_ms": 286.6714,
+  "inference_base_f32_max_abs_change": 9.923628765839965E-06,
+  "inference_tiny_single_ms": 1.0524,
+  "inference_tiny_single_median_ms": 1.4038,
+  "inference_tiny_batch8_ms": 3.4605,
   "inference_tiny_tokens": 12,
+  "inference_tiny_single_f32_ms": 1.3682,
+  "inference_tiny_batch8_f32_ms": 3.7258,
+  "inference_tiny_f32_max_abs_change": 2.365309762941692E-06,
   "fillmask_france": [
     {
       "token": "paris",
@@ -92,8 +98,9 @@
       "score": 0.013642564889810341
     }
   ],
-  "vision_single_ms": 947.8515,
-  "vision_single_median_ms": 1006.9181,
+  "vision_single_ms": 912.65,
+  "vision_single_median_ms": 985.51,
+  "vision_single_f32_ms": 682.2424,
   "vision_top5": [
     {
       "label": "binder, ring-binder",
@@ -122,7 +129,7 @@
     }
   ],
   "onnx_provider": "Cpu",
-  "onnx_base_single_ms": 31.4687,
-  "onnx_base_single_median_ms": 35.4158,
+  "onnx_base_single_ms": 28.921,
+  "onnx_base_single_median_ms": 31.974,
   "onnx_base_max_abs_error": 4.691827061975573E-06
 }

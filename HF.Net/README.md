@@ -32,13 +32,13 @@ Each mirrors a package in the Python Hugging Face stack.
 | Library | Mirrors | What it does |
 |---|---|---|
 | **GraviHub** | `huggingface_hub` | Hub download and upload, a readable local cache, and readers for the formats the Hub serves: **safetensors** and **`pytorch_model.bin`** |
-| **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE and Unigram, loading `tokenizer.json` — with character offsets that point back into the original text |
+| **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE, Unigram and CLIP, loading `tokenizer.json` — with character offsets that point back into the original text |
 | **GraviDatasets** | `datasets` | CSV, Parquet, JSON and JSON Lines, Hub datasets, splits, streaming and memory-mapped reads |
-| **GraviTransformers** | `transformers` | Load pretrained BERT-family encoders and ViT vision encoders and run them: classification, fill-mask, named entities, question answering, embeddings, similarity, image classification |
-| **GraviPEFT** | `peft` | LoRA adapters in the Hugging Face PEFT format — train, apply, merge, save, load |
+| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders, GPT-2, ViT and CLIP: classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification — and streaming for models larger than memory |
+| **GraviPEFT** | `peft` | LoRA and prefix tuning in the Hugging Face PEFT format — train, apply, merge, save, load |
 | **GraviAccelerate** | `accelerate` | Device selection across CPU SIMD and ILGPU, sharding, weighted gradient averaging, honest throughput measurement |
 | **GraviOptimum** | `optimum` | ONNX Runtime inference with an explicitly chosen execution provider, and weight quantisation that reports its measured error |
-| **GraviDiffusers** | `diffusers` | DDPM, DDIM and Euler schedulers, and a Stable Diffusion text-to-image pipeline over ONNX |
+| **GraviDiffusers** | `diffusers` | DDPM, DDIM and Euler schedulers, and Stable Diffusion over ONNX — text to image, image to image, inpainting, LoRA — reproducing diffusers' own pipelines |
 
 ```
 Gravicode.Science ──► GraviHub ──┬──► GraviTokenizers ──┐
@@ -91,13 +91,21 @@ against an allow-list of tensor constructors, so nothing in the file is executed
 `distilbert-base-uncased-finetuned-sst-2-english` (classification: 99.99% POSITIVE on
 *"I absolutely loved this film."*) and `prajjwal1/bert-tiny` (a pickle-only checkpoint).
 
-**Sees, as well as reads.** `google/vit-base-patch16-224` on the Hub's own sample photograph answers
-**bee 94.46%**, against torch's 94.38%; on the canonical two-cats image, **Egyptian cat 93.81%**
-against 93.74%. Same ranking, five for five, within 0.08 of a percentage point.
-A Vision Transformer is the same encoder block over a different embedding, so it lives in
-GraviTransformers rather than a library of its own; the preprocessing numbers come from the
-repository's `preprocessor_config.json` rather than from a default, because a model fed inputs
-normalised the wrong way still answers, and answers confidently.
+**Sees, as well as reads.** `google/vit-base-patch16-224` on the canonical two-cats image answers
+**Egyptian cat 0.937441702420** - torch's probability, to all twelve digits. The image is resized with
+PIL's own algorithm, reproduced to the byte, because that is what the model was trained on.
+`openai/clip-vit-base-patch32` classifies among labels it has never seen - *a bee 76.7%, a flower
+21.0%* - with logits within 8e-14 of torch's.
+
+**Writes.** `gpt2` continues *"The lighthouse keeper opened the door and"* with exactly the words
+transformers' `generate` produces, through a key/value cache, at about 22 tokens a second on a laptop
+CPU.
+
+**Draws.** Stable Diffusion 1.5 from its ONNX export, with the same seed and settings as diffusers'
+own pipeline, gives the same picture - to the pixel on float32 exports, to 55 dB on float16 ones -
+and image to image, inpainting, prompt emphasis and LoRA work the same way.
+
+![A red lighthouse, drawn by HF.Net](docs/screenshots/diffusion-lighthouse.png)
 
 **Answers with spans of your text, not with new text.** `dslim/bert-base-NER` on
 *"Kang Fadhil founded Gravicode Studios in Bandung"* returns `PER Kang Fadhil` (98.8%),
@@ -110,15 +118,17 @@ difference applied per position.
 
 Stated plainly, because a library that fails quietly is worse than one that says no:
 
-- **Decoder-only models** — GPT, Llama, Mistral — are **refused**, not half-loaded. They need causal
-  masking and rotary positions this encoder does not have.
+- **Rotary-position decoders** — Llama, Mistral, GPT-NeoX — are **refused**, not half-loaded. GPT-2
+  and its family run; those have a different block. Export them to ONNX and use GraviOptimum.
 - **LoRA training runs on the CPU, bound by the linear kernel.** `PeftModel.Train` fits adapters and a
   sequence classification head exactly, which is checked against numerical gradients and against
   PEFT in Python. It suits hundreds of examples. For tens of thousands, train with PEFT in Python
-  and serve the adapter here. Sequence classification, token classification and extractive question answering heads train.
-- **CLIP is not implemented.** Its text tower is causal, which this encoder is not. ViT and DeiT
-  are; a windowed or convolutional backbone — Swin, ConvNeXt — is refused by name.
-- **Diffusion needs an ONNX export**, not the PyTorch weights.
+  and serve the adapter here. Sequence classification, token classification and extractive question answering heads train;
+  prefix tuning trains sequence classification.
+- **Windowed and convolutional vision backbones** — Swin, ConvNeXt — are refused by name. ViT, DeiT
+  and CLIP run.
+- **Diffusion needs an ONNX export**, not the PyTorch weights, and exports built from ONNX Runtime's
+  fused GPU kernels (`onnxruntime/sd-turbo`) need CUDA.
 - **Uploads are capped at 10 MB.** Real weights need Git LFS, which GraviHub does not implement.
 
 ## How it compares to Python
@@ -128,22 +138,23 @@ method and caveats in **[docs/benchmarks.md](docs/benchmarks.md)**.
 
 | | Python | HF.Net | |
 |---|---:|---:|---|
-| Tokenize 1,000 documents | 14.0 ms | **6.2 ms** | **2.25x faster** |
-| Open a 420 MB checkpoint, list 206 tensors | 0.48 ms | 0.48 ms | level |
-| Read one 30,522 × 768 tensor | 0.48 ms | 185 ms | 384x slower |
-| bert-base forward pass, 1 document | 37.6 ms | 48.1 ms | 1.28x slower |
-| ViT-base forward pass, 1 image | 214 ms | 948 ms | 4.4x slower |
-| **bert-base through ONNX Runtime, from .NET** | 37.6 ms | **31.5 ms** | **1.19x faster** |
+| Tokenize 1,000 documents | 20.6 ms | **9.6 ms** | **2.15x faster** |
+| Open a 420 MB checkpoint, list 206 tensors | 0.70 ms | 0.71 ms | level |
+| Read one 30,522 × 768 tensor | 0.74 ms | 185 ms | 251x slower |
+| bert-base forward pass, 1 document | 50.1 ms | 59.5 ms | 1.19x slower |
+| bert-base, float32 linear layers | 50.1 ms | **45.0 ms** | **1.11x faster** |
+| ViT-base forward pass, 1 image | 345 ms | 913 ms | 2.65x slower |
+| **bert-base through ONNX Runtime, from .NET** | 50.1 ms | **28.9 ms** | **1.73x faster** |
 
 **Tokenization is faster than the Rust `tokenizers` crate, and the ids are identical.** Reading a
 tensor is slower because every value is widened to `double` — paid once at load time. Managed
-inference is slower than torch, and it exists so a model can be **loaded, inspected and
-understood** in pure .NET. When you need throughput, export to ONNX and run it through
+inference is slower than torch in double precision and level with it in float32, and it exists so a
+model can be **loaded, inspected and understood** in pure .NET. When you need throughput, export to ONNX and run it through
 `GraviOptimum`, which is faster than torch.
 
 **And they agree — to the last digit that means anything.** Against torch in float64, on the same
 inputs, `bert-base-uncased`'s hidden states agree to about 1e-13 and ViT's top-five probabilities to
-1.3e-15:
+5.7e-16:
 
 ```
 The capital of France is [MASK].
@@ -156,7 +167,7 @@ The capital of France is [MASK].
 
 ## HF Gallery
 
-`samples/HFGallery` is a desktop application that runs ten HF.Net use cases against real models and
+`samples/HFGallery` is a desktop application that runs fifteen HF.Net use cases against real models and
 shows the answer next to the code that produced it. Nothing in it is mocked.
 
 ![HF Gallery — image classification](docs/screenshots/hfgallery-image.png)
@@ -212,10 +223,11 @@ See [docs/HFAppGen.md](docs/HFAppGen.md).
 
 ```
 src/            one class library per Gravi* project
-samples/        Gravi*.Console apps, plus HFGallery — nine use cases in an Avalonia window
-tests/          Gravi*.Tests — 191 tests, no network required
-benchmarks/     comparison/ — HF.Net measured against the Python reference
-notebooks/      .NET Interactive notebooks (01 getting started, 02 performance)
+samples/        a Gravi*.Console app per library, plus HFGallery — fifteen use cases in an Avalonia window
+tests/          Gravi*.Tests — 414 tests, no network required
+benchmarks/     HFNet.Benchmarks (BenchmarkDotNet, every library) and comparison/ (against Python)
+notebooks/      .NET Interactive notebooks: 01 getting started, 02 performance, 03 GPT-2 and CLIP,
+                04 LoRA and prefix tuning, 05 Stable Diffusion
 datasets/       titanic.csv, iris.csv, imdb_reviews.csv, finance_timeseries.csv
 docs/           one page per library, plus id/ mirroring every page
 tools/HFAppGen/ the Avalonia app generator

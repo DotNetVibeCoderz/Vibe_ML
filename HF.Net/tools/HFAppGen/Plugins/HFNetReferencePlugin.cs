@@ -174,7 +174,7 @@ public sealed class HFNetReferencePlugin
             """,
 
         ["GraviTransformers"] = """
-            GraviTransformers - run pretrained Hugging Face encoders.
+            GraviTransformers - pretrained Hugging Face encoders, GPT-2, ViT and CLIP.
             using Gravicode.HFNet.GraviTransformers;
 
             TransformerModel (dispose it - it holds the weight files open)
@@ -210,11 +210,31 @@ public sealed class HFNetReferencePlugin
               Detects the name prefix, the DistilBERT block layout, and the transpose convention.
               LoadReport: .Loaded .Missing .Prefix .IsComplete
 
+            CausalLanguageModel - GPT-2 family text generation (gpt2, distilgpt2, gpt2-medium ...)
+              CausalLanguageModel.Load("gpt2")  /  CausalLanguageModel.Open(directory)
+              .Generate(prompt, new GenerationSettings(MaxNewTokens: 50))  -> continuation only
+              .Stream(prompt, settings)          -> IEnumerable<string>, text as it arrives
+              .GenerateIds(promptIds, settings)  -> IEnumerable<int>
+              .Logits(ids)                       -> [tokens * vocab] next-token scores
+              GenerationSettings(MaxNewTokens = 50, Sample = false, Temperature = 1.0, TopK = 50,
+                                 TopP = 1.0, RepetitionPenalty = 1.0, Seed = null, StopAtEndToken = true)
+              Greedy (Sample: false) matches transformers' generate token for token. A KV cache
+                makes each new token cost one row.
+
+            using Gravicode.HFNet.GraviTransformers.Vision;
+            VisionTransformer.Load("google/vit-base-patch16-224")  .Classify(path, topK) .Embed(path)
+            ClipModel - CLIP, images and text in one space
+              ClipModel.Load("openai/clip-vit-base-patch32")  /  ClipModel.Open(directory)
+              .ZeroShot(imagePath, ["a cat", "a dog"], template: "This is a photo of {0}.")
+                                                 -> Classification[] (.Label .Score), best first
+              .EmbedImage(path) .EmbedText(text) .Logits(pixels, texts) .Similarity(path, text)
+              .Processor.Read(path) -> [3, 224, 224] pixels, prepared exactly as transformers does
+
             GOTCHAS
-              Decoder-only models (GPT, Llama, Mistral) are REFUSED, not half-loaded: they need
-                causal masking and rotary positions this encoder does not have.
-              Token type embeddings are folded into the word embeddings, which is exact for a
-                single sequence and approximate for a sentence pair.
+              Llama, Mistral, GPT-NeoX and other rotary-position decoders are REFUSED: only GPT-2's
+                block is implemented. Export them to ONNX and use GraviOptimum.
+              JPEG files decode slightly differently here than in PIL (one level on some pixels);
+                PNG input gives exactly the reference's pixels.
               Inference is double precision on the CPU. For throughput, export to ONNX and use
                 GraviOptimum.
               Embed() mean-pools rather than taking [CLS]: on a model that was not fine-tuned,
@@ -357,23 +377,36 @@ public sealed class HFNetReferencePlugin
               BetaSchedule: Linear | ScaledLinear | SquaredCosine
 
             IScheduler: .SetTimesteps(steps) .Timesteps .ScaleInput(sample, i)
-                        .Step(modelOutput, i, sample) .InitialNoiseScale
-              DdimScheduler(schedule, eta: 0, seed)   deterministic at eta = 0, skips timesteps well
-              DdpmScheduler(schedule, seed)           one step per training timestep, the reference
-              EulerScheduler(schedule)                sigma parameterisation, good at 20-30 steps
+                        .Step(modelOutput, i, sample) .InitialNoiseScale .AddNoise(x0, noise, i)
+              SchedulerConfig.Load("scheduler/scheduler_config.json")   spacing, offset, prediction type
+              DdimScheduler(config, eta: 0, seed)     deterministic at eta = 0, skips timesteps well
+              DdpmScheduler(config, seed)             one step per training timestep, the reference
+              EulerScheduler(config)                  sigma parameterisation, good at 20-30 steps
+              (the older (NoiseSchedule) constructors still work but ignore the repository's config)
 
             DiffusionPipeline (dispose it)
-              DiffusionPipeline.FromPretrained(id, scheduler, target, revision, progress)
+              DiffusionPipeline.FromPretrained(id, scheduler: null, target, revision, progress,
+                                               sampler: Sampler.Ddim | Euler | Ddpm)
+              DiffusionPipeline.FromDirectory(path, scheduler: null, target, sampler)
               .Generate(prompt, new GenerationOptions(Steps: 25, GuidanceScale: 7.5,
-                                                      Width: 512, Height: 512, Seed: 42),
+                                                      Width: 512, Height: 512, Seed: 42,
+                                                      NegativePrompt: "blurry"),
                         onStep: (i, total) => ...)    -> Image<Rgb24>
-              .Scheduler (settable) .Tokenizer .RepoId .MaxPromptTokens
+              .Generate(prompt, NdArray latents, options)          start from given noise
+              .ImageToImage(prompt, Image<Rgb24> image, strength: 0.8, options)
+              .Inpaint(prompt, image, mask, options)  mask white = repaint; needs vae_encoder/
+              .LoadLora(fileOrFolderOrRepo, scale: 1.0) -> LoraReport     .UnloadLoras()
+              .PromptWeighting = true                 "(word)", "[word]", "(word:1.4)" emphasis
+              .Scheduler (settable) .SchedulerConfig .Tokenizer .RepoId .MaxPromptTokens
+              .VaeScaleFactor .UnetInputChannels .SupportsImageToImage
               DiffusionPipeline.RequiredFiles          text_encoder/ unet/ vae_decoder/ model.onnx
+              PromptWeights.Parse(prompt)             -> (Text, Weight) pieces
 
             GOTCHAS
               Needs the ONNX export of a diffusion model, not the PyTorch weights. Convert with
                 `optimum-cli export onnx --model <id> <out>`.
-              Width and height must be multiples of 8 - the latent grid is 8x smaller.
+              Width and height must be multiples of VaeScaleFactor (8 for Stable Diffusion).
+              A seed gives the same image as diffusers' ONNX pipelines in Python for the same settings.
               GuidanceScale > 1 runs the UNet TWICE per step; a scale of 1 halves the work.
               The schedule must match what the weights were trained with. Stable Diffusion is
                 ScaledLinear; plain Linear with the same endpoints gives washed-out images that
@@ -451,7 +484,7 @@ public sealed class HFNetReferencePlugin
             builder.AppendLine("  GraviHub          Hub download/upload, safetensors, pytorch_model.bin");
             builder.AppendLine("  GraviTokenizers   WordPiece, BPE, Unigram, tokenizer.json");
             builder.AppendLine("  GraviDatasets     CSV/Parquet/JSON, Hub datasets, splits, streaming");
-            builder.AppendLine("  GraviTransformers load and run pretrained BERT-family encoders");
+            builder.AppendLine("  GraviTransformers BERT-family encoders, GPT-2 generation, ViT and CLIP");
             builder.AppendLine("  GraviPEFT         LoRA adapters in the Hugging Face PEFT format");
             builder.AppendLine("  GraviAccelerate   device selection, sharding, throughput measurement");
             builder.AppendLine("  GraviOptimum      ONNX Runtime inference, quantisation");
@@ -761,8 +794,8 @@ public sealed class HFNetReferencePlugin
 
                 // Needs a repository with an ONNX layout: text_encoder/, unet/, vae_decoder/.
                 using var pipeline = DiffusionPipeline.FromPretrained(
-                    "some-user/stable-diffusion-onnx",
-                    scheduler: new EulerScheduler());
+                    "nmkd/stable-diffusion-1.5-onnx-fp16",
+                    sampler: Sampler.Euler);     // built from the repo's scheduler_config.json
 
                 using var image = pipeline.Generate(
                     "a watercolour of a mountain village at dawn",

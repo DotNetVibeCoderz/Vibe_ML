@@ -47,6 +47,35 @@ HfTokenizer.FromGpt2Files("vocab.json", "merges.txt");
 
 Pemuat yang hanya memahami bentuk pertama tidak bisa membuka sebagian besar model lama dan kecil.
 
+## Dicocokkan dengan rujukan
+
+```csharp
+HfTokenizer.FromClipFiles("vocab.json", "merges.txt");   // CLIP: text encoder Stable Diffusion dan CLIP
+HfTokenizer.FromDirectory("tokenizer/");                 // tata letak mana pun, dari disk
+tokenizer.WithPadToken("!");                             // token pad milik model (SD 2.x memakai "!")
+```
+
+Dicocokkan dengan `tokenizers` Python pada tokenizer BERT, GPT-2, CLIP, dan XLM-R, atas teks berisi
+aksen, CJK, emoji, kode, serta deretan spasi dan tanda baca: 11 dari 56 kasus berbeda, dan kini tidak
+ada. Kasus CLIP, `Split`, dan `Precompiled` dipatok di rangkaian uji. Enam perbedaan diperbaiki,
+yang masing-masing menghasilkan id yang tampak wajar:
+
+- **`Split` dengan `invert` dan `behavior`.** Pre-tokenizer CLIP menyimpan *hasil cocokan* regex, bukan
+  celah di antaranya, dan `MergedWithPrevious`/`MergedWithNext` melipat potongannya seperti crate Rust.
+- **Normalizer sebelum pemetaan byte-level**, bukan sesudahnya: mengecilkan huruf teks yang sudah
+  dipetakan ke `Ġ` tidak mengubah apa pun.
+- **`model` tanpa `type`** disimpulkan - `merges` berarti BPE, `vocab` berupa array berarti Unigram -
+  alih-alih dianggap WordPiece, yang merusak GPT-2 dan membuat XLM-R gagal.
+- **Ideogram CJK** menjadi satu token masing-masing di pre-tokenizer BERT.
+- **Normalizer `Precompiled` milik SentencePiece** menjalankan trie double-array-nya atas
+  `precompiled_charsmap`, grafem demi grafem seperti crate Rust. Sebelumnya ia dilewati, dan karakter
+  lebar-penuh serta kompatibilitas XLM-R ter-tokenisasi berbeda.
+- **Unigram** menggabungkan potongan tak dikenal yang berurutan menjadi satu `<unk>`.
+
+Memuat kosakata CLIP sebagai milik GPT-2 adalah kesalahan yang paling berpengaruh dalam praktik: id-nya
+tampak wajar dan setiap prompt Stable Diffusion dienkode keliru. `FromPretrained` mengenali CLIP dari
+`tokenizer_class` atau dari token `<|startoftext|>`-nya.
+
 ## Encoding
 
 ```csharp

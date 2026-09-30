@@ -729,7 +729,7 @@ public static class TemplateService
 
                     // Needs a repository with the ONNX layout: text_encoder/, unet/, vae_decoder/.
                     // Convert one with: optimum-cli export onnx --model <id> <out>
-                    const string ModelId = "OnnxStack/stable-diffusion-v1-5-onnx";
+                    const string ModelId = "nmkd/stable-diffusion-1.5-onnx-fp16";
 
                     Console.Write("Prompt: ");
                     var prompt = Console.ReadLine();
@@ -739,7 +739,7 @@ public static class TemplateService
                     {
                         using var pipeline = DiffusionPipeline.FromPretrained(
                             ModelId,
-                            scheduler: new EulerScheduler(),
+                            sampler: Sampler.Euler,
                             progress: new Progress<Gravicode.HFNet.GraviHub.TransferProgress>(
                                 p => { if (p.Fraction is 1) Console.WriteLine($"  fetched {p.Path}"); }));
 

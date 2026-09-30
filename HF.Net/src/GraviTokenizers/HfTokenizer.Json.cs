@@ -35,7 +35,15 @@ public sealed partial class HfTokenizer
 
     private static ITokenizerModel ReadModel(JsonElement model)
     {
-        var type = model.TryGetProperty("type", out var kind) ? kind.GetString() : "WordPiece";
+        // Older tokenizer.json files - GPT-2's and XLM-RoBERTa's among them - leave out "type", and
+        // the reference infers it from the fields: merges mean BPE, an array vocabulary means
+        // Unigram. Defaulting to WordPiece instead ran GPT-2 as greedy longest-match, which gets
+        // whole common words right and splits the rest wrongly ("emoji" as emo+ji, not em+oji).
+        var type = model.TryGetProperty("type", out var kind) && kind.ValueKind == JsonValueKind.String
+            ? kind.GetString()
+            : model.TryGetProperty("merges", out _) ? "BPE"
+            : model.TryGetProperty("vocab", out var vocab) && vocab.ValueKind == JsonValueKind.Array ? "Unigram"
+            : "WordPiece";
 
         return type switch
         {
@@ -154,10 +162,16 @@ public sealed partial class HfTokenizer
             case "Replace":
                 return ParseReplace(node);
 
+            // SentencePiece models carry their normalization as a table, which is read exactly.
+            case "Precompiled":
+                return node.TryGetProperty("precompiled_charsmap", out var map)
+                    && map.ValueKind == JsonValueKind.String && map.GetString() is { Length: > 0 } charsmap
+                    ? new PrecompiledNormalizer(charsmap)
+                    : null;
+
             // NFC, NFD, NFKC and NFKD are no-ops under InvariantGlobalization, which the whole
-            // stack builds with. Silently ignoring them is the honest behaviour: pretending to
-            // normalize would be worse, and refusing to load would reject most real tokenizers.
-            case "NFC" or "NFD" or "NFKC" or "NFKD" or "Nmt" or "Precompiled":
+            // stack builds with, and Nmt only drops control characters these inputs rarely have.
+            case "NFC" or "NFD" or "NFKC" or "NFKD" or "Nmt":
                 return null;
 
             case "StripAccents":
@@ -258,10 +272,20 @@ public sealed partial class HfTokenizer
             : System.Text.RegularExpressions.Regex.Escape(
                 pattern.TryGetProperty("String", out var literal) ? literal.GetString() ?? "" : "");
 
-        // "behavior": "Isolated" / "Removed" / "MergedWithPrevious" ... Only the question of
-        // whether the match is the piece or the delimiter changes the token stream here.
-        var behavior = node.TryGetProperty("behavior", out var mode) ? mode.GetString() : "Removed";
-        return new SplitPreTokenizer(expression, Invert: behavior == "Isolated");
+        // "invert" says which spans are delimiters, "behavior" what happens to them. Both matter:
+        // CLIP is Removed + invert, which keeps the words; reading behavior alone keeps the spaces.
+        var invert = node.TryGetProperty("invert", out var flag) && flag.ValueKind == JsonValueKind.True;
+        var behavior = (node.TryGetProperty("behavior", out var mode) ? mode.GetString() : "Removed") switch
+        {
+            "Isolated" => SplitBehavior.Isolated,
+            "MergedWithPrevious" => SplitBehavior.MergedWithPrevious,
+            "MergedWithNext" => SplitBehavior.MergedWithNext,
+            "Contiguous" => SplitBehavior.Contiguous,
+            "Removed" or null => SplitBehavior.Removed,
+            var other => throw new NotSupportedException($"Split behavior '{other}' is not supported."),
+        };
+
+        return new SplitPreTokenizer(expression, invert, behavior);
     }
 
     private static IDecoder ReadDecoder(JsonElement root, string property)

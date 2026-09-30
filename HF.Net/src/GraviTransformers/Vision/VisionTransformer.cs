@@ -150,7 +150,9 @@ public sealed class VisionTransformer : IDisposable
                 + "A remainder would be a strip of pixels no patch covers.");
         }
 
-        return processor.Size == size ? processor : processor with { Size = size };
+        return processor.OutputSize == size && !processor.ShortestEdge
+            ? processor
+            : processor with { Size = size, ShortestEdge = false, CropSize = null };
     }
 
     private static VisionTransformer Build(
@@ -351,16 +353,37 @@ public sealed class VisionTransformer : IDisposable
         var columns = pixels.Shape[2] / patch;
         var positions = Positions(rows, columns);
 
+        var count = rows * columns;
+        var projected = _patchProjection.Apply(GatherPatches(pixels, patch), count);
+        var table = positions.ToArray();
+        var sequence = new double[(1 + count) * hidden];
+
+        for (var d = 0; d < hidden; d++) sequence[d] = _classToken.At(d) + table[d];
+
+        for (var i = 0; i < count * hidden; i++) sequence[hidden + i] = projected[i] + table[hidden + i];
+
+        return new NdArray(sequence, [1 + count, hidden]);
+    }
+
+    /// <summary>
+    /// Every patch of a <c>[channels, height, width]</c> image flattened into one row of a
+    /// <c>[patches, channels * patch * patch]</c> matrix, so the patch projection is a single call
+    /// into the linear kernel.
+    /// </summary>
+    /// <remarks>
+    /// The flattening is channel-major, matching the convolution weight's own <c>[channels, ky, kx]</c>
+    /// layout - any other order silently scrambles the projection. Each run of <c>patch</c> pixels
+    /// along x is contiguous in both, so it is one copy.
+    /// </remarks>
+    internal static double[] GatherPatches(NdArray pixels, int patch)
+    {
+        var channels = pixels.Shape[0];
         var height = pixels.Shape[1];
         var width = pixels.Shape[2];
-        var source = pixels.ToArray();          // [channels, height, width], contiguous
-        var count = rows * columns;
-        var values = _patchProjection.Inputs;   // channels * patch * patch
-
-        // Every patch flattened into one row of a [patches, values] matrix, so the projection is a
-        // single call into the linear kernel. The flattening is channel-major, matching the
-        // convolution weight's own [channels, ky, kx] layout - any other order silently scrambles
-        // the projection. Each run of `patch` pixels along x is contiguous in both, so it is one copy.
+        var columns = width / patch;
+        var count = (height / patch) * columns;
+        var values = channels * patch * patch;
+        var source = pixels.AsContiguous().ToArray();
         var gathered = new double[count * values];
 
         Parallel.For(0, count, p =>
@@ -369,7 +392,7 @@ public sealed class VisionTransformer : IDisposable
             var left = (p % columns) * patch;
             var target = p * values;
 
-            for (var c = 0; c < Config.Channels; c++)
+            for (var c = 0; c < channels; c++)
             {
                 for (var ky = 0; ky < patch; ky++)
                 {
@@ -379,15 +402,7 @@ public sealed class VisionTransformer : IDisposable
             }
         });
 
-        var projected = _patchProjection.Apply(gathered, count);
-        var table = positions.ToArray();
-        var sequence = new double[(1 + count) * hidden];
-
-        for (var d = 0; d < hidden; d++) sequence[d] = _classToken.At(d) + table[d];
-
-        for (var i = 0; i < count * hidden; i++) sequence[hidden + i] = projected[i] + table[hidden + i];
-
-        return new NdArray(sequence, [1 + count, hidden]);
+        return gathered;
     }
 
     /// <summary>The position table for a grid of patches, interpolated if it is not the trained one.</summary>

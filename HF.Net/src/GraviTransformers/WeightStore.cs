@@ -150,6 +150,47 @@ public sealed class WeightStore : IDisposable
         };
     }
 
+    /// <summary>Whether a parameter can be read in parts from a memory-mapped file, rather than only whole.</summary>
+    /// <remarks>True for safetensors; a PyTorch pickle has to be read a tensor at a time.</remarks>
+    public bool IsMapped(string name) => _owners.TryGetValue(name, out var owner) && owner is SafeTensorsReader;
+
+    /// <summary>A parameter's shape, read from the file's header without reading the parameter.</summary>
+    public int[] ShapeOf(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_owners.TryGetValue(name, out var owner)) throw new KeyNotFoundException($"'{name}' is not in this checkpoint ({Description}).");
+
+        return owner is SafeTensorsReader reader ? reader.Info(name)!.Value.Shape : Read(name).Shape.ToArray();
+    }
+
+    /// <summary>
+    /// <paramref name="count"/> consecutive elements of a parameter from element <paramref name="first"/>:
+    /// a few rows of an embedding table without the rest of it.
+    /// </summary>
+    public double[] ReadRange(string name, long first, int count)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_owners.TryGetValue(name, out var owner)) throw new KeyNotFoundException($"'{name}' is not in this checkpoint ({Description}).");
+
+        return owner is SafeTensorsReader reader
+            ? reader.ReadRange(name, first, count)
+            : Read(name).AsContiguous().ToArray().AsSpan((int)first, count).ToArray();
+    }
+
+    /// <summary>A parameter as float32, exact for every dtype checkpoints store, at half the memory of <see cref="Read"/>.</summary>
+    public float[] ReadFloats(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_owners.TryGetValue(name, out var owner)) throw new KeyNotFoundException($"'{name}' is not in this checkpoint ({Description}).");
+
+        if (owner is SafeTensorsReader reader) return reader.ReadFloats(name);
+
+        var tensor = Read(name);
+        var values = new float[tensor.Size];
+        for (var i = 0; i < values.Length; i++) values[i] = (float)tensor.At(i);
+        return values;
+    }
+
     /// <summary>Reads a parameter if present.</summary>
     public bool TryRead(string name, out NdArray tensor)
     {

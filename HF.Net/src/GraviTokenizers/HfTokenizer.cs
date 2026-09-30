@@ -68,7 +68,7 @@ public sealed partial class HfTokenizer
     public int VocabularySize => _model.VocabularySize;
 
     /// <summary>The padding id, or -1 when the vocabulary has none.</summary>
-    public int PadId { get; }
+    public int PadId { get; private set; }
 
     /// <summary>The unknown id, or -1 when the vocabulary has none.</summary>
     public int UnknownId { get; }
@@ -102,16 +102,22 @@ public sealed partial class HfTokenizer
         var info = Hub.ModelInfo(repoId, revision);
         var available = info.Files.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
 
+        var configPath = available.Contains("tokenizer_config.json")
+            ? Hub.DownloadFile(repoId, "tokenizer_config.json", revision)
+            : null;
+
         if (available.Contains("tokenizer.json"))
         {
-            return Load(Hub.DownloadFile(repoId, "tokenizer.json", revision));
+            return Load(Hub.DownloadFile(repoId, "tokenizer.json", revision)).WithConfiguredPadding(configPath);
         }
 
         if (available.Contains("vocab.json") && available.Contains("merges.txt"))
         {
-            return FromGpt2Files(
-                Hub.DownloadFile(repoId, "vocab.json", revision),
-                Hub.DownloadFile(repoId, "merges.txt", revision));
+            var vocab = Hub.DownloadFile(repoId, "vocab.json", revision);
+            var merges = Hub.DownloadFile(repoId, "merges.txt", revision);
+
+            return (IsClip(configPath, vocab) ? FromClipFiles(vocab, merges) : FromGpt2Files(vocab, merges))
+                .WithConfiguredPadding(configPath);
         }
 
         if (available.Contains("vocab.txt"))
@@ -137,8 +143,16 @@ public sealed partial class HfTokenizer
     public static HfTokenizer Load(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return FromJson(File.ReadAllText(path));
+    }
 
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
+    /// <summary>Builds a tokenizer from the text of a <c>tokenizer.json</c>.</summary>
+    /// <param name="json">The file's contents.</param>
+    public static HfTokenizer FromJson(string json)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+
+        using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
 
         var addedTokens = ReadAddedTokens(root);
@@ -213,6 +227,246 @@ public sealed partial class HfTokenizer
             normalizer: null,
             new ByteLevelDecoder(),
             PostProcessor.None);
+    }
+
+    /// <summary>Builds CLIP's tokenizer from its <c>vocab.json</c> and <c>merges.txt</c>.</summary>
+    /// <param name="vocabPath">A JSON object mapping piece to id.</param>
+    /// <param name="mergesPath">The merge list, one pair per line in priority order.</param>
+    /// <remarks>
+    /// <para>
+    /// CLIP's BPE is not GPT-2's, though the two ship the same pair of files. CLIP lowercases,
+    /// collapses whitespace, splits words with its own pattern, marks the <i>last</i> piece of each
+    /// word with <c>&lt;/w&gt;</c> instead of the first with a space, and wraps the sequence in
+    /// <c>&lt;|startoftext|&gt;</c> and <c>&lt;|endoftext|&gt;</c>. Read with the GPT-2 rules,
+    /// every prompt comes out as different ids, and a diffusion model conditioned on them draws
+    /// something other than what was asked.
+    /// </para>
+    /// <para>
+    /// The pipeline is the one Transformers' <c>CLIPTokenizerFast</c> saves as <c>tokenizer.json</c>,
+    /// built here as that document and read by the same loader, so the two cannot drift apart.
+    /// Stable Diffusion repositories ship only these two files. Their padding token is set in
+    /// <c>tokenizer_config.json</c>; see <see cref="WithPadToken"/>.
+    /// </para>
+    /// </remarks>
+    public static HfTokenizer FromClipFiles(string vocabPath, string mergesPath)
+    {
+        using var vocabulary = JsonDocument.Parse(File.ReadAllText(vocabPath));
+        var ids = vocabulary.RootElement.EnumerateObject().ToDictionary(e => e.Name, e => e.Value.GetInt32(), StringComparer.Ordinal);
+
+        const string Start = "<|startoftext|>";
+        const string End = "<|endoftext|>";
+        if (!ids.TryGetValue(Start, out var startId) || !ids.TryGetValue(End, out var endId))
+        {
+            throw new InvalidDataException(
+                $"'{vocabPath}' has no {Start} or {End}; it is not a CLIP vocabulary. Use FromGpt2Files for GPT-2 style BPE.");
+        }
+
+        var merges = File.ReadLines(mergesPath)
+            .Where(line => line.Length > 0 && !line.StartsWith("#version", StringComparison.Ordinal))
+            .ToList();
+
+        using var stream = new MemoryStream();
+        using (var json = new Utf8JsonWriter(stream))
+        {
+            json.WriteStartObject();
+
+            json.WriteStartArray("added_tokens");
+            foreach (var (content, id) in new[] { (Start, startId), (End, endId) })
+            {
+                json.WriteStartObject();
+                json.WriteNumber("id", id);
+                json.WriteString("content", content);
+                json.WriteBoolean("special", true);
+                json.WriteEndObject();
+            }
+
+            json.WriteEndArray();
+
+            json.WriteStartObject("normalizer");
+            json.WriteString("type", "Sequence");
+            json.WriteStartArray("normalizers");
+            json.WriteStartObject(); json.WriteString("type", "NFC"); json.WriteEndObject();
+            json.WriteStartObject();
+            json.WriteString("type", "Replace");
+            json.WriteStartObject("pattern"); json.WriteString("Regex", @"\s+"); json.WriteEndObject();
+            json.WriteString("content", " ");
+            json.WriteEndObject();
+            json.WriteStartObject(); json.WriteString("type", "Lowercase"); json.WriteEndObject();
+            json.WriteEndArray();
+            json.WriteEndObject();
+
+            json.WriteStartObject("pre_tokenizer");
+            json.WriteString("type", "Sequence");
+            json.WriteStartArray("pretokenizers");
+            json.WriteStartObject();
+            json.WriteString("type", "Split");
+            json.WriteStartObject("pattern");
+            json.WriteString("Regex", @"<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+");
+            json.WriteEndObject();
+            json.WriteString("behavior", "Removed");
+            json.WriteBoolean("invert", true);
+            json.WriteEndObject();
+            json.WriteStartObject();
+            json.WriteString("type", "ByteLevel");
+            json.WriteBoolean("add_prefix_space", false);
+            json.WriteEndObject();
+            json.WriteEndArray();
+            json.WriteEndObject();
+
+            json.WriteStartObject("post_processor");
+            json.WriteString("type", "RobertaProcessing");
+            json.WriteStartArray("sep"); json.WriteStringValue(End); json.WriteNumberValue(endId); json.WriteEndArray();
+            json.WriteStartArray("cls"); json.WriteStringValue(Start); json.WriteNumberValue(startId); json.WriteEndArray();
+            json.WriteEndObject();
+
+            json.WriteStartObject("decoder");
+            json.WriteString("type", "ByteLevel");
+            json.WriteEndObject();
+
+            json.WriteStartObject("model");
+            json.WriteString("type", "BPE");
+            json.WriteString("unk_token", End);
+            json.WriteString("continuing_subword_prefix", "");
+            json.WriteString("end_of_word_suffix", "</w>");
+            json.WriteStartObject("vocab");
+            foreach (var (piece, id) in ids) json.WriteNumber(piece, id);
+            json.WriteEndObject();
+            json.WriteStartArray("merges");
+            foreach (var merge in merges) json.WriteStringValue(merge);
+            json.WriteEndArray();
+            json.WriteEndObject();
+
+            json.WriteEndObject();
+        }
+
+        return FromJson(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+    }
+
+    /// <summary>Loads a tokenizer from a folder on disk, as <see cref="FromPretrained"/> loads one from the Hub.</summary>
+    /// <param name="directory">A folder holding <c>tokenizer.json</c>, or <c>vocab.json</c> with <c>merges.txt</c>.</param>
+    /// <remarks>
+    /// The padding token is taken from <c>tokenizer_config.json</c>, or failing that from
+    /// <c>special_tokens_map.json</c>; a CLIP vocabulary is recognised and read as CLIP's.
+    /// </remarks>
+    public static HfTokenizer FromDirectory(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+
+        var config = Path.Combine(directory, "tokenizer_config.json");
+        var special = Path.Combine(directory, "special_tokens_map.json");
+        var configPath = File.Exists(config) ? config : null;
+
+        HfTokenizer tokenizer;
+        if (File.Exists(Path.Combine(directory, "tokenizer.json")))
+        {
+            tokenizer = Load(Path.Combine(directory, "tokenizer.json"));
+        }
+        else if (File.Exists(Path.Combine(directory, "vocab.json")) && File.Exists(Path.Combine(directory, "merges.txt")))
+        {
+            var vocab = Path.Combine(directory, "vocab.json");
+            var merges = Path.Combine(directory, "merges.txt");
+            tokenizer = IsClip(configPath, vocab) ? FromClipFiles(vocab, merges) : FromGpt2Files(vocab, merges);
+        }
+        else if (File.Exists(Path.Combine(directory, "vocab.txt")))
+        {
+            tokenizer = FromBertVocabulary(Path.Combine(directory, "vocab.txt"), configPath is null || ReadLowercaseFlag(configPath));
+        }
+        else
+        {
+            throw new FileNotFoundException(
+                $"'{directory}' holds no tokenizer.json, vocab.json with merges.txt, or vocab.txt.");
+        }
+
+        return ReadPadToken(configPath) is not null
+            ? tokenizer.WithConfiguredPadding(configPath)
+            : tokenizer.WithConfiguredPadding(File.Exists(special) ? special : null);
+    }
+
+    /// <summary>A copy of this tokenizer that pads with <paramref name="token"/>.</summary>
+    /// <param name="token">The padding token, for example <c>&lt;|endoftext|&gt;</c>.</param>
+    /// <exception cref="ArgumentException">The token is not in the vocabulary.</exception>
+    /// <remarks>
+    /// Which token pads is set per model, not per tokenizer family: Stable Diffusion 1.x pads with
+    /// <c>&lt;|endoftext|&gt;</c>, 2.x with <c>!</c>. The text encoder was trained on one of them,
+    /// and padding with another changes every prompt's embedding.
+    /// </remarks>
+    public HfTokenizer WithPadToken(string token)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(token);
+
+        var id = _addedTokens.TryGetValue(token, out var added) ? added.Id : _model.IdOf(token);
+        if (id < 0 || _model.TokenOf(id) != token && !_addedTokens.ContainsKey(token))
+        {
+            throw new ArgumentException($"'{token}' is not in the vocabulary, so it cannot pad.", nameof(token));
+        }
+
+        var copy = (HfTokenizer)MemberwiseClone();
+        copy.PadId = id;
+        return copy;
+    }
+
+    /// <summary>Applies <c>tokenizer_config.json</c>'s <c>pad_token</c>, when it names one this vocabulary has.</summary>
+    internal HfTokenizer WithConfiguredPadding(string? configPath)
+    {
+        var pad = ReadPadToken(configPath);
+        if (pad is null) return this;
+
+        try
+        {
+            return WithPadToken(pad);
+        }
+        catch (ArgumentException)
+        {
+            return this;
+        }
+    }
+
+    /// <summary>The <c>pad_token</c> a <c>tokenizer_config.json</c> or <c>special_tokens_map.json</c> names.</summary>
+    internal static string? ReadPadToken(string? configPath)
+    {
+        if (configPath is null || !File.Exists(configPath)) return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(configPath));
+            if (!document.RootElement.TryGetProperty("pad_token", out var pad)) return null;
+
+            // Either a bare string or an AddedToken object with a "content" field.
+            return pad.ValueKind switch
+            {
+                JsonValueKind.String => pad.GetString(),
+                JsonValueKind.Object when pad.TryGetProperty("content", out var content) => content.GetString(),
+                _ => null,
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether a <c>vocab.json</c> + <c>merges.txt</c> pair is CLIP's rather than GPT-2's.</summary>
+    internal static bool IsClip(string? configPath, string vocabPath)
+    {
+        if (configPath is not null && File.Exists(configPath))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(configPath));
+                if (document.RootElement.TryGetProperty("tokenizer_class", out var kind)
+                    && kind.GetString() is { } name
+                    && name.StartsWith("CLIPTokenizer", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        // Without a config, CLIP's vocabulary gives itself away with its start token.
+        return File.ReadAllText(vocabPath).Contains("\"<|startoftext|>\"", StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------ encoding
@@ -318,10 +572,23 @@ public sealed partial class HfTokenizer
                 continue;
             }
 
-            foreach (var preToken in _preTokenizer.Split(segment.Text))
+            // The reference normalizes the whole text before splitting it. Normalizing each piece
+            // afterwards is equivalent for BERT's normalizer, whose pieces are plain words, but not
+            // after a byte-level split: lowercasing the byte alphabet turns the byte 0xC3, written
+            // 'Ã', into 'ã' - another byte - and every accented letter gets the wrong id.
+            var normalizeFirst = _normalizer is not null and not BertNormalizer;
+            var (source, map) = normalizeFirst ? NormalizeAligned(segment.Text) : (segment.Text, null);
+
+            foreach (var preToken in _preTokenizer.Split(source))
             {
-                var word = _normalizer is null ? preToken.Word : _normalizer.Normalize(preToken.Word);
+                var word = normalizeFirst || _normalizer is null ? preToken.Word : _normalizer.Normalize(preToken.Word);
                 if (word.Length == 0) continue;
+
+                // Positions back in the caller's text: through the alignment when the text was
+                // normalized first, directly otherwise.
+                var originalStart = map is null ? preToken.Start : map[preToken.Start];
+                var originalEnd = map is null ? preToken.End : map[preToken.End];
+                var originalWord = segment.Text[originalStart..originalEnd];
 
                 var pieces = _model.Tokenize(word);
 
@@ -338,13 +605,13 @@ public sealed partial class HfTokenizer
                     total += surfaces[i].Length;
                 }
 
-                var aligned = word.Length == preToken.Word.Length && total == preToken.Word.Length;
-                var cursor = segment.Start + preToken.Start;
+                var aligned = word.Length == originalWord.Length && total == originalWord.Length;
+                var cursor = segment.Start + originalStart;
 
                 for (var i = 0; i < pieces.Count; i++)
                 {
-                    var start = aligned ? cursor : segment.Start + preToken.Start;
-                    var end = aligned ? cursor + surfaces[i].Length : segment.Start + preToken.End;
+                    var start = aligned ? cursor : segment.Start + originalStart;
+                    var end = aligned ? cursor + surfaces[i].Length : segment.Start + originalEnd;
                     cursor = end;
 
                     result.Add((_model.IdOf(pieces[i]), pieces[i], start, end, false));
@@ -353,6 +620,43 @@ public sealed partial class HfTokenizer
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Normalizes a whole text, with a map from each normalized position back to the original one.
+    /// </summary>
+    /// <remarks>
+    /// Each character is normalized on its own and the pieces concatenated, which gives an exact
+    /// map. Where that differs from normalizing the text as a whole - a whitespace run collapsed to
+    /// one space, say - the whole-text result is used, because it is what the ids have to come
+    /// from, and the map falls back to proportional positions: the ids stay right, and only the
+    /// offsets of that text become approximate.
+    /// </remarks>
+    private (string Text, int[] Map) NormalizeAligned(string original)
+    {
+        var whole = _normalizer!.Normalize(original);
+        var built = new System.Text.StringBuilder(whole.Length);
+        var map = new List<int>(whole.Length + 1);
+
+        var index = 0;
+        foreach (var rune in original.EnumerateRunes())
+        {
+            var piece = _normalizer.Normalize(rune.ToString());
+            built.Append(piece);
+            for (var k = 0; k < piece.Length; k++) map.Add(index);
+            index += rune.Utf16SequenceLength;
+        }
+
+        map.Add(original.Length);
+        if (built.ToString() == whole) return (whole, [.. map]);
+
+        var scaled = new int[whole.Length + 1];
+        for (var j = 0; j <= whole.Length; j++)
+        {
+            scaled[j] = whole.Length == 0 ? 0 : (int)Math.Round((double)j * original.Length / whole.Length);
+        }
+
+        return (whole, scaled);
     }
 
     /// <summary>The text a piece contributes, with any continuation marker removed.</summary>
@@ -482,13 +786,21 @@ public sealed partial class HfTokenizer
 
         if (encoding.Length > width)
         {
+            // The reference truncates the text and then adds the special tokens, so a closing
+            // [SEP] or <|endoftext|> survives. Cutting the finished sequence would drop it, and a
+            // model that pools or reads at the end token then reads a word instead.
+            var keepLast = width > 1 && encoding.SpecialTokensMask[^1] == 1;
+            IEnumerable<int> Positions() => keepLast
+                ? [.. Enumerable.Range(0, width - 1), encoding.Length - 1]
+                : Enumerable.Range(0, width);
+
             return new Encoding(
-                [.. encoding.Ids.Take(width)],
-                [.. encoding.Tokens.Take(width)],
-                [.. encoding.AttentionMask.Take(width)],
-                [.. encoding.TypeIds.Take(width)],
-                [.. encoding.SpecialTokensMask.Take(width)],
-                [.. encoding.Offsets.Take(width)]);
+                [.. Positions().Select(i => encoding.Ids[i])],
+                [.. Positions().Select(i => encoding.Tokens[i])],
+                [.. Positions().Select(i => encoding.AttentionMask[i])],
+                [.. Positions().Select(i => encoding.TypeIds[i])],
+                [.. Positions().Select(i => encoding.SpecialTokensMask[i])],
+                [.. Positions().Select(i => encoding.Offsets[i])]);
         }
 
         var padCount = width - encoding.Length;

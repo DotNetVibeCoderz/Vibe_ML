@@ -7,13 +7,14 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.6.0 — current
+## Current — unreleased, after v0.6.0
 
-**26 projects, 308 tests passing, whole solution builds clean with no warnings.**
+**27 projects, 414 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
 `distilbert-base-cased-distilled-squad`, `google/vit-base-patch16-224`, `prajjwal1/bert-tiny`, `gpt2`,
+`openai/clip-vit-base-patch32`, `bert-large-uncased`, `nmkd/stable-diffusion-1.5-onnx-fp16`,
 `hf-internal-testing/tiny-random-BertModel`.
 
 ### Libraries
@@ -21,13 +22,13 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | Library | State | Tests | Notes |
 |---|---|---|---|
 | GraviHub | **Complete** | 27 | Hub client, cache, safetensors, PyTorch pickle reader |
-| GraviTokenizers | **Complete** | 29 | WordPiece, BPE, Unigram, `tokenizer.json`, offsets |
+| GraviTokenizers | **Complete** | 50 | WordPiece, BPE, Unigram, CLIP, `tokenizer.json`, offsets; matches Python on BERT, GPT-2, CLIP and XLM-R |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
-| GraviTransformers | **Core complete** | 103 | BERT-family encoders and ViT at any resolution; classification, fill-mask, named entities, question answering, embeddings, image classification |
-| GraviPEFT | **Core complete** | 61 | LoRA training for sequence classification, named entities and question answering; apply, merge, save, load; trained heads predict the same in Python |
+| GraviTransformers | **Complete** | 128 | BERT-family encoders, GPT-2 with a KV cache, ViT, CLIP; streaming for models larger than memory; opt-in float32 |
+| GraviPEFT | **Complete** | 69 | LoRA and prefix tuning, trained here and loaded in Python and the reverse |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
-| GraviOptimum | **Core complete** | 22 | ONNX Runtime, provider choice, quantisation with measured error |
-| GraviDiffusers | **Core complete** | 22 | DDPM/DDIM/Euler; SD pipeline needs an ONNX export to exercise |
+| GraviOptimum | **Complete** | 25 | ONNX Runtime, float16, weight overrides, model-file reading, quantisation with measured error |
+| GraviDiffusers | **Complete** | 71 | Schedulers from the repo's config; text to image, img2img, inpainting, emphasis, LoRA, pixel-identical to diffusers |
 
 ### Verified behaviour
 
@@ -78,6 +79,22 @@ These are the checks that establish the stack is actually correct, not merely ru
   `FindEntities`, scores to 5e-11. A QA head trained on 24 SQuAD-style examples gives the same
   answers as `AutoModelForQuestionAnswering`, scores to 3e-10. Both are right on names and places
   they were never shown.
+- **Stable Diffusion reproduces diffusers.** On tiny exported models the pipeline gives diffusers'
+  own ONNX pipelines' images to the pixel - text to image with DDIM and with Euler, image to image,
+  and inpainting with a 9-channel UNet - with the NumPy-seeded noise reproduced bit for bit. A LoRA
+  merged into the ONNX weights gives the image of the model it was fused into in PyTorch, bar three
+  values in 12,288 off by one level. On `nmkd/stable-diffusion-1.5-onnx-fp16`, a 512x512 image at 25
+  steps agrees with diffusers to 54.7 dB PSNR.
+- **GPT-2 generates what transformers generates.** `gpt2`'s greedy continuation is word for word
+  transformers' `generate`, and on a random checkpoint the logits agree with torch in float64 to 1e-11.
+- **CLIP and ViT are exact from an image file.** With PIL's resize reproduced to the byte,
+  `google/vit-base-patch16-224` gives torch's probabilities to twelve digits from a PNG, and
+  `openai/clip-vit-base-patch32`'s logits agree to 8e-14.
+- **Prefix tuning round-trips with PEFT.** An adapter PEFT 0.21 saved gives its logits here to 1e-10;
+  one trained here gives the same logits in Python to 1e-9. The prefix gradient agrees with
+  numerical differentiation to 1e-6.
+- **`bert-large-uncased` streams in 0.45 GB** of private memory against 5.9 GB loaded whole, with the
+  same embedding to the last bit.
 - **Measured against the Python reference** on the same machine in the same session. Tokenization is
   **2.25x faster than the Rust `tokenizers` crate** with byte-identical ids. bert-base takes 48 ms
   managed against torch's 38 ms, and **31 ms through ONNX Runtime from .NET, faster than torch**.
@@ -132,6 +149,28 @@ Each of these was caught by a test or by a live run, not by reading the code.
 - **Adapter initialisation was seeded from `HashCode.Combine`**, which .NET randomises per process,
   so "the same configuration always initialises the same way" was false: two runs of the same
   training gave two loss curves. It is an FNV-1a hash now.
+- **Stable Diffusion's prompts were tokenized as GPT-2's.** The CLIP vocabulary went through the GPT-2
+  loader: plausible ids, and every prompt encoded wrongly. Six tokenizer differences from Python came
+  out of the same investigation - `Split`'s `invert` and `behavior`, the normalizer running after the
+  byte-level mapping, a missing model `type` read as WordPiece, BERT's CJK handling, SentencePiece's
+  `Precompiled` normalizer being skipped, and Unigram not fusing unknown pieces.
+- **The diffusion pipeline assumed a VAE factor of 8** and so returned a 16x16 image for a 64x64
+  request on a model whose VAE downsamples by 2 - as diffusers' own ONNX pipelines still do. The
+  factor now comes from the VAE's config.
+- **The VAE encoder is not deterministic as exported**: an unseeded `RandomNormalLike` samples inside
+  the graph, so image to image could not be reproduced from a seed, in Python either. The node's
+  scale is set to zero in a copy beside the file, which gives the mean.
+- **A protobuf length read with `Position += ReadVarint()`** took `Position` before the call advanced
+  it, and the ONNX reader desynchronised with "wire type 6".
+- **PEFT prefix tuning shifts BERT's positions.** BERT numbers positions from `past_key_values`'
+  length, so with ten virtual tokens the first word is at position 10. Without that, logits were 3.4
+  away from PEFT's.
+- **ONNX Runtime refuses external data behind a symbolic link.** Python's Hub cache links snapshot
+  files into `blobs/`, and a newer runtime resolves `weights.pb` there and calls it an escape from the
+  model's folder. Such folders are now opened through hard links.
+- **The GELU epilogue ran on one thread**: a quarter of a ViT block's time went on `erf` calls after
+  the product had been spread across four cores. With that parallel and attention scoring four keys
+  per pass, ViT-base went from 1,034 ms to 774 ms with the same result to nine digits.
 - HFAppGen's assistant, asked to build a project, **invented a NuGet package** for HF.Net, hit
   NU1101, and wrote a fake shim to get a green build. It now has an `HFNetProjectReferences` tool
   and a system prompt that forbids shims outright.
@@ -153,10 +192,10 @@ Each of these was caught by a test or by a live run, not by reading the code.
 
 ### HF Gallery
 
-`samples/HFGallery` — an Avalonia application holding thirteen use cases, each running against a real
+`samples/HFGallery` — an Avalonia application holding fifteen use cases, each running against a real
 model and shown next to the code that produced it.
 
-- Image classification, sentiment, fill-mask, named entities, question answering, semantic search,
+- Image classification, CLIP zero-shot classification, GPT-2 story writing, sentiment, fill-mask, named entities, question answering, semantic search,
   an embedding map, LoRA training for a classifier, for names and for answers, the tokenizer, a checkpoint's byte layout, and the diffusion noise schedules
 - Charts drawn straight into a `DrawingContext`: bars, scatter, lines, treemap, plus a span view
   built from text inlines so wrapping and selection come from the text stack
@@ -174,7 +213,9 @@ model and shown next to the code that produced it.
 Complete and bilingual. Every page under `docs/` has a counterpart under `docs/id/`:
 
 - `README`, `getting-started`, `benchmarks`, `HFAppGen`, `hf-gallery`, and one page per library
-- Three screenshots of HFAppGen and thirteen of HF Gallery, captured from the real windows
+- Three screenshots of HFAppGen and fifteen of HF Gallery, captured from the real windows, and a
+  Stable Diffusion image generated by HF.Net
+- Five notebooks: getting started, performance, GPT-2 and CLIP, LoRA and prefix tuning, Stable Diffusion
 
 ### Continuous integration
 
@@ -194,16 +235,22 @@ there and HF.Net is a subdirectory.
 
 Carried into [PLAN.md](PLAN.md):
 
-- Per-library BenchmarkDotNet suites (the comparison benchmark is done; the per-library harnesses
-  are thin)
-- Notebooks under `notebooks/` beyond the two shipped as HFAppGen templates
-- CLIP (its text tower is causal, which this encoder is not)
-- An opt-in float32 activation mode, which is most of what still separates managed inference
-  from torch
+- Rotary-position decoders (Llama, Mistral, GPT-NeoX), which need their own block
+- Compiling the notebooks' C# in CI; today CI checks their structure only
+- Route (a) of v0.3, biased attention in the foundation's autodiff tape - nothing here depends on it
 
 ---
 
 ## Log
+
+**2026-10-01** — Everything the v0.2-v0.5 plans left open. Stable Diffusion rebuilt to reproduce
+diffusers' pipelines to the pixel, with image to image, inpainting, AUTOMATIC1111 emphasis and LoRA,
+and checked on SD 1.5. CLIP and GPT-2, both on the causal attention the spec's GPT needed. PEFT prefix
+tuning, round-tripping with Python. A streaming encoder that runs `bert-large-uncased` in 0.45 GB.
+PIL's resize reproduced to the byte, making ViT and CLIP exact from an image file. An opt-in float32
+GEMM, bit-identical to an in-order float32 sum, and a parallel GELU. Tokenizers now match Python on
+BERT, GPT-2, CLIP and XLM-R. A sample for every library, a BenchmarkDotNet suite, three new
+notebooks. 414 tests.
 
 **2026-09-30** — v0.6.0, a register-blocked GEMM. Weights move into float32 panels of twelve outputs, and a
 4x12 kernel holds its block of the result in AVX registers, widening each panel slice once per call.

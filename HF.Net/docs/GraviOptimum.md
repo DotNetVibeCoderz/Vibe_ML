@@ -141,6 +141,54 @@ activations and `int64` for token ids. The conversion happens at the boundary, d
 declared element type - feeding a double tensor to a float input throws inside the runtime with a
 message that names neither the tensor nor the caller.
 
+## Half precision
+
+float16 and bfloat16 inputs and outputs are converted at the boundary like any other type. Most
+Stable Diffusion exports are float16 throughout, the timestep included, and need nothing set.
+
+## Reading and patching a model file
+
+```csharp
+var file = OnnxModelFile.Read("unet/model.onnx");
+file.Nodes;          // name, op type, inputs, outputs, attribute names
+file.Initializers;   // name, shape, data type - external data files included
+file.ReadFloats(file.Initializers["onnx::MatMul_2567"]);
+
+var (bytes, changed) = OnnxModelFile.SetFloatAttribute("vae_encoder/model.onnx", "RandomNormalLike", "scale", 0f);
+```
+
+A streaming protobuf reader, with no dependency on the `onnx` package: it reads the graph's structure
+and any initializer's values without loading the whole file. `SetFloatAttribute` adds or changes one
+attribute on every node of a type and returns the patched model - how the VAE encoder's unseeded
+sampling is turned into its mean.
+
+## Replacing weights without rewriting the file
+
+```csharp
+OnnxSession.Open(path, target, new Dictionary<string, InitializerOverride>
+{
+    ["onnx::MatMul_2567"] = new InitializerOverride(values, shape, AsHalf: true),
+});
+```
+
+Goes through ONNX Runtime's `SessionOptions.AddInitializer`: the session uses the given values in
+place of the stored ones. It is how a LoRA is merged into a diffusion UNet.
+
+## Models from Python's Hugging Face cache
+
+Python's cache keeps each file once under `blobs/` and links to it from the snapshot folder. Newer
+ONNX Runtime resolves a model's external data file (`weights.pb`, `model.onnx_data`) to its real path
+and refuses it for leaving the model's folder. A folder with links in it is therefore opened through a
+twin folder of hard links to the same files - a second name, no second copy - so a model downloaded by
+Python opens as it is.
+
+## Kernels a CPU does not have
+
+Exports optimised for a GPU use ONNX Runtime's fused `com.microsoft` operators (`NhwcConv`,
+`GroupNorm`, `BiasSplitGelu`), which have no CPU kernel. Opening one on the CPU is refused with the
+operator's name and what to do instead - run with `ExecutionTarget.Cuda`, or use an unoptimised
+export.
+
 ## See also
 
 [GraviTransformers](GraviTransformers.md) · [GraviDiffusers](GraviDiffusers.md) · [GraviAccelerate](GraviAccelerate.md)

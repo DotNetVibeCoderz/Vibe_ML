@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.6.0 is published: **26 projects, 308 tests passing**, the whole solution builds clean, and the
-eight libraries are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
+v0.6.0 is published and the work since is not yet released: **27 projects, 414 tests passing**, the
+whole solution builds clean, and the eight libraries are on nuget.org as `Gravicode.HFNet.*`. The new
+notebooks reference 0.7.0, the next version. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`
@@ -130,6 +131,42 @@ root rather than here — see below.
 - **The GPU is not a win here.** Everything is double precision, which consumer and integrated GPUs
   run at a fraction of their single-precision rate; the foundation measured its ILGPU path 5–8x
   *slower* than the CPU.
+- **Test fixtures come from Python scripts beside them.** `tests/*/Fixtures/make_*.py` build tiny
+  random models (CLIP, GPT-2, BERT, Stable Diffusion ONNX exports, a PEFT prefix adapter) and write the
+  reference outputs with the real library. Change the model code, rerun the script - never edit a
+  reference by hand. The suite itself needs no network.
+- **Stable Diffusion's tokenizer is CLIP's, not GPT-2's.** Same `vocab.json` + `merges.txt` layout,
+  different pre-tokenizer and `</w>` suffix. Loaded as GPT-2 it gives plausible ids and every prompt
+  is wrong. `HfTokenizer.IsClip` decides by `tokenizer_class` or the `<|startoftext|>` token.
+- **diffusers' ONNX pipelines hard-code a VAE factor of 8.** HF.Net reads it from the VAE config, so
+  on the tiny test repo (factor 2) Python returns 16x16 for a 64x64 request and HF.Net 64x64. To
+  compare, feed both the same latents through `Generate(prompt, latents)`.
+- **A diffusers ONNX VAE encoder samples with an unseeded `RandomNormalLike`**, so two calls differ,
+  in Python too. HF.Net writes `vae_encoder/model.mean.onnx` with `scale` = 0. The attribute is usually
+  *absent* (default 1), so a patch that only edits existing attributes silently does nothing.
+- **diffusers 0.40's ONNX pipeline breaks with Euler** (`init_noise_sigma` is a tensor). Reference
+  scripts subclass the scheduler to return a float.
+- **fp16 SD exports differ from diffusers by ~55 dB, not 0.** diffusers keeps latents in float16
+  between steps; HF.Net in double. float32 exports match to the pixel.
+- **ONNX Runtime refuses external data behind a symlink** (Python's HF cache). `LinkedModelFolder`
+  opens such folders through hard links. **`onnxruntime/sd-turbo` is CUDA-only** (fused
+  `com.microsoft` ops) and is refused on the CPU by name.
+- **A protobuf length must be read before it is added**: `stream.Position += ReadVarint(stream)`
+  evaluates `Position` first and desynchronises.
+- **PEFT prefix tuning shifts BERT's positions by the number of virtual tokens** (BERT counts from
+  `past_key_values`' length). `LoraEncoder` does the same; without it logits are 3.4 off PEFT's.
+- **Image preprocessing is PIL's resize reproduced to the byte (`PilResize`)**, rescale and normalise
+  in float32. A bare `"size": 224` means a square for ViT and the shortest edge for CLIP. JPEG decoding
+  differs from PIL by one level on some pixels; compare against references from a PNG. transformers 5
+  uses a torchvision backend when torchvision is installed - reference scripts use the `*Pil`
+  processors.
+- **transformers 5 flattened `CLIPTextModel`** (no `text_model.` level), while LoRA files and older
+  exports keep it. `DiffusionLora.Merge` accepts both spellings.
+- **`ComputeOptions.LinearLayers` is process-wide.** Tests must call `Gemm.MultiplySingle` directly,
+  never flip the switch - xUnit runs classes in parallel and a CLIP test would run in float32.
+  Training wraps its forward pass in `ComputeOptions.Exact()`.
+- **GPT-2 stores `Conv1D` weights `[inputs, outputs]`** - transposed from every other layer - and ties
+  `lm_head` to `wte`.
 - **Heredocs with large C# or Markdown content fail in this environment.** Use the Write tool for
   anything substantial.
 
@@ -179,11 +216,11 @@ Eight libraries mirroring the Python Hugging Face stack, built on Gravicode.Scie
 | `GraviHub` | `huggingface_hub` | Hub transfer, cache, **safetensors** and **PyTorch pickle** readers |
 | `GraviTokenizers` | `tokenizers` | WordPiece, BPE, Unigram, `tokenizer.json`, character offsets |
 | `GraviDatasets` | `datasets` | Files, Hub datasets, splits, streaming, memory mapping |
-| `GraviTransformers` | `transformers` | Pretrained BERT-family encoders, ViT vision encoders, and task heads |
-| `GraviPEFT` | `peft` | LoRA adapters in the PEFT format |
+| `GraviTransformers` | `transformers` | BERT-family encoders and heads, GPT-2, ViT, CLIP, streaming |
+| `GraviPEFT` | `peft` | LoRA and prefix tuning in the PEFT format |
 | `GraviAccelerate` | `accelerate` | Device selection, sharding, measurement |
 | `GraviOptimum` | `optimum` | ONNX Runtime, quantisation |
-| `GraviDiffusers` | `diffusers` | DDPM/DDIM/Euler schedulers, Stable Diffusion over ONNX |
+| `GraviDiffusers` | `diffusers` | Schedulers, Stable Diffusion over ONNX: txt2img, img2img, inpaint, LoRA |
 
 ```
 GraviHub ──┬── GraviTokenizers ──┐
@@ -222,7 +259,7 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 308
+dotnet test                                                     # all 414
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

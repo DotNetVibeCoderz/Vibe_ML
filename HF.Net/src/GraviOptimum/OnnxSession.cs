@@ -71,6 +71,7 @@ public readonly record struct LatencyReport(ExecutionTarget Target, TimeSpan Bes
 public sealed class OnnxSession : IDisposable
 {
     private readonly InferenceSession _session;
+    private readonly List<OrtValue> _overrides = [];
     private bool _disposed;
 
     private OnnxSession(InferenceSession session, string path, ExecutionTarget requested, ExecutionTarget actual)
@@ -106,6 +107,23 @@ public sealed class OnnxSession : IDisposable
     /// <param name="path">Path to the <c>.onnx</c> file.</param>
     /// <param name="target">Which provider to run on.</param>
     public static OnnxSession Open(string path, ExecutionTarget target = ExecutionTarget.Auto)
+        => Open(path, target, overrides: null);
+
+    /// <summary>
+    /// Loads a model with some of its initializers replaced - merged LoRA weights, for instance -
+    /// without rewriting the file.
+    /// </summary>
+    /// <param name="path">The <c>.onnx</c> file.</param>
+    /// <param name="target">Which provider to run on.</param>
+    /// <param name="overrides">
+    /// Replacement values by initializer name. Each must have the original's shape; one stored as
+    /// float16 is written back as float16.
+    /// </param>
+    /// <remarks>
+    /// Goes through ONNX Runtime's <c>SessionOptions.AddInitializer</c>, which reads the values at
+    /// session creation. The session keeps them alive until it is disposed, as the runtime requires.
+    /// </remarks>
+    public static OnnxSession Open(string path, ExecutionTarget target, IReadOnlyDictionary<string, InitializerOverride>? overrides)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         if (!File.Exists(path)) throw new FileNotFoundException("ONNX model not found.", path);
@@ -129,7 +147,33 @@ public sealed class OnnxSession : IDisposable
                 + "Microsoft.ML.OnnxRuntime.DirectML for DirectML. Use ExecutionTarget.Auto to accept a fallback.");
         }
 
-        return new OnnxSession(new InferenceSession(path, options), path, target, actual);
+        var values = new List<OrtValue>();
+        foreach (var (name, replacement) in overrides ?? new Dictionary<string, InitializerOverride>())
+        {
+            var value = replacement.AsHalf
+                ? OrtValue.CreateTensorValueFromMemory([.. replacement.Values.Select(v => (Float16)v)], replacement.Shape)
+                : OrtValue.CreateTensorValueFromMemory(replacement.Values, replacement.Shape);
+            options.AddInitializer(name, value);
+            values.Add(value);
+        }
+
+        InferenceSession inner;
+        try
+        {
+            inner = new InferenceSession(LinkedModelFolder.Resolve(path), options);
+        }
+        catch (OnnxRuntimeException error) when (error.Message.Contains("Failed to find kernel", StringComparison.Ordinal))
+        {
+            foreach (var value in values) value.Dispose();
+            throw new NotSupportedException(
+                $"'{path}' uses operators the {actual} provider has no kernel for ({error.Message.Split('\n')[0]}). "
+                + "It was optimised for a GPU provider - ONNX Runtime's fused com.microsoft ops such as NhwcConv "
+                + "and GroupNorm are CUDA-only. Run it with ExecutionTarget.Cuda, or use an unoptimised export.", error);
+        }
+
+        var session = new OnnxSession(inner, path, target, actual);
+        session._overrides.AddRange(values);
+        return session;
     }
 
     /// <summary>Downloads a Hub model's ONNX export and opens it.</summary>
@@ -336,6 +380,21 @@ public sealed class OnnxSession : IDisposable
             return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<double>(values, shape));
         }
 
+        // Half-precision exports - most Stable Diffusion ONNX repositories are float16 throughout.
+        if (elementType == typeof(Float16))
+        {
+            var data = new Float16[values.Length];
+            for (var i = 0; i < values.Length; i++) data[i] = (Float16)(float)values[i];
+            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<Float16>(data, shape));
+        }
+
+        if (elementType == typeof(BFloat16))
+        {
+            var data = new BFloat16[values.Length];
+            for (var i = 0; i < values.Length; i++) data[i] = (BFloat16)(float)values[i];
+            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<BFloat16>(data, shape));
+        }
+
         throw new NotSupportedException($"Input '{name}' has element type {elementType.Name}, which is not supported.");
     }
 
@@ -349,6 +408,24 @@ public sealed class OnnxSession : IDisposable
                 var data = new double[tensor.Length];
                 var i = 0;
                 foreach (var element in tensor) data[i++] = element;
+                return new NdArray(data, [.. tensor.Dimensions]);
+            }
+
+            case TensorElementType.Float16:
+            {
+                var tensor = value.AsTensor<Float16>();
+                var data = new double[tensor.Length];
+                var i = 0;
+                foreach (var element in tensor) data[i++] = (float)element;
+                return new NdArray(data, [.. tensor.Dimensions]);
+            }
+
+            case TensorElementType.BFloat16:
+            {
+                var tensor = value.AsTensor<BFloat16>();
+                var data = new double[tensor.Length];
+                var i = 0;
+                foreach (var element in tensor) data[i++] = (float)element;
                 return new NdArray(data, [.. tensor.Dimensions]);
             }
 
@@ -388,6 +465,7 @@ public sealed class OnnxSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         _session.Dispose();
+        foreach (var value in _overrides) value.Dispose();
     }
 
     /// <inheritdoc />
@@ -395,3 +473,9 @@ public sealed class OnnxSession : IDisposable
         => $"OnnxSession({System.IO.Path.GetFileName(Path)} on {ActualTarget}: "
             + $"{Inputs.Count} in, {Outputs.Count} out)";
 }
+
+/// <summary>A value to load in place of one of a model's initializers.</summary>
+/// <param name="Values">The values, row-major.</param>
+/// <param name="Shape">Their shape, which must be the original's.</param>
+/// <param name="AsHalf">Whether the original is float16, so the values are written back as float16.</param>
+public sealed record InitializerOverride(float[] Values, long[] Shape, bool AsHalf = false);

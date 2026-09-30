@@ -1,6 +1,6 @@
 # GraviTransformers
 
-**Memuat encoder Hugging Face terlatih dan menjalankannya.**
+**Model Hugging Face terlatih: encoder keluarga BERT, GPT-2, ViT, dan CLIP.**
 
 Padanan `transformers`. Pustaka andalan.
 
@@ -40,9 +40,8 @@ Selain itu **ditolak**, bukan dimuat setengah jalan:
 
 ```csharp
 TransformerModel.Load("gpt2");
-// NotSupportedException: 'gpt2' adalah model 'gpt2'. GraviTransformers menjalankan encoder
-// keluarga BERT (...); arsitektur decoder-only dan encoder-decoder memerlukan causal masking
-// dan cross-attention yang tidak dimiliki encoder ini.
+// NotSupportedException: 'gpt2' is a 'gpt2' model, a decoder that continues text.
+// Load it with CausalLanguageModel.Load, not as an encoder.
 ```
 
 Mengisi encoder dari bobot decoder menghasilkan model yang berjalan mulus dan mengembalikan omong
@@ -183,7 +182,7 @@ mengembalikan `LayerNorm(input)`, yang bukan input.
 
 ```csharp
 model.Processor
-// ImageProcessor(224x224, mean [0.5, 0.5, 0.5], std [0.5, 0.5, 0.5])
+// ImageProcessor(224x224, Bilinear, mean [0.5, 0.5, 0.5], std [0.5, 0.5, 0.5])
 ```
 
 Angkanya berasal dari `preprocessor_config.json` milik repositori itu sendiri, tidak pernah dari
@@ -195,6 +194,16 @@ Bila prosesor dan model berselisih soal panjang sisi — atau bila repositori ti
 prosesor sama sekali — `image_size` **milik model** yang menang, kecuali Anda meminta ukuran lain.
 Itulah kisi tempat position embedding dipelajari, jadi itulah satu-satunya resolusi yang tidak perlu
 diinterpolasi.
+
+Pengubahan ukurannya adalah **algoritme PIL sendiri, direproduksi sampai ke byte**: image processor
+transformers mengubah ukuran lewat PIL, dan model melihat apa pun yang dihasilkan PIL. "Bilinear" dan
+"bicubic" pustaka lain berbeda di tiga tempat yang masing-masing menggeser piksel satu tingkat atau
+lebih - PIL melebarkan kernel saat mengecilkan, memakai `a = -0.5` untuk kubiknya, dan bekerja dalam
+fixed point 22 bit dengan gambar yang dibulatkan ke byte di antara lintasan horizontal dan vertikal.
+Penskalaan ulang dan normalisasi berjalan dalam float32, seperti milik rujukannya. Dari PNG tensornya
+identik dengan milik `ViTImageProcessor` dan `CLIPImageProcessor`, bit demi bit. JPEG bisa berbeda satu
+tingkat pada sebagian piksel, karena libjpeg milik PIL dan ImageSharp mendekode JPEG sedikit berbeda.
+Pengubahan ukuran sisi terpendek dan potong-tengah (CLIP, DeiT) mengikuti konfigurasi prosesor.
 
 ### Resolusi lain
 
@@ -240,9 +249,111 @@ ini ditolak dengan menyebut namanya.
 
 ### Kecepatan
 
-`google/vit-base-patch16-224` memakan sekitar **2 detik** per gambar pada 224 piksel melawan 226 ms
-milik torch. Dengan piksel yang sama, probabilitas lima teratasnya sepakat dengan torch dalam float64
-hingga 1,3e-15. Dulu ia memakan 12 detik; lihat [benchmark](benchmarks.md) untuk apa yang berubah.
+`google/vit-base-patch16-224` memakan sekitar **0,74 detik** per gambar pada 224 piksel, 0,55 dalam
+presisi tunggal, melawan 226 ms milik torch. Dari berkas gambar yang sama, probabilitas lima teratasnya
+sepakat dengan torch dalam float64 sampai dua belas digit. Dulu ia memakan 12 detik; lihat
+[benchmark](benchmarks.md) untuk apa yang berubah.
+
+## CLIP
+
+```csharp
+using var clip = ClipModel.Load("openai/clip-vit-base-patch32");
+
+foreach (var label in clip.ZeroShot("bee.jpg", ["a bee", "a flower", "a butterfly", "a bird"]))
+    Console.WriteLine($"{label.Label,-12} {label.Score:P2}");
+```
+
+```
+a bee        76.65 %
+a flower     21.03 %
+a butterfly   2.21 %
+a bird        0.09 %
+```
+
+Dua encoder yang dilatih agar sebuah gambar dan kalimat yang menggambarkannya berdekatan. Setiap label
+dimasukkan ke `This is a photo of {label}.` - templat yang dipakai pipeline transformers - lalu
+softmax dijalankan atas kemiripan gambar dengan setiap kalimat, diskalakan dengan suhu yang dipelajari
+checkpoint. Tidak ada yang dilatih. `EmbedImage`, `EmbedText`, `Logits`, dan `Similarity` memberi
+bagian-bagiannya.
+
+Menara visinya adalah ViT dengan satu layer norm tambahan sebelum blok pertama. Menara teksnya blok
+pre-norm yang sama, dijalankan **kausal** - setiap token hanya memperhatikan dirinya dan token
+sebelumnya - dan vektor kalimat dibaca pada token akhir teks. Posisi mana itu punya dua jawaban:
+checkpoint OpenAI menulis `eos_token_id: 2` di konfigurasinya, yang lebih tua dari kolom itu, dan
+dibaca pada id token tertinggi; yang lebih baru pada token akhir pertama. Keduanya mengikuti
+transformers. Checkpoint OpenAI juga memakai `quick_gelu`, `x * sigmoid(1.702 x)`, bentuk GELU ketiga.
+
+Pada `openai/clip-vit-base-patch32`, logit-nya sepakat dengan torch dalam float64 sampai **8e-14** dari
+berkas gambar yang sama.
+
+## Pembangkitan teks
+
+```csharp
+using var gpt = CausalLanguageModel.Load("gpt2");
+
+gpt.Generate("The lighthouse keeper opened the door and", new GenerationSettings(MaxNewTokens: 40));
+// " saw a man in a white suit and a black suit with a black hat. ..."
+
+foreach (var piece in gpt.Stream(prompt, new GenerationSettings(
+             MaxNewTokens: 60, Sample: true, Temperature: 0.8, TopP: 0.95, RepetitionPenalty: 1.2, Seed: 1)))
+    Console.Write(piece);
+```
+
+GPT-2 beserta fine-tune dan distilasinya (`gpt2`, `distilgpt2`, `gpt2-medium` dan sejenisnya).
+Dekode greedy mengembalikan apa yang dikembalikan `generate(do_sample=False)` milik transformers,
+token demi token, dan logit-nya sepakat dengan torch dalam float64 sampai 1e-11. Penalti pengulangan
+memakai aturan transformers; sampling menerapkan temperature, top-k, dan top-p dalam urutan
+transformers, dari generator ber-seed (yang tidak mereproduksi tarikan acak torch).
+
+Pembangkitan menyimpan **cache key/value**: key dan value sebuah token tidak pernah berubah setelah
+dihitung, jadi setiap token baru hanya memakan satu baris melalui jaringan, bukan seluruh teks lagi.
+Sekitar 22 token per detik untuk `gpt2` di CPU laptop, 25 dalam presisi tunggal.
+
+Dua detail checkpoint yang perlu diketahui. GPT-2 menyimpan proyeksinya sebagai `Conv1D`, lapisan
+linear yang disimpan `[masukan, keluaran]` - kebalikan dari semua lapisan lain di Hub - dan dibalik
+saat dimuat. Lapisan keluarannya adalah tabel embedding token itu sendiri.
+
+Decoder dengan posisi rotary - Llama, Mistral, GPT-NeoX - punya blok berbeda dan ditolak dengan
+menyebut namanya, disertai arahan ke ONNX.
+
+## Presisi
+
+```csharp
+ComputeOptions.LinearLayers = Precision.Single;
+```
+
+Semuanya berjalan dalam presisi ganda secara bawaan, itulah sebabnya hidden state sepakat dengan
+float64 milik torch sampai sekitar 1e-13. Mengalihkan lapisan linear ke float32 - presisi yang dipakai
+torch sendiri secara bawaan - kira-kira menggandakan kecepatannya, karena satu instruksi vektor memuat
+delapan float sementara hanya empat double. Attention, norm, dan aktivasi tetap double.
+
+| | double | single |
+|---|---|---|
+| `bert-base-uncased`, 128 token | 434 ms | 326 ms |
+| `google/vit-base-patch16-224` | 743 ms | 551 ms |
+| `openai/clip-vit-base-patch32`, gambar dan 5 label | 231 ms | 159 ms |
+| `gpt2`, token per detik | 22 | 25 |
+
+Probabilitas teratas ViT bergeser 3,5e-8. Pelatihan mengabaikan setelan ini: satu langkah LoRA atau
+prefix tuning selalu menjalankan forward pass-nya dalam double, karena backward pass yang ditulis
+tangan adalah turunan dari fungsi itu.
+
+## Model yang lebih besar dari memori
+
+```csharp
+using var encoder = StreamingEncoder.Load("bert-large-uncased");
+var vector = encoder.Embed("a sentence");
+```
+
+`TransformerModel` menyimpan setiap parameter di memori. `StreamingEncoder` tidak menyimpan apa pun:
+setiap forward pass membaca baris embedding yang dipakai token-tokennya, lalu bobot setiap lapisan
+secara bergiliran, langsung dari safetensors yang dipetakan ke memori, menjalankan lapisan itu, lalu
+melepaskannya. Checkpoint yang dipecah (sharded) dibaca lintas pecahannya.
+
+Pada `bert-large-uncased` embedding-nya sama sampai bit terakhir, dan puncak memori privat turun dari
+**5,9 GB menjadi 0,45 GB**. Setiap pass membaca bobot lagi, jadi ini cocok untuk model yang kalau tidak
+begitu sama sekali tidak bisa dijalankan. Pickle PyTorch tidak bisa dibaca per bagian dan ditolak,
+disertai cara konversinya.
 
 ## Konfigurasi
 
@@ -357,14 +468,14 @@ model.Encoder.Layers[0].Intermediate.Weights[0, 0] = 0.5;
 model.WeightsChanged();
 ```
 
-Tidak ada KV cache karena ini encoder: setiap posisi toh memperhatikan semua posisi lain.
+Encoder tidak butuh KV cache - setiap posisi toh memperhatikan semua posisi lain. Decoder-nya, `CausalLanguageModel`, punya.
 
 ## Batasan
 
-- Arsitektur decoder-only dan encoder-decoder ditolak.
-- CLIP belum tersedia: menara teksnya kausal, sedangkan encoder ini tidak. ViT dan DeiT tersedia.
-- Aktivasi selain `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python` dan `relu`
-  ditolak saat memuat, dengan menyebut namanya.
+- Decoder selain keluarga GPT-2, dan arsitektur encoder-decoder, ditolak.
+- `ClipModel` membaca checkpoint CLIP lengkap; SigLIP dan ALIGN ditolak.
+- Aktivasi selain `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python`, `quick_gelu`
+  dan `relu` ditolak saat memuat, dengan menyebut namanya.
 
 ## Lihat juga
 

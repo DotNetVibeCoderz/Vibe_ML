@@ -1,6 +1,6 @@
 # GraviPEFT
 
-**Adapter LoRA, dalam format Hugging Face PEFT.**
+**LoRA dan prefix tuning, dalam format Hugging Face PEFT.**
 
 Padanan `peft`.
 
@@ -336,6 +336,40 @@ yang memakai nama yang sama. Untuk `bert-base-uncased`, yang nama-nama checkpoin
 `bert.`, artinya `AutoModelForSequenceClassification` atau `BertForMaskedLM`, bukan `BertModel`
 polos. Sebelum 0.3 kuncinya `layer.0.query`, yang oleh PEFT di Python dimuat sebagai tidak ada adapter
 sama sekali.
+
+## Prefix tuning
+
+```csharp
+var tuned = PEFT.ApplyPrefixTuning(model, new PrefixTuningConfig(VirtualTokens: 10));
+Console.WriteLine(tuned);    // PrefixTuningModel(..., 10 virtual tokens, 5,120/4,367,104 params = 0.117%)
+
+tuned.Train(texts, labels, new TrainingOptions { Epochs = 3, BatchSize = 16, LearningRate = 2e-2 });
+tuned.Predict("an absolute joy to watch");
+tuned.Save("prefix-adapter");
+
+var again = PrefixTuningModel.Load(model, "prefix-adapter");   // atau yang disimpan PEFT
+```
+
+Bila LoRA mengubah setiap matriks bobot sedikit, prefix tuning tidak mengubah satu pun. Setiap lapisan
+attention mendapat beberapa posisi tambahan di depan teks - bukan token, yang akan terbatas pada
+embedding kosakata, melainkan key dan value per lapisan dan head yang dilatih langsung. Hanya prefix
+dan classifier yang dilatih: 0,12% parameter pada contoh di atas.
+
+Pelatihannya memakai loop yang sama dengan LoRA dan backward pass yang sama, yang membawa bagian
+gradien setiap lapisan kembali ke irisan prefix miliknya. Gradien prefix diperiksa terhadap
+diferensiasi numerik sampai 1e-6, sendirian, dikemas (packed), dan bersama adapter LoRA. Ia butuh laju
+pembelajaran lebih besar daripada LoRA, sekitar 1e-2.
+
+**Formatnya adalah `PREFIX_TUNING` milik PEFT**: `prompt_embeddings` berbentuk `[virtual tokens,
+layers * 2 * hidden]`, setiap barisnya key lalu value untuk setiap lapisan, dan pada BERT classifier
+disimpan sebagai `base_model.classifier.*` di atas pooler yang dibekukan. Adapter yang disimpan PEFT
+0.21 dimuat di sini dan memberi logit-nya sampai 1e-10; yang dilatih di sini dimuat di Python dengan
+`PeftModel.from_pretrained` dan memberi logit yang sama sampai 1e-9.
+
+Satu detail menentukan kesepakatan itu. PEFT memberikan prefix ke BERT sebagai `past_key_values`, dan
+BERT menomori posisinya mulai dari panjangnya - jadi dengan sepuluh virtual token, token nyata pertama
+berada di posisi 10, bukan 0. Tanpa pergeseran itu logit-nya berselisih 3,4. HF.Net ikut menggeser,
+yang juga berarti sebuah teks paling panjang `max_position_embeddings - virtual tokens`.
 
 ## Mengapa jumlah parameter itu penting
 

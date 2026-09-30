@@ -1,6 +1,6 @@
 # GraviDiffusers
 
-**Difusi denoising: scheduler, dan teks-ke-gambar lewat ONNX.**
+**Difusi denoising: scheduler, dan Stable Diffusion lewat ONNX — teks ke gambar, gambar ke gambar, inpainting, LoRA.**
 
 Padanan `diffusers`.
 
@@ -41,89 +41,177 @@ schedule.Sigma(t);
 ## Sampler
 
 ```csharp
-IScheduler scheduler = new DdimScheduler(eta: 0);   // deterministik
-                     = new DdpmScheduler();          // rujukan
-                     = new EulerScheduler();         // bagus di 20-30 langkah
+// Dibangun dari scheduler_config.json milik repositori sendiri - cara yang lazim.
+var config = SchedulerConfig.Load("scheduler/scheduler_config.json");
+IScheduler scheduler = new DdimScheduler(config, eta: 0);   // deterministik
+                     = new DdpmScheduler(config);          // rujukan
+                     = new EulerScheduler(config);         // bagus di 20-30 langkah
 ```
+
+`SchedulerConfig` memuat semua yang dibaca diffusers dari berkas itu: beta, `timestep_spacing`
+(`leading`, `linspace`, `trailing`), `steps_offset`, `set_alpha_to_one`, `prediction_type`
+(`epsilon`, `v_prediction`, `sample`) dan `clip_sample`. Masing-masing mengubah timestep mana yang
+dikunjungi atau cara sebuah langkah diambil, jadi sampler yang dibangun tanpanya menyusuri jalur yang
+berbeda dari yang dipakai saat model diterbitkan. Konstruktor lama `(NoiseSchedule)` tetap berfungsi,
+untuk eksperimen.
 
 **DDIM** merekonstruksi taksiran sampel bersih di setiap langkah lalu memberinya derau kembali ke
 tingkat berikutnya. Itulah yang memungkinkannya melompati timestep: ia tetap konsisten saat
 mengunjungi 25 dari 1000, sementara pembaruan DDPM mengandaikan langkah bersebelahan dan memburuk
-tajam. Pada `eta = 0` ia sepenuhnya deterministik, sehingga seed dan prompt mereproduksi gambar yang
-persis sama.
+tajam. Pada `eta = 0` ia sepenuhnya deterministik.
 
 **DDPM** setia dan lambat, satu langkah per timestep pelatihan. Ia ada sebagai rujukan untuk
 memeriksa sampler yang lebih cepat.
 
 **Euler** memandang proses mundur sebagai ODE dalam tingkat derau dan mengambil langkah Euler biasa di
-sepanjangnya. Cara pandang itulah yang membuatnya menghasilkan gambar layak dalam dua puluh atau tiga
-puluh langkah — jumlah langkah menjadi pilihan ketelitian integrasi, bukan sifat jadwal yang dilatih.
+sepanjangnya, itulah sebabnya dua puluh atau tiga puluh langkah sudah cukup. Timestep-nya bisa jatuh di
+antara langkah pelatihan; sigma diinterpolasi di sana, seperti yang dilakukan diffusers.
 
 ### Bagaimana koefisiennya diverifikasi
 
-Bangun `x_t` dari `x₀` yang diketahui dan derau yang diketahui, lalu biarkan "model" mengembalikan
-derau itu persis di setiap langkah. Rekonstruksi DDIM jadi tepat di tiap langkah, sehingga lintasannya
-harus mendarat kembali di `x₀` — dan itu terjadi sampai **1e-9** hanya jika `sqrt(abar)`,
-`sqrt(1 - abar)` dan suku arahnya semuanya berada di tempat yang benar. Uji itu ada di
-`tests/GraviDiffusers.Tests`.
-
-Perlu dicatat bahwa prediksi derau *konstan* bukanlah kontraksi: DDIM justru memperbesar sebesar
-`sqrt(abar₀ / abar_T)` di sepanjang jalan, kira-kira lima belas kali lipat pada jadwal Stable
-Diffusion. Itu perilaku yang benar, bukan bug — model sungguhan memprediksi derau yang sebanding
-dengan isi sampelnya.
+Dua cara. Bangun `x_t` dari `x₀` dan derau yang diketahui, lalu biarkan model mengembalikan derau itu
+persis di setiap langkah: lintasan DDIM harus mendarat kembali di `x₀`, dan memang sampai **1e-9**. Lalu
+timestep, sigma, dan keluaran setiap langkah dari tiap sampler dipatok ke nilai yang dicetak oleh
+diffusers 0.40 sendiri, untuk setiap spacing dan jenis prediksi.
 
 ## Teks ke gambar
 
 ```csharp
-using var pipeline = DiffusionPipeline.FromPretrained(
-    "some-user/stable-diffusion-onnx",
-    scheduler: new EulerScheduler());
+using var pipeline = DiffusionPipeline.FromPretrained("nmkd/stable-diffusion-1.5-onnx-fp16");
 
-using var image = pipeline.Generate(
-    "a watercolour of a mountain village at dawn",
-    new GenerationOptions(Steps: 25, GuidanceScale: 7.5, Width: 512, Height: 512, Seed: 42),
+var options = new GenerationOptions(Steps: 25, GuidanceScale: 7.5, Width: 512, Height: 512, Seed: 42,
+                                    NegativePrompt: "blurry");
+
+using var lighthouse = pipeline.Generate(
+    "a red lighthouse on a cliff at dawn, oil painting", options,
     onStep: (step, total) => Console.Write($"\r  {step}/{total}"));
 
-image.Save("output.png");
+lighthouse.Save("lighthouse.png");
 ```
 
-### Yang dibutuhkannya
+![Mercusuar merah, dibuat oleh HF.Net](../screenshots/diffusion-lighthouse.png)
 
-Repositori dengan tata letak sebagaimana ekspor ONNX:
+Gambar itu, 25 langkah DDIM di CPU laptop, sekitar enam menit. `OnnxStableDiffusionPipeline` milik
+diffusers sendiri dengan seed yang sama memberi gambar yang sama, sampai PSNR 54,7 dB.
 
-```
-text_encoder/model.onnx
-unet/model.onnx
-vae_decoder/model.onnx
-```
+### Ini pipeline diffusers, langkah demi langkah
 
-Repositori yang hanya memuat bobot PyTorch **tidak akan bekerja** dan mengatakannya saat dimuat, bukan
-gagal belakangan. Konversikan dengan `optimum-cli export onnx --model <id> <out>`.
+Pipeline ini mengikuti pipeline ONNX diffusers baris demi baris, jadi setelan yang sama memberi gambar
+yang sama:
 
-Ketiga jaringan berjalan lewat ONNX Runtime karena satu kali difusi mengevaluasi UNet puluhan kali,
-dan jalur `double` terkelola adalah alat yang keliru untuk itu, meleset dua orde besaran.
+- **Derau awal** adalah `np.random.RandomState(seed).randn(...)`: `NumpyRandom` mereproduksi Mersenne
+  Twister NumPy dan cara penarikan Gaussian-nya bit demi bit.
+- **Prompt** di-tokenisasi seperti tokenizer CLIP melakukannya - huruf kecil, dipecah dengan regex,
+  BPE tingkat byte dengan `</w>` - dan diberi padding dengan token pad milik model sendiri
+  (`<|endoftext|>` pada SD 1.x, `!` pada 2.x).
+- **Guidance** menjalankan UNet sekali pada batch `[tanpa syarat, bersyarat]`.
+- **Geometrinya** diambil dari repositori: faktor skala VAE dari `block_out_channels`, penskalaan laten
+  dari `scaling_factor`, kanal masukan UNet dari konfigurasinya. Model dengan VAE berbeda menghasilkan
+  gambar seukuran yang diminta.
+- **Piksel** dibulatkan, bukan dipotong - pemotongan menggelapkan setiap piksel setengah tingkat.
 
-### Hal yang akan menjebak Anda
+Pada ekspor float32 hasilnya identik dengan diffusers sampai piksel terakhir; ini diuji pada model
+ekspor kecil, untuk DDIM, Euler, gambar ke gambar, dan inpainting. Pada ekspor float16 diffusers
+menyimpan laten dalam float16 di antara langkah dan HF.Net dalam double, sehingga keduanya sepakat
+sampai sekitar 55 dB.
 
-**Lebar dan tinggi harus kelipatan 8.** Kisi laten delapan kali lebih kecil daripada gambar di tiap
-dimensi — dari sanalah semua aritmetika `/ 8` berasal.
+### Repositori yang berfungsi
 
-**Guidance scale di atas 1 menjalankan UNet dua kali per langkah**, sekali terkondisi dan sekali
-tidak. Nilai tepat 1 bukan sekadar setelan lemah: ia memangkas separuh kerja.
+| Repositori | Ukuran | Catatan |
+|---|---|---|
+| `nmkd/stable-diffusion-1.5-onnx-fp16` | 2,1 GB | SD 1.5, float16. Dicocokkan dengan diffusers di atas. |
+| `onnx-community/stable-diffusion-v1-5-ONNX` | 4,3 GB | SD 1.5, float32. |
+| `amd/stable-diffusion-1.5_io16_amdgpu` | 2,1 GB | SD 1.5, float16. |
+| `onnxruntime/sd-turbo` | 2,6 GB | **Hanya CUDA.** Dibangun dari kernel GPU gabungan ONNX Runtime (`NhwcConv`, `GroupNorm`); di CPU ditolak dengan menyebut namanya. |
+| `optimum-internal-testing/tiny-stable-diffusion-onnx` | 9 MB | Bobot acak, untuk pengujian. |
 
-**Faktor penskalaan laten adalah 0,18215.** Ia diterapkan di jalan masuk dan dibagi kembali sebelum
-VAE mendekode; lupa salah satu arah menghasilkan gambar pucat atau terlalu jenuh.
+Repositori membutuhkan `text_encoder/`, `unet/`, dan `vae_decoder/` masing-masing dengan `model.onnx`,
+serta `vae_encoder/` untuk gambar ke gambar dan inpainting. Repositori yang hanya memuat bobot PyTorch
+ditolak saat dimuat; konversikan dengan `optimum-cli export onnx --model <id> <out>`.
+`DiffusionPipeline.FromDirectory` membuka ekspor yang ada di disk.
 
-## Reproduksibilitas
+## Gambar ke gambar
 
 ```csharp
-new GenerationOptions(Seed: 42)
+using var night = pipeline.ImageToImage("the same lighthouse at night, stars", lighthouse,
+                                        strength: 0.6, options);
 ```
 
-Laten awal diambil dari `GraviRandom` ber-seed, dan DDIM pada `eta = 0` maupun Euler sama-sama
-deterministik. Prompt dan seed yang sama menghasilkan gambar yang sama setiap kali — dan itulah dasar
-membagikan sebuah *generasi*, bukan sekadar gambarnya.
+Gambar dienkode, diberi derau sampai sejauh `strength` di sepanjang jadwal, lalu dibersihkan dari
+sana: 0 mengembalikannya apa adanya, 1 mengabaikannya.
+
+**Encoder VAE sebagaimana diekspor tidak deterministik.** Ia mengambil sampel latennya di dalam graf
+dengan `RandomNormalLike` tanpa seed, jadi setiap panggilan mengembalikan laten berbeda - di Python
+juga. HF.Net menulis salinannya sekali di sebelahnya, `vae_encoder/model.mean.onnx`, dengan skala node
+itu diatur ke nol, yang memberi rerata distribusinya. Seed kemudian mereproduksi hasil.
+
+Pada SD 1.5 dengan strength 0,6 hasilnya sepakat dengan `OnnxStableDiffusionImg2ImgPipeline` milik
+diffusers, yang dijalankan dengan encoder rerata dan seed yang sama, sampai PSNR 57,8 dB.
+
+## Inpainting
+
+```csharp
+using var repainted = pipeline.Inpaint("a full moon", lighthouse, mask, options);   // putih = lukis ulang
+```
+
+Dengan **UNet inpainting** (sembilan kanal masukan) ini adalah pipeline inpainting diffusers: UNet
+melihat laten, masker pada resolusi laten, dan laten gambar dengan area bermasker dihitamkan. Dengan
+**UNet biasa** ia memadukan: setelah setiap langkah, area tanpa masker diganti gambar asli yang diberi
+derau setingkat langkah itu - berfungsi di checkpoint mana pun dan lebih lembut di tepinya.
+
+![Mercusuar dengan bulan dilukis ke langit bermasker](../screenshots/diffusion-inpaint.png)
+
+Mercusuar di atas, dengan pojok kanan atas langit dimasker dan `"a full moon in the sky"`, pada UNet
+SD 1.5 biasa.
+
+## Penekanan
+
+```csharp
+pipeline.PromptWeighting = true;
+pipeline.Generate("a (red:1.4) lighthouse at [dawn], ((oil painting))", options);
+```
+
+Sintaks dan aritmetika AUTOMATIC1111: `(kata)` mengalikan 1,1, `[kata]` membaginya, `(kata:1.4)`
+mengatur bobot, kurung bisa bersarang dan `\(` meloloskan. Keluaran text encoder untuk setiap token
+diskalakan dengan bobotnya, lalu keseluruhannya diskalakan kembali ke rerata aslinya. Fitur ini mati
+secara bawaan, jadi prompt biasa selalu dienkode persis seperti diffusers melakukannya.
+`PromptWeights.Parse` menunjukkan potongan-potongannya.
+
+## LoRA
+
+```csharp
+var report = pipeline.LoadLora("some-user/some-sd15-lora", scale: 0.8);   // berkas, folder, atau repo
+Console.WriteLine(report);      // LoRA: 128 UNet and 72 text-encoder layers
+pipeline.UnloadLoras();
+```
+
+Tata letak kohya (`lora_unet_..._to_q.lora_down.weight`) maupun diffusers atau PEFT
+(`unet....to_q.lora_A.weight`) sama-sama dibaca. Bobot ekspor ONNX tidak bernama
+(`onnx::MatMul_2567`), tetapi nama node-nya menyimpan jalur modul PyTorch, jadi setiap adapter
+dicocokkan lewat node yang memakai bobot itu. Pembaruannya ditambahkan ke bobot tersimpan dan diberikan
+ke ONNX Runtime sebagai initializer pengganti; berkas model tidak pernah ditulis ulang. LoRA yang
+modulnya tidak cocok dengan apa pun ditolak - ia dilatih untuk model lain.
+
+Diuji terhadap LoRA yang digabungkan ke UNet dan text encoder di PyTorch lalu diekspor: keduanya
+sepakat kecuali tiga dari 12.288 nilai yang berbeda satu tingkat.
+
+## Hal yang akan menjebak Anda
+
+**Guidance scale di atas 1 menjalankan UNet pada batch berisi dua**, bersyarat dan tidak. Nilai tepat
+1 bukan sekadar setelan lemah: ia memangkas separuh kerja.
+
+**Lebar dan tinggi harus kelipatan faktor skala VAE** - 8 untuk Stable Diffusion. Pipeline ONNX
+diffusers menganggap 8 apa pun kata VAE-nya; pada model yang VAE-nya memperkecil lebih sedikit, ia
+mengembalikan gambar yang lebih kecil daripada yang diminta.
+
+**Siapkan sekitar 8 GB memori untuk SD 1.5 di CPU**, bahkan dari ekspor float16 2 GB: ONNX Runtime hanya
+punya sedikit kernel float16 di CPU, jadi ia menyisipkan konversi dan menyimpan salinan float32 dari bobot
+yang dibutuhkannya.
+
+**Ekspor float16 memakai float16 sampai ke dasar**, termasuk timestep. HF.Net mengonversi di
+perbatasan; tidak ada yang perlu diatur.
 
 ## Lihat juga
 
-[GraviOptimum](GraviOptimum.md) · [GraviTokenizers](GraviTokenizers.md)
+[GraviOptimum](GraviOptimum.md) · [GraviTokenizers](GraviTokenizers.md) ·
+[notebook 05](../../notebooks/05-stable-diffusion.ipynb)

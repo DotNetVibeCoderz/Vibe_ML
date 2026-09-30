@@ -7,10 +7,10 @@
 ## Mulai dari sini
 
 - [Memulai](memulai.md) — pasang, model pertama, prediksi pertama
-- [HF Gallery](hf-gallery.md) — sembilan use case berjalan terhadap model sungguhan, dalam satu jendela
+- [HF Gallery](hf-gallery.md) — lima belas use case berjalan terhadap model sungguhan, dalam satu jendela
 - [HFAppGen](HFAppGen.md) — IDE yang menuliskan aplikasi HF.Net untuk Anda
 - [Benchmark](benchmarks.md) — HF.Net diukur terhadap rujukan Python
-- Notebook: [01 memulai](../../notebooks/01-hugging-face-from-dotnet.ipynb) · [02 kinerja](../../notebooks/02-where-the-time-goes.ipynb)
+- Notebook: [01 memulai](../../notebooks/01-hugging-face-from-dotnet.ipynb) · [02 kinerja](../../notebooks/02-where-the-time-goes.ipynb) · [03 GPT-2 dan CLIP](../../notebooks/03-generate-and-see.ipynb) · [04 LoRA dan prefix tuning](../../notebooks/04-train-an-adapter.ipynb) · [05 Stable Diffusion](../../notebooks/05-stable-diffusion.ipynb)
 
 ## Pustaka
 
@@ -19,18 +19,20 @@
 | [GraviHub](GraviHub.md) | Klien Hub, safetensors, checkpoint PyTorch | `huggingface_hub` |
 | [GraviTokenizers](GraviTokenizers.md) | WordPiece, BPE, Unigram, `tokenizer.json` | `tokenizers` |
 | [GraviDatasets](GraviDatasets.md) | Berkas, dataset Hub, split, streaming | `datasets` |
-| [GraviTransformers](GraviTransformers.md) | Encoder terlatih dan task head | `transformers` |
-| [GraviPEFT](GraviPEFT.md) | Adapter LoRA | `peft` |
+| [GraviTransformers](GraviTransformers.md) | Encoder dan task head, GPT-2, ViT, CLIP | `transformers` |
+| [GraviPEFT](GraviPEFT.md) | LoRA dan prefix tuning | `peft` |
 | [GraviAccelerate](GraviAccelerate.md) | Perangkat, sharding, pengukuran | `accelerate` |
 | [GraviOptimum](GraviOptimum.md) | ONNX Runtime, kuantisasi | `optimum` |
-| [GraviDiffusers](GraviDiffusers.md) | Scheduler, Stable Diffusion | `diffusers` |
+| [GraviDiffusers](GraviDiffusers.md) | Scheduler, Stable Diffusion, img2img, inpainting, LoRA | `diffusers` |
 
 ## Konvensi yang berlaku di seluruh pustaka
 
 **Semuanya bertipe `double`.** `NdArray` menyimpan `double`, jadi checkpoint yang tersimpan sebagai
 F16 atau F32 dilebarkan saat dibaca. Ini memakan memori tetapi menjaga keseragaman dengan seluruh
 tumpukan Gravicode; ketika throughput yang dibutuhkan, jawabannya adalah
-[GraviOptimum](GraviOptimum.md), bukan tipe array yang berbeda.
+[GraviOptimum](GraviOptimum.md), bukan tipe array yang berbeda. Di dalam kernel inferensi bobotnya
+float32, dan `ComputeOptions.LinearLayers = Precision.Single` menjalankan lapisan linear dalam float32
+juga, sekitar dua kali lebih cepat.
 
 **Penolakan dinyatakan terang-terangan.** Ketika HF.Net tidak bisa melakukan sesuatu, ia mengatakannya
 dan menyebutkan alasannya — arsitektur yang tidak didukung, format berkas yang tidak dikenal, operasi

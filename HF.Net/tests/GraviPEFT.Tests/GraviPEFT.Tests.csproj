@@ -13,6 +13,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- A tiny BERT and a PEFT prefix-tuning adapter for it; see Fixtures/make_prefix.py. -->
+    <None Include="Fixtures\**" Exclude="Fixtures\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\GraviPEFT\GraviPEFT.csproj" />
   </ItemGroup>
 

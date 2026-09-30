@@ -2,7 +2,7 @@
 
 *[Bahasa Indonesia](id/hf-gallery.md)*
 
-`samples/HFGallery` is a desktop application that runs thirteen HF.Net use cases against real models
+`samples/HFGallery` is a desktop application that runs fifteen HF.Net use cases against real models
 and shows both the answer and the code that produced it. Nothing in it is mocked: every panel you
 see is the output of a checkpoint downloaded from the Hub during that run.
 
@@ -23,11 +23,13 @@ dotnet run --project samples/HFGallery
 
 ---
 
-## The thirteen cases
+## The fifteen cases
 
 | Case | Library | Model | What it shows |
 |---|---|---|---|
 | What is in this picture | GraviTransformers | `google/vit-base-patch16-224` | A Vision Transformer over image patches |
+| Labels it never saw | GraviTransformers | `openai/clip-vit-base-patch32` | CLIP zero-shot classification among labels you type |
+| Continue a story | GraviTransformers | `gpt2` | GPT-2 generation, streamed token by token |
 | Sentiment | GraviTransformers | `distilbert-base-uncased-finetuned-sst-2-english` | A fine-tuned head and its own label names |
 | Fill in the blank | GraviTransformers | `bert-base-uncased` | The masked-language head |
 | Named entities | GraviTransformers | `dslim/bert-base-NER` | Token classification, as spans of the input |
@@ -50,6 +52,22 @@ a 14x14 grid of 16px squares, each square becomes one vector, and a learned `[CL
 front. The picture is fetched from the Hub, so nothing is checked in.
 
 ![What is in this picture](screenshots/hfgallery-image.png)
+
+## Labels it never saw
+
+CLIP puts a picture and a sentence in one space. Each label you type becomes
+`This is a photo of {label}.`, and a softmax over the picture's similarity to each sentence - scaled by
+the checkpoint's learned temperature, 100 here - gives the probabilities. Nothing is trained.
+
+![Labels it never saw](screenshots/hfgallery-zero-shot.png)
+
+## Continue a story
+
+GPT-2 writes on from your text, one token at a time, the text appearing as it is produced. A
+temperature of 0 is greedy decoding, which gives transformers' output word for word; above 0 it
+samples, with top-p 0.95 and a repetition penalty of 1.2.
+
+![Continue a story](screenshots/hfgallery-story.png)
 
 ## Named entities
 

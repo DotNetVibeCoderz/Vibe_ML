@@ -628,6 +628,71 @@ public sealed class SafeTensorsReader : IDisposable
         return new NdArray(data, info.Shape);
     }
 
+    /// <summary>
+    /// Reads <paramref name="count"/> consecutive elements of a tensor, starting at element
+    /// <paramref name="first"/> in row-major order - a few rows of an embedding table, say, without
+    /// reading the rest of it.
+    /// </summary>
+    /// <param name="name">The tensor's name.</param>
+    /// <param name="first">Index of the first element.</param>
+    /// <param name="count">How many elements.</param>
+    public double[] ReadRange(string name, long first, int count)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_byName.TryGetValue(name, out var info)) throw new KeyNotFoundException($"'{name}' is not in {System.IO.Path.GetFileName(Path)}.");
+        if (first < 0 || count < 0 || first + count > info.ElementCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(first), $"Elements {first}..{first + count} are outside '{name}', which has {info.ElementCount}.");
+        }
+
+        var width = SafeTensors.ElementSize(info.DType);
+        var data = new double[count];
+        var staging = new byte[Math.Min(count, 1 << 16) * width];
+
+        for (var i = 0; i < count; i += 1 << 16)
+        {
+            var take = Math.Min(1 << 16, count - i);
+            var bytes = take * width;
+            _view.ReadArray(_dataStart + info.Begin + (first + i) * width, staging, 0, bytes);
+            SafeTensors.DecodeBlock(staging.AsSpan(0, bytes), data.AsSpan(i, take), info.DType);
+        }
+
+        return data;
+    }
+
+    /// <summary>Reads a whole tensor as float32, never holding it as double.</summary>
+    /// <remarks>
+    /// Exact for F32, F16 and BF16 - which is what checkpoints store - and half the memory of
+    /// <see cref="Read"/>. An F64 tensor is rounded.
+    /// </remarks>
+    public float[] ReadFloats(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_byName.TryGetValue(name, out var info)) throw new KeyNotFoundException($"'{name}' is not in {System.IO.Path.GetFileName(Path)}.");
+        if (info.ElementCount > Array.MaxLength) throw new NotSupportedException($"'{name}' has {info.ElementCount:N0} elements, more than one array holds.");
+
+        var count = (int)info.ElementCount;
+        var width = SafeTensors.ElementSize(info.DType);
+        var result = new float[count];
+
+        const int ChunkElements = 1 << 16;
+        var staging = new byte[ChunkElements * width];
+        var decoded = new double[ChunkElements];
+
+        for (var i = 0; i < count; i += ChunkElements)
+        {
+            var take = Math.Min(ChunkElements, count - i);
+            var bytes = take * width;
+            _view.ReadArray(_dataStart + info.Begin + (long)i * width, staging, 0, bytes);
+            SafeTensors.DecodeBlock(staging.AsSpan(0, bytes), decoded.AsSpan(0, take), info.DType);
+            for (var k = 0; k < take; k++) result[i + k] = (float)decoded[k];
+        }
+
+        return result;
+    }
+
     /// <summary>Reads a tensor if present, without throwing when it is not.</summary>
     public bool TryRead(string name, out NdArray tensor)
     {

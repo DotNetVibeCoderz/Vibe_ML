@@ -16,4 +16,9 @@
     <ProjectReference Include="..\..\src\GraviTokenizers\GraviTokenizers.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Real tokenizer files the parity tests are pinned against. -->
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

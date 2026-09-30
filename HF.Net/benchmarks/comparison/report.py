@@ -140,6 +140,21 @@ def main():
         add(row("bert-base-uncased, 8 documents", "inference_base_batch8_ms", py, net))
         add(row("bert-tiny, 1 document", "inference_tiny_single_ms", py, net))
         add("")
+        if "inference_base_single_f32_ms" in net:
+            add("With `ComputeOptions.LinearLayers = Precision.Single`, the linear layers in float32 as torch runs them:")
+            add("")
+            add("| Model | Python (torch) | HF.Net (float32 linear) | |")
+            add("|---|---:|---:|---|")
+            for label, key, f32 in (("bert-base-uncased, 1 document", "inference_base_single_ms", "inference_base_single_f32_ms"),
+                                    ("bert-base-uncased, 8 documents", "inference_base_batch8_ms", "inference_base_batch8_f32_ms"),
+                                    ("bert-tiny, 1 document", "inference_tiny_single_ms", "inference_tiny_single_f32_ms")):
+                value, reference = net.get(f32), py.get(key)
+                add(f"| {label} | {fmt(reference, ' ms')} | {fmt(value, ' ms')} | {ratio_text(ratio(value, reference))} |")
+            add("")
+            change = net.get("inference_base_f32_max_abs_change")
+            if change is not None:
+                add(f"On bert-base the hidden states move by at most **{change:.1e}** from the double-precision ones.")
+                add("")
         add("The managed encoder computes in `double` with float32 weights - which is exact, since")
         add("every checkpoint stores float32 or narrower - and agrees with torch in float64 to about")
         add("1e-13. torch runs float32 through hand-tuned kernels. For throughput the answer is the")
@@ -177,6 +192,9 @@ def main():
         add("| Model | Python (torch) | HF.Net (managed) | |")
         add("|---|---:|---:|---|")
         add(row("vit-base-patch16-224, 1 image", "vision_single_ms", py, net))
+        if "vision_single_f32_ms" in net:
+            value, reference = net.get("vision_single_f32_ms"), py.get("vision_single_ms")
+            add(f"| vit-base-patch16-224, float32 linear | {fmt(reference, ' ms')} | {fmt(value, ' ms')} | {ratio_text(ratio(value, reference))} |")
         add("")
         p = py.get("vision_top5")
         n = net.get("vision_top5")

@@ -345,6 +345,34 @@ public sealed class KernelTests
         Close(expectedBackward, backward, 1e-11, "dx");
     }
 
+    [Theory]
+    [InlineData(7, 600, 25)]     // a partial row group and a padded last panel
+    [InlineData(37, 700, 100)]   // several groups, several threads
+    [InlineData(1, 1, 1)]
+    public void The_single_precision_gemm_is_an_in_order_float32_sum_to_the_bit(int rows, int inputs, int outputs)
+    {
+        // The kernel rounds each activation to float32 and sums each output over the inputs in order
+        // with one fused multiply-add per step - exactly what this loop does, so the two must agree
+        // bit for bit, whatever the thread count or blocking.
+        var weight = Matrix(outputs, inputs, 71);
+        var x = Values(rows * inputs, 72);
+        // Called directly rather than through the process-wide switch, which other test classes
+        // running in parallel would see.
+        var flat = new float[outputs * inputs];
+        for (var o = 0; o < outputs; o++) for (var i = 0; i < inputs; i++) flat[o * inputs + i] = (float)weight[o, i];
+        var actual = Gemm.MultiplySingle(x, rows, Gemm.Pack(flat, inputs, outputs), inputs, outputs);
+
+        for (var r = 0; r < rows; r++)
+        {
+            for (var o = 0; o < outputs; o++)
+            {
+                var sum = 0f;
+                for (var i = 0; i < inputs; i++) sum = MathF.FusedMultiplyAdd((float)x[r * inputs + i], (float)weight[o, i], sum);
+                Assert.Equal(sum, actual[r * outputs + o]);
+            }
+        }
+    }
+
     [Fact]
     public void Packing_keeps_every_weight_where_it_can_be_read_back()
     {

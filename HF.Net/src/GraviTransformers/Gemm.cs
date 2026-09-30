@@ -71,6 +71,109 @@ internal static class Gemm
         => Run(x, rows, inputs, outputs, (panel, k0, count, buffer) =>
             Widen(packed, panel * inputs * Width + k0 * Width, buffer, count * Width));
 
+    /// <summary>
+    /// <c>y = x W^T</c> in single precision: activations rounded to float32, float32 sums - the
+    /// <see cref="Precision.Single"/> path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same packed panels, read without widening. The blocking turns around: eight input rows are
+    /// transposed into one float vector per input position, and each of a panel's twelve weights is
+    /// broadcast against it, so twelve accumulators hold an 8-row by 12-output block. That is eight
+    /// lanes per multiply-add where the double kernel has four, which is where the factor of two
+    /// comes from.
+    /// </para>
+    /// <para>
+    /// Each block is summed over the whole depth in order, so results do not depend on the thread count.
+    /// </para>
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal static double[] MultiplySingle(double[] x, int rows, float[] packed, int inputs, int outputs)
+    {
+        if (!Avx2.IsSupported || !Fma.IsSupported) return Multiply(x, rows, packed, inputs, outputs);
+
+        const int Rows = 8;
+        var groups = (rows + Rows - 1) / Rows;
+        var panels = Panels(outputs);
+
+        // [group][input][8 rows], float - the transposed, rounded activations, shared by every panel.
+        var transposed = new float[groups * inputs * Rows];
+        Parallel.For(0, groups, group =>
+        {
+            var baseRow = group * Rows;
+            var target = group * inputs * Rows;
+            for (var r = 0; r < Rows && baseRow + r < rows; r++)
+            {
+                var source = (baseRow + r) * inputs;
+                for (var k = 0; k < inputs; k++) transposed[target + k * Rows + r] = (float)x[source + k];
+            }
+        });
+
+        var result = new double[rows * outputs];
+        var work = (long)rows * inputs * outputs;
+        var workers = (int)Math.Min(Math.Min(Environment.ProcessorCount, panels), Math.Max(1, work / 400_000));
+
+        Parallel.For(0, workers, worker =>
+        {
+            Span<float> block = stackalloc float[Rows * Width];
+            var firstPanel = panels * worker / workers;
+            var lastPanel = panels * (worker + 1) / workers;
+
+            for (var panel = firstPanel; panel < lastPanel; panel++)
+            {
+                for (var group = 0; group < groups; group++)
+                {
+                    SingleKernel(transposed, group * inputs * Rows, packed, panel * inputs * Width, inputs, block);
+
+                    var columns = Math.Min(Width, outputs - panel * Width);
+                    for (var r = 0; r < Rows && group * Rows + r < rows; r++)
+                    {
+                        var at = (group * Rows + r) * outputs + panel * Width;
+                        for (var j = 0; j < columns; j++) result[at + j] = block[j * Rows + r];
+                    }
+                }
+            }
+        });
+
+        return result;
+    }
+
+    /// <summary>An 8-row by 12-output block, <c>block[j * 8 + r]</c>, summed over every input.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static void SingleKernel(float[] aArray, int aOffset, float[] wArray, int wOffset, int depth, Span<float> block)
+    {
+        ref var a = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(aArray), aOffset);
+        ref var w = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(wArray), wOffset);
+
+        Vector256<float> c0 = default, c1 = default, c2 = default, c3 = default, c4 = default, c5 = default,
+            c6 = default, c7 = default, c8 = default, c9 = default, c10 = default, c11 = default;
+
+        for (nuint k = 0; k < (nuint)depth; k++)
+        {
+            var column = Vector256.LoadUnsafe(ref a, k * 8);
+            ref var row = ref Unsafe.Add(ref w, k * Width);
+
+            c0 = Fma.MultiplyAdd(column, Vector256.Create(row), c0);
+            c1 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 1)), c1);
+            c2 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 2)), c2);
+            c3 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 3)), c3);
+            c4 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 4)), c4);
+            c5 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 5)), c5);
+            c6 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 6)), c6);
+            c7 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 7)), c7);
+            c8 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 8)), c8);
+            c9 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 9)), c9);
+            c10 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 10)), c10);
+            c11 = Fma.MultiplyAdd(column, Vector256.Create(Unsafe.Add(ref row, 11)), c11);
+        }
+
+        ref var target = ref MemoryMarshal.GetReference(block);
+        c0.StoreUnsafe(ref target, 0); c1.StoreUnsafe(ref target, 8); c2.StoreUnsafe(ref target, 16);
+        c3.StoreUnsafe(ref target, 24); c4.StoreUnsafe(ref target, 32); c5.StoreUnsafe(ref target, 40);
+        c6.StoreUnsafe(ref target, 48); c7.StoreUnsafe(ref target, 56); c8.StoreUnsafe(ref target, 64);
+        c9.StoreUnsafe(ref target, 72); c10.StoreUnsafe(ref target, 80); c11.StoreUnsafe(ref target, 88);
+    }
+
     /// <summary><c>dx = dy W</c>: the transposed product, from the same packed weights.</summary>
     /// <returns>Row-major <c>[rows, inputs]</c>.</returns>
     /// <remarks>

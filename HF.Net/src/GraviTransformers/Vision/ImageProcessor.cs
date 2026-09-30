@@ -18,8 +18,30 @@ namespace Gravicode.HFNet.GraviTransformers.Vision;
 /// </remarks>
 public sealed record ImageProcessor
 {
-    /// <summary>The square edge length the image is resized to.</summary>
+    /// <summary>
+    /// The square edge length the image is resized to - or, with <see cref="ShortestEdge"/>, the
+    /// length its shorter side is resized to.
+    /// </summary>
     public required int Size { get; init; }
+
+    /// <summary>
+    /// Whether <see cref="Size"/> is the shorter side, the aspect ratio kept (CLIP), rather than both
+    /// sides (ViT).
+    /// </summary>
+    public bool ShortestEdge { get; init; }
+
+    /// <summary>The square cut from the centre after resizing, or <c>null</c> for none.</summary>
+    public int? CropSize { get; init; }
+
+    /// <summary>The filter the resize uses, as PIL numbers it.</summary>
+    /// <remarks>
+    /// ViT is bilinear, CLIP bicubic. The resize is PIL's own algorithm reproduced to the byte (see
+    /// <see cref="PilResize"/>), because that is what the model saw in training.
+    /// </remarks>
+    public Resample Resample { get; init; } = Resample.Bilinear;
+
+    /// <summary>The edge length of the tensor this produces.</summary>
+    public int OutputSize => CropSize ?? Size;
 
     /// <summary>Per-channel mean subtracted after rescaling, in RGB order.</summary>
     public required IReadOnlyList<double> Mean { get; init; }
@@ -55,15 +77,49 @@ public sealed record ImageProcessor
         return Load(path);
     }
 
+    /// <summary>The processor CLIP checkpoints publish: shortest edge 224, bicubic, centre crop, CLIP's own statistics.</summary>
+    public static ImageProcessor Clip => new()
+    {
+        Size = 224,
+        ShortestEdge = true,
+        CropSize = 224,
+        Resample = Resample.Bicubic,
+        Mean = [0.48145466, 0.4578275, 0.40821073],
+        Deviation = [0.26862954, 0.26130258, 0.27577711],
+    };
+
     /// <summary>Reads a <c>preprocessor_config.json</c> from disk.</summary>
     public static ImageProcessor Load(string path)
     {
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
 
+        // A bare number means a square to ViT's processor but the shorter side to CLIP's, which
+        // reads sizes with default_to_square=False - and OpenAI's own configs write a bare 224.
+        var type = root.TryGetProperty("image_processor_type", out var kind) ? kind.GetString()
+            : root.TryGetProperty("feature_extractor_type", out var legacy) ? legacy.GetString()
+            : null;
+        var squareByDefault = type is null || !type.StartsWith("CLIP", StringComparison.Ordinal);
+
+        var shortest = root.TryGetProperty("size", out var sizeElement)
+            && (sizeElement.ValueKind == JsonValueKind.Object
+                ? sizeElement.TryGetProperty("shortest_edge", out _)
+                : !squareByDefault);
+        var crop = (!root.TryGetProperty("do_center_crop", out var doCrop) || doCrop.GetBoolean())
+            && root.TryGetProperty("crop_size", out var cropElement)
+            ? cropElement.ValueKind == JsonValueKind.Number
+                ? cropElement.GetInt32()
+                : cropElement.TryGetProperty("height", out var cropHeight) ? cropHeight.GetInt32() : (int?)null
+            : null;
+
         return new ImageProcessor
         {
             Size = ReadSize(root),
+            ShortestEdge = shortest,
+            CropSize = crop,
+            Resample = root.TryGetProperty("resample", out var resample) && resample.ValueKind == JsonValueKind.Number
+                ? (Resample)resample.GetInt32()
+                : Resample.Bilinear,
             Mean = ReadTriple(root, "image_mean", 0.5),
             Deviation = ReadTriple(root, "image_std", 0.5),
             RescaleFactor = root.TryGetProperty("rescale_factor", out var rescale)
@@ -94,43 +150,72 @@ public sealed record ImageProcessor
         return Convert(image);
     }
 
-    private NdArray Convert(Image<Rgb24> image)
+    /// <summary>Converts a decoded image to <c>[channels, size, size]</c>, normalised.</summary>
+    /// <remarks>
+    /// Every step is the Hugging Face processor's: PIL's resize on the 8-bit image, an integer
+    /// centre crop, then rescaling and normalising in float32, which is the precision the reference
+    /// hands the model.
+    /// </remarks>
+    public NdArray Convert(Image<Rgb24> image)
     {
-        // Straight to a square, not shortest-side-then-crop: that is what ViTImageProcessor does
-        // with a scalar `size`, and cropping instead would quietly throw away the edges of a
-        // non-square photograph.
-        image.Mutate(x => x.Resize(new ResizeOptions
-        {
-            Size = new Size(Size, Size),
-            Mode = ResizeMode.Stretch,
-            Sampler = KnownResamplers.Triangle,
-        }));
+        ArgumentNullException.ThrowIfNull(image);
 
-        var pixels = NdArray.Zeros(3, Size, Size);
+        var width = image.Width;
+        var height = image.Height;
+        var bytes = new byte[width * height * 3];
+        image.CopyPixelDataTo(bytes);
 
-        image.ProcessPixelRows(accessor =>
+        // The target size: both sides, or the shorter one with the longer scaled to match -
+        // transformers' get_resize_output_image_size, which truncates the longer side.
+        int newWidth, newHeight;
+        if (ShortestEdge)
         {
-            for (var y = 0; y < Size; y++)
+            var (shorter, longer) = width <= height ? (width, height) : (height, width);
+            var scaled = (int)((long)Size * longer / shorter);
+            (newWidth, newHeight) = width <= height ? (Size, scaled) : (scaled, Size);
+        }
+        else
+        {
+            (newWidth, newHeight) = (Size, Size);
+        }
+
+        if (newWidth != width || newHeight != height)
+        {
+            bytes = PilResize.Resize(bytes, width, height, newWidth, newHeight, Resample);
+            (width, height) = (newWidth, newHeight);
+        }
+
+        var edge = OutputSize;
+        var top = CropSize is null ? 0 : (height - edge) / 2;
+        var left = CropSize is null ? 0 : (width - edge) / 2;
+
+        if (top < 0 || left < 0 || (CropSize is null && (width != edge || height != edge)))
+        {
+            throw new InvalidOperationException(
+                $"A {width}x{height} image cannot be cut to {edge}x{edge}; the crop is larger than the resized image.");
+        }
+
+        var mean = Mean.Select(m => (float)m).ToArray();
+        var deviation = Deviation.Select(d => (float)d).ToArray();
+        var values = new double[3 * edge * edge];
+        var plane = edge * edge;
+
+        for (var y = 0; y < edge; y++)
+        {
+            for (var x = 0; x < edge; x++)
             {
-                var row = accessor.GetRowSpan(y);
-
-                for (var x = 0; x < Size; x++)
+                var at = ((top + y) * width + left + x) * 3;
+                for (var c = 0; c < 3; c++)
                 {
-                    var pixel = row[x];
-                    Span<double> channels = [pixel.R, pixel.G, pixel.B];
+                    var value = (float)(bytes[at + c] * RescaleFactor);
+                    if (Normalize) value = (value - mean[c]) / deviation[c];
 
-                    for (var c = 0; c < 3; c++)
-                    {
-                        var value = channels[c] * RescaleFactor;
-                        if (Normalize) value = (value - Mean[c]) / Deviation[c];
-
-                        pixels[c, y, x] = value;
-                    }
+                    values[c * plane + y * edge + x] = value;
                 }
             }
-        });
+        }
 
-        return pixels;
+        return new NdArray(values, 3, edge, edge);
     }
 
     private static int ReadSize(JsonElement root)
@@ -168,6 +253,7 @@ public sealed record ImageProcessor
 
     /// <inheritdoc />
     public override string ToString()
-        => $"ImageProcessor({Size}x{Size}, mean [{string.Join(", ", Mean)}], "
+        => $"ImageProcessor({(ShortestEdge ? $"shortest edge {Size}" : $"{Size}x{Size}")}"
+            + $"{(CropSize is { } c ? $", crop {c}" : "")}, {Resample}, mean [{string.Join(", ", Mean)}], "
             + $"std [{string.Join(", ", Deviation)}])";
 }

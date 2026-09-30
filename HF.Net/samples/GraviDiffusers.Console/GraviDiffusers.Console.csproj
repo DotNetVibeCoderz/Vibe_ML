@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.HFNet.Samples.GraviDiffusers</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GraviDiffusers\GraviDiffusers.csproj" />
+  </ItemGroup>
+</Project>

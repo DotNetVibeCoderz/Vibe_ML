@@ -120,6 +120,22 @@ if (!skipInference)
         results[$"inference_{label}_single_median_ms"] = singleMedian;
         results[$"inference_{label}_batch8_ms"] = batch;
         results[$"inference_{label}_tokens"] = encoded.Length;
+
+        // The opt-in float32 linear layers: the same measurements, and how far the output moved.
+        var exact = model.Hidden(corpus[0]).ToArray();
+        ComputeOptions.LinearLayers = Precision.Single;
+        try
+        {
+            var (singleF32, _) = Best(() => model.Hidden(corpus[0]), iterations: 20, warmup: 10);
+            var (batchF32, _) = Best(() => model.EmbedBatch(corpus), iterations: 10, warmup: 5);
+            results[$"inference_{label}_single_f32_ms"] = singleF32;
+            results[$"inference_{label}_batch8_f32_ms"] = batchF32;
+            results[$"inference_{label}_f32_max_abs_change"] = model.Hidden(corpus[0]).ToArray().Zip(exact, (x, y) => Math.Abs(x - y)).Max();
+        }
+        finally
+        {
+            ComputeOptions.LinearLayers = Precision.Double;
+        }
     }
 
     // Fill-mask, so the answers can be compared against the reference rather than against
@@ -150,6 +166,17 @@ if (!skipInference)
     var (single, median) = Best(() => vit.Forward(pixels), iterations: 10, warmup: 3);
     results["vision_single_ms"] = single;
     results["vision_single_median_ms"] = median;
+
+    ComputeOptions.LinearLayers = Precision.Single;
+    try
+    {
+        var (singleF32, _) = Best(() => vit.Forward(pixels), iterations: 10, warmup: 3);
+        results["vision_single_f32_ms"] = singleF32;
+    }
+    finally
+    {
+        ComputeOptions.LinearLayers = Precision.Double;
+    }
 
     results["vision_top5"] = vit.Classify(pixels, topK: 5)
         .Select(c => new Dictionary<string, object> { ["label"] = c.Label, ["index"] = c.Index, ["score"] = c.Score })

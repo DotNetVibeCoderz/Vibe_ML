@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- One suite per library, as the blueprint asks: run them all, or one with - -filter *Tokenizer*.
+       Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.HFNet.Benchmarks</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CA1822;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+    <PackageReference Include="Gravicode.Science.GraviLearn" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GraviHub\GraviHub.csproj" />
+    <ProjectReference Include="..\..\src\GraviTokenizers\GraviTokenizers.csproj" />
+    <ProjectReference Include="..\..\src\GraviDatasets\GraviDatasets.csproj" />
+    <ProjectReference Include="..\..\src\GraviTransformers\GraviTransformers.csproj" />
+    <ProjectReference Include="..\..\src\GraviPEFT\GraviPEFT.csproj" />
+    <ProjectReference Include="..\..\src\GraviAccelerate\GraviAccelerate.csproj" />
+    <ProjectReference Include="..\..\src\GraviOptimum\GraviOptimum.csproj" />
+    <ProjectReference Include="..\..\src\GraviDiffusers\GraviDiffusers.csproj" />
+  </ItemGroup>
+
+</Project>

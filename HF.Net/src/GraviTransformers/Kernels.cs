@@ -62,6 +62,106 @@ internal static class Simd
 
         for (; i < x.Length; i++) y[i] += alpha * x[i];
     }
+
+    /// <summary>
+    /// <c>scores[j] = scale * (query . keys[j])</c> for the first <paramref name="count"/> rows of a
+    /// row-major key block, four keys per pass so each piece of the query is loaded once for four.
+    /// </summary>
+    /// <remarks>
+    /// Each score is still one dot product summed lane-wise in the same order as <see cref="Dot"/>,
+    /// so the result is the same to the last bit; only the loads are shared.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal static void Scores(ReadOnlySpan<double> query, double[] keys, int count, int size, double scale, double[] scores)
+    {
+        var width = Vector<double>.Count;
+        var j = 0;
+
+        for (; j + 4 <= count; j += 4)
+        {
+            var k0 = keys.AsSpan(j * size, size);
+            var k1 = keys.AsSpan((j + 1) * size, size);
+            var k2 = keys.AsSpan((j + 2) * size, size);
+            var k3 = keys.AsSpan((j + 3) * size, size);
+            Vector<double> s0 = default, s1 = default, s2 = default, s3 = default;
+
+            var i = 0;
+            for (; i <= size - width; i += width)
+            {
+                var q = new Vector<double>(query[i..]);
+                s0 += q * new Vector<double>(k0[i..]);
+                s1 += q * new Vector<double>(k1[i..]);
+                s2 += q * new Vector<double>(k2[i..]);
+                s3 += q * new Vector<double>(k3[i..]);
+            }
+
+            double d0 = Vector.Sum(s0), d1 = Vector.Sum(s1), d2 = Vector.Sum(s2), d3 = Vector.Sum(s3);
+            for (; i < size; i++)
+            {
+                d0 += query[i] * k0[i];
+                d1 += query[i] * k1[i];
+                d2 += query[i] * k2[i];
+                d3 += query[i] * k3[i];
+            }
+
+            scores[j] = d0 * scale;
+            scores[j + 1] = d1 * scale;
+            scores[j + 2] = d2 * scale;
+            scores[j + 3] = d3 * scale;
+        }
+
+        for (; j < count; j++) scores[j] = Dot(query, keys.AsSpan(j * size, size)) * scale;
+    }
+
+    /// <summary>
+    /// <c>target += sum over j of weights[j] * values[j]</c>, four value rows per pass so the target
+    /// is loaded and stored once for four.
+    /// </summary>
+    /// <remarks>
+    /// Added in the same order as four <see cref="Axpy"/> calls - weight 0's term first - so the sums
+    /// are the same to the last bit.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal static void Combine(double[] weights, double[] values, int count, int size, Span<double> target)
+    {
+        var width = Vector<double>.Count;
+        var j = 0;
+
+        for (; j + 4 <= count; j += 4)
+        {
+            var v0 = values.AsSpan(j * size, size);
+            var v1 = values.AsSpan((j + 1) * size, size);
+            var v2 = values.AsSpan((j + 2) * size, size);
+            var v3 = values.AsSpan((j + 3) * size, size);
+            var w0 = new Vector<double>(weights[j]);
+            var w1 = new Vector<double>(weights[j + 1]);
+            var w2 = new Vector<double>(weights[j + 2]);
+            var w3 = new Vector<double>(weights[j + 3]);
+
+            var i = 0;
+            for (; i <= size - width; i += width)
+            {
+                var t = new Vector<double>(target[i..]);
+                t += w0 * new Vector<double>(v0[i..]);
+                t += w1 * new Vector<double>(v1[i..]);
+                t += w2 * new Vector<double>(v2[i..]);
+                t += w3 * new Vector<double>(v3[i..]);
+                t.CopyTo(target[i..]);
+            }
+
+            for (; i < size; i++)
+            {
+                var t = target[i];
+                t += weights[j] * v0[i];
+                t += weights[j + 1] * v1[i];
+                t += weights[j + 2] * v2[i];
+                t += weights[j + 3] * v3[i];
+                target[i] = t;
+            }
+        }
+
+        for (; j < count; j++) Axpy(weights[j], values.AsSpan(j * size, size), target);
+    }
 }
 
 /// <summary>The feed-forward activations a config's <c>hidden_act</c> can name.</summary>
@@ -80,10 +180,11 @@ internal static class Activation
         "gelu" or "gelu_python" => ExactGelu,
         "gelu_new" or "gelu_pytorch_tanh" or "gelu_fast" => Activations.Gelu,
         "relu" => Activations.Relu,
+        "quick_gelu" => QuickGelu,
         _ => throw new NotSupportedException(
             $"The config asks for the activation '{name}'. This encoder runs gelu, gelu_new, "
-            + "gelu_pytorch_tanh, gelu_fast and relu; export the model to ONNX and use GraviOptimum "
-            + "for anything else."),
+            + "gelu_pytorch_tanh, gelu_fast, quick_gelu and relu; export the model to ONNX and use "
+            + "GraviOptimum for anything else."),
     };
 
     /// <summary>The derivative of the activation <paramref name="name"/> refers to.</summary>
@@ -97,10 +198,21 @@ internal static class Activation
         "gelu" or "gelu_python" => ExactGeluDerivative,
         "gelu_new" or "gelu_pytorch_tanh" or "gelu_fast" => TanhGeluDerivative,
         "relu" => x => x > 0 ? 1.0 : 0.0,
+        "quick_gelu" => QuickGeluDerivative,
         _ => throw new NotSupportedException(
             $"The config asks for the activation '{name}', which has no derivative here; only gelu, "
-            + "gelu_new, gelu_pytorch_tanh, gelu_fast and relu can be trained through."),
+            + "gelu_new, gelu_pytorch_tanh, gelu_fast, quick_gelu and relu can be trained through."),
     };
+
+    /// <summary>CLIP's <c>x * sigmoid(1.702 x)</c>, a third form of GELU that is neither of the other two.</summary>
+    internal static double QuickGelu(double x) => x / (1 + Math.Exp(-1.702 * x));
+
+    /// <summary><c>s + 1.702 x s (1 - s)</c> with <c>s = sigmoid(1.702 x)</c>.</summary>
+    internal static double QuickGeluDerivative(double x)
+    {
+        var s = 1 / (1 + Math.Exp(-1.702 * x));
+        return s + 1.702 * x * s * (1 - s);
+    }
 
     internal static double ExactGelu(double x) => 0.5 * x * (1 + Erf(x * InverseSqrtTwo));
 
@@ -263,6 +375,28 @@ internal sealed class Linear
         return new Linear(flat, bias, inputs, outputs);
     }
 
+    /// <summary>
+    /// A layer from float32 weights as a checkpoint stores them - <c>(outputs, inputs)</c>, or
+    /// <c>(inputs, outputs)</c> when <paramref name="inputsFirst"/> - never widened to double.
+    /// </summary>
+    internal static Linear FromFloats(float[] weights, double[] bias, int inputs, int outputs, bool inputsFirst = false)
+    {
+        if (weights.Length != (long)inputs * outputs)
+        {
+            throw new InvalidDataException($"The weight holds {weights.Length} values but the layer is {inputs}x{outputs}.");
+        }
+
+        if (!inputsFirst) return new Linear(weights, bias, inputs, outputs);
+
+        var turned = new float[weights.Length];
+        for (var i = 0; i < inputs; i++)
+        {
+            for (var o = 0; o < outputs; o++) turned[o * inputs + i] = weights[i * outputs + o];
+        }
+
+        return new Linear(turned, bias, inputs, outputs);
+    }
+
     /// <summary>Copies a matrix stored <c>(outputs, inputs)</c>, with an optional bias.</summary>
     internal static Linear From(NdArray weight, NdArray? bias)
     {
@@ -335,16 +469,34 @@ internal sealed class Linear
     internal double[] Apply(double[] input, int rows, Func<double, double>? activation = null)
     {
         var outputs = Outputs;
-        var result = Gemm.Multiply(input, rows, _packed, Inputs, outputs);
+        var result = ComputeOptions.UseSingle
+            ? Gemm.MultiplySingle(input, rows, _packed, Inputs, outputs)
+            : Gemm.Multiply(input, rows, _packed, Inputs, outputs);
 
-        for (var r = 0; r < rows; r++)
+        // The bias and the activation, row by row. With an exact GELU this is millions of erf calls
+        // per image - measured at a quarter of a ViT block's time while it ran on one thread - so a
+        // product large enough to have been split across threads has its epilogue split too.
+        var bias = _bias;
+        void Epilogue(int r)
         {
             var row = result.AsSpan(r * outputs, outputs);
-            for (var o = 0; o < outputs; o++)
+            if (activation is null)
             {
-                var value = row[o] + _bias[o];
-                row[o] = activation is null ? value : activation(value);
+                for (var o = 0; o < outputs; o++) row[o] += bias[o];
             }
+            else
+            {
+                for (var o = 0; o < outputs; o++) row[o] = activation(row[o] + bias[o]);
+            }
+        }
+
+        if (activation is not null && (long)rows * outputs >= 16_384)
+        {
+            Parallel.For(0, rows, Epilogue);
+        }
+        else
+        {
+            for (var r = 0; r < rows; r++) Epilogue(r);
         }
 
         return result;
@@ -440,6 +592,11 @@ internal static class Attention
     /// <param name="hidden">Model width.</param>
     /// <param name="heads">Attention heads.</param>
     /// <param name="mask">1 for a real position, 0 for padding; <c>null</c> for none.</param>
+    /// <param name="causal">
+    /// Whether each position sees only itself and those before it, as a decoder or CLIP's text
+    /// tower does. Later positions are left out of the sum entirely rather than given a large
+    /// negative score, which is what their weight after the softmax is anyway: exactly zero.
+    /// </param>
     /// <returns>Row-major <c>[rows, hidden]</c>, heads concatenated.</returns>
     /// <remarks>
     /// Each head's keys and values are first copied out into their own contiguous block, so every
@@ -448,7 +605,7 @@ internal static class Attention
     /// twelve-head model, and rows alone would repeat the copy.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal static double[] Apply(double[] projected, int rows, int hidden, int heads, int[]? mask)
+    internal static double[] Apply(double[] projected, int rows, int hidden, int heads, int[]? mask, bool causal = false)
     {
         var size = hidden / heads;
         var stride = 3 * hidden;
@@ -489,27 +646,29 @@ internal static class Attention
             for (var i = first; i < last; i++)
             {
                 var query = projected.AsSpan(i * stride + head * size, size);
+                var seen = causal ? i + 1 : rows;
+
+                Simd.Scores(query, k, seen, size, scale, weights);
 
                 var largest = double.NegativeInfinity;
-                for (var j = 0; j < rows; j++)
+                for (var j = 0; j < seen; j++)
                 {
                     // The same -1e9 the reference uses, so a fully masked row behaves the same too.
-                    weights[j] = mask is not null && mask[j] == 0
-                        ? -1e9
-                        : Simd.Dot(query, k.AsSpan(j * size, size)) * scale;
-
+                    if (mask is not null && mask[j] == 0) weights[j] = -1e9;
                     if (weights[j] > largest) largest = weights[j];
                 }
 
                 var total = 0.0;
-                for (var j = 0; j < rows; j++)
+                for (var j = 0; j < seen; j++)
                 {
                     weights[j] = Math.Exp(weights[j] - largest);
                     total += weights[j];
                 }
 
-                var target = result.AsSpan(i * hidden + head * size, size);
-                for (var j = 0; j < rows; j++) Simd.Axpy(weights[j] / total, v.AsSpan(j * size, size), target);
+                // Divided, not multiplied by a reciprocal: that is what the softmax the weights were
+                // trained with does, and the two differ in the last bit.
+                for (var j = 0; j < seen; j++) weights[j] /= total;
+                Simd.Combine(weights, v, seen, size, result.AsSpan(i * hidden + head * size, size));
             }
         });
 
@@ -560,22 +719,22 @@ internal sealed class EncoderBlock
 
     internal int Hidden => _attentionOutput.Outputs;
 
-    internal double[] Forward(double[] hidden, int rows, int[]? mask)
+    internal double[] Forward(double[] hidden, int rows, int[]? mask, bool causal = false)
     {
         if (_order == NormOrder.Pre)
         {
-            var attended = Add(hidden, Attend(_first.Apply(hidden, rows), rows, mask));
+            var attended = Add(hidden, Attend(_first.Apply(hidden, rows), rows, mask, causal));
             return Add(attended, FeedForward(_second.Apply(attended, rows), rows));
         }
 
-        var normed = _first.Apply(Add(hidden, Attend(hidden, rows, mask)), rows);
+        var normed = _first.Apply(Add(hidden, Attend(hidden, rows, mask, causal)), rows);
         return _second.Apply(Add(normed, FeedForward(normed, rows)), rows);
     }
 
-    private double[] Attend(double[] input, int rows, int[]? mask)
+    private double[] Attend(double[] input, int rows, int[]? mask, bool causal)
     {
         var projected = _queryKeyValue.Apply(input, rows);
-        return _attentionOutput.Apply(Attention.Apply(projected, rows, Hidden, _heads, mask), rows);
+        return _attentionOutput.Apply(Attention.Apply(projected, rows, Hidden, _heads, mask, causal), rows);
     }
 
     private double[] FeedForward(double[] input, int rows)

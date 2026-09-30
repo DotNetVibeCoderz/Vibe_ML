@@ -289,7 +289,23 @@ public sealed class UnigramModel(IReadOnlyList<(string Piece, double LogProbabil
         var result = new List<string>();
         for (var at = word.Length; at > 0; at = from[at]) result.Add(word[from[at]..at]);
         result.Reverse();
-        return [.. result];
+
+        // Consecutive unknown characters become one unknown piece, as the reference's Unigram does:
+        // "©®" is one <unk>, not two, and neither is an emoji split into its two UTF-16 halves.
+        var fused = new List<string>(result.Count);
+        foreach (var piece in result)
+        {
+            if (fused.Count > 0 && !_ids.ContainsKey(piece) && !_ids.ContainsKey(fused[^1]))
+            {
+                fused[^1] += piece;
+            }
+            else
+            {
+                fused.Add(piece);
+            }
+        }
+
+        return [.. fused];
     }
 
     /// <summary>

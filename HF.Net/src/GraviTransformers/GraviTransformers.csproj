@@ -16,6 +16,9 @@
          the function inference runs. The two packages are versioned and released together. -->
     <InternalsVisibleTo Include="Gravicode.HFNet.GraviPEFT" />
     <InternalsVisibleTo Include="GraviPEFT.Tests" />
+
+    <!-- The per-library benchmarks time the GEMM directly against the foundation and ILGPU. -->
+    <InternalsVisibleTo Include="HFNet.Benchmarks" />
   </ItemGroup>
 
   <ItemGroup>

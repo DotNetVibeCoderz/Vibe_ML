@@ -1,6 +1,12 @@
+using Gravicode.HFNet.GraviHub;
 using Gravicode.HFNet.GraviTransformers;
+using Gravicode.HFNet.GraviTransformers.Vision;
 
 // GraviTransformers sample. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.
+//   dotnet run -- [model id] [--all]
+// --all also runs GPT-2, CLIP and the streaming encoder, which download about 1.2 GB between them.
+var all = args.Contains("--all");
+args = [.. args.Where(a => a != "--all")];
 var id = args.Length > 0 ? args[0] : "prajjwal1/bert-tiny";
 
 Console.WriteLine($"=== GraviTransformers: {id} ===\n");
@@ -81,3 +87,44 @@ if (model.HasQuestionAnsweringHead)
             Console.WriteLine($"    {answer}");
     }
 }
+
+if (!all) return;
+
+// --- text generation: GPT-2 -----------------------------------------------------
+Console.WriteLine("\n=== gpt2 ===");
+using (var gpt = CausalLanguageModel.Load("gpt2"))
+{
+    const string Prompt = "The lighthouse keeper opened the door and";
+    Console.Write($"greedy:  {Prompt}");
+    foreach (var piece in gpt.Stream(Prompt, new GenerationSettings(MaxNewTokens: 30))) Console.Write(piece);
+
+    Console.Write($"\nsampled: {Prompt}");
+    var sampled = new GenerationSettings(MaxNewTokens: 30, Sample: true, Temperature: 0.8, TopP: 0.95, RepetitionPenalty: 1.2, Seed: 3);
+    foreach (var piece in gpt.Stream(Prompt, sampled)) Console.Write(piece);
+    Console.WriteLine();
+}
+
+// --- zero-shot image classification: CLIP ---------------------------------------
+Console.WriteLine("\n=== openai/clip-vit-base-patch32 ===");
+using (var clip = ClipModel.Load("openai/clip-vit-base-patch32"))
+{
+    var bee = Hub.DownloadDatasetFile("huggingface/documentation-images", "bee.jpg");
+    foreach (var label in clip.ZeroShot(bee, ["a bee", "a flower", "a butterfly", "a bird", "a cat"]))
+        Console.WriteLine($"    {label.Label,-12} {label.Score:P2}");
+}
+
+// --- a model read layer by layer ------------------------------------------------
+Console.WriteLine($"\n=== {id}, streamed ===");
+try
+{
+    using var streaming = StreamingEncoder.Load(id);
+    var streamed = streaming.Embed("HF.Net brings Hugging Face models to .NET.");
+    var same = streamed.ToArray().SequenceEqual(vector.ToArray());
+    Console.WriteLine($"{streaming}: embedding identical to the loaded model's: {same}");
+}
+catch (NotSupportedException refusal)
+{
+    // bert-tiny, the default, publishes only a PyTorch pickle, which cannot be read a layer at a time.
+    Console.WriteLine($"refused: {refusal.Message}");
+}
+

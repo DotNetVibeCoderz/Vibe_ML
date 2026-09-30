@@ -1,6 +1,6 @@
 # GraviPEFT
 
-**LoRA adapters, in the Hugging Face PEFT format.**
+**LoRA and prefix tuning, in the Hugging Face PEFT format.**
 
 Mirrors `peft`.
 
@@ -328,6 +328,40 @@ leaves out, without an error, any it cannot place. Load the adapter onto a model
 the same names. For `bert-base-uncased`, whose checkpoint names start with `bert.`, that means
 `AutoModelForSequenceClassification` or `BertForMaskedLM`, not a bare `BertModel`. Before 0.3 the
 keys were `layer.0.query`, which PEFT in Python loaded as no adapter at all.
+
+## Prefix tuning
+
+```csharp
+var tuned = PEFT.ApplyPrefixTuning(model, new PrefixTuningConfig(VirtualTokens: 10));
+Console.WriteLine(tuned);    // PrefixTuningModel(..., 10 virtual tokens, 5,120/4,367,104 params = 0.117%)
+
+tuned.Train(texts, labels, new TrainingOptions { Epochs = 3, BatchSize = 16, LearningRate = 2e-2 });
+tuned.Predict("an absolute joy to watch");
+tuned.Save("prefix-adapter");
+
+var again = PrefixTuningModel.Load(model, "prefix-adapter");   // or one PEFT saved
+```
+
+Where LoRA changes each weight matrix a little, prefix tuning changes none of them. Every attention
+layer gets a handful of extra positions ahead of the text - not tokens, which would be confined to the
+vocabulary's embeddings, but a key and a value per layer and head, trained directly. Only the prefix
+and the classifier train: 0.12% of the parameters in the example above.
+
+It trains with the same loop as LoRA and the same backward pass, which carries each layer's share of
+the gradient back into its slice of the prefix. The prefix gradient is checked against numerical
+differentiation to 1e-6, alone, packed, and alongside LoRA adapters. It wants a larger learning rate
+than LoRA, about 1e-2.
+
+**The format is PEFT's `PREFIX_TUNING`**: `prompt_embeddings` of shape `[virtual tokens,
+layers * 2 * hidden]`, each row every layer's key then value, and on BERT the classifier saved as
+`base_model.classifier.*` over the frozen pooler. An adapter PEFT 0.21 saved loads here and gives its
+logits to 1e-10; one trained here loads in Python with `PeftModel.from_pretrained` and gives the same
+logits to 1e-9.
+
+One detail decides that agreement. PEFT hands the prefix to BERT as `past_key_values`, and BERT numbers
+its positions from their length - so with ten virtual tokens the first real token is at position 10,
+not 0. Without that shift the logits were 3.4 apart. HF.Net shifts too, which also means a text can
+be at most `max_position_embeddings - virtual tokens` long.
 
 ## Why the parameter count matters
 

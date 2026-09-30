@@ -144,6 +144,55 @@ aktivasi dan `int64` untuk id token. Konversi terjadi di batas, dikendalikan ole
 dideklarasikan graf — menyodorkan tensor double ke input float melempar exception di dalam runtime
 dengan pesan yang tidak menyebut nama tensor maupun pemanggilnya.
 
+## Presisi setengah
+
+Masukan dan keluaran float16 dan bfloat16 dikonversi di perbatasan seperti tipe lain. Kebanyakan
+ekspor Stable Diffusion memakai float16 di seluruhnya, termasuk timestep, dan tidak perlu diatur apa
+pun.
+
+## Membaca dan menambal berkas model
+
+```csharp
+var file = OnnxModelFile.Read("unet/model.onnx");
+file.Nodes;          // nama, tipe op, masukan, keluaran, nama atribut
+file.Initializers;   // nama, bentuk, tipe data - termasuk berkas data eksternal
+file.ReadFloats(file.Initializers["onnx::MatMul_2567"]);
+
+var (bytes, changed) = OnnxModelFile.SetFloatAttribute("vae_encoder/model.onnx", "RandomNormalLike", "scale", 0f);
+```
+
+Pembaca protobuf streaming, tanpa ketergantungan pada paket `onnx`: ia membaca struktur graf dan nilai
+initializer mana pun tanpa memuat seluruh berkas. `SetFloatAttribute` menambah atau mengubah satu
+atribut pada setiap node bertipe tertentu dan mengembalikan model yang sudah ditambal - begitulah
+sampling tanpa seed milik encoder VAE diubah menjadi reratanya.
+
+## Mengganti bobot tanpa menulis ulang berkas
+
+```csharp
+OnnxSession.Open(path, target, new Dictionary<string, InitializerOverride>
+{
+    ["onnx::MatMul_2567"] = new InitializerOverride(values, shape, AsHalf: true),
+});
+```
+
+Melalui `SessionOptions.AddInitializer` milik ONNX Runtime: sesi memakai nilai yang diberikan sebagai
+pengganti nilai tersimpan. Begitulah LoRA digabungkan ke UNet difusi.
+
+## Model dari cache Hugging Face milik Python
+
+Cache Python menyimpan setiap berkas sekali di `blobs/` dan menautkannya dari folder snapshot. ONNX
+Runtime yang lebih baru menelusuri berkas data eksternal model (`weights.pb`, `model.onnx_data`) ke
+jalur aslinya dan menolaknya karena keluar dari folder model. Karena itu folder yang berisi tautan
+dibuka melalui folder kembaran berisi hard link ke berkas yang sama - nama kedua, bukan salinan kedua -
+sehingga model yang diunduh Python bisa dibuka apa adanya.
+
+## Kernel yang tidak dimiliki CPU
+
+Ekspor yang dioptimalkan untuk GPU memakai operator gabungan `com.microsoft` milik ONNX Runtime
+(`NhwcConv`, `GroupNorm`, `BiasSplitGelu`), yang tidak punya kernel CPU. Membukanya di CPU ditolak
+dengan menyebut nama operatornya dan apa yang harus dilakukan - jalankan dengan
+`ExecutionTarget.Cuda`, atau pakai ekspor yang tidak dioptimalkan.
+
 ## Lihat juga
 
 [GraviTransformers](GraviTransformers.md) · [GraviDiffusers](GraviDiffusers.md) · [GraviAccelerate](GraviAccelerate.md)

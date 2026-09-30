@@ -23,13 +23,13 @@ So the order of work is formats first, models second, training last.
 
 **The goal:** stop refusing so much.
 
-1. ~~**Vision encoders.**~~ **ViT and DeiT done; CLIP not.** The patch embedding, the image
-   processor and a pre-norm encoder block are in `GraviTransformers.Vision`, and
-   `google/vit-base-patch16-224` agrees with torch to within 0.08 of a percentage point on the top
-   five. Two things are worth carrying forward. The block had to be written rather than reused: ViT
-   is pre-norm, BERT is post-norm, and each loads the other's parameters without a word of
-   complaint. And CLIP still needs a **causal** text tower, which is the same gap that keeps
-   decoder-only models out — so it belongs with that work, not with this.
+1. ~~**Vision encoders.**~~ **Done: ViT, DeiT and CLIP.** The patch embedding, the image processor
+   and a pre-norm encoder block are in `GraviTransformers.Vision`. Two things are worth carrying
+   forward. The block had to be written rather than reused: ViT is pre-norm, BERT is post-norm, and
+   each loads the other's parameters without a word of complaint. And CLIP needed a **causal** text
+   tower - the same attention GPT-2 needed, so they came together. The image processor is PIL's
+   resize reproduced to the byte, and from an image file ViT matches torch to twelve digits and CLIP's
+   logits to 8e-14.
 2. ~~**Token classification and question answering.**~~ **Done.** `FindEntities` decodes BIO tags
    into whole entities and `Answer` searches a constrained start/end pair; both return real
    substrings of the input, taken from the tokenizer's offsets. The ordering trap worth recording:
@@ -40,12 +40,11 @@ So the order of work is formats first, models second, training last.
    `token_type_embeddings[1] - token_type_embeddings[0]` is carried on `LoadReport.SegmentDelta` and
    added per position to the rows of the second sequence. Segment 0 stays folded into the word
    embeddings, so both segments are now exact and `CheckpointLoader.SupportsPairs` is `true`.
-4. **Sharded checkpoints that do not fit in memory.** Half of this is already true and worth being
-   precise about: `WeightStore.Open` reads `model.safetensors.index.json`, memory-maps every shard
-   and reads a tensor only when asked, so *inspecting* a model larger than RAM already works. What
-   does not is running one — `CheckpointLoader.Load` materialises every parameter as `double`,
-   which is 8 bytes per value whatever the file held. Streaming a forward pass layer by layer is the
-   remaining work.
+4. ~~**Sharded checkpoints that do not fit in memory.**~~ **Done.** `StreamingEncoder` keeps no
+   parameter resident: each forward pass reads the embedding rows its tokens use and then each layer
+   in turn, straight from the memory-mapped safetensors to float32, across shards. `bert-large-uncased`
+   runs in 0.45 GB of private memory against 5.9 GB loaded whole, bit-identical. A pickle cannot be
+   read in parts and is refused with the conversion to use.
 5. ~~**Position-embedding interpolation.**~~ **Done.** `VisionTransformer.Load(id, imageSize: 384)`,
    or any square or rectangle of whole patches passed to `Forward`. The resampler is torch's
    bicubic, pinned to 1e-12, and the whole model matches torch to ten decimal places at 160, 224
@@ -102,30 +101,48 @@ but nothing depends on it now.
 
 **The goal:** publishable numbers, and the honesty to report them properly.
 
-1. **Fill out the benchmark suites.** Every library has a harness project; they need real cases:
-   tokenizer throughput on a multilingual corpus, encoder latency by sequence length, memory-mapped
-   versus full dataset loads, CPU versus ONNX Runtime versus an accelerator.
+1. ~~**Fill out the benchmark suites.**~~ **Done.** `benchmarks/HFNet.Benchmarks` is one
+   BenchmarkDotNet project covering every library: tokenizer throughput on a multilingual corpus,
+   encoder latency by sequence length, memory-mapped against full dataset loads, GEMM against the
+   foundation and ILGPU, LoRA steps, sharded gradients, managed against ONNX Runtime, diffusion steps,
+   Hub transfer. Results are in [docs/benchmarks.md](docs/benchmarks.md).
 2. **Measure before optimising, and say which configuration a number came from.** The foundation's
    experience is instructive: its ILGPU path measured 5–8× *slower* than the CPU because everything
    is `double`. Any claim here needs the hardware and the configuration attached.
-3. **A single-precision path.** Half done, and the half that was free. Weights are now held as
-   float32 inside HF.Net's kernels. That is lossless, because every checkpoint stores F32 or
-   narrower, and it halves the bytes a short input streams. Activations and sums stay `double`,
-   which is why the managed encoder still agrees with torch in float64 to about 1e-13. Going fully
-   float32 would double SIMD width once more, at the cost of that agreement, and would move the
-   comparison target to torch's own float32. Worth doing only as an opt-in mode.
+3. ~~**A single-precision path.**~~ **Done, as the opt-in it was meant to be.**
+   `ComputeOptions.LinearLayers = Precision.Single` runs the products in float32: eight rows are
+   transposed into one vector per input and each of a panel's twelve weights broadcast against it, so
+   every multiply-add covers eight values instead of four. The kernel is bit-identical to an in-order
+   float32 sum. bert-base at 128 tokens: 434 ms to 326 ms; ViT-base 743 ms to 551 ms, its top
+   probability moving by 3.5e-8. Training ignores the setting, since its backward pass is the
+   derivative of the double forward pass. Profiling on the way found a GELU epilogue running on one
+   thread and attention scoring one key at a time; fixing both took ViT from 1,034 ms to 774 ms in
+   double.
 4. ~~**A better GEMM.**~~ **Done.** Weights are packed into float32 panels of twelve outputs, and a
    4x12 register-blocked kernel runs the product, widening each panel slice once per call. From about
    12 GMAC/s to 35-54 at 80 rows. bert-base went from 111 ms to 48 ms (torch: 38 ms), ViT-base from
    1,964 ms to 948 ms, and a LoRA training step about 2.2x faster, all with unchanged results. What
    separates it from torch now is mostly float64 against float32, which is item 3.
-5. **KV caching** if and when decoder models arrive — generation is quadratic without it.
+5. ~~**KV caching**~~ **Done with GPT-2.** `CausalLanguageModel` keeps every layer's keys and values,
+   so each new token costs one row: about 22 tokens a second for `gpt2` on a laptop CPU, 25 in single
+   precision.
 
 ## v0.5 — diffusion in earnest
 
-The schedulers are exact and tested. What is missing is a pipeline anyone can run without first
-converting a model by hand: a curated list of ONNX diffusion repositories that work, image-to-image
-and inpainting, LoRA applied to the UNet, and negative prompting with per-token weights.
+~~Done.~~ The pipeline now follows diffusers' ONNX pipelines step for step - NumPy's generator
+reproduced bit for bit, CLIP's tokenizer, batched guidance, the geometry read from the repository's
+configs - and on float32 exports gives diffusers' image to the pixel, on float16 ones to about 55 dB.
+Image to image (with the VAE encoder's unseeded sampling turned into its mean), inpainting on 9-channel
+and on ordinary UNets, AUTOMATIC1111 emphasis, and LoRA merged into the ONNX weights without rewriting
+them. A curated list of repositories that work is in [docs/GraviDiffusers.md](docs/GraviDiffusers.md),
+with `onnxruntime/sd-turbo` marked CUDA-only.
+
+## Next
+
+- **Rotary-position decoders** - Llama, Mistral, GPT-NeoX. The causal attention and the KV cache exist
+  now; what is missing is the block (rotary positions, RMSNorm, gated feed-forward, grouped queries).
+- **Compile the notebooks in CI**, not just validate their JSON.
+- **Route (a) of v0.3**, biased attention in the foundation's autodiff tape, for the wider ecosystem.
 
 ## Continuous
 

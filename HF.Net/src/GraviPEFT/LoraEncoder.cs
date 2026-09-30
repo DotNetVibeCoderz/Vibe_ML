@@ -48,13 +48,19 @@ internal sealed class LoraEncoder
     private readonly Func<double, double> _derivative;
     private readonly int _lowest;
     private readonly double[]? _segmentDelta;
+    private readonly NdArray? _prefix;
+    private readonly int _virtual;
+    private readonly object _prefixLock = new();
 
     private LoraEncoder(
         Layer[] layers, NdArray tokens, NdArray positions, double[] embeddingScale, double[] embeddingShift,
         double epsilon, int hidden, int heads, Func<double, double> activation, Func<double, double> derivative,
-        double[]? segmentDelta)
+        double[]? segmentDelta, NdArray? prefix)
     {
         _segmentDelta = segmentDelta;
+        _prefix = prefix;
+        _virtual = prefix?.Shape[0] ?? 0;
+        PrefixGradient = prefix is null ? null : new double[prefix.Size];
         _layers = layers;
         _tokens = tokens;
         _positions = positions;
@@ -66,9 +72,20 @@ internal sealed class LoraEncoder
         _activation = activation;
         _derivative = derivative;
 
-        _lowest = Array.FindIndex(layers, l => l.Adapters.Any(a => a is not null));
+        // A prefix enters every layer's attention, so its gradient needs the backward pass to reach
+        // the first layer; adapters alone need it only down to the lowest adapted one.
+        _lowest = prefix is not null ? 0 : Array.FindIndex(layers, l => l.Adapters.Any(a => a is not null));
         if (_lowest < 0) _lowest = layers.Length;
     }
+
+    /// <summary>
+    /// The trained prefix, PEFT's <c>prompt_embeddings</c>: <c>[virtual tokens, layers * 2 * hidden]</c>,
+    /// each row holding every layer's key then value for that virtual position. <c>null</c> without one.
+    /// </summary>
+    internal NdArray? Prefix => _prefix;
+
+    /// <summary>The prefix's accumulated gradient, shaped like it.</summary>
+    internal double[]? PrefixGradient { get; }
 
     /// <summary>Model width.</summary>
     internal int Hidden => _hidden;
@@ -84,10 +101,22 @@ internal sealed class LoraEncoder
     /// <c>token_type_embeddings[1] - token_type_embeddings[0]</c>, for sentence pairs; segment 0 is
     /// already folded into the word embeddings.
     /// </param>
+    /// <param name="prefix">
+    /// A prefix-tuning prefix, <c>[virtual tokens, layers * 2 * hidden]</c>, attended to by every
+    /// layer ahead of the text; <c>null</c> for none. Held by reference, so an optimizer updating it
+    /// in place is seen by the next forward pass.
+    /// </param>
     internal static LoraEncoder Build(
         Encoder source, PretrainedConfig config, Func<int, Projection, LoraAdapter?> adapterAt,
-        NdArray? segmentDelta = null)
+        NdArray? segmentDelta = null, NdArray? prefix = null)
     {
+        if (prefix is not null && (prefix.Rank != 2 || prefix.Shape[1] != source.Layers.Count * 2 * source.Config.HiddenSize))
+        {
+            throw new ArgumentException(
+                $"A prefix for this model is [virtual tokens, {source.Layers.Count * 2 * source.Config.HiddenSize}]; "
+                + $"got [{string.Join(", ", prefix.Shape.ToArray())}].", nameof(prefix));
+        }
+
         var layers = new Layer[source.Layers.Count];
 
         Parallel.For(0, layers.Length, i =>
@@ -122,7 +151,8 @@ internal sealed class LoraEncoder
             source.Config.Heads,
             Activation.For(config.Activation),
             Activation.DerivativeFor(config.Activation),
-            segmentDelta?.ToArray());
+            segmentDelta?.ToArray(),
+            prefix);
     }
 
     // ------------------------------------------------------------------ forward
@@ -148,6 +178,9 @@ internal sealed class LoraEncoder
     internal double[] Forward(
         int[] ids, Tape? tape = null, Random? dropout = null, int[]? typeIds = null, int[]? lengths = null)
     {
+        // Always double: the backward pass is the derivative of this exact function.
+        using var exact = ComputeOptions.Exact();
+
         var rows = ids.Length;
         var width = _hidden;
         lengths ??= [rows];
@@ -158,11 +191,15 @@ internal sealed class LoraEncoder
                 $"The packed lengths sum to {lengths.Sum()} but there are {rows} ids.", nameof(lengths));
         }
 
-        if (lengths.Max() > _positions.Shape[0])
+        // With a prefix, BERT numbers positions from the prefix's length: transformers starts
+        // position ids at past_key_values' length, and PEFT passes the prefix as exactly that. The
+        // text's first token is therefore position m, not 0 - so an adapter trained in Python
+        // expects it, and one trained here must do the same to load there.
+        if (lengths.Max() + _virtual > _positions.Shape[0])
         {
             throw new ArgumentException(
-                $"A sequence is {lengths.Max()} tokens but the model has {_positions.Shape[0]} position "
-                + "embeddings. Truncate it with maxLength.", nameof(ids));
+                $"A sequence is {lengths.Max()} tokens{(_virtual > 0 ? $" after a {_virtual}-token prefix" : "")} but the model "
+                + $"has {_positions.Shape[0]} position embeddings. Truncate it with maxLength.", nameof(ids));
         }
 
         var vocabulary = _tokens.Shape[0];
@@ -179,7 +216,7 @@ internal sealed class LoraEncoder
                 for (var d = 0; d < width; d++)
                 {
                     // Before the embedding norm, in the inference encoder's order of addition.
-                    hidden[row * width + d] = _tokens[id, d] + _positions[position, d] + (segment ? _segmentDelta![d] : 0.0);
+                    hidden[row * width + d] = _tokens[id, d] + _positions[_virtual + position, d] + (segment ? _segmentDelta![d] : 0.0);
                 }
             }
         }
@@ -192,17 +229,18 @@ internal sealed class LoraEncoder
             tape.Lengths = lengths;
         }
 
-        foreach (var layer in _layers)
+        for (var index = 0; index < _layers.Length; index++)
         {
+            var layer = _layers[index];
             var record = tape is null ? null : new LayerTape();
-            hidden = LayerForward(layer, hidden, rows, lengths, record, tape is null ? null : dropout);
+            hidden = LayerForward(layer, index, hidden, rows, lengths, record, tape is null ? null : dropout);
             tape?.Layers.Add(record!);
         }
 
         return hidden;
     }
 
-    private double[] LayerForward(Layer layer, double[] x, int rows, int[] lengths, LayerTape? tape, Random? dropout)
+    private double[] LayerForward(Layer layer, int index, double[] x, int rows, int[] lengths, LayerTape? tape, Random? dropout)
     {
         var width = _hidden;
         var inner = layer.Intermediate.Outputs;
@@ -213,7 +251,7 @@ internal sealed class LoraEncoder
             AddLora(layer, p, x, rows, qkv, 3 * width, (int)p * width, tape, dropout);
         }
 
-        var context = Attend(qkv, rows, lengths, out var probabilities);
+        var context = Attend(qkv, index, rows, lengths, out var probabilities);
 
         var attended = layer.AttentionOutput.Apply(context, rows);
         AddLora(layer, Projection.AttentionOutput, context, rows, attended, width, 0, tape, dropout);
@@ -300,16 +338,21 @@ internal sealed class LoraEncoder
     }
 
     /// <summary>Where each packed sequence starts, and where its attention block starts.</summary>
-    private static (int[] Rows, int[] Blocks) Offsets(int[] lengths)
+    /// <remarks>A sequence of n tokens attends over the prefix's m positions and its own n: n (m + n) weights.</remarks>
+    private (int[] Rows, int[] Blocks) Offsets(int[] lengths)
     {
         var rows = new int[lengths.Length];
         var blocks = new int[lengths.Length + 1];
 
         for (var s = 1; s < lengths.Length; s++) rows[s] = rows[s - 1] + lengths[s - 1];
-        for (var s = 0; s < lengths.Length; s++) blocks[s + 1] = blocks[s] + lengths[s] * lengths[s];
+        for (var s = 0; s < lengths.Length; s++) blocks[s + 1] = blocks[s] + lengths[s] * (_virtual + lengths[s]);
 
         return (rows, blocks);
     }
+
+    /// <summary>Where layer <paramref name="layer"/>'s prefix key (or value) for one head starts in a prefix row.</summary>
+    private int PrefixColumn(int layer, bool value, int head)
+        => (2 * layer + (value ? 1 : 0)) * _hidden + head * (_hidden / _heads);
 
     /// <summary>
     /// Softmax attention over every head, each sequence attending only to itself, keeping the
@@ -319,8 +362,11 @@ internal sealed class LoraEncoder
     /// Probabilities are stored per head as the sequences' square blocks one after another, so a
     /// packed batch keeps the sum of its squared lengths rather than the square of their sum.
     /// </remarks>
-    private double[] Attend(double[] qkv, int rows, int[] lengths, out double[][] probabilities)
+    private double[] Attend(double[] qkv, int layerIndex, int rows, int[] lengths, out double[][] probabilities)
     {
+        var m = _virtual;
+        var prefix = _prefix?.AsContiguous().ToArray();
+        var prefixWidth = 2 * _layers.Length * _hidden;
         var width = _hidden;
         var heads = _heads;
         var size = width / heads;
@@ -340,38 +386,46 @@ internal sealed class LoraEncoder
             var first = starts[sequence];
             var n = lengths[sequence];
 
-            var k = new double[n * size];
-            var v = new double[n * size];
-            for (var j = 0; j < n; j++)
+            // The prefix's keys and values first, as PEFT prepends them, then the sequence's own.
+            var total = m + n;
+            var k = new double[total * size];
+            var v = new double[total * size];
+            for (var j = 0; j < m; j++)
             {
-                Array.Copy(qkv, (first + j) * stride + width + head * size, k, j * size, size);
-                Array.Copy(qkv, (first + j) * stride + 2 * width + head * size, v, j * size, size);
+                Array.Copy(prefix!, j * prefixWidth + PrefixColumn(layerIndex, false, head), k, j * size, size);
+                Array.Copy(prefix!, j * prefixWidth + PrefixColumn(layerIndex, true, head), v, j * size, size);
             }
 
-            var p = weights[head].AsSpan(blocks[sequence], n * n);
+            for (var j = 0; j < n; j++)
+            {
+                Array.Copy(qkv, (first + j) * stride + width + head * size, k, (m + j) * size, size);
+                Array.Copy(qkv, (first + j) * stride + 2 * width + head * size, v, (m + j) * size, size);
+            }
+
+            var p = weights[head].AsSpan(blocks[sequence], n * total);
             for (var i = 0; i < n; i++)
             {
                 var query = qkv.AsSpan((first + i) * stride + head * size, size);
-                var row = p.Slice(i * n, n);
+                var row = p.Slice(i * total, total);
 
                 var largest = double.NegativeInfinity;
-                for (var j = 0; j < n; j++)
+                for (var j = 0; j < total; j++)
                 {
                     row[j] = Simd.Dot(query, k.AsSpan(j * size, size)) * scale;
                     if (row[j] > largest) largest = row[j];
                 }
 
-                var total = 0.0;
-                for (var j = 0; j < n; j++)
+                var sum = 0.0;
+                for (var j = 0; j < total; j++)
                 {
                     row[j] = Math.Exp(row[j] - largest);
-                    total += row[j];
+                    sum += row[j];
                 }
 
                 var target = result.AsSpan((first + i) * width + head * size, size);
-                for (var j = 0; j < n; j++)
+                for (var j = 0; j < total; j++)
                 {
-                    row[j] /= total;
+                    row[j] /= sum;
                     Simd.Axpy(row[j], v.AsSpan(j * size, size), target);
                 }
             }
@@ -458,7 +512,7 @@ internal sealed class LoraEncoder
             var dContext = layer.AttentionOutput.ApplyTransposed(daPre, rows);
             LoraBackward(layer, Projection.AttentionOutput, record, daPre, rows, width, 0, dContext, gradients);
 
-            var dQkv = AttendBackward(dContext, record.QueryKeyValue, record.Probabilities, rows, tape.Lengths);
+            var dQkv = AttendBackward(dContext, record.QueryKeyValue, record.Probabilities, index, rows, tape.Lengths);
 
             double[]? dx = null;
             if (needInput)
@@ -535,8 +589,11 @@ internal sealed class LoraEncoder
     }
 
     /// <summary>The gradient of the stacked query/key/value projection from the context's.</summary>
-    private double[] AttendBackward(double[] dContext, double[] qkv, double[][] probabilities, int rows, int[] lengths)
+    private double[] AttendBackward(double[] dContext, double[] qkv, double[][] probabilities, int layerIndex, int rows, int[] lengths)
     {
+        var m = _virtual;
+        var prefix = _prefix?.AsContiguous().ToArray();
+        var prefixWidth = 2 * _layers.Length * _hidden;
         var width = _hidden;
         var heads = _heads;
         var size = width / heads;
@@ -556,21 +613,38 @@ internal sealed class LoraEncoder
             var first = starts[sequence];
             var n = lengths[sequence];
 
-            var p = probabilities[head].AsSpan(blocks[sequence], n * n);
-            var dScores = new double[n];
+            var total = m + n;
+            var p = probabilities[head].AsSpan(blocks[sequence], n * total);
+            var dScores = new double[total];
+
+            // The prefix's gradient for this head, gathered here and added under a lock at the end:
+            // every sequence of the batch attends to the same prefix.
+            var dPrefixKeys = new double[m * size];
+            var dPrefixValues = new double[m * size];
 
             for (var i = 0; i < n; i++)
             {
                 var dc = dContext.AsSpan((first + i) * width + head * size, size);
-                var row = p.Slice(i * n, n);
+                var row = p.Slice(i * total, total);
 
                 // dV_j += P_ij dC_i, and dP_ij = dC_i . V_j
                 var weighted = 0.0;
-                for (var j = 0; j < n; j++)
+                for (var j = 0; j < total; j++)
                 {
-                    var at = (first + j) * stride + 2 * width + head * size;
-                    Simd.Axpy(row[j], dc, result.AsSpan(at, size));
-                    dScores[j] = Simd.Dot(dc, qkv.AsSpan(at, size));
+                    ReadOnlySpan<double> value;
+                    if (j < m)
+                    {
+                        value = prefix.AsSpan(j * prefixWidth + PrefixColumn(layerIndex, true, head), size);
+                        Simd.Axpy(row[j], dc, dPrefixValues.AsSpan(j * size, size));
+                    }
+                    else
+                    {
+                        var at = (first + j - m) * stride + 2 * width + head * size;
+                        value = qkv.AsSpan(at, size);
+                        Simd.Axpy(row[j], dc, result.AsSpan(at, size));
+                    }
+
+                    dScores[j] = Simd.Dot(dc, value);
                     weighted += row[j] * dScores[j];
                 }
 
@@ -578,14 +652,34 @@ internal sealed class LoraEncoder
                 var query = qkv.AsSpan((first + i) * stride + head * size, size);
                 var dQuery = result.AsSpan((first + i) * stride + head * size, size);
 
-                for (var j = 0; j < n; j++)
+                for (var j = 0; j < total; j++)
                 {
                     var ds = row[j] * (dScores[j] - weighted) * scale;
                     if (ds == 0) continue;
 
-                    var at = (first + j) * stride + width + head * size;
+                    if (j < m)
+                    {
+                        Simd.Axpy(ds, prefix.AsSpan(j * prefixWidth + PrefixColumn(layerIndex, false, head), size), dQuery);
+                        Simd.Axpy(ds, query, dPrefixKeys.AsSpan(j * size, size));
+                        continue;
+                    }
+
+                    var at = (first + j - m) * stride + width + head * size;
                     Simd.Axpy(ds, qkv.AsSpan(at, size), dQuery);
                     Simd.Axpy(ds, query, result.AsSpan(at, size));
+                }
+            }
+
+            if (m > 0)
+            {
+                lock (_prefixLock)
+                {
+                    var gradient = PrefixGradient!;
+                    for (var j = 0; j < m; j++)
+                    {
+                        Simd.Axpy(1.0, dPrefixKeys.AsSpan(j * size, size), gradient.AsSpan(j * prefixWidth + PrefixColumn(layerIndex, false, head), size));
+                        Simd.Axpy(1.0, dPrefixValues.AsSpan(j * size, size), gradient.AsSpan(j * prefixWidth + PrefixColumn(layerIndex, true, head), size));
+                    }
                 }
             }
         });

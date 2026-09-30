@@ -16,4 +16,8 @@
     <ProjectReference Include="..\GraviHub\GraviHub.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="GraviTokenizers.Tests" />
+  </ItemGroup>
+
 </Project>

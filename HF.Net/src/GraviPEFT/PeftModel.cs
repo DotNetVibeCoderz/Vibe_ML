@@ -251,7 +251,7 @@ public sealed class PeftModel
     /// <c>pre_classifier</c> that PEFT does not save - a head built on either would not be the head
     /// Python loads.
     /// </remarks>
-    private static Pooler? PoolerOf(TransformerModel model)
+    internal static Pooler? PoolerOf(TransformerModel model)
     {
         if (!model.Config.ModelType.Equals("bert", StringComparison.OrdinalIgnoreCase)) return null;
 
@@ -982,6 +982,12 @@ public static class PEFT
         => Directory.Exists(adapter)
             ? PeftModel.Load(model, adapter, merge)
             : PeftModel.FromPretrained(model, adapter, "main", merge);
+
+    /// <summary>Attaches a freshly initialised prefix-tuning prefix to a model.</summary>
+    /// <param name="model">The pretrained model; its weights stay frozen.</param>
+    /// <param name="config">How many virtual tokens, and the seed.</param>
+    public static PrefixTuningModel ApplyPrefixTuning(TransformerModel model, PrefixTuningConfig? config = null)
+        => PrefixTuningModel.Apply(model, config);
 
     /// <summary>Reads an adapter file without attaching it to anything.</summary>
     public static LoraAdapterSet ReadAdapter(string path) => LoraAdapterSet.Load(path);

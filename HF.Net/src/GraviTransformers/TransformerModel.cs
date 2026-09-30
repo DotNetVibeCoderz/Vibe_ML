@@ -137,6 +137,30 @@ public sealed class TransformerModel : IDisposable
 
     // ------------------------------------------------------------------ loading
 
+    /// <summary>Loads a model from a directory: <c>config.json</c>, the weights and the tokenizer files.</summary>
+    /// <param name="directory">A folder such as one <c>save_pretrained</c> writes, or a cached snapshot.</param>
+    /// <exception cref="NotSupportedException">The architecture is not an encoder this can run.</exception>
+    public static TransformerModel Open(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+
+        var config = PretrainedConfig.Load(Path.Combine(directory, "config.json"));
+        RequireSupported(config, directory);
+
+        var weights = WeightStore.Open(directory);
+
+        try
+        {
+            var (encoder, report) = CheckpointLoader.Load(config, weights);
+            return new TransformerModel(directory, config, HfTokenizer.FromDirectory(directory), encoder, weights, report);
+        }
+        catch
+        {
+            weights.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>Downloads a model from the Hub and loads it.</summary>
     /// <param name="repoId">A model id such as <c>bert-base-uncased</c>.</param>
     /// <param name="revision">A branch, tag or commit.</param>
@@ -180,6 +204,18 @@ public sealed class TransformerModel : IDisposable
     private static void RequireSupported(PretrainedConfig config, string repoId)
     {
         if (SupportedModelTypes.Contains(config.ModelType)) return;
+
+        if (CausalLanguageModelConfig.Supported.Contains(config.ModelType))
+        {
+            throw new NotSupportedException(
+                $"'{repoId}' is a '{config.ModelType}' model, a decoder that continues text. Load it with "
+                + "CausalLanguageModel.Load, not as an encoder.");
+        }
+
+        if (string.Equals(config.ModelType, "clip", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new NotSupportedException($"'{repoId}' is a CLIP model. Load it with Vision.ClipModel.Load.");
+        }
 
         throw new NotSupportedException(
             $"'{repoId}' is a '{config.ModelType}' model. GraviTransformers runs BERT-family encoders "

@@ -2,7 +2,7 @@
 
 *[English](../hf-gallery.md)*
 
-`samples/HFGallery` adalah aplikasi desktop yang menjalankan tiga belas use case HF.Net terhadap model
+`samples/HFGallery` adalah aplikasi desktop yang menjalankan lima belas use case HF.Net terhadap model
 sungguhan, dan menampilkan hasilnya bersama kode yang menghasilkannya. Tidak ada yang dipalsukan:
 setiap panel yang terlihat adalah keluaran checkpoint yang diunduh dari Hub saat itu juga.
 
@@ -23,11 +23,13 @@ dotnet run --project samples/HFGallery
 
 ---
 
-## Tiga belas use case
+## Lima belas use case
 
 | Use case | Library | Model | Yang ditunjukkan |
 |---|---|---|---|
 | What is in this picture | GraviTransformers | `google/vit-base-patch16-224` | Vision Transformer di atas patch gambar |
+| Labels it never saw | GraviTransformers | `openai/clip-vit-base-patch32` | Klasifikasi zero-shot CLIP di antara label yang Anda ketik |
+| Continue a story | GraviTransformers | `gpt2` | Pembangkitan GPT-2, dialirkan token demi token |
 | Sentiment | GraviTransformers | `distilbert-base-uncased-finetuned-sst-2-english` | Head hasil fine-tune beserta nama labelnya sendiri |
 | Fill in the blank | GraviTransformers | `bert-base-uncased` | Head masked language model |
 | Named entities | GraviTransformers | `dslim/bert-base-NER` | Klasifikasi token, sebagai rentang teks asli |
@@ -51,6 +53,22 @@ vektor `[CLS]` terlatih ditaruh di depan. Gambarnya diambil dari Hub, jadi tidak
 perlu ikut disimpan di repositori.
 
 ![What is in this picture](../screenshots/hfgallery-image.png)
+
+## Labels it never saw
+
+CLIP menaruh gambar dan kalimat dalam satu ruang. Setiap label yang Anda ketik menjadi
+`This is a photo of {label}.`, dan softmax atas kemiripan gambar dengan setiap kalimat - diskalakan
+dengan suhu yang dipelajari checkpoint, di sini 100 - memberi probabilitasnya. Tidak ada yang dilatih.
+
+![Labels it never saw](../screenshots/hfgallery-zero-shot.png)
+
+## Continue a story
+
+GPT-2 melanjutkan teks Anda, satu token demi satu, teksnya muncul sambil dihasilkan. Temperature 0
+adalah dekode greedy, yang memberi keluaran transformers kata demi kata; di atas 0 ia mengambil sampel,
+dengan top-p 0,95 dan penalti pengulangan 1,2.
+
+![Continue a story](../screenshots/hfgallery-story.png)
 
 ## Named entities
 

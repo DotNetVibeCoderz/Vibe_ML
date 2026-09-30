@@ -16,6 +16,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Tiny CLIP checkpoints, a test image and transformers' outputs for them; see Fixtures/make_clip.py. -->
+    <None Include="Fixtures\**" Exclude="Fixtures\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\GraviTransformers\GraviTransformers.csproj" />
   </ItemGroup>
 

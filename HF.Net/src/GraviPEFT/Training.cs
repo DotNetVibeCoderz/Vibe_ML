@@ -216,6 +216,9 @@ internal static class LoraTrainer
             parameters.Add(new Parameter(adapter.B, gradB, decay: true));
         }
 
+        // Prefix tuning's prefix: decayed like any other weight, as the Trainer treats PEFT's prompt_embeddings.
+        if (encoder.Prefix is { } prefix) parameters.Add(new Parameter(prefix, encoder.PrefixGradient!, decay: true));
+
         parameters.Add(new Parameter(head.Weight, head.WeightGradient, decay: true));
         parameters.Add(new Parameter(head.Bias, head.BiasGradient, decay: false));
 
@@ -284,6 +287,7 @@ internal static class LoraTrainer
                 optimizer.Step(rate);
 
                 gradients.Clear();
+                if (encoder.PrefixGradient is { } prefixGradient) Array.Clear(prefixGradient);
                 head.ClearGradients();
 
                 stepLosses.Add(stepLoss);

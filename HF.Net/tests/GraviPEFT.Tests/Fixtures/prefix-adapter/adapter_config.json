@@ -1,0 +1,23 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "encoder_hidden_size": 16,
+  "inference_mode": true,
+  "init_weights": null,
+  "modules_to_save": [
+    "classifier",
+    "score",
+    "classifier",
+    "score"
+  ],
+  "num_attention_heads": 2,
+  "num_layers": 2,
+  "num_transformer_submodules": 1,
+  "num_virtual_tokens": 3,
+  "peft_type": "PREFIX_TUNING",
+  "peft_version": "0.21.0",
+  "prefix_projection": false,
+  "revision": null,
+  "task_type": "SEQ_CLS",
+  "token_dim": 16
+}

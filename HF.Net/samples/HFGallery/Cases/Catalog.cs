@@ -25,6 +25,25 @@ internal static class ModelCache
     private static readonly Dictionary<string, TransformerModel> Models = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, HfTokenizer> Tokenizers = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, VisionTransformer> Vision = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, ClipModel> Clip = new(StringComparer.Ordinal);
+
+    internal static async Task<ClipModel> ClipAsync(
+        string id, IProgress<string> progress, CancellationToken token)
+    {
+        await Gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (Clip.TryGetValue(id, out var cached)) return cached;
+
+            progress.Report($"Loading {id} — the first run downloads it.");
+            var model = await Task.Run(() => ClipModel.Load(id), token).ConfigureAwait(false);
+
+            Clip[id] = model;
+            progress.Report("Both towers ready.");
+            return model;
+        }
+        finally { Gate.Release(); }
+    }
 
     internal static async Task<TransformerModel> ModelAsync(
         string id, IProgress<string> progress, CancellationToken token)
@@ -87,7 +106,9 @@ public static class Catalog
     public static IReadOnlyList<GalleryCase> All { get; } =
     [
         new ImageCase(),
+        new ZeroShotCase(),
         new SentimentCase(),
+        new StoryCase(),
         new FillMaskCase(),
         new EntitiesCase(),
         new AnswerCase(),
@@ -167,6 +188,146 @@ internal sealed class ImageCase : GalleryCase
                 ("resolution", $"{model.Processor.Size}x{model.Processor.Size}"),
                 ("patches", $"{model.Config.Grid}x{model.Config.Grid} of {model.Config.PatchSize}px"),
                 ("classes", $"{model.Config.LabelCount:N0}"),
+            ],
+        };
+    }
+}
+
+// ====================================================================== zero-shot image classification
+
+internal sealed class ZeroShotCase : GalleryCase
+{
+    private const string Gallery = "huggingface/documentation-images";
+
+    public override string Title => "Labels it never saw";
+    public override string Blurb => "Classify a picture among labels you type, with CLIP and no training.";
+    public override string Library => "GraviTransformers";
+    public override string Model => "openai/clip-vit-base-patch32";
+    public override string InputLabel => "A local image path, or a file from huggingface/documentation-images";
+    public override string SecondInputLabel => "Candidate labels, separated by commas";
+
+    public override string? DefaultInput => "bee.jpg";
+    public override string? DefaultSecondInput => "a bee, a flower, a butterfly, a bird, a cat";
+
+    public override string Code => """
+        using Gravicode.HFNet.GraviTransformers.Vision;
+
+        // Two encoders trained so a picture and a sentence describing it land close together.
+        // Each label becomes "This is a photo of {label}.", and the softmax runs over the
+        // picture's similarity to each sentence.
+        using var model = ClipModel.Load("openai/clip-vit-base-patch32");
+
+        foreach (var label in model.ZeroShot(path, ["a bee", "a flower", "a bird"]))
+            Console.WriteLine($"{label.Label,-12} {label.Score:P2}");
+        """;
+
+    public override async Task<CaseResult> RunAsync(
+        string input, string second, IProgress<string> progress, CancellationToken token)
+    {
+        var labels = second.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (labels.Length < 2) throw new ArgumentException("Type at least two labels, separated by commas.");
+
+        var model = await ModelCache.ClipAsync(Model, progress, token).ConfigureAwait(false);
+
+        string path;
+        if (File.Exists(input))
+        {
+            path = input;
+        }
+        else
+        {
+            progress.Report($"Fetching {input} from {Gallery}.");
+            path = await Task.Run(() => Hub.DownloadDatasetFile(Gallery, input), token).ConfigureAwait(false);
+        }
+
+        progress.Report($"Embedding the picture and {labels.Length} sentences.");
+        var ranked = await Task.Run(() => model.ZeroShot(path, labels), token).ConfigureAwait(false);
+        var best = ranked[0];
+
+        return new CaseResult
+        {
+            Summary = $"{best.Label} at {best.Score:P1}, out of {labels.Length} labels it was never trained on.",
+            Bars = [.. ranked.Select(p => new Datum(p.Label, p.Score))],
+            Facts =
+            [
+                ("image", Path.GetFileName(path)),
+                ("prompt", "This is a photo of {label}."),
+                ("temperature", $"exp({model.LogitScale:F3}) = {Math.Exp(model.LogitScale):F1}"),
+                ("space", $"{model.Config.ProjectionSize} dimensions"),
+            ],
+        };
+    }
+}
+
+// ====================================================================== text generation
+
+internal sealed class StoryCase : GalleryCase
+{
+    private static CausalLanguageModel? _model;
+
+    public override string Title => "Continue a story";
+    public override string Blurb => "Let GPT-2 write the next sentences, one token at a time.";
+    public override string Library => "GraviTransformers";
+    public override string Model => "gpt2";
+    public override string InputLabel => "The beginning of a story";
+    public override string SecondInputLabel => "Temperature (0 for greedy)";
+
+    public override string? DefaultInput => "The lighthouse keeper opened the door and";
+    public override string? DefaultSecondInput => "0.8";
+
+    public override string Code => """
+        using Gravicode.HFNet.GraviTransformers;
+
+        // A decoder: each position attends only to the ones before it, so the model can be
+        // asked what comes next. A key/value cache makes every new token cost one row.
+        using var model = CausalLanguageModel.Load("gpt2");
+
+        foreach (var piece in model.Stream(prompt, new GenerationSettings(
+                     MaxNewTokens: 60, Sample: true, Temperature: 0.8, TopP: 0.95,
+                     RepetitionPenalty: 1.2, Seed: 1)))
+            Console.Write(piece);
+        """;
+
+    public override async Task<CaseResult> RunAsync(
+        string input, string second, IProgress<string> progress, CancellationToken token)
+    {
+        if (_model is null)
+        {
+            progress.Report("Loading gpt2 — the first run downloads it.");
+            _model = await Task.Run(() => CausalLanguageModel.Load(Model), token).ConfigureAwait(false);
+        }
+
+        var temperature = double.TryParse(second, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : 0.8;
+        var settings = temperature <= 0
+            ? new GenerationSettings(MaxNewTokens: 60, RepetitionPenalty: 1.2)
+            : new GenerationSettings(MaxNewTokens: 60, Sample: true, Temperature: temperature, TopP: 0.95, RepetitionPenalty: 1.2, Seed: 1);
+
+        progress.Report("Writing.");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var text = await Task.Run(() =>
+        {
+            var builder = new System.Text.StringBuilder();
+            foreach (var piece in _model.Stream(input, settings))
+            {
+                token.ThrowIfCancellationRequested();
+                builder.Append(piece);
+                progress.Report(input + builder);
+            }
+
+            return builder.ToString();
+        }, token).ConfigureAwait(false);
+
+        var tokens = _model.Tokenizer!.Encode(text, addSpecialTokens: false).Length;
+
+        return new CaseResult
+        {
+            Summary = input + text,
+            Facts =
+            [
+                ("decoding", temperature <= 0 ? "greedy" : $"sampled, temperature {temperature}, top-p 0.95"),
+                ("new tokens", $"{tokens}"),
+                ("speed", $"{tokens / watch.Elapsed.TotalSeconds:F1} tokens/s"),
+                ("context", $"{_model.Config.MaxPositions} tokens"),
             ],
         };
     }

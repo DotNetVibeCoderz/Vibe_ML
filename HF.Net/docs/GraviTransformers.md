@@ -1,6 +1,6 @@
 # GraviTransformers
 
-**Load pretrained Hugging Face encoders and run them.**
+**Pretrained Hugging Face models: BERT-family encoders, GPT-2, ViT and CLIP.**
 
 Mirrors `transformers`. The flagship library.
 
@@ -40,9 +40,8 @@ Anything else is **refused**, not half-loaded:
 
 ```csharp
 TransformerModel.Load("gpt2");
-// NotSupportedException: 'gpt2' is a 'gpt2' model. GraviTransformers runs BERT-family
-// encoders (...); decoder-only and encoder-decoder architectures need causal masking
-// and cross-attention, which this encoder does not have.
+// NotSupportedException: 'gpt2' is a 'gpt2' model, a decoder that continues text.
+// Load it with CausalLanguageModel.Load, not as an encoder.
 ```
 
 Filling an encoder from a decoder's weights produces a model that runs happily and returns nonsense,
@@ -182,7 +181,7 @@ block is then the **identity** - the residual is added to nothing. A post-norm b
 
 ```csharp
 model.Processor
-// ImageProcessor(224x224, mean [0.5, 0.5, 0.5], std [0.5, 0.5, 0.5])
+// ImageProcessor(224x224, Bilinear, mean [0.5, 0.5, 0.5], std [0.5, 0.5, 0.5])
 ```
 
 The numbers come from the repository's own `preprocessor_config.json`, never from a default written
@@ -193,6 +192,15 @@ Where the processor and the model disagree about the edge length - or where a re
 processor config at all - the **model's** `image_size` wins, unless you ask for another one. It is
 the grid the position embeddings were learned on, so it is the one resolution that needs no
 interpolation.
+
+The resize is **PIL's own algorithm, reproduced to the byte**: transformers' image processors resize
+through PIL, and a model saw whatever PIL produced. Other libraries' "bilinear" and "bicubic" differ in
+three places that each move pixels by a level or more - PIL widens the kernel when shrinking, uses
+`a = -0.5` for its cubic, and works in 22-bit fixed point with a byte-rounded image between the
+horizontal and vertical pass. Rescaling and normalising run in float32, as the reference's do. From a
+PNG the tensor is identical to `ViTImageProcessor`'s and `CLIPImageProcessor`'s, bit for bit. A JPEG
+can differ by one level on some pixels, because PIL's libjpeg and ImageSharp decode JPEG slightly
+differently. Shortest-edge resizing and a centre crop (CLIP, DeiT) follow the processor config.
 
 ### Other resolutions
 
@@ -237,9 +245,109 @@ not know is refused by name.
 
 ### Speed
 
-`google/vit-base-patch16-224` takes about **2 seconds** per image at 224 px against torch's 226 ms.
-Given the same pixels, its top-five probabilities agree with torch in float64 to 1.3e-15. It used to
-take 12 seconds; see [benchmarks](benchmarks.md) for what changed.
+`google/vit-base-patch16-224` takes about **0.74 seconds** per image at 224 px, 0.55 in single
+precision, against torch's 226 ms. From the same image file its top-five probabilities agree with
+torch in float64 to twelve digits. It used to take 12 seconds; see [benchmarks](benchmarks.md) for
+what changed.
+
+## CLIP
+
+```csharp
+using var clip = ClipModel.Load("openai/clip-vit-base-patch32");
+
+foreach (var label in clip.ZeroShot("bee.jpg", ["a bee", "a flower", "a butterfly", "a bird"]))
+    Console.WriteLine($"{label.Label,-12} {label.Score:P2}");
+```
+
+```
+a bee        76.65 %
+a flower     21.03 %
+a butterfly   2.21 %
+a bird        0.09 %
+```
+
+Two encoders trained so a picture and a sentence describing it land close together. Each label goes
+into `This is a photo of {label}.` - the template transformers' pipeline uses - and a softmax runs over
+the picture's similarity to each sentence, scaled by the checkpoint's learned temperature. Nothing is
+trained. `EmbedImage`, `EmbedText`, `Logits` and `Similarity` give the pieces.
+
+The vision tower is ViT with one extra layer norm before the first block. The text tower is the same
+pre-norm block run **causally** - each token attends only to itself and those before it - and the
+sentence vector is read at the end-of-text token. Which position that is has two answers: OpenAI's
+checkpoints say `eos_token_id: 2` in their config, which predates the field, and are read at the
+highest token id; newer ones at the first end token. Both follow transformers. OpenAI's checkpoints
+also use `quick_gelu`, `x * sigmoid(1.702 x)`, a third form of GELU.
+
+On `openai/clip-vit-base-patch32`, the logits agree with torch in float64 to **8e-14** from the same
+image file.
+
+## Text generation
+
+```csharp
+using var gpt = CausalLanguageModel.Load("gpt2");
+
+gpt.Generate("The lighthouse keeper opened the door and", new GenerationSettings(MaxNewTokens: 40));
+// " saw a man in a white suit and a black suit with a black hat. ..."
+
+foreach (var piece in gpt.Stream(prompt, new GenerationSettings(
+             MaxNewTokens: 60, Sample: true, Temperature: 0.8, TopP: 0.95, RepetitionPenalty: 1.2, Seed: 1)))
+    Console.Write(piece);
+```
+
+GPT-2 and its fine-tunes and distillations (`gpt2`, `distilgpt2`, `gpt2-medium` and the like).
+Greedy decoding returns what transformers' `generate(do_sample=False)` returns, token for token, and
+the logits agree with torch in float64 to 1e-11. The repetition penalty is transformers' rule;
+sampling applies temperature, top-k and top-p in transformers' order, from a seeded generator (which
+does not reproduce torch's draws).
+
+Generation keeps a **key/value cache**: a token's keys and values never change once computed, so each
+new token costs one row through the network rather than the whole text again. About 22 tokens a
+second for `gpt2` on a laptop CPU, 25 in single precision.
+
+Two details of the checkpoint worth knowing. GPT-2 stores its projections as `Conv1D`, a linear layer
+kept `[inputs, outputs]` - the transpose of every other layer on the Hub - and they are turned round on
+load. And the output layer is the token embedding table itself.
+
+Rotary-position decoders - Llama, Mistral, GPT-NeoX - have a different block and are refused by
+name, with a pointer to ONNX.
+
+## Precision
+
+```csharp
+ComputeOptions.LinearLayers = Precision.Single;
+```
+
+Everything runs in double precision by default, which is why hidden states agree with torch's float64
+to about 1e-13. Switching the linear layers to float32 - the precision torch itself uses by default -
+roughly doubles their speed, because a vector instruction holds eight floats where it holds four
+doubles. Attention, norms and activations stay double.
+
+| | double | single |
+|---|---|---|
+| `bert-base-uncased`, 128 tokens | 434 ms | 326 ms |
+| `google/vit-base-patch16-224` | 743 ms | 551 ms |
+| `openai/clip-vit-base-patch32`, image and 5 labels | 231 ms | 159 ms |
+| `gpt2`, tokens per second | 22 | 25 |
+
+ViT's top probability moves by 3.5e-8. Training ignores the setting: a LoRA or prefix-tuning step
+always runs its forward pass in double, because its hand-written backward pass is the derivative of
+that function.
+
+## Models larger than memory
+
+```csharp
+using var encoder = StreamingEncoder.Load("bert-large-uncased");
+var vector = encoder.Embed("a sentence");
+```
+
+`TransformerModel` keeps every parameter in memory. `StreamingEncoder` keeps none: each forward pass
+reads the embedding rows its tokens use, then each layer's weights in turn, straight from the
+memory-mapped safetensors, runs the layer and lets it go. Sharded checkpoints are read across their
+shards.
+
+On `bert-large-uncased` the embedding is the same to the last bit, and peak private memory falls from
+**5.9 GB to 0.45 GB**. Each pass reads the weights again, so it suits a model that otherwise could not
+run at all. A PyTorch pickle cannot be read in parts and is refused with the conversion to use.
 
 ## Configuration
 
@@ -353,14 +461,14 @@ model.Encoder.Layers[0].Intermediate.Weights[0, 0] = 0.5;
 model.WeightsChanged();
 ```
 
-There is no KV cache because this is an encoder: every position attends to every other one anyway.
+An encoder needs no KV cache - every position attends to every other one anyway. The decoder, `CausalLanguageModel`, has one.
 
 ## Limits
 
-- Decoder-only and encoder-decoder architectures are refused.
-- CLIP is not implemented: its text tower is causal, which this encoder is not. ViT and DeiT are.
-- Activations other than `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python` and
-  `relu` are refused at load time, by name.
+- Decoders other than GPT-2's family, and encoder-decoder architectures, are refused.
+- `ClipModel` reads full CLIP checkpoints; SigLIP and ALIGN are refused.
+- Activations other than `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python`,
+  `quick_gelu` and `relu` are refused at load time, by name.
 
 ## See also
 

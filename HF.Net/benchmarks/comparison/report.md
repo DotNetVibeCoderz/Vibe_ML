@@ -21,10 +21,10 @@ binding; GraviTokenizers is managed C#.
 
 | Measure | Python | HF.Net | |
 |---|---:|---:|---|
-| One document | 0.03 ms | 0.01 ms | **3.03x faster** |
-| 1,000 documents | 13.96 ms | 6.21 ms | **2.25x faster** |
+| One document | 0.04 ms | 0.01 ms | **3.11x faster** |
+| 1,000 documents | 20.60 ms | 9.60 ms | **2.15x faster** |
 
-Throughput: **71,630 docs/s** (Python) against **161,095 docs/s** (HF.Net).
+Throughput: **48,553 docs/s** (Python) against **104,154 docs/s** (HF.Net).
 
 **Ids identical to the reference: yes.**
 
@@ -40,8 +40,8 @@ hf.net  101 7592 1010 2088 999 19204 17629 2015 2024 23653 1012 102
 
 | Measure | Python | HF.Net | |
 |---|---:|---:|---|
-| Open and list tensors | 0.48 ms | 0.48 ms | **1.01x faster** |
-| Read one 30522x768 tensor | 0.48 ms | 184.85 ms | 384.30x slower |
+| Open and list tensors | 0.70 ms | 0.71 ms | 1.01x slower |
+| Read one 30522x768 tensor | 0.74 ms | 185.18 ms | 251.19x slower |
 
 Reading one tensor costs HF.Net more because every value is widened to `double` on the
 way out, where PyTorch hands back the F32 buffer as it lies on disk. Listing the
@@ -53,9 +53,19 @@ One forward pass over 12 tokens.
 
 | Model | Python (torch) | HF.Net (managed) | |
 |---|---:|---:|---|
-| bert-base-uncased, 1 document | 37.58 ms | 48.06 ms | 1.28x slower |
-| bert-base-uncased, 8 documents | 175.21 ms | 386.33 ms | 2.20x slower |
-| bert-tiny, 1 document | 1.15 ms | 0.83 ms | **1.39x faster** |
+| bert-base-uncased, 1 document | 50.06 ms | 59.49 ms | 1.19x slower |
+| bert-base-uncased, 8 documents | 263.15 ms | 427.73 ms | 1.63x slower |
+| bert-tiny, 1 document | 1.75 ms | 1.05 ms | **1.66x faster** |
+
+With `ComputeOptions.LinearLayers = Precision.Single`, the linear layers in float32 as torch runs them:
+
+| Model | Python (torch) | HF.Net (float32 linear) | |
+|---|---:|---:|---|
+| bert-base-uncased, 1 document | 50.06 ms | 45.00 ms | **1.11x faster** |
+| bert-base-uncased, 8 documents | 263.15 ms | 286.67 ms | 1.09x slower |
+| bert-tiny, 1 document | 1.75 ms | 1.37 ms | **1.28x faster** |
+
+On bert-base the hidden states move by at most **9.9e-06** from the double-precision ones.
 
 The managed encoder computes in `double` with float32 weights - which is exact, since
 every checkpoint stores float32 or narrower - and agrees with torch in float64 to about
@@ -69,9 +79,9 @@ ONNX row below.
 
 | Path | Time | against torch |
 |---|---:|---|
-| torch (Python) | 37.58 ms | — |
-| HF.Net managed | 48.06 ms | 1.28x slower |
-| HF.Net through ONNX Runtime | 31.47 ms | **1.19x faster** |
+| torch (Python) | 50.06 ms | — |
+| HF.Net managed | 59.49 ms | 1.19x slower |
+| HF.Net through ONNX Runtime | 28.92 ms | **1.73x faster** |
 
 Largest difference between the ONNX and managed hidden states: **4.7e-06** -
 float32 arithmetic, since the managed encoder matches torch in float64 to about 1e-13.
@@ -83,7 +93,8 @@ compute, not a photograph, so no resampler sits between them.
 
 | Model | Python (torch) | HF.Net (managed) | |
 |---|---:|---:|---|
-| vit-base-patch16-224, 1 image | 214.46 ms | 947.85 ms | 4.42x slower |
+| vit-base-patch16-224, 1 image | 344.51 ms | 912.65 ms | 2.65x slower |
+| vit-base-patch16-224, float32 linear | 344.51 ms | 682.24 ms | 1.98x slower |
 
 | Rank | torch (float64) | | HF.Net | |
 |---|---|---:|---|---:|

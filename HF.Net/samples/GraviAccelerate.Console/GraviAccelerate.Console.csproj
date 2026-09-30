@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.HFNet.Samples.GraviAccelerate</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Gravicode.Science.GraviLearn" />
+    <PackageReference Include="Gravicode.Science.GraviNum" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GraviAccelerate\GraviAccelerate.csproj" />
+    <ProjectReference Include="..\..\src\GraviDatasets\GraviDatasets.csproj" />
+  </ItemGroup>
+</Project>
