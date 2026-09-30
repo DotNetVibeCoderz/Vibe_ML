@@ -335,7 +335,10 @@ public sealed class DiffusionPipeline : IDisposable
     /// The encoder uses the latent distribution's <b>mean</b>. The usual export samples inside the
     /// graph with a <c>RandomNormalLike</c> that has no seed, so it returns a different latent on
     /// every call - in Python as well - and no seed could reproduce a result. The export is copied
-    /// once with that node's scale set to zero, beside the original.
+    /// once, beside the original, with that node's scale set to the smallest normal float: the noise
+    /// it then draws is about 1e-38, which vanishes when added to any latent value. Not zero, because
+    /// the libstdc++ that ONNX Runtime is built against on Linux asserts on a zero deviation and aborts
+    /// the process.
     /// </para>
     /// </remarks>
     public Image<Rgb24> ImageToImage(
@@ -669,6 +672,9 @@ public sealed class DiffusionPipeline : IDisposable
         return Scale(latents, LatentScaling);
     }
 
+    /// <summary>The smallest normal float32: a deviation too small to move any latent, and not zero.</summary>
+    private const float SmallestNormal = 1.17549435E-38f;
+
     /// <summary>The VAE encoder with any in-graph sampling turned into the distribution's mean.</summary>
     private OnnxSession OpenMeanEncoder()
     {
@@ -682,10 +688,12 @@ public sealed class DiffusionPipeline : IDisposable
         var model = OnnxModelFile.Read(path);
         if (!model.Nodes.Any(n => n.OpType is "RandomNormalLike" or "RandomNormal")) return OnnxSession.Open(path, _target);
 
-        var mean = Path.Combine(_directory, "vae_encoder", "model.mean.onnx");
+        // A new name for the patched copy: an earlier release wrote model.mean.onnx with a scale of 0,
+        // which aborts ONNX Runtime on Linux, and it must not be picked up again.
+        var mean = Path.Combine(_directory, "vae_encoder", "model.deterministic.onnx");
         if (!File.Exists(mean) || File.GetLastWriteTimeUtc(mean) < File.GetLastWriteTimeUtc(path))
         {
-            var (bytes, _) = OnnxModelFile.SetFloatAttribute(path, "RandomNormalLike", "scale", 0f);
+            var (bytes, _) = OnnxModelFile.SetFloatAttribute(path, "RandomNormalLike", "scale", SmallestNormal);
             File.WriteAllBytes(mean, bytes);
         }
 

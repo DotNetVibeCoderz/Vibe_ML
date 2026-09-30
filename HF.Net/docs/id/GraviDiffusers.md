@@ -142,8 +142,10 @@ sana: 0 mengembalikannya apa adanya, 1 mengabaikannya.
 
 **Encoder VAE sebagaimana diekspor tidak deterministik.** Ia mengambil sampel latennya di dalam graf
 dengan `RandomNormalLike` tanpa seed, jadi setiap panggilan mengembalikan laten berbeda - di Python
-juga. HF.Net menulis salinannya sekali di sebelahnya, `vae_encoder/model.mean.onnx`, dengan skala node
-itu diatur ke nol, yang memberi rerata distribusinya. Seed kemudian mereproduksi hasil.
+juga. HF.Net menulis salinannya sekali di sebelahnya, `vae_encoder/model.deterministic.onnx`, dengan
+skala node itu diatur ke float normal terkecil: derau yang ditariknya, sekitar 1e-38, lenyap saat
+ditambahkan ke laten mana pun, menyisakan rerata distribusinya. (Bukan nol - build ONNX Runtime untuk
+Linux melakukan assert pada deviasi nol dan menghentikan proses.) Seed kemudian mereproduksi hasil.
 
 Pada SD 1.5 dengan strength 0,6 hasilnya sepakat dengan `OnnxStableDiffusionImg2ImgPipeline` milik
 diffusers, yang dijalankan dengan encoder rerata dan seed yang sama, sampai PSNR 57,8 dB.

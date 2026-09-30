@@ -39,10 +39,11 @@ public sealed class OnnxFileTests
     }
 
     [Fact]
-    public void Setting_a_sampler_s_scale_to_zero_makes_the_graph_deterministic()
+    public void Setting_a_sampler_s_scale_to_the_smallest_normal_makes_the_graph_deterministic()
     {
         var path = Path.Combine(Fixtures, "random.onnx");
-        var input = new NdArray(Enumerable.Range(0, 64).Select(i => i / 8.0).ToArray(), 1, 64);
+        // Offset from zero: noise of about 1e-38 vanishes when added to any of these, but not to 0.
+        var input = new NdArray(Enumerable.Range(0, 64).Select(i => 0.5 + i / 8.0).ToArray(), 1, 64);
 
         using (var session = OnnxSession.Open(path, ExecutionTarget.Cpu))
         {
@@ -50,8 +51,9 @@ public sealed class OnnxFileTests
             Assert.NotEqual(session.Run(input).ToArray(), session.Run(input).ToArray());
         }
 
-        // The node relies on the default scale of 1, so the attribute has to be added, not edited.
-        var (bytes, changed) = OnnxModelFile.SetFloatAttribute(path, "RandomNormalLike", "scale", 0f);
+        // The node relies on the default scale of 1, so the attribute has to be added, not edited. Not 0:
+        // ONNX Runtime's Linux build asserts on a zero deviation in std::normal_distribution and aborts.
+        var (bytes, changed) = OnnxModelFile.SetFloatAttribute(path, "RandomNormalLike", "scale", 1.17549435E-38f);
         Assert.Equal(1, changed);
 
         var patched = Path.Combine(Path.GetTempPath(), $"hfnet-random-{Guid.NewGuid():N}.onnx");

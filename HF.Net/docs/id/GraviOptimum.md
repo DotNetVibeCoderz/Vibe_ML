@@ -158,7 +158,7 @@ file.Nodes;          // nama, tipe op, masukan, keluaran, nama atribut
 file.Initializers;   // nama, bentuk, tipe data - termasuk berkas data eksternal
 file.ReadFloats(file.Initializers["onnx::MatMul_2567"]);
 
-var (bytes, changed) = OnnxModelFile.SetFloatAttribute("vae_encoder/model.onnx", "RandomNormalLike", "scale", 0f);
+var (bytes, changed) = OnnxModelFile.SetFloatAttribute("vae_encoder/model.onnx", "RandomNormalLike", "scale", 1.17549435E-38f);
 ```
 
 Pembaca protobuf streaming, tanpa ketergantungan pada paket `onnx`: ia membaca struktur graf dan nilai

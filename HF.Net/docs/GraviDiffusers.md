@@ -138,8 +138,10 @@ there: 0 returns it, 1 ignores it.
 
 **The VAE encoder as exported is not deterministic.** It samples its latent inside the graph with a
 `RandomNormalLike` that has no seed, so it returns a different latent on every call - in Python as
-well. HF.Net writes a copy beside it once, `vae_encoder/model.mean.onnx`, with that node's scale set to
-zero, which gives the distribution's mean. A seed then reproduces a result.
+well. HF.Net writes a copy beside it once, `vae_encoder/model.deterministic.onnx`, with that node's
+scale set to the smallest normal float: the noise it draws, about 1e-38, vanishes when added to any
+latent, leaving the distribution's mean. (Not zero - ONNX Runtime's Linux build asserts on a zero
+deviation and aborts.) A seed then reproduces a result.
 
 On SD 1.5 at strength 0.6 the result agrees with diffusers' `OnnxStableDiffusionImg2ImgPipeline`, run
 with the same mean-patched encoder and seed, to 57.8 dB PSNR.

@@ -141,8 +141,11 @@ root rather than here — see below.
   on the tiny test repo (factor 2) Python returns 16x16 for a 64x64 request and HF.Net 64x64. To
   compare, feed both the same latents through `Generate(prompt, latents)`.
 - **A diffusers ONNX VAE encoder samples with an unseeded `RandomNormalLike`**, so two calls differ,
-  in Python too. HF.Net writes `vae_encoder/model.mean.onnx` with `scale` = 0. The attribute is usually
-  *absent* (default 1), so a patch that only edits existing attributes silently does nothing.
+  in Python too. HF.Net writes `vae_encoder/model.deterministic.onnx` with `scale` = the smallest normal
+  float (1.17549435e-38). **Never 0**: ONNX Runtime's Linux build has libstdc++ assertions on, and
+  `std::normal_distribution` with a zero deviation aborts the whole process (exit 134, no message
+  through the xUnit runner). Windows' MSVC does not assert, so only Ubuntu CI shows it. The attribute is
+  usually *absent* (default 1), so a patch that only edits existing attributes silently does nothing.
 - **diffusers 0.40's ONNX pipeline breaks with Euler** (`init_noise_sigma` is a tensor). Reference
   scripts subclass the scheduler to return a float.
 - **fp16 SD exports differ from diffusers by ~55 dB, not 0.** diffusers keeps latents in float16
