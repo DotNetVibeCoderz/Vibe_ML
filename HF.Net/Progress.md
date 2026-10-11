@@ -7,9 +7,9 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.8.1 — current (0.8.0 plus legacy pytorch_model.bin support)
+## v0.9.0 — current
 
-**27 projects, 445 tests passing, whole solution builds clean with no warnings.**
+**28 projects, 447 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -244,6 +244,15 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-10-11** — 0.9.0: ViT and CLIP move to their own package, `GraviTransformers.Vision` (namespace
+unchanged), so GraviTransformers no longer depends on SixLabors.ImageSharp. ImageSharp 3.1.12 has five
+advisories that are fixed only in the licence-keyed 4.x line. The image processor now decodes with a
+restricted set (PNG/JPEG/BMP/GIF/WebP, metadata skipped), which keeps the TIFF and ICC ones unreachable;
+the PIL-parity fixtures are unchanged to the bit. Breaking for vision users: add the new package.
+447 tests.
+
+**2026-10-11** — 0.8.1 released with the legacy-checkpoint support below.
 
 **2026-10-11** — Legacy (pre-torch-1.6) `pytorch_model.bin` checkpoints load. They were refused
 before, which left `ProsusAI/finbert` (Finance.Net's local FinBERT) loadable only from the

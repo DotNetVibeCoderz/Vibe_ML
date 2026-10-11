@@ -131,8 +131,19 @@ mirip. `EmbedBatch` memparalelkan antar-masukan, dan di situlah throughput-nya b
 
 ## Vision
 
-Vision Transformer adalah blok encoder yang sama di atas embedding yang berbeda, jadi ia tinggal di
-sini alih-alih di pustaka tersendiri.
+Vision Transformer adalah blok encoder yang sama di atas embedding yang berbeda, jadi ia berjalan di
+atas kernel pustaka ini - tetapi sejak 0.9.0 ia dirilis sebagai paket tersendiri,
+**`Gravicode.HFNet.GraviTransformers.Vision`** (namespace sama, `Gravicode.HFNet.GraviTransformers.Vision`),
+agar pengguna teks saja tidak bergantung pada pustaka gambar:
+
+```bash
+dotnet add package Gravicode.HFNet.GraviTransformers.Vision
+```
+
+Gambar didekode sebagai PNG, JPEG, BMP, GIF atau WebP dengan metadata dilewati
+(`ImageProcessor.Decoding`). Ini menjauhkan advisory TIFF dan profil ICC ImageSharp 3.1.x dari jalur
+gambar yang tidak tepercaya, tanpa mengubah satu piksel pun. Format lain dapat Anda dekode sendiri lalu
+berikan `Image<Rgb24>`-nya ke `ImageProcessor.Convert`.
 
 ```csharp
 using Gravicode.HFNet.GraviTransformers.Vision;

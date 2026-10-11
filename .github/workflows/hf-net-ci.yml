@@ -60,7 +60,7 @@ jobs:
       - name: Restore
         run: dotnet restore HF.Net.sln
 
-      # Warnings are not errors here on purpose: the eight shipping libraries build clean, and
+      # Warnings are not errors here on purpose: the nine shipping libraries build clean, and
       # failing the build on an inherited Avalonia warning would gate the packages on the IDE.
       - name: Build
         run: dotnet build HF.Net.sln -c Release --no-restore

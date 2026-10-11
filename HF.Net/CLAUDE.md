@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.8.1 is published: **27 projects, 445 tests passing**, the whole solution builds clean, and the
-eight libraries are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
+v0.9.0 is published: **28 projects, 447 tests passing**, the whole solution builds clean, and the
+nine packages are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`
@@ -16,6 +16,12 @@ monorepo alongside GravicodeScience. That placement is what puts the CI workflow
 root rather than here — see below.
 
 ## Things that will bite you
+
+- **ViT and CLIP are a separate package, `GraviTransformers.Vision`** (since 0.9.0; namespace
+  unchanged). It exists so text users do not pull in SixLabors.ImageSharp 3.1.x, whose open
+  advisories are fixed only in the licence-keyed 4.x. `ImageProcessor.Decoding` (PNG/JPEG/BMP/GIF/WebP,
+  metadata skipped) is what keeps them unreachable - do not go back to a bare `Image.Load`. The
+  reasoning behind the NuGetAuditSuppress entries is in `Directory.Build.props`.
 
 - **The foundation's namespaces are `Gravicode.Science.*`, not `GraviNum`.** HF.Net's own are
   `Gravicode.HFNet.*`. Both define a `TransformerModel` and a `Dataset`, so files that touch both

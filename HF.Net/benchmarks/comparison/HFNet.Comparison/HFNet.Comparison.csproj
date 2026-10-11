@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\..\src\GraviHub\GraviHub.csproj" />
     <ProjectReference Include="..\..\..\src\GraviTokenizers\GraviTokenizers.csproj" />
     <ProjectReference Include="..\..\..\src\GraviTransformers\GraviTransformers.csproj" />
+    <ProjectReference Include="..\..\..\src\GraviTransformers.Vision\GraviTransformers.Vision.csproj" />
     <ProjectReference Include="..\..\..\src\GraviOptimum\GraviOptimum.csproj" />
   </ItemGroup>
 

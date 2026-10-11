@@ -4,7 +4,7 @@
     <RootNamespace>Gravicode.HFNet.GraviTransformers</RootNamespace>
     <AssemblyName>Gravicode.HFNet.GraviTransformers</AssemblyName>
     <PackageId>Gravicode.HFNet.GraviTransformers</PackageId>
-    <Description>GraviTransformers - run Hugging Face transformer models on .NET: load pretrained BERT-family encoders and ViT vision encoders from safetensors or PyTorch weights and serve them through task pipelines - classification, fill-mask, named entities, question answering, embeddings and image classification. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <Description>GraviTransformers - run Hugging Face transformer models on .NET: load pretrained BERT-family encoders and GPT-2/Llama/Mistral/Qwen/Pythia decoders from safetensors or PyTorch weights and serve them through task pipelines - classification, fill-mask, named entities, question answering, embeddings and text generation. ViT and CLIP are in Gravicode.HFNet.GraviTransformers.Vision. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +19,10 @@
 
     <!-- The per-library benchmarks time the GEMM directly against the foundation and ILGPU. -->
     <InternalsVisibleTo Include="HFNet.Benchmarks" />
+
+    <!-- ViT and CLIP live in GraviTransformers.Vision (so text users skip ImageSharp) but run on these
+         same kernels. -->
+    <InternalsVisibleTo Include="Gravicode.HFNet.GraviTransformers.Vision" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,8 +31,6 @@
     <PackageReference Include="Gravicode.Science.GraviLearn" />
     <PackageReference Include="Gravicode.Science.GraviText" />
 
-    <!-- Decoding and resampling for the vision encoder's image processor. -->
-    <PackageReference Include="SixLabors.ImageSharp" />
   </ItemGroup>
 
   <ItemGroup>

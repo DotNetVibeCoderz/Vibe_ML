@@ -223,7 +223,7 @@ public sealed class HFNetReferencePlugin
               Greedy (Sample: false) matches transformers' generate token for token. A KV cache
                 makes each new token cost one row.
 
-            using Gravicode.HFNet.GraviTransformers.Vision;
+            using Gravicode.HFNet.GraviTransformers.Vision;   // package Gravicode.HFNet.GraviTransformers.Vision (0.9.0+)
             VisionTransformer.Load("google/vit-base-patch16-224")  .Classify(path, topK) .Embed(path)
             ClipModel - CLIP, images and text in one space
               ClipModel.Load("openai/clip-vit-base-patch32")  /  ClipModel.Open(directory)

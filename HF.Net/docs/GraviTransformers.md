@@ -131,8 +131,19 @@ look alike. `EmbedBatch` parallelises across inputs, which is where the throughp
 
 ## Vision
 
-A Vision Transformer is the same encoder block over a different embedding, so it lives here rather
-than in a library of its own.
+A Vision Transformer is the same encoder block over a different embedding, so it runs on this
+library's kernels - but since 0.9.0 it ships as its own package, **`Gravicode.HFNet.GraviTransformers.Vision`**
+(same `Gravicode.HFNet.GraviTransformers.Vision` namespace), so that text-only users do not depend
+on an image library:
+
+```bash
+dotnet add package Gravicode.HFNet.GraviTransformers.Vision
+```
+
+Images are decoded as PNG, JPEG, BMP, GIF or WebP with metadata skipped (`ImageProcessor.Decoding`).
+That keeps ImageSharp 3.1.x's TIFF and ICC-profile advisories off the path of an untrusted image,
+and changes no pixel. Decode anything else yourself and pass the `Image<Rgb24>` to
+`ImageProcessor.Convert`.
 
 ```csharp
 using Gravicode.HFNet.GraviTransformers.Vision;

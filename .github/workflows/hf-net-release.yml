@@ -1,4 +1,4 @@
-# HF.Net - publish the eight packages to NuGet.
+# HF.Net - publish the nine packages to NuGet.
 #
 # Triggered by a tag, so the tag and the package version cannot disagree: the version is read from
 # the tag and passed to `dotnet pack`, rather than from a file somebody forgot to bump. The tag is

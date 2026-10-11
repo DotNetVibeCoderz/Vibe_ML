@@ -34,7 +34,7 @@ Each mirrors a package in the Python Hugging Face stack.
 | **GraviHub** | `huggingface_hub` | Hub download and upload, a readable local cache, and readers for the formats the Hub serves: **safetensors** and **`pytorch_model.bin`** |
 | **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE, Unigram and CLIP, loading `tokenizer.json` — with character offsets that point back into the original text |
 | **GraviDatasets** | `datasets` | CSV, Parquet, JSON and JSON Lines, Hub datasets, splits, streaming and memory-mapped reads |
-| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT and CLIP: classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification — and streaming for models larger than memory |
+| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT and CLIP (package `GraviTransformers.Vision`): classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification — and streaming for models larger than memory |
 | **GraviPEFT** | `peft` | LoRA and prefix tuning in the Hugging Face PEFT format — train, apply, merge, save, load |
 | **GraviAccelerate** | `accelerate` | Device selection across CPU SIMD and ILGPU, sharding, weighted gradient averaging, honest throughput measurement |
 | **GraviOptimum** | `optimum` | ONNX Runtime inference with an explicitly chosen execution provider, and weight quantisation that reports its measured error |
@@ -61,6 +61,7 @@ Each library is a separate package; add only what you need, and the rest comes t
 | `Gravicode.HFNet.GraviTokenizers` | `Gravicode.HFNet.GraviAccelerate` |
 | `Gravicode.HFNet.GraviDatasets` | `Gravicode.HFNet.GraviOptimum` |
 | `Gravicode.HFNet.GraviTransformers` | `Gravicode.HFNet.GraviDiffusers` |
+| `Gravicode.HFNet.GraviTransformers.Vision` | |
 
 Or build from source:
 
@@ -227,7 +228,7 @@ See [docs/HFAppGen.md](docs/HFAppGen.md).
 ```
 src/            one class library per Gravi* project
 samples/        a Gravi*.Console app per library, plus HFGallery — fifteen use cases in an Avalonia window
-tests/          Gravi*.Tests — 445 tests, no network required
+tests/          Gravi*.Tests — 447 tests, no network required
 benchmarks/     HFNet.Benchmarks (BenchmarkDotNet, every library) and comparison/ (against Python)
 notebooks/      .NET Interactive notebooks: 01 getting started, 02 performance, 03 GPT-2 and CLIP,
                 04 LoRA and prefix tuning, 05 Stable Diffusion

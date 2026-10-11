@@ -2,6 +2,12 @@ using System.Text.Json;
 using Gravicode.HFNet.GraviHub;
 using Gravicode.Science.GraviNum;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats;
+using SixLabors.ImageSharp.Formats.Bmp;
+using SixLabors.ImageSharp.Formats.Gif;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
@@ -132,12 +138,12 @@ public sealed record ImageProcessor
     /// <summary>
     /// Reads an image and returns it as <c>[channels, size, size]</c>, normalised.
     /// </summary>
-    /// <param name="path">A path to a PNG, JPEG, BMP, GIF, TIFF or WebP file.</param>
+    /// <param name="path">A path to a PNG, JPEG, BMP, GIF or WebP file.</param>
     public NdArray Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        using var image = Image.Load<Rgb24>(path);
+        using var image = Image.Load<Rgb24>(Decoding, path);
         return Convert(image);
     }
 
@@ -146,9 +152,31 @@ public sealed record ImageProcessor
     {
         ArgumentNullException.ThrowIfNull(stream);
 
-        using var image = Image.Load<Rgb24>(stream);
+        using var image = Image.Load<Rgb24>(Decoding, stream);
         return Convert(image);
     }
+
+    /// <summary>
+    /// The decoders images are read with: PNG, JPEG, BMP, GIF and WebP, with metadata skipped.
+    /// </summary>
+    /// <remarks>
+    /// ImageSharp 3.1.12 has open advisories in its TIFF decoder (a BigTIFF IFD loop) and its ICC
+    /// profile parser, and their fixes exist only in the licence-keyed 4.x line. Leaving TIFF out of
+    /// the configuration and skipping metadata keeps both off the path an untrusted image takes.
+    /// Neither changes a pixel: ImageSharp 3 does not colour-convert from embedded profiles, and no
+    /// vision checkpoint's processor ever expected TIFF. Callers who need another format can decode
+    /// it themselves and pass the result to <see cref="Convert"/>.
+    /// </remarks>
+    internal static readonly DecoderOptions Decoding = new()
+    {
+        Configuration = new Configuration(
+            new PngConfigurationModule(),
+            new JpegConfigurationModule(),
+            new BmpConfigurationModule(),
+            new GifConfigurationModule(),
+            new WebpConfigurationModule()),
+        SkipMetadata = true,
+    };
 
     /// <summary>Converts a decoded image to <c>[channels, size, size]</c>, normalised.</summary>
     /// <remarks>

@@ -214,7 +214,7 @@ public sealed class TransformerModel : IDisposable
 
         if (string.Equals(config.ModelType, "clip", StringComparison.OrdinalIgnoreCase))
         {
-            throw new NotSupportedException($"'{repoId}' is a CLIP model. Load it with Vision.ClipModel.Load.");
+            throw new NotSupportedException($"'{repoId}' is a CLIP model. Load it with Vision.ClipModel.Load (package Gravicode.HFNet.GraviTransformers.Vision).");
         }
 
         throw new NotSupportedException(

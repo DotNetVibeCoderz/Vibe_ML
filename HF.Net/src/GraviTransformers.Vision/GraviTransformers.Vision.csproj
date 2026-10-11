@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.HFNet.GraviTransformers.Vision</RootNamespace>
+    <AssemblyName>Gravicode.HFNet.GraviTransformers.Vision</AssemblyName>
+    <PackageId>Gravicode.HFNet.GraviTransformers.Vision</PackageId>
+    <Description>GraviTransformers.Vision - ViT image classification and CLIP zero-shot classification on .NET, with PIL's resize reproduced to the byte so results match torch. Split from GraviTransformers so that text-only users do not depend on an image library. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The vision tests sit with the text tests and reach the same internals. -->
+    <InternalsVisibleTo Include="GraviTransformers.Tests" />
+    <InternalsVisibleTo Include="HFNet.Benchmarks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Decoding and resampling for the image processor. This is the only reason the vision encoders
+         live in their own package: text users (BERT, GPT, FinBERT) no longer pull in ImageSharp. -->
+    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviTransformers\GraviTransformers.csproj" />
+  </ItemGroup>
+
+</Project>
