@@ -16,4 +16,9 @@
     <ProjectReference Include="..\..\src\GraviHub\GraviHub.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- One state dict in both torch.save layouts; see Fixtures/make_checkpoints.py. -->
+    <None Include="Fixtures\**" Exclude="Fixtures\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

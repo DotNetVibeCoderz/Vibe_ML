@@ -9,7 +9,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ## v0.8.0 — current
 
-**27 projects, 440 tests passing, whole solution builds clean with no warnings.**
+**27 projects, 445 tests passing, whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
@@ -244,6 +244,13 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-10-11** — Legacy (pre-torch-1.6) `pytorch_model.bin` checkpoints load. They were refused
+before, which left `ProsusAI/finbert` (Finance.Net's local FinBERT) loadable only from the
+safetensors conversion on a pull-request ref. `PyTorchCheckpoint` now reads the bare-pickle layout
+and indexes its storages; tests cover both layouts against hand-written values from one torch-made
+state dict (transposed view, storage offset, F16, I64, rank 0), and the real FinBERT gives the same
+probabilities from either file. 445 tests.
 
 **2026-10-01** — Rotary-position decoders and the foundation's biased attention. `CausalLanguageModel`
 runs Llama, Mistral, Qwen2, Qwen3 and GPT-NeoX beside GPT-2, each matching transformers in float64 to

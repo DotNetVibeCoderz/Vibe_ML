@@ -162,8 +162,12 @@ tensor constructors and nothing else, and anything outside it throws.
 
 Where both formats are published, prefer safetensors anyway: it needs no interpretation at all.
 
-The pre-1.6 bare-pickle format is detected and refused with a message saying so, rather than failing
-somewhere deep in the opcode loop.
+The pre-1.6 layout is read too - it is still what some popular models ship, `ProsusAI/finbert`
+among them. Instead of a ZIP it is five pickles in a row (magic number, protocol version 1001,
+system info, the state dict, the storage keys) followed by each storage as an int64 element count
+and the raw elements. `Open` walks those headers to index the storages; data is still read only
+when a tensor is asked for. On `ProsusAI/finbert` the legacy `pytorch_model.bin` and the
+safetensors conversion give identical class probabilities.
 
 ## Uploading
 

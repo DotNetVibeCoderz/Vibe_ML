@@ -227,7 +227,7 @@ See [docs/HFAppGen.md](docs/HFAppGen.md).
 ```
 src/            one class library per Gravi* project
 samples/        a Gravi*.Console app per library, plus HFGallery — fifteen use cases in an Avalonia window
-tests/          Gravi*.Tests — 440 tests, no network required
+tests/          Gravi*.Tests — 445 tests, no network required
 benchmarks/     HFNet.Benchmarks (BenchmarkDotNet, every library) and comparison/ (against Python)
 notebooks/      .NET Interactive notebooks: 01 getting started, 02 performance, 03 GPT-2 and CLIP,
                 04 LoRA and prefix tuning, 05 Stable Diffusion

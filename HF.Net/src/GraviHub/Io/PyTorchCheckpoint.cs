@@ -26,7 +26,7 @@ public readonly record struct TorchTensorInfo(string Name, SafeTensorDType DType
 
 /// <summary>
 /// Reads a PyTorch <c>.bin</c> / <c>.pt</c> checkpoint - a ZIP holding a pickled state dict beside
-/// raw tensor storages.
+/// raw tensor storages, or the legacy pre-1.6 layout of bare pickles followed by the storages.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -42,20 +42,36 @@ public readonly record struct TorchTensorInfo(string Name, SafeTensorDType DType
 /// are published, prefer safetensors anyway - it needs no interpretation at all.
 /// </para>
 /// <para>
-/// The legacy pre-1.6 format, which is a bare pickle rather than a ZIP, is detected and refused
-/// with a message saying so rather than failing somewhere deep in the opcode loop.
+/// The legacy pre-1.6 format is still common on the Hub (<c>ProsusAI/finbert</c> ships only that).
+/// It is five pickles in a row - magic number, protocol version (1001), system info, the state
+/// dict, and the list of storage keys - followed by each storage in that order as a little-endian
+/// int64 element count and the raw elements. Opening one reads the pickles and walks the storage
+/// headers to index where each storage's data begins; tensor data is read only on demand.
 /// </para>
 /// </remarks>
 public sealed class PyTorchCheckpoint : IDisposable
 {
-    private readonly ZipArchive _archive;
+    /// <summary>The protocol version torch's legacy serializer writes as its second pickle.</summary>
+    private const long LegacyProtocolVersion = 1001;
+
+    private readonly ZipArchive? _archive;
+    private readonly Dictionary<string, (long Offset, long Count)>? _legacyStorages;
     private readonly Dictionary<string, TorchTensor> _tensors = new(StringComparer.Ordinal);
-    private readonly string _prefix;
+    private readonly string _prefix = "";
     private bool _disposed;
 
-    private PyTorchCheckpoint(string path)
+    private PyTorchCheckpoint(string path, bool legacy)
     {
         Path = path;
+        if (legacy)
+        {
+            _legacyStorages = OpenLegacy(path, out var legacyRoot);
+            Flatten(Unwrap(legacyRoot), prefix: "", _tensors);
+            Tensors = [.. _tensors.Select(p => new TorchTensorInfo(p.Key, p.Value.DType, p.Value.Shape))
+                .OrderBy(t => t.Name, StringComparer.Ordinal)];
+            return;
+        }
+
         _archive = ZipFile.OpenRead(path);
 
         var pickleEntry = _archive.Entries.FirstOrDefault(e =>
@@ -86,20 +102,84 @@ public sealed class PyTorchCheckpoint : IDisposable
         if (!File.Exists(path)) throw new FileNotFoundException("Checkpoint not found.", path);
 
         // A ZIP starts with 'PK'. Anything else here is the pre-1.6 bare-pickle layout, whose
-        // storages are concatenated after the pickle with no index at all.
+        // storages are concatenated after the pickles with no index at all.
         Span<byte> magic = stackalloc byte[2];
+        bool legacy;
         using (var probe = File.OpenRead(path))
         {
-            if (probe.Read(magic) == 2 && !(magic[0] == 'P' && magic[1] == 'K'))
-            {
-                throw new NotSupportedException(
-                    $"'{System.IO.Path.GetFileName(path)}' is a legacy (pre-torch-1.6) checkpoint, which this "
-                    + "reader does not handle. Re-save it with a current torch, or use the .safetensors file "
-                    + "if the repository publishes one.");
-            }
+            legacy = probe.Read(magic) == 2 && !(magic[0] == 'P' && magic[1] == 'K');
         }
 
-        return new PyTorchCheckpoint(path);
+        return new PyTorchCheckpoint(path, legacy);
+    }
+
+    /// <summary>
+    /// Reads a legacy checkpoint's pickles and indexes its storages: for each key, where its elements
+    /// start in the file and how many there are.
+    /// </summary>
+    private static Dictionary<string, (long Offset, long Count)> OpenLegacy(string path, out object? root)
+    {
+        var name = System.IO.Path.GetFileName(path);
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
+
+        // The magic number is an 80-bit integer the pickle reader cannot hold, so the protocol
+        // version that follows it is what identifies the format.
+        new PickleReader(file).Load();
+        var protocol = new PickleReader(file).Load();
+        if (protocol is not long version || version != LegacyProtocolVersion)
+        {
+            throw new InvalidDataException(
+                $"'{name}' is neither a ZIP nor a legacy torch checkpoint (protocol {protocol ?? "none"}, expected {LegacyProtocolVersion}).");
+        }
+
+        new PickleReader(file).Load(); // system info: endianness and type sizes
+        if (!BitConverter.IsLittleEndian)
+        {
+            throw new NotSupportedException("Legacy torch checkpoints are read on little-endian hosts only.");
+        }
+
+        var storages = new Dictionary<string, StorageRef>(StringComparer.Ordinal);
+        root = new PickleReader(file, id =>
+        {
+            // Legacy ids carry a sixth element, view metadata, which is null unless a storage was
+            // saved as a view of another - something torch stopped producing long before 1.6.
+            if (id.Count > 5 && id[5] is not null)
+            {
+                throw new NotSupportedException($"'{name}' stores a storage view, which is not supported.");
+            }
+            var storage = (StorageRef)ResolveStorage(id);
+            storages[storage.Key] = storage;
+            return storage;
+        }).Load();
+
+        if (new PickleReader(file).Load() is not List<object?> keys)
+        {
+            throw new InvalidDataException($"'{name}' has no storage key list after its state dict.");
+        }
+
+        var index = new Dictionary<string, (long Offset, long Count)>(StringComparer.Ordinal);
+        Span<byte> header = stackalloc byte[8];
+        foreach (var keyObject in keys)
+        {
+            var key = Convert.ToString(keyObject) ?? "";
+            if (!storages.TryGetValue(key, out var storage))
+            {
+                throw new InvalidDataException($"'{name}' lists storage '{key}' that no tensor refers to.");
+            }
+
+            file.ReadExactly(header);
+            var count = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(header);
+            var bytes = checked(count * SafeTensors.ElementSize(storage.DType));
+            if (count < 0 || file.Position + bytes > file.Length)
+            {
+                throw new InvalidDataException($"Storage '{key}' in '{name}' runs past the end of the file.");
+            }
+
+            index[key] = (file.Position, count);
+            file.Seek(bytes, SeekOrigin.Current);
+        }
+
+        return index;
     }
 
     /// <summary>Lists the parameters in a checkpoint without reading their data.</summary>
@@ -190,14 +270,31 @@ public sealed class PyTorchCheckpoint : IDisposable
     /// <summary>Reads a storage entry out of the ZIP and widens it.</summary>
     private double[] ReadStorage(string key, SafeTensorDType dtype)
     {
-        var entry = _archive.GetEntry(_prefix + "data/" + key)
-            ?? throw new InvalidDataException($"Storage '{key}' is missing from {System.IO.Path.GetFileName(Path)}.");
-
         var width = SafeTensors.ElementSize(dtype);
-        var count = checked((int)(entry.Length / width));
-        var values = new double[count];
+        Stream stream;
+        int count;
 
-        using var stream = entry.Open();
+        if (_legacyStorages is not null)
+        {
+            if (!_legacyStorages.TryGetValue(key, out var location))
+            {
+                throw new InvalidDataException($"Storage '{key}' is missing from {System.IO.Path.GetFileName(Path)}.");
+            }
+            count = checked((int)location.Count);
+            var file = new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
+            file.Seek(location.Offset, SeekOrigin.Begin);
+            stream = file;
+        }
+        else
+        {
+            var entry = _archive!.GetEntry(_prefix + "data/" + key)
+                ?? throw new InvalidDataException($"Storage '{key}' is missing from {System.IO.Path.GetFileName(Path)}.");
+            count = checked((int)(entry.Length / width));
+            stream = entry.Open();
+        }
+
+        var values = new double[count];
+        using var _ = stream;
 
         // Torch stores these uncompressed, but the entry still has to be read sequentially through
         // the ZIP stream rather than mapped, so it goes through a staging buffer.
@@ -334,7 +431,7 @@ public sealed class PyTorchCheckpoint : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _archive.Dispose();
+        _archive?.Dispose();
     }
 
     /// <inheritdoc />

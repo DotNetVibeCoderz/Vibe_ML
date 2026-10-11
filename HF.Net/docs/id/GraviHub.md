@@ -158,8 +158,12 @@ luar itu melempar exception.
 
 Bila kedua format tersedia, tetap pilih safetensors: ia tidak memerlukan penafsiran sama sekali.
 
-Format bare-pickle pra-1.6 dideteksi dan ditolak dengan pesan yang menjelaskannya, bukan gagal di
-kedalaman loop opcode.
+Layout pra-1.6 juga dibaca - masih dipakai sejumlah model populer, termasuk `ProsusAI/finbert`.
+Alih-alih ZIP, ia berupa lima pickle berurutan (angka magic, versi protokol 1001, info sistem,
+state dict, daftar kunci storage) disusul setiap storage sebagai jumlah elemen int64 dan elemen
+mentahnya. `Open` menelusuri header tersebut untuk mengindeks storage; data tetap baru dibaca saat
+sebuah tensor diminta. Pada `ProsusAI/finbert`, `pytorch_model.bin` legacy dan konversi safetensors
+memberi probabilitas kelas yang identik.
 
 ## Mengunggah
 
