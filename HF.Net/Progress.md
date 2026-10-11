@@ -7,7 +7,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.8.0 — current
+## v0.8.1 — current (0.8.0 plus legacy pytorch_model.bin support)
 
 **27 projects, 445 tests passing, whole solution builds clean with no warnings.**
 
