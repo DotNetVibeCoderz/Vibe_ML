@@ -1,6 +1,6 @@
 # GraviTransformers
 
-**Model Hugging Face terlatih: encoder keluarga BERT; decoder GPT-2, Llama, Mistral, Qwen, dan Pythia; ViT dan CLIP.**
+**Model Hugging Face terlatih: encoder keluarga BERT; decoder GPT-2, Llama, Mistral, Qwen, dan Pythia; ViT, CLIP, dan TrOCR.**
 
 Padanan `transformers`. Pustaka andalan.
 
@@ -297,6 +297,53 @@ transformers. Checkpoint OpenAI juga memakai `quick_gelu`, `x * sigmoid(1.702 x)
 Pada `openai/clip-vit-base-patch32`, logit-nya sepakat dengan torch dalam float64 sampai **8e-14** dari
 berkas gambar yang sama.
 
+## TrOCR
+
+```csharp
+using var ocr = TrOcrModel.Load("microsoft/trocr-small-printed");   // atau microsoft/trocr-base-printed
+
+ocr.Recognize("baris.png");                                     // NET REVENUE ROSE 12% TO $4.3 BILLION
+ocr.RecognizeBatch(["baris1.png", "baris2.png"]);               // didekode bersama, satu teks per gambar
+ocr.Recognize("baris.png", new OcrSettings(Beams: 4, MaxNewTokens: 64));
+```
+
+Pengenalan teks, satu baris teks per gambar: sebuah `VisionEncoderDecoderModel` yang encoder-nya ViT di
+atas (DeiT dengan token distilasinya pada trocr-small, ViT tanpa bias q/k/v pada trocr-base) dan
+decoder-nya milik TrOCR. Baris dipaksa ke persegi 384x384 milik encoder - begitulah checkpoint-nya
+dilatih - dan decoder menulis teks satu token demi satu token sambil memperhatikan 578 (atau 577)
+vektor encoder. Ia mulai dari `decoder_start_token_id` (`</s>`, id 2) dan berhenti pada token akhir
+atau batas panjang, greedy secara bawaan dan beam search bila diminta, mengikuti `generate` milik
+transformers langkah demi langkah: kandidat top-`2 * beams`, penalti panjang, dan heuristik henti yang sama.
+
+Decoder-nya **post-norm** - residual dulu, lalu norm, tiga kali per blok - dengan posisi terlatih yang
+digeser dua (penomoran fairseq) atau posisi sinusoidal yang melewati padding, skala `sqrt(d_model)`
+opsional pada vektor token dan norm opsional atas embedding, semuanya dibaca dari konfigurasi. Ia
+menyimpan cache key/value untuk self-attention-nya dan menghitung key dan value cross-attention setiap
+gambar sekali saja. Beberapa gambar, atau beberapa beam, berjalan sebagai baris dari satu perkalian
+matriks per langkah.
+
+Tokenizer-nya berasal dari checkpoint: trocr-small hanya membawa `sentencepiece.bpe.model` XLM-R, yang
+kini dibaca GraviTokenizers; trocr-base membawa `vocab.json` + `merges.txt` RoBERTa.
+
+| Checkpoint | vs transformers float64 | Teks | Per baris (CPU) |
+|---|---|---|---|
+| `microsoft/trocr-small-printed` | encoder 8e-13, logit langkah pertama 2e-13 | identik dengan Python pada ketiga baris uji | sekitar 1,5 dtk |
+| `microsoft/trocr-base-printed` | encoder 6e-13, logit langkah pertama 6e-14 | identik dengan Python pada ketiga baris uji | sekitar 5,3 dtk |
+
+Terhadap torch dalam float32, yang dijalankan pengguna Python, state encoder berbeda sampai 4e-4 dan
+logit sampai 7e-5 - pembulatan float32 torch sendiri: jalannya float32 dan float64 torch berbeda lebih
+besar, sampai 4e-3. Teks greedy dan 4-beam sama token demi token. Sebagian besar waktunya untuk encoder
+(1,3 dtk dan 3,3 dtk); Python butuh sekitar 1 dtk dan 6 dtk per baris dengan `use_cache: false` milik
+checkpoint ini.
+
+Batas panjangnya bawaan transformers, **20 token baru**, karena tidak ada checkpoint yang menetapkannya;
+baris panjang butuh `MaxNewTokens`. trocr-*-printed di-fine-tune pada struk (SROIE) dan menjawab dengan
+huruf kapital - *"NET REVENUE"*, dan trocr-small membaca *"Laba bersih"* sebagai *"LABA BERSIN"* - itu
+checkpoint-nya, bukan port-nya: Python menjawab sama.
+
+`TrOcrModel.Open(directory)` memuat checkpoint dari disk; `EncoderStates`, `Logits`, dan `GenerateIds`
+memberi bagian-bagiannya.
+
 ## Pembangkitan teks
 
 ```csharp
@@ -511,7 +558,8 @@ Encoder tidak butuh KV cache - setiap posisi toh memperhatikan semua posisi lain
 
 ## Batasan
 
-- Decoder selain GPT-2, Llama, Mistral, Qwen2/3, dan GPT-NeoX, serta arsitektur encoder-decoder, ditolak.
+- Decoder selain GPT-2, Llama, Mistral, Qwen2/3, dan GPT-NeoX, serta arsitektur encoder-decoder selain
+  TrOCR (ViT/DeiT + decoder TrOCR), ditolak.
 - `ClipModel` membaca checkpoint CLIP lengkap; SigLIP dan ALIGN ditolak.
 - Aktivasi selain `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python`, `quick_gelu`
   dan `relu` ditolak saat memuat, dengan menyebut namanya.

@@ -133,8 +133,15 @@ public sealed partial class HfTokenizer
             var vocab = Hub.DownloadFile(repoId, "vocab.json", revision);
             var merges = Hub.DownloadFile(repoId, "merges.txt", revision);
 
-            return (IsClip(configPath, vocab) ? FromClipFiles(vocab, merges) : FromGpt2Files(vocab, merges))
+            return (IsClip(configPath, vocab) ? FromClipFiles(vocab, merges)
+                    : IsTokenizerClass(configPath, "RobertaTokenizer") ? FromRobertaFiles(vocab, merges)
+                    : FromGpt2Files(vocab, merges))
                 .WithConfiguredPadding(configPath);
+        }
+
+        if (available.Contains(SentencePieceFile) && IsXlmRoberta(configPath))
+        {
+            return FromSentencePieceModel(Hub.DownloadFile(repoId, SentencePieceFile, revision));
         }
 
         if (available.Contains("vocab.txt"))
@@ -149,7 +156,8 @@ public sealed partial class HfTokenizer
         }
 
         throw new HubException(
-            $"'{repoId}' has no tokenizer files this loader recognises (tokenizer.json, vocab.json + merges.txt, or vocab.txt).")
+            $"'{repoId}' has no tokenizer files this loader recognises (tokenizer.json, vocab.json + merges.txt, "
+            + $"an XLM-RoBERTa {SentencePieceFile}, or vocab.txt).")
         {
             RepoId = repoId,
         };
@@ -222,6 +230,54 @@ public sealed partial class HfTokenizer
     /// <param name="mergesPath">The merge list, one pair per line in priority order.</param>
     public static HfTokenizer FromGpt2Files(string vocabPath, string mergesPath)
     {
+        var (vocabulary, merges) = ReadBpeFiles(vocabPath, mergesPath);
+
+        return new HfTokenizer(
+            new BpeModel(vocabulary, merges),
+            new ByteLevelPreTokenizer(),
+            normalizer: null,
+            new ByteLevelDecoder(),
+            PostProcessor.None);
+    }
+
+    /// <summary>Builds RoBERTa's tokenizer from its <c>vocab.json</c> and <c>merges.txt</c>.</summary>
+    /// <param name="vocabPath">A JSON object mapping piece to id.</param>
+    /// <param name="mergesPath">The merge list, one pair per line in priority order.</param>
+    /// <remarks>
+    /// GPT-2's byte-level BPE with what transformers' <c>RobertaTokenizer</c> adds to the same two
+    /// files: no prefix space, <c>&lt;s&gt; $A &lt;/s&gt;</c> around every text, and
+    /// <c>&lt;s&gt; &lt;pad&gt; &lt;/s&gt; &lt;unk&gt; &lt;mask&gt;</c> as special tokens, so
+    /// skip-special decoding drops them. Repositories that ship no <c>tokenizer.json</c>
+    /// (<c>microsoft/trocr-base-printed</c>) are read this way when their config names the class.
+    /// </remarks>
+    public static HfTokenizer FromRobertaFiles(string vocabPath, string mergesPath)
+    {
+        var (vocabulary, merges) = ReadBpeFiles(vocabPath, mergesPath);
+
+        var special = new List<AddedToken>();
+        foreach (var token in (string[])["<s>", "<pad>", "</s>", "<unk>", "<mask>"])
+        {
+            if (vocabulary.TryGetValue(token, out var id)) special.Add(new AddedToken(id, token, Special: true, LStrip: token == "<mask>"));
+        }
+
+        var post = vocabulary.TryGetValue("<s>", out var cls) && vocabulary.TryGetValue("</s>", out var sep)
+            ? new PostProcessor(
+                ["<s>", "$A", "</s>"],
+                ["<s>", "$A", "</s>", "</s>", "$B", "</s>"],
+                new Dictionary<string, int>(StringComparer.Ordinal) { ["<s>"] = cls, ["</s>"] = sep })
+            : PostProcessor.None;
+
+        return new HfTokenizer(
+            new BpeModel(vocabulary, merges),
+            new ByteLevelPreTokenizer(AddPrefixSpace: false),
+            normalizer: null,
+            new ByteLevelDecoder(),
+            post,
+            special);
+    }
+
+    private static (Dictionary<string, int> Vocabulary, List<(string, string)> Merges) ReadBpeFiles(string vocabPath, string mergesPath)
+    {
         using var document = JsonDocument.Parse(File.ReadAllText(vocabPath));
         var vocabulary = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var entry in document.RootElement.EnumerateObject())
@@ -238,12 +294,7 @@ public sealed partial class HfTokenizer
             if (space > 0) merges.Add((line[..space], line[(space + 1)..]));
         }
 
-        return new HfTokenizer(
-            new BpeModel(vocabulary, merges),
-            new ByteLevelPreTokenizer(),
-            normalizer: null,
-            new ByteLevelDecoder(),
-            PostProcessor.None);
+        return (vocabulary, merges);
     }
 
     /// <summary>Builds CLIP's tokenizer from its <c>vocab.json</c> and <c>merges.txt</c>.</summary>
@@ -382,7 +433,13 @@ public sealed partial class HfTokenizer
         {
             var vocab = Path.Combine(directory, "vocab.json");
             var merges = Path.Combine(directory, "merges.txt");
-            tokenizer = IsClip(configPath, vocab) ? FromClipFiles(vocab, merges) : FromGpt2Files(vocab, merges);
+            tokenizer = IsClip(configPath, vocab) ? FromClipFiles(vocab, merges)
+                : IsTokenizerClass(configPath, "RobertaTokenizer") ? FromRobertaFiles(vocab, merges)
+                : FromGpt2Files(vocab, merges);
+        }
+        else if (File.Exists(Path.Combine(directory, SentencePieceFile)) && IsXlmRoberta(configPath))
+        {
+            tokenizer = FromSentencePieceModel(Path.Combine(directory, SentencePieceFile));
         }
         else if (File.Exists(Path.Combine(directory, "vocab.txt")))
         {
@@ -391,7 +448,7 @@ public sealed partial class HfTokenizer
         else
         {
             throw new FileNotFoundException(
-                $"'{directory}' holds no tokenizer.json, vocab.json with merges.txt, or vocab.txt.");
+                $"'{directory}' holds no tokenizer.json, vocab.json with merges.txt, XLM-RoBERTa {SentencePieceFile}, or vocab.txt.");
         }
 
         return ReadPadToken(configPath) is not null
@@ -455,6 +512,41 @@ public sealed partial class HfTokenizer
                 JsonValueKind.Object when pad.TryGetProperty("content", out var content) => content.GetString(),
                 _ => null,
             };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The file name XLM-RoBERTa and its derivatives give their SentencePiece model.</summary>
+    internal const string SentencePieceFile = "sentencepiece.bpe.model";
+
+    /// <summary>
+    /// Whether a bare <see cref="SentencePieceFile"/> should be read with XLM-RoBERTa's layout: the
+    /// config says so, or names no class at all.
+    /// </summary>
+    /// <remarks>
+    /// CamemBERT ships a file of the same name with a different set of leading specials, so a class
+    /// that is named and is not XLM-RoBERTa's is not guessed at.
+    /// </remarks>
+    internal static bool IsXlmRoberta(string? configPath)
+        => ReadTokenizerClass(configPath) is not { } name || name.StartsWith("XLMRobertaTokenizer", StringComparison.Ordinal);
+
+    /// <summary>Whether <c>tokenizer_config.json</c> names this class (or its <c>Fast</c> twin).</summary>
+    internal static bool IsTokenizerClass(string? configPath, string name)
+        => ReadTokenizerClass(configPath) is { } named && (named == name || named == name + "Fast");
+
+    private static string? ReadTokenizerClass(string? configPath)
+    {
+        if (configPath is null || !File.Exists(configPath)) return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(configPath));
+            return document.RootElement.TryGetProperty("tokenizer_class", out var kind) && kind.ValueKind == JsonValueKind.String
+                ? kind.GetString()
+                : null;
         }
         catch (JsonException)
         {

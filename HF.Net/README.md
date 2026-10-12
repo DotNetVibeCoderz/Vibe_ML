@@ -34,7 +34,7 @@ Each mirrors a package in the Python Hugging Face stack.
 | **GraviHub** | `huggingface_hub` | Hub download and upload, a readable local cache, and readers for the formats the Hub serves: **safetensors** and **`pytorch_model.bin`** |
 | **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE, Unigram and CLIP, loading `tokenizer.json` — with character offsets that point back into the original text |
 | **GraviDatasets** | `datasets` | CSV, Parquet, JSON and JSON Lines, Hub datasets, splits, streaming and memory-mapped reads |
-| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT and CLIP (package `GraviTransformers.Vision`): classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification — and streaming for models larger than memory |
+| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT, CLIP and TrOCR (package `GraviTransformers.Vision`): classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification, printed-text OCR — and streaming for models larger than memory |
 | **GraviPEFT** | `peft` | LoRA and prefix tuning in the Hugging Face PEFT format — train, apply, merge, save, load |
 | **GraviAccelerate** | `accelerate` | Device selection across CPU SIMD and ILGPU, sharding, weighted gradient averaging, honest throughput measurement |
 | **GraviOptimum** | `optimum` | ONNX Runtime inference with an explicitly chosen execution provider, and weight quantisation that reports its measured error |
@@ -98,6 +98,11 @@ PIL's own algorithm, reproduced to the byte, because that is what the model was 
 `openai/clip-vit-base-patch32` classifies among labels it has never seen - *a bee 76.7%, a flower
 21.0%* - with logits within 8e-14 of torch's.
 
+**Reads printed text.** `microsoft/trocr-base-printed` reads a rendered line *"Net revenue rose 12% to
+$4.3 billion"* as **NET REVENUE ROSE 12% TO $4.3 BILLION**, token for token what transformers'
+`generate` gives, greedy or beam search, with encoder states within 6e-13 of torch in float64.
+`trocr-small-printed` runs too; its tokenizer is a bare SentencePiece model, which GraviTokenizers reads.
+
 **Writes.** `gpt2` continues *"The lighthouse keeper opened the door and"* with exactly the words
 transformers' `generate` produces, through a key/value cache, at about 22 tokens a second on a laptop
 CPU. Llama, Mistral, Qwen2, Qwen3 and GPT-NeoX (Pythia) run too - rotary positions, grouped-query
@@ -129,8 +134,8 @@ Stated plainly, because a library that fails quietly is worse than one that says
   PEFT in Python. It suits hundreds of examples. For tens of thousands, train with PEFT in Python
   and serve the adapter here. Sequence classification, token classification and extractive question answering heads train;
   prefix tuning trains sequence classification.
-- **Windowed and convolutional vision backbones** — Swin, ConvNeXt — are refused by name. ViT, DeiT
-  and CLIP run.
+- **Windowed and convolutional vision backbones** — Swin, ConvNeXt — are refused by name. ViT, DeiT,
+  CLIP and TrOCR run. TrOCR reads one line per image; finding the lines on a page is up to you.
 - **Diffusion needs an ONNX export**, not the PyTorch weights, and exports built from ONNX Runtime's
   fused GPU kernels (`onnxruntime/sd-turbo`) need CUDA.
 - **Uploads are capped at 10 MB.** Real weights need Git LFS, which GraviHub does not implement.

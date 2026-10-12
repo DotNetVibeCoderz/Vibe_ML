@@ -1,6 +1,6 @@
 # GraviTransformers
 
-**Pretrained Hugging Face models: BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT and CLIP.**
+**Pretrained Hugging Face models: BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT, CLIP and TrOCR.**
 
 Mirrors `transformers`. The flagship library.
 
@@ -292,6 +292,52 @@ also use `quick_gelu`, `x * sigmoid(1.702 x)`, a third form of GELU.
 On `openai/clip-vit-base-patch32`, the logits agree with torch in float64 to **8e-14** from the same
 image file.
 
+## TrOCR
+
+```csharp
+using var ocr = TrOcrModel.Load("microsoft/trocr-small-printed");   // or microsoft/trocr-base-printed
+
+ocr.Recognize("line.png");                                      // NET REVENUE ROSE 12% TO $4.3 BILLION
+ocr.RecognizeBatch(["line1.png", "line2.png"]);                 // decoded together, one text each
+ocr.Recognize("line.png", new OcrSettings(Beams: 4, MaxNewTokens: 64));
+```
+
+Text recognition, one line of text per image: a `VisionEncoderDecoderModel` whose encoder is the ViT
+above (DeiT with its distillation token on trocr-small, ViT without q/k/v bias on trocr-base) and
+whose decoder is TrOCR's. The line is squashed to the encoder's 384x384 square - that is how the
+checkpoints were trained - and the decoder writes the text a token at a time, attending to the
+encoder's 578 (or 577) vectors. It starts from `decoder_start_token_id` (`</s>`, id 2) and stops at the
+end token or the length limit, greedy by default and beam search on request, following transformers'
+`generate` step for step: the same top-`2 * beams` candidates, length penalty and stopping heuristic.
+
+The decoder is **post-norm** - residual first, then the norm, three times per block - with learned
+positions offset by two (fairseq's numbering) or sinusoidal ones that skip padding, an optional
+`sqrt(d_model)` scale on the token vectors and an optional norm over the embeddings, all read from
+the config. It keeps a key/value cache for its self-attention and computes each image's
+cross-attention keys and values once. Several images, or several beams, run as rows of one matrix
+product per step.
+
+The tokenizer comes from the checkpoint: trocr-small ships only an XLM-R `sentencepiece.bpe.model`,
+which GraviTokenizers now reads; trocr-base a RoBERTa `vocab.json` + `merges.txt`.
+
+| Checkpoint | vs transformers float64 | Text | Per line (CPU) |
+|---|---|---|---|
+| `microsoft/trocr-small-printed` | encoder 8e-13, first-step logits 2e-13 | identical to Python on all three test lines | about 1.5 s |
+| `microsoft/trocr-base-printed` | encoder 6e-13, first-step logits 6e-14 | identical to Python on all three test lines | about 5.3 s |
+
+Against torch in float32, which is what a Python user runs, the encoder states differ by up to 4e-4
+and the logits by 7e-5 - torch's own float32 rounding: its float32 and float64 runs differ by more,
+up to 4e-3. Greedy and 4-beam texts are token for token the same. Most of the time is the encoder
+(1.3 s and 3.3 s); Python takes about 1 s and 6 s per line with these checkpoints' `use_cache: false`.
+
+The length limit is transformers' default, **20 new tokens**, since neither checkpoint sets one; a
+long line needs `MaxNewTokens`. trocr-*-printed were fine-tuned on receipts (SROIE) and answer in
+capitals - *"NET REVENUE"*, and trocr-small reads *"Laba bersih"* as *"LABA BERSIN"* - which is the
+checkpoint, not the port: Python says the same.
+
+`TrOcrModel.Open(directory)` loads a checkpoint from disk; `EncoderStates`, `Logits` and `GenerateIds`
+give the pieces.
+
 ## Text generation
 
 ```csharp
@@ -503,7 +549,8 @@ An encoder needs no KV cache - every position attends to every other one anyway.
 
 ## Limits
 
-- Decoders other than GPT-2, Llama, Mistral, Qwen2/3 and GPT-NeoX, and encoder-decoder architectures, are refused.
+- Decoders other than GPT-2, Llama, Mistral, Qwen2/3 and GPT-NeoX, and encoder-decoder architectures other than
+  TrOCR (ViT/DeiT + TrOCR decoder), are refused.
 - `ClipModel` reads full CLIP checkpoints; SigLIP and ALIGN are refused.
 - Activations other than `gelu`, `gelu_new`, `gelu_pytorch_tanh`, `gelu_fast`, `gelu_python`,
   `quick_gelu` and `relu` are refused at load time, by name.

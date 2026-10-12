@@ -32,17 +32,24 @@ bagian di hilir yang akan memberi tahu Anda.
 
 ## Memuat
 
-`FromPretrained` mencoba tiga tata letak berurutan, karena ketiganya masih dipakai aktif di Hub:
+`FromPretrained` mencoba empat tata letak berurutan, karena keempatnya masih dipakai aktif di Hub:
 
 1. `tokenizer.json` — format cepat
-2. `vocab.json` + `merges.txt` — BPE byte-level gaya GPT-2
-3. `vocab.txt` — WordPiece BERT orisinal
+2. `vocab.json` + `merges.txt` — BPE byte-level gaya GPT-2 (milik RoBERTa, dengan `<s> $A </s>` dan
+   token spesialnya, bila `tokenizer_config.json` menyebut `RobertaTokenizer`; milik CLIP bila itu CLIP)
+3. `sentencepiece.bpe.model` — model SentencePiece XLM-RoBERTa, dikonversi seperti
+   `XLMRobertaTokenizer` milik transformers mengonversinya: id fairseq (`<s> <pad> </s> <unk>` lebih
+   dulu, setiap potongan lain satu tempat lebih tinggi daripada di berkas, `<mask>` terakhir) dan
+   tabel `Precompiled` milik model itu sendiri
+4. `vocab.txt` — WordPiece BERT orisinal
 
 ```csharp
 HfTokenizer.FromPretrained("bert-base-uncased");
 HfTokenizer.Load("tokenizer.json");
 HfTokenizer.FromBertVocabulary("vocab.txt", lowercase: true);
 HfTokenizer.FromGpt2Files("vocab.json", "merges.txt");
+HfTokenizer.FromRobertaFiles("vocab.json", "merges.txt");
+HfTokenizer.FromSentencePieceModel("sentencepiece.bpe.model");
 ```
 
 Pemuat yang hanya memahami bentuk pertama tidak bisa membuka sebagian besar model lama dan kecil.

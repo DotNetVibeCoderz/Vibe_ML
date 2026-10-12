@@ -37,8 +37,8 @@ public sealed class VisionTransformer : IDisposable
     private readonly EncoderBlock[] _blocks;
     private readonly Norm _finalNorm;
     private readonly Linear _patchProjection;    // [hidden, patchValues], as the checkpoint stores it
-    private readonly NdArray _classToken;        // [hidden]
-    private readonly NdArray _positions;         // [1 + patches, hidden], at the trained grid
+    private readonly double[] _leadingTokens;    // [leading, hidden]: [CLS], then DeiT's distillation token if any
+    private readonly NdArray _positions;         // [leading + patches, hidden], at the trained grid
     private readonly ConcurrentDictionary<(int Rows, int Columns), NdArray> _resized = new();
     private readonly NdArray? _classifierWeight; // [hidden, classes]
     private readonly NdArray? _classifierBias;   // [classes]
@@ -47,7 +47,7 @@ public sealed class VisionTransformer : IDisposable
     private VisionTransformer(
         string id, VisionConfig config, ImageProcessor processor, WeightStore weights,
         EncoderBlock[] blocks, Norm finalNorm, Linear patchProjection,
-        NdArray classToken, NdArray positions, NdArray? classifierWeight, NdArray? classifierBias)
+        double[] leadingTokens, NdArray positions, NdArray? classifierWeight, NdArray? classifierBias)
     {
         Id = id;
         Config = config;
@@ -56,7 +56,8 @@ public sealed class VisionTransformer : IDisposable
         _blocks = blocks;
         _finalNorm = finalNorm;
         _patchProjection = patchProjection;
-        _classToken = classToken;
+        _leadingTokens = leadingTokens;
+        LeadingTokens = leadingTokens.Length / config.HiddenSize;
         _positions = positions;
         _classifierWeight = classifierWeight;
         _classifierBias = classifierBias;
@@ -70,6 +71,12 @@ public sealed class VisionTransformer : IDisposable
 
     /// <summary>How images are prepared for it.</summary>
     public ImageProcessor Processor { get; }
+
+    /// <summary>
+    /// How many learned vectors come before the patches: 1 (<c>[CLS]</c>), or 2 for a distilled DeiT,
+    /// which adds a distillation token after it.
+    /// </summary>
+    public int LeadingTokens { get; }
 
     /// <summary>Whether the checkpoint carries a classification head.</summary>
     public bool HasClassificationHead => _classifierWeight is not null;
@@ -137,7 +144,7 @@ public sealed class VisionTransformer : IDisposable
     /// the grid the position embeddings were learned on, so it is the one resolution that needs no
     /// interpolation.
     /// </remarks>
-    private static ImageProcessor Align(ImageProcessor processor, VisionConfig config, int? imageSize)
+    internal static ImageProcessor Align(ImageProcessor processor, VisionConfig config, int? imageSize)
     {
         var size = imageSize ?? config.ImageSize;
 
@@ -162,6 +169,20 @@ public sealed class VisionTransformer : IDisposable
             : weights.Contains("deit.embeddings.cls_token") ? "deit."
             : "";
 
+        return Build(id, config, processor, weights, prefix);
+    }
+
+    /// <summary>
+    /// Builds the encoder from the tensors under <paramref name="prefix"/> - <c>encoder.</c> inside a
+    /// <c>VisionEncoderDecoderModel</c> such as TrOCR.
+    /// </summary>
+    /// <remarks>
+    /// Every tensor is copied out of <paramref name="weights"/>, so the store may be disposed once
+    /// this returns; disposing the encoder disposes it too.
+    /// </remarks>
+    internal static VisionTransformer Build(
+        string id, VisionConfig config, ImageProcessor processor, WeightStore weights, string prefix)
+    {
         var hidden = config.HiddenSize;
         var patchValues = config.Channels * config.PatchSize * config.PatchSize;
 
@@ -182,10 +203,18 @@ public sealed class VisionTransformer : IDisposable
         var patchProjection = Linear.Load(
             weights, $"{prefix}embeddings.patch_embeddings.projection", patchValues, hidden);
 
-        var classToken = Flat(weights.Read($"{prefix}embeddings.cls_token"));
+        // A distilled DeiT puts a second learned vector after [CLS], with a position of its own -
+        // which is why its table is one row longer than the grid needs. Leaving the token out
+        // shifts every patch onto its neighbour's position.
+        var leading = weights.Read($"{prefix}embeddings.cls_token").AsContiguous().ToArray();
+        if (weights.TryRead($"{prefix}embeddings.distillation_token", out var distillation))
+        {
+            leading = [.. leading, .. distillation.AsContiguous().ToArray()];
+        }
+
         var positions = Rows(weights.Read($"{prefix}embeddings.position_embeddings"), hidden);
 
-        var expected = 1 + config.Patches;
+        var expected = leading.Length / hidden + config.Patches;
         if (positions.Shape[0] != expected)
         {
             // Interpolation starts from the grid the config names, so a table of any other length
@@ -223,7 +252,7 @@ public sealed class VisionTransformer : IDisposable
 
         return new VisionTransformer(
             id, config, processor, weights, blocks, finalNorm,
-            patchProjection, classToken, positions, classifierWeight, classifierBias);
+            patchProjection, leading, positions, classifierWeight, classifierBias);
     }
 
     /// <summary>Classifies an image file.</summary>
@@ -356,13 +385,14 @@ public sealed class VisionTransformer : IDisposable
         var count = rows * columns;
         var projected = _patchProjection.Apply(GatherPatches(pixels, patch), count);
         var table = positions.ToArray();
-        var sequence = new double[(1 + count) * hidden];
+        var lead = _leadingTokens.Length;
+        var sequence = new double[lead + count * hidden];
 
-        for (var d = 0; d < hidden; d++) sequence[d] = _classToken.At(d) + table[d];
+        for (var d = 0; d < lead; d++) sequence[d] = _leadingTokens[d] + table[d];
 
-        for (var i = 0; i < count * hidden; i++) sequence[hidden + i] = projected[i] + table[hidden + i];
+        for (var i = 0; i < count * hidden; i++) sequence[lead + i] = projected[i] + table[lead + i];
 
-        return new NdArray(sequence, [1 + count, hidden]);
+        return new NdArray(sequence, [LeadingTokens + count, hidden]);
     }
 
     /// <summary>
@@ -408,9 +438,9 @@ public sealed class VisionTransformer : IDisposable
     /// <summary>The position table for a grid of patches, interpolated if it is not the trained one.</summary>
     /// <remarks>
     /// Does what <c>interpolate_pos_encoding=True</c> does in transformers: the class token's
-    /// position is kept as it is, and the patch positions are treated as a <c>hidden</c>-channel
-    /// image and resized bicubically. Cached per grid, since every image at one resolution needs
-    /// the same table.
+    /// position (and a distilled DeiT's distillation token's) is kept as it is, and the patch
+    /// positions are treated as a <c>hidden</c>-channel image and resized bicubically. Cached per
+    /// grid, since every image at one resolution needs the same table.
     /// </remarks>
     internal NdArray Positions(int rows, int columns)
     {
@@ -420,11 +450,16 @@ public sealed class VisionTransformer : IDisposable
         return _resized.GetOrAdd((rows, columns), key =>
         {
             var hidden = Config.HiddenSize;
-            var patches = Bicubic(_positions, 1, grid, hidden, key.Rows, key.Columns);
+            var lead = LeadingTokens;
+            var patches = Bicubic(_positions, lead, grid, hidden, key.Rows, key.Columns);
 
-            var table = NdArray.Zeros(1 + key.Rows * key.Columns, hidden);
-            for (var d = 0; d < hidden; d++) table[0, d] = _positions[0, d];
-            for (var i = 0; i < patches.Length; i++) table.SetAt(hidden + i, patches[i]);
+            var table = NdArray.Zeros(lead + key.Rows * key.Columns, hidden);
+            for (var t = 0; t < lead; t++)
+            {
+                for (var d = 0; d < hidden; d++) table[t, d] = _positions[t, d];
+            }
+
+            for (var i = 0; i < patches.Length; i++) table.SetAt(lead * hidden + i, patches[i]);
 
             return table;
         });
@@ -579,9 +614,10 @@ public sealed class VisionTransformer : IDisposable
         return new EncoderBlock(
             NormOrder.Pre,
             config.Heads,
-            Linear.Load(weights, $"{block}.attention.attention.query", hidden, hidden),
-            Linear.Load(weights, $"{block}.attention.attention.key", hidden, hidden),
-            Linear.Load(weights, $"{block}.attention.attention.value", hidden, hidden),
+            // qkv_bias: false (TrOCR's ViT, for one) stores no bias at all, which is a bias of zero.
+            LlamaBlock.Dense(weights, $"{block}.attention.attention.query", hidden, hidden, bias: true),
+            LlamaBlock.Dense(weights, $"{block}.attention.attention.key", hidden, hidden, bias: true),
+            LlamaBlock.Dense(weights, $"{block}.attention.attention.value", hidden, hidden, bias: true),
             Linear.Load(weights, $"{block}.attention.output.dense", hidden, hidden),
             Norm.Load(weights, $"{block}.layernorm_before", hidden, config.LayerNormEpsilon),
             Linear.Load(weights, $"{block}.intermediate.dense", hidden, config.IntermediateSize),

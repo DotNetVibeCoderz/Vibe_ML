@@ -31,17 +31,23 @@ one yields ids the model was never trained on, and nothing downstream will tell 
 
 ## Loading
 
-`FromPretrained` tries three layouts in turn, because all three are in active use on the Hub:
+`FromPretrained` tries four layouts in turn, because all four are in active use on the Hub:
 
 1. `tokenizer.json` - the fast format
-2. `vocab.json` + `merges.txt` - GPT-2 style byte-level BPE
-3. `vocab.txt` - original BERT WordPiece
+2. `vocab.json` + `merges.txt` - GPT-2 style byte-level BPE (RoBERTa's, with `<s> $A </s>` and its
+   special tokens, when `tokenizer_config.json` names `RobertaTokenizer`; CLIP's when it is CLIP)
+3. `sentencepiece.bpe.model` - an XLM-RoBERTa SentencePiece model, converted as transformers'
+   `XLMRobertaTokenizer` converts it: fairseq's ids (`<s> <pad> </s> <unk>` first, every other piece
+   one place higher than in the file, `<mask>` last) and the model's own `Precompiled` table
+4. `vocab.txt` - original BERT WordPiece
 
 ```csharp
 HfTokenizer.FromPretrained("bert-base-uncased");
 HfTokenizer.Load("tokenizer.json");
 HfTokenizer.FromBertVocabulary("vocab.txt", lowercase: true);
 HfTokenizer.FromGpt2Files("vocab.json", "merges.txt");
+HfTokenizer.FromRobertaFiles("vocab.json", "merges.txt");
+HfTokenizer.FromSentencePieceModel("sentencepiece.bpe.model");
 ```
 
 A loader that only understands the first cannot open a large share of the older and smaller models.

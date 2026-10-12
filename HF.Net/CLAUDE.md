@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.9.0 is published: **28 projects, 447 tests passing**, the whole solution builds clean, and the
+v0.10.0 is published: **28 projects, 462 tests** (2 download-gated), the whole solution builds clean, and the
 nine packages are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
@@ -198,6 +198,20 @@ root rather than here — see below.
   `onnxruntime.dll`, so .NET probes `libonnxruntime.dll.so` and never finds `libonnxruntime.so`. 1.24.4
   imports `onnxruntime`. Windows passes either way, so only the Ubuntu CI job shows it - and only once
   a test actually opens a session. Check a new ORT version on Linux before pinning it.
+- **TrOCR's decoder is post-norm and its encoder pre-norm.** Same trap as BERT/ViT, inside one model.
+  The decoder's norms are `nn.LayerNorm`'s default 1e-5, not the encoder's 1e-12.
+- **TrOCR starts from `</s>` (id 2), not `<s>`**, and its checkpoints set no length: transformers then
+  allows 20 *new* tokens (`max_length` = 20 + the start token). `generation_config.json` has
+  `use_cache: false`, so Python re-runs the whole prefix each step - which is also why sinusoidal
+  positions follow the full-forward rule (count non-pad tokens; a pad reads the zero row).
+- **trocr-small's encoder is a distilled DeiT**: two leading tokens (`[CLS]`, distillation), 578 positions.
+  **trocr-base's ViT has no q/k/v bias** (`qkv_bias: false`) and ties its output layer to `embed_tokens`.
+- **`sentencepiece.bpe.model` ids are not the model's ids.** XLM-R/fairseq puts `<s> <pad> </s> <unk>`
+  at 0-3, so every SentencePiece piece from index 3 sits one place higher, and `<mask>` goes last.
+  transformers cannot even load an identity-normalised SentencePiece model (empty `precompiled_charsmap`),
+  which is why the tiny fixture tokenizer is 240 KB of nmt_nfkc table.
+- **Download-gated tests use `HFNET_DOWNLOAD_TESTS=1`** (`Assert.SkipUnless`). The default suite stays
+  offline; `TrOcrPublishedTests` pulls trocr-small and trocr-base.
 - **Heredocs with large C# or Markdown content fail in this environment.** Use the Write tool for
   anything substantial.
 

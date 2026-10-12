@@ -7,15 +7,15 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.9.0 — current
+## v0.10.0 — current
 
-**28 projects, 447 tests passing, whole solution builds clean with no warnings.**
+**28 projects, 462 tests (460 offline + 2 download-gated), whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
 `distilbert-base-cased-distilled-squad`, `google/vit-base-patch16-224`, `prajjwal1/bert-tiny`, `gpt2`,
 `openai/clip-vit-base-patch32`, `bert-large-uncased`, `nmkd/stable-diffusion-1.5-onnx-fp16`,
-`hf-internal-testing/tiny-random-BertModel`.
+`hf-internal-testing/tiny-random-BertModel`, `microsoft/trocr-small-printed`, `microsoft/trocr-base-printed`.
 
 ### Libraries
 
@@ -24,7 +24,7 @@ Verified against real Hugging Face models rather than fixtures: `bert-base-uncas
 | GraviHub | **Complete** | 27 | Hub client, cache, safetensors, PyTorch pickle reader |
 | GraviTokenizers | **Complete** | 57 | WordPiece, BPE, Unigram, CLIP, `tokenizer.json`, offsets; matches Python on BERT, GPT-2, CLIP and XLM-R |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
-| GraviTransformers | **Complete** | 147 | BERT-family encoders, GPT-2/Llama/Mistral/Qwen/NeoX decoders with a KV cache, ViT, CLIP; streaming for models larger than memory; opt-in float32 |
+| GraviTransformers | **Complete** | 164 | BERT-family encoders, GPT-2/Llama/Mistral/Qwen/NeoX decoders with a KV cache, ViT, CLIP, TrOCR (in GraviTransformers.Vision); streaming for models larger than memory; opt-in float32 |
 | GraviPEFT | **Complete** | 69 | LoRA and prefix tuning, trained here and loaded in Python and the reverse |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Complete** | 25 | ONNX Runtime, float16, weight overrides, model-file reading, quantisation with measured error |
@@ -244,6 +244,18 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-10-13** — 0.10.0: TrOCR. `TrOcrModel` (in `GraviTransformers.Vision`) reads one line of printed
+text per image - `Load`, `Recognize`, `RecognizeBatch`, greedy or beam search, following transformers'
+`generate` step for step. The ViT encoder gained DeiT's distillation token and checkpoints without q/k/v
+bias; the decoder is a new post-norm block with cross-attention, learned or sinusoidal positions and a
+key/value cache. GraviTokenizers reads an XLM-R `sentencepiece.bpe.model` (`FromSentencePieceModel`,
+fairseq's ids) and RoBERTa's `vocab.json` + `merges.txt` with its special tokens (`FromRobertaFiles`).
+Checked against transformers on two tiny random checkpoints covering every config switch (1e-12), and on
+`microsoft/trocr-small-printed` and `microsoft/trocr-base-printed` over three rendered lines: encoder
+states within 8e-13 of torch float64, first-step logits within 2e-13, greedy and 4-beam texts identical
+to Python's. The published-checkpoint test downloads 1.5 GB and runs only with `HFNET_DOWNLOAD_TESTS=1`.
+462 tests (2 of them download-gated).
 
 **2026-10-11** — 0.9.0: ViT and CLIP move to their own package, `GraviTransformers.Vision` (namespace
 unchanged), so GraviTransformers no longer depends on SixLabors.ImageSharp. ImageSharp 3.1.12 has five

@@ -4,7 +4,7 @@
     <RootNamespace>Gravicode.HFNet.GraviTransformers.Vision</RootNamespace>
     <AssemblyName>Gravicode.HFNet.GraviTransformers.Vision</AssemblyName>
     <PackageId>Gravicode.HFNet.GraviTransformers.Vision</PackageId>
-    <Description>GraviTransformers.Vision - ViT image classification and CLIP zero-shot classification on .NET, with PIL's resize reproduced to the byte so results match torch. Split from GraviTransformers so that text-only users do not depend on an image library. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <Description>GraviTransformers.Vision - ViT image classification, CLIP zero-shot classification and TrOCR text recognition on .NET, with PIL's resize reproduced to the byte so results match torch. Split from GraviTransformers so that text-only users do not depend on an image library. Part of HF.Net. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
   </PropertyGroup>
 
   <ItemGroup>

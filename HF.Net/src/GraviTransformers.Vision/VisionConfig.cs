@@ -87,8 +87,16 @@ public sealed record VisionConfig
     public static VisionConfig Load(string path)
     {
         using var document = JsonDocument.Parse(File.ReadAllText(path));
-        var root = document.RootElement;
+        return Read(document.RootElement);
+    }
 
+    /// <summary>Reads a vision config from a JSON object - a whole file, or the <c>encoder</c> of a composite one.</summary>
+    /// <remarks>
+    /// A <c>VisionEncoderDecoderModel</c> (TrOCR, Donut) nests its encoder's config under
+    /// <c>encoder</c>, in exactly the shape a stand-alone ViT or DeiT writes at the top level.
+    /// </remarks>
+    internal static VisionConfig Read(JsonElement root)
+    {
         var imageSize = Dimension(root, "image_size", "input_size");
         var patchSize = Dimension(root, "patch_size");
 
