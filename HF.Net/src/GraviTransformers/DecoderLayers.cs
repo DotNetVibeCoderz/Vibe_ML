@@ -73,12 +73,26 @@ internal sealed class RotaryEmbedding
     private readonly List<double[]> _cos = [];
     private readonly List<double[]> _sin = [];
 
+    /// <summary>Unscaled rotation over <paramref name="dimensions"/> values per head, as ESM-2 uses.</summary>
+    internal RotaryEmbedding(int dimensions, double theta)
+    {
+        Dimensions = dimensions;
+        _inverseFrequency = InverseFrequencies(dimensions, theta);
+    }
+
+    private static double[] InverseFrequencies(int dimensions, double theta)
+    {
+        var half = dimensions / 2;
+        var inverse = new double[half];
+        for (var i = 0; i < half; i++) inverse[i] = 1.0 / Math.Pow(theta, 2.0 * i / dimensions);
+        return inverse;
+    }
+
     internal RotaryEmbedding(CausalLanguageModelConfig config)
     {
         Dimensions = config.RotaryDimensions;
         var half = Dimensions / 2;
-        _inverseFrequency = new double[half];
-        for (var i = 0; i < half; i++) _inverseFrequency[i] = 1.0 / Math.Pow(config.RopeTheta, 2.0 * i / Dimensions);
+        _inverseFrequency = InverseFrequencies(Dimensions, config.RopeTheta);
 
         var p = config.RopeParameters;
         switch (config.RopeType)

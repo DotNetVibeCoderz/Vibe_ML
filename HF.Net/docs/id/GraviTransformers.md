@@ -33,8 +33,10 @@ bobot dalam keadaan terbuka.
 
 ```csharp
 TransformerModel.SupportedModelTypes
-// bert  roberta  xlm-roberta  distilbert  electra  camembert  mpnet  deberta
+// bert  roberta  xlm-roberta  distilbert  electra  camembert  mpnet  deberta  esm
 ```
+
+`esm` (model bahasa protein dan nukleotida) berjalan lewat jalurnya sendiri; lihat [ESM](#esm-model-bahasa-protein).
 
 Selain itu **ditolak**, bukan dimuat setengah jalan:
 
@@ -128,6 +130,64 @@ model.Similarity("the cat sat on the mat", "quarterly earnings beat");     // 0.
 `Embed` melakukan **mean-pooling** atas token, bukan mengambil `[CLS]`. Pada model yang belum
 di-fine-tune untuk kemiripan kalimat, `[CLS]` nyaris konstan sehingga setiap pasangan kalimat tampak
 mirip. `EmbedBatch` memparalelkan antar-masukan, dan di situlah throughput-nya berada.
+
+### Model tanpa tokenizer
+
+Sebagian model menerima id yang dibuat di tempat lain dan sama sekali tidak menyertakan tokenizer.
+Id Geneformer adalah gen yang diurutkan menurut ekspresinya. `Open` dan `Load` menerima folder atau
+repositori seperti itu. Encoder berjalan dari id, dan apa pun yang membutuhkan teks melempar galat yang
+menyebutkan apa yang harus dipanggil sebagai gantinya:
+
+```csharp
+using var model = TransformerModel.Open(geneformerFolder);
+
+model.HasTokenizer;                          // false
+var hidden = model.Hidden(ids);              // [id, hidden], semua id dipakai apa adanya, tidak ada yang ditambahkan
+var logits = model.MaskedLanguageLogits(ids, position: 5);
+model.Hidden("text");                        // InvalidOperationException: ... has no tokenizer ... Pass token ids instead
+```
+
+## ESM (model bahasa protein)
+
+ESM-1b, ESM-1v, ESM-2 dan Nucleotide Transformer v1 (`model_type: esm`) dimuat seperti encoder lainnya:
+
+```csharp
+using var model = TransformerModel.Load("facebook/esm2_t6_8M_UR50D");
+
+var hidden = model.Hidden("MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG", maxLength: 1026);
+model.FillMask("<mask>QIFVKTLTGK...", topK: 1);              // M 99,1 %
+
+// Efek varian, masked marginal: tutup residu 11, bandingkan mutan dengan tipe liar.
+var ids = model.Tokenizer.Encode(sequence).ToIdArray();     // <cls> di 0, jadi residu 11 adalah token 11
+ids[11] = model.Tokenizer.MaskId;
+var logits = model.MaskedLanguageLogits(ids, 11);
+var k11p = logits[model.Tokenizer.TokenToId("P")] - logits[model.Tokenizer.TokenToId("K")];   // -2,0974
+
+var contacts = model.PredictContacts(sequence);             // [L, L] probabilitas kontak
+```
+
+ESM memakai nama tensor BERT, tetapi hampir setiap nama itu berarti hal yang berbeda, jadi ESM tidak
+melewati encoder BERT:
+
+- **Pre-norm.** `attention.LayerNorm` berjalan sebelum attention, dan `LayerNorm` sebelum feed-forward.
+  `emb_layer_norm_after` menutup tumpukannya. Jika dibaca sebagai BERT post-norm, setiap tensor tetap
+  termuat dan keluarannya omong kosong yang tampak meyakinkan.
+- **Posisi rotary** (ESM-2). Tidak ada tabel posisi. Query dan key diputar dengan pasangan
+  "rotate half". Posisi terlatih ESM-1b dihitung mulai `pad + 1`, sama seperti RoBERTa.
+- **Token dropout.** Embedding `<mask>` dinolkan dan semua embedding diskalakan dengan
+  `0,88 / (1 - masked / tokens)`. Tanpa langkah itu, setiap hidden state sekitar 12% terlalu kecil.
+- **Tokenizer-nya `EsmTokenizer`.** Setiap entri kosakata dicocokkan apa adanya, yang terpanjang lebih
+  dulu, lalu hasilnya dibungkus `<cls> ... <eos>`. Lihat [GraviTokenizers](GraviTokenizers.md).
+
+Pada `facebook/esm2_t6_8M_UR50D`, hidden state cocok dengan transformers float64 hingga **5e-15**, dan
+skor K11P di atas cocok dengan Python sampai sembilan digit. Head kontak (`HasContactHead`) adalah
+`predict_contacts` milik transformers: simetrisasi, koreksi average-product, regresi logistik, cocok
+hingga 1e-9.
+
+Dua hal ditolak, masing-masing dengan pesan yang menjelaskannya: feed-forward bergerbang milik
+Nucleotide Transformer v2 (`add_bias_fnn: false`), dan ESMFold. LoRA dan prefix tuning juga menolak
+ESM, karena keduanya melatih lewat backward pass milik encoder BERT. Karena alasan yang sama,
+`model.Encoder` melempar galat pada ESM. Tidak ada encoder fondasi yang bisa diubah di baliknya.
 
 ## Vision
 

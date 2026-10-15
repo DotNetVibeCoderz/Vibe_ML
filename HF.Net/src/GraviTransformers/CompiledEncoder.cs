@@ -3,6 +3,21 @@ using Encoder = Gravicode.Science.GraviText.Transformers.TransformerModel;
 
 namespace Gravicode.HFNet.GraviTransformers;
 
+/// <summary>What <c>TransformerModel</c> runs: token ids in, one hidden state per position out.</summary>
+/// <remarks>
+/// Two implementations: <see cref="CompiledEncoder"/> for the post-norm BERT family, built from the
+/// foundation's encoder, and <see cref="EsmEncoder"/> for ESM, built straight from the checkpoint.
+/// </remarks>
+internal interface IInferenceEncoder
+{
+    /// <summary>Runs the encoder.</summary>
+    /// <param name="ids">Token ids.</param>
+    /// <param name="mask">1 for a real token, 0 for padding.</param>
+    /// <param name="typeIds">Segment per position, or <c>null</c>; ignored by a model without segments.</param>
+    /// <param name="segmentDelta">The segment-1 difference, or <c>null</c>.</param>
+    NdArray Forward(int[] ids, int[] mask, int[]? typeIds = null, NdArray? segmentDelta = null);
+}
+
 /// <summary>
 /// The forward pass of a loaded text encoder, compiled into the shared kernels.
 /// </summary>
@@ -25,7 +40,7 @@ namespace Gravicode.HFNet.GraviTransformers;
 /// them has to call <c>TransformerModel.WeightsChanged</c>; <c>PeftModel.Merge</c> does.
 /// </para>
 /// </remarks>
-internal sealed class CompiledEncoder
+internal sealed class CompiledEncoder : IInferenceEncoder
 {
     private readonly Encoder _source;
     private readonly Norm _embeddingNorm;
@@ -75,7 +90,7 @@ internal sealed class CompiledEncoder
     /// <c>token_type_embeddings[1] - token_type_embeddings[0]</c>, added where the segment is 1.
     /// Segment 0 is already folded into the word embeddings.
     /// </param>
-    internal NdArray Forward(int[] ids, int[] mask, int[]? typeIds = null, NdArray? segmentDelta = null)
+    public NdArray Forward(int[] ids, int[] mask, int[]? typeIds = null, NdArray? segmentDelta = null)
     {
         var rows = ids.Length;
         var width = _source.Config.HiddenSize;

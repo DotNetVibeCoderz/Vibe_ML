@@ -165,6 +165,24 @@ mentahnya. `Open` menelusuri header tersebut untuk mengindeks storage; data teta
 sebuah tensor diminta. Pada `ProsusAI/finbert`, `pytorch_model.bin` legacy dan konversi safetensors
 memberi probabilitas kelas yang identik.
 
+### Pickle data dan skalar NumPy
+
+Pembaca yang sama membuka pickle yang berisi data, bukan tensor. Geneformer menerbitkan kamus gennya
+dengan cara ini, dan `gene_median_dictionary.pkl` miliknya menyimpan setiap median sebagai skalar NumPy:
+
+```csharp
+var medians = (Dictionary<object, object?>)PickleReader.LoadFile("gene_median_dictionary_gc104M.pkl")!;
+var median = (double)medians["ENSG00000000003"];
+```
+
+Skalar NumPy di-pickle sebagai panggilan `numpy.core.multiarray.scalar(dtype, byte mentah)`, dan
+NumPy 2 menulis modulnya sebagai `numpy._core`. Pembaca mengenali panggilan itu, `numpy.dtype`, dan
+`_codecs.encode` (cara protokol 2 menyimpan byte). Byte-nya didekode sendiri dengan menghormati urutan
+byte dtype. Float kembali sebagai `double`, bilangan bulat sebagai `long` (`ulong` di atas
+`long.MaxValue`), boolean sebagai `bool`, dan string NumPy sebagai `string`. Tidak ada yang dipanggil,
+dan setiap global lain tetap ditolak: pickle yang menyebut `os.system` atau `datetime.date` melempar
+`NotSupportedException` sebelum apa pun dijalankan.
+
 ## Mengunggah
 
 ```csharp

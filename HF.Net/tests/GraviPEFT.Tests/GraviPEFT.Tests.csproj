@@ -15,6 +15,9 @@
   <ItemGroup>
     <!-- A tiny BERT and a PEFT prefix-tuning adapter for it; see Fixtures/make_prefix.py. -->
     <None Include="Fixtures\**" Exclude="Fixtures\*.py" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- A tiny ESM-2, shared with GraviTransformers.Tests, to check that LoRA and prefix tuning refuse it. -->
+    <None Include="..\GraviTransformers.Tests\Fixtures\esm-rotary\**" LinkBase="Fixtures\esm-rotary" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

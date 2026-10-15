@@ -149,6 +149,11 @@ with `onnxruntime/sd-turbo` marked CUDA-only.
   the exact GELU (`Erf`, `GeluExact`), and `EncoderWeights.From(layer)` makes a pretrained block
   trainable; it matches the forward-only block to 1e-10, every bias gradient checked by finite
   differences. Released as Gravicode.Science 1.1.0.
+- ~~**What Biotech.Net had to work around**~~ **Done in 0.11.** ESM-1b/ESM-2/NT v1 run as encoders
+  (`EsmEncoder`: pre-norm, rotary, token dropout, contact head) with transformers' `EsmTokenizer`, at
+  5e-15 from transformers on `facebook/esm2_t6_8M_UR50D`. The pickle reader decodes NumPy scalars as
+  data, and a model with no tokenizer (Geneformer) opens and runs from ids. Still open: the Nucleotide
+  Transformer v2's gated feed-forward, which is refused by name.
 - **Compile the notebooks in CI**, not just validate their JSON.
 - **Hold tied embeddings once.** A tied checkpoint keeps its token table twice today - about 1 GB extra
   on a 1B model with a 128k vocabulary.

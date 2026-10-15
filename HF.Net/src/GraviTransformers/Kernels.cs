@@ -609,6 +609,10 @@ internal static class Attention
     /// tower does. Later positions are left out of the sum entirely rather than given a large
     /// negative score, which is what their weight after the softmax is anyway: exactly zero.
     /// </param>
+    /// <param name="probabilities">
+    /// When given, receives the attention weights after the softmax, <c>[heads, rows, rows]</c> - what
+    /// transformers returns with <c>output_attentions=True</c>. ESM's contact head reads them.
+    /// </param>
     /// <returns>Row-major <c>[rows, hidden]</c>, heads concatenated.</returns>
     /// <remarks>
     /// Each head's keys and values are first copied out into their own contiguous block, so every
@@ -617,7 +621,7 @@ internal static class Attention
     /// twelve-head model, and rows alone would repeat the copy.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal static double[] Apply(double[] projected, int rows, int hidden, int heads, int[]? mask, bool causal = false)
+    internal static double[] Apply(double[] projected, int rows, int hidden, int heads, int[]? mask, bool causal = false, double[]? probabilities = null)
     {
         var size = hidden / heads;
         var stride = 3 * hidden;
@@ -680,6 +684,7 @@ internal static class Attention
                 // Divided, not multiplied by a reciprocal: that is what the softmax the weights were
                 // trained with does, and the two differ in the last bit.
                 for (var j = 0; j < seen; j++) weights[j] /= total;
+                if (probabilities is not null) Array.Copy(weights, 0, probabilities, ((long)head * rows + i) * rows, seen);
                 Simd.Combine(weights, v, seen, size, result.AsSpan(i * hidden + head * size, size));
             }
         });
@@ -698,7 +703,12 @@ internal static class Attention
 /// </para>
 /// <para>
 /// Post-norm (BERT): <c>a = LN1(x + Attn(x))</c>, <c>y = LN2(a + FFN(a))</c>.
-/// Pre-norm (ViT): <c>a = x + Attn(LN1(x))</c>, <c>y = a + FFN(LN2(a))</c>.
+/// Pre-norm (ViT, ESM): <c>a = x + Attn(LN1(x))</c>, <c>y = a + FFN(LN2(a))</c>.
+/// </para>
+/// <para>
+/// With a <see cref="RotaryEmbedding"/> (ESM-2), every query and key head is rotated for its row's
+/// position after the projection and before the scores. ESM scales the query before rotating it and
+/// this scales the scores after; rotation is linear, so the two agree to rounding.
 /// </para>
 /// </remarks>
 internal sealed class EncoderBlock
@@ -712,11 +722,13 @@ internal sealed class EncoderBlock
     private readonly Linear _output;
     private readonly Norm _second;
     private readonly Func<double, double> _activation;
+    private readonly RotaryEmbedding? _rotary;
 
     internal EncoderBlock(
         NormOrder order, int heads,
         Linear query, Linear key, Linear value, Linear attentionOutput, Norm first,
-        Linear intermediate, Linear output, Norm second, Func<double, double> activation)
+        Linear intermediate, Linear output, Norm second, Func<double, double> activation,
+        RotaryEmbedding? rotary = null)
     {
         _order = order;
         _heads = heads;
@@ -727,26 +739,50 @@ internal sealed class EncoderBlock
         _output = output;
         _second = second;
         _activation = activation;
+        _rotary = rotary;
     }
 
     internal int Hidden => _attentionOutput.Outputs;
 
-    internal double[] Forward(double[] hidden, int rows, int[]? mask, bool causal = false)
+    internal int Heads => _heads;
+
+    /// <summary>Runs the block over <paramref name="rows"/> positions.</summary>
+    /// <param name="hidden">Row-major <c>[rows, hidden]</c>.</param>
+    /// <param name="rows">Sequence length.</param>
+    /// <param name="mask">1 for a real position, 0 for padding; <c>null</c> for none.</param>
+    /// <param name="causal">Whether each position sees only itself and those before it.</param>
+    /// <param name="probabilities">When given, receives the attention weights, <c>[heads, rows, rows]</c>.</param>
+    internal double[] Forward(double[] hidden, int rows, int[]? mask, bool causal = false, double[]? probabilities = null)
     {
         if (_order == NormOrder.Pre)
         {
-            var attended = Add(hidden, Attend(_first.Apply(hidden, rows), rows, mask, causal));
+            var attended = Add(hidden, Attend(_first.Apply(hidden, rows), rows, mask, causal, probabilities));
             return Add(attended, FeedForward(_second.Apply(attended, rows), rows));
         }
 
-        var normed = _first.Apply(Add(hidden, Attend(hidden, rows, mask, causal)), rows);
+        var normed = _first.Apply(Add(hidden, Attend(hidden, rows, mask, causal, probabilities)), rows);
         return _second.Apply(Add(normed, FeedForward(normed, rows)), rows);
     }
 
-    private double[] Attend(double[] input, int rows, int[]? mask, bool causal)
+    private double[] Attend(double[] input, int rows, int[]? mask, bool causal, double[]? probabilities)
     {
         var projected = _queryKeyValue.Apply(input, rows);
-        return _attentionOutput.Apply(Attention.Apply(projected, rows, Hidden, _heads, mask, causal), rows);
+
+        if (_rotary is not null)
+        {
+            // Rows are [q | k | v]; the queries and keys of every head turn by the row's position.
+            var hidden = Hidden;
+            var size = hidden / _heads;
+            for (var r = 0; r < rows; r++)
+            {
+                for (var h = 0; h < 2 * _heads; h++)
+                {
+                    _rotary.Apply(projected.AsSpan(r * 3 * hidden + h * size, size), r);
+                }
+            }
+        }
+
+        return _attentionOutput.Apply(Attention.Apply(projected, rows, Hidden, _heads, mask, causal, probabilities), rows);
     }
 
     private double[] FeedForward(double[] input, int rows)

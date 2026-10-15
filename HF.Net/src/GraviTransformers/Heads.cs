@@ -156,7 +156,12 @@ internal sealed class MaskedLanguageHead
     }
 
     /// <summary>Loads a masked language head, or returns null when the checkpoint has none.</summary>
-    internal static MaskedLanguageHead? TryLoad(WeightStore weights, PretrainedConfig config, Encoder encoder)
+    /// <remarks>
+    /// ESM's <c>lm_head</c> has RoBERTa's layout and order - dense, exact GELU, norm, tied decoder plus
+    /// <c>lm_head.bias</c> - so it loads here too. ESM has no foundation <paramref name="encoder"/>;
+    /// its decoder is always found as the stored word embeddings.
+    /// </remarks>
+    internal static MaskedLanguageHead? TryLoad(WeightStore weights, PretrainedConfig config, Encoder? encoder)
     {
         if (!weights.TryReadAny(out var transformWeight,
             "cls.predictions.transform.dense.weight",
@@ -197,7 +202,9 @@ internal sealed class MaskedLanguageHead
             var stored = weights.Names.FirstOrDefault(
                 n => n.EndsWith("embeddings.word_embeddings.weight", StringComparison.Ordinal));
 
-            decoder = stored is not null ? weights.Read(stored) : encoder.TokenEmbeddings;
+            if (stored is not null) decoder = weights.Read(stored);
+            else if (encoder is not null) decoder = encoder.TokenEmbeddings;
+            else return null;
         }
 
         weights.TryReadAny(out var decoderBias,

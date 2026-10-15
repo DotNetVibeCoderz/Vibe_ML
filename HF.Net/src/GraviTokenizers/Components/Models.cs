@@ -369,6 +369,93 @@ public sealed class UnigramModel(IReadOnlyList<(string Piece, double LogProbabil
     }
 }
 
+/// <summary>
+/// Every vocabulary entry matched verbatim, longest first, with no subword marker - the model behind
+/// transformers' <c>EsmTokenizer</c>.
+/// </summary>
+/// <param name="vocabulary">The pieces in id order, as <c>vocab.txt</c> lists them.</param>
+/// <param name="unknownToken">The piece emitted for text no entry covers.</param>
+/// <remarks>
+/// <para>
+/// <c>EsmTokenizer</c> marks its whole vocabulary as "no split" tokens, so the reference carves the
+/// input at the earliest, longest vocabulary match and sends whatever is left between matches through
+/// <c>str.split()</c>, where each leftover piece becomes one unknown token. For ESM-1 and ESM-2 every
+/// entry is one amino acid; for the Nucleotide Transformer most entries are 6-mers, which this splits
+/// into non-overlapping 6-mers with single-nucleotide fallback, as the reference does.
+/// </para>
+/// <para>
+/// <b>A run of unmatched characters is one unknown token, not one per character</b>: <c>"MKJJX"</c> is
+/// <c>M K &lt;unk&gt; X</c>. Counting them separately shifts every later position by one.
+/// </para>
+/// </remarks>
+public sealed class LongestMatchModel(IReadOnlyList<string> vocabulary, string unknownToken = "<unk>") : ITokenizerModel
+{
+    private readonly string[] _byId = [.. vocabulary];
+    private readonly Dictionary<string, int> _ids = BuildIds(vocabulary);
+    private readonly int _longest = vocabulary.Count == 0 ? 1 : vocabulary.Max(v => v.Length);
+    private readonly ConcurrentDictionary<string, string[]> _cache = new(StringComparer.Ordinal);
+
+    /// <summary>The piece emitted for text the vocabulary cannot represent.</summary>
+    public string UnknownToken { get; } = unknownToken;
+
+    /// <inheritdoc />
+    public int VocabularySize => _byId.Length;
+
+    /// <inheritdoc />
+    public int IdOf(string token)
+        => _ids.TryGetValue(token, out var id) ? id : _ids.GetValueOrDefault(UnknownToken, 0);
+
+    /// <inheritdoc />
+    public string TokenOf(int id) => id >= 0 && id < _byId.Length ? _byId[id] : "";
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> Tokenize(string word)
+        => _cache.GetOrAdd(word, static (key, self) => self.Match(key), this);
+
+    private string[] Match(string word)
+    {
+        var pieces = new List<string>();
+        var unmatched = false;
+        var at = 0;
+
+        while (at < word.Length)
+        {
+            string? match = null;
+            for (var length = Math.Min(_longest, word.Length - at); length >= 1; length--)
+            {
+                var candidate = word.Substring(at, length);
+                if (_ids.ContainsKey(candidate))
+                {
+                    match = candidate;
+                    break;
+                }
+            }
+
+            if (match is null)
+            {
+                // The first unmatched character opens a run; the rest of the run adds nothing.
+                if (!unmatched) pieces.Add(UnknownToken);
+                unmatched = true;
+                at++;
+                continue;
+            }
+
+            pieces.Add(match);
+            unmatched = false;
+            at += match.Length;
+        }
+
+        return [.. pieces];
+    }
+
+    private static Dictionary<string, int> BuildIds(IReadOnlyList<string> vocabulary)
+    {
+        var ids = new Dictionary<string, int>(vocabulary.Count, StringComparer.Ordinal);
+        for (var i = 0; i < vocabulary.Count; i++) ids.TryAdd(vocabulary[i], i);
+        return ids;
+    }
+}
+
 /// <summary>A special token the tokenizer inserts or recognises verbatim.</summary>
 /// <param name="Id">Its vocabulary id.</param>
 /// <param name="Content">Its literal text.</param>

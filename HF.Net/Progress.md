@@ -7,25 +7,26 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.10.0 — current
+## v0.11.0 — current
 
-**28 projects, 462 tests (460 offline + 2 download-gated), whole solution builds clean with no warnings.**
+**29 projects, 503 tests (500 offline + 3 download-gated), whole solution builds clean with no warnings.**
 
 Verified against real Hugging Face models rather than fixtures: `bert-base-uncased`,
 `distilbert-base-uncased-finetuned-sst-2-english`, `dslim/bert-base-NER`,
 `distilbert-base-cased-distilled-squad`, `google/vit-base-patch16-224`, `prajjwal1/bert-tiny`, `gpt2`,
 `openai/clip-vit-base-patch32`, `bert-large-uncased`, `nmkd/stable-diffusion-1.5-onnx-fp16`,
-`hf-internal-testing/tiny-random-BertModel`, `microsoft/trocr-small-printed`, `microsoft/trocr-base-printed`.
+`hf-internal-testing/tiny-random-BertModel`, `microsoft/trocr-small-printed`, `microsoft/trocr-base-printed`,
+`facebook/esm2_t6_8M_UR50D`.
 
 ### Libraries
 
 | Library | State | Tests | Notes |
 |---|---|---|---|
-| GraviHub | **Complete** | 27 | Hub client, cache, safetensors, PyTorch pickle reader |
-| GraviTokenizers | **Complete** | 57 | WordPiece, BPE, Unigram, CLIP, `tokenizer.json`, offsets; matches Python on BERT, GPT-2, CLIP and XLM-R |
+| GraviHub | **Complete** | 39 | Hub client, cache, safetensors, PyTorch pickle reader, data pickles with NumPy scalars |
+| GraviTokenizers | **Complete** | 74 | WordPiece, BPE, Unigram, CLIP, ESM, `tokenizer.json`, offsets; matches Python on BERT, GPT-2, CLIP, XLM-R and ESM |
 | GraviDatasets | **Complete** | 30 | Files, Hub datasets, splits, streaming |
-| GraviTransformers | **Complete** | 164 | BERT-family encoders, GPT-2/Llama/Mistral/Qwen/NeoX decoders with a KV cache, ViT, CLIP, TrOCR (in GraviTransformers.Vision); streaming for models larger than memory; opt-in float32 |
-| GraviPEFT | **Complete** | 69 | LoRA and prefix tuning, trained here and loaded in Python and the reverse |
+| GraviTransformers | **Complete** | 179 | BERT-family and ESM encoders (with ESM's contact head), GPT-2/Llama/Mistral/Qwen/NeoX decoders with a KV cache, ViT, CLIP, TrOCR (in GraviTransformers.Vision); streaming for models larger than memory; opt-in float32 |
+| GraviPEFT | **Complete** | 71 | LoRA and prefix tuning, trained here and loaded in Python and the reverse |
 | GraviAccelerate | **Core complete** | 14 | Device selection, sharding, weighted averaging, measurement |
 | GraviOptimum | **Complete** | 25 | ONNX Runtime, float16, weight overrides, model-file reading, quantisation with measured error |
 | GraviDiffusers | **Complete** | 71 | Schedulers from the repo's config; text to image, img2img, inpainting, emphasis, LoRA, pixel-identical to diffusers |
@@ -95,6 +96,11 @@ These are the checks that establish the stack is actually correct, not merely ru
   numerical differentiation to 1e-6.
 - **`bert-large-uncased` streams in 0.45 GB** of private memory against 5.9 GB loaded whole, with the
   same embedding to the last bit.
+- **ESM-2 matches transformers in float64 to 5e-15.** On `facebook/esm2_t6_8M_UR50D` the mean-pooled
+  ubiquitin embedding, the K11P masked-marginal score (-2.0974) and the contact map all agree with
+  `EsmForMaskedLM`, and with the float32 figures Biotech.Net recorded to within 1e-3. Two tiny random
+  checkpoints cover every switch (rotary and learned positions, token dropout, padding, the contact
+  head) to 1e-10.
 - **Measured against the Python reference** on the same machine in the same session. Tokenization is
   **2.25x faster than the Rust `tokenizers` crate** with byte-identical ids. bert-base takes 48 ms
   managed against torch's 38 ms, and **31 ms through ONNX Runtime from .NET, faster than torch**.
@@ -171,6 +177,13 @@ Each of these was caught by a test or by a live run, not by reading the code.
 - **The GELU epilogue ran on one thread**: a quarter of a ViT block's time went on `erf` calls after
   the product had been spread across four cores. With that parallel and attention scoring four keys
   per pass, ViT-base went from 1,034 ms to 774 ms with the same result to nine digits.
+- **ESM's `vocab.txt` was read as BERT WordPiece**, so a protein went in as an unknown token and
+  `model_type: esm` was refused outright. Biotech.Net had to carry its own ESM runner and tokenizer.
+  Checking the port against transformers turned up two more things. transformers rotates queries and
+  keys in float32 even inside a float64 model, which is worth 3e-7 in the reference. And it saves
+  ESM's block norms as `gamma`/`beta`.
+- **Geneformer could not be opened at all.** The pickle reader refused the NumPy scalars in its
+  gene-median dictionary, and `TransformerModel.Open` refused a folder with no tokenizer.
 - HFAppGen's assistant, asked to build a project, **invented a NuGet package** for HF.Net, hit
   NU1101, and wrote a fake shim to get a green build. It now has an `HFNetProjectReferences` tool
   and a system prompt that forbids shims outright.
@@ -244,6 +257,26 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-10-15** — 0.11.0: ESM, Geneformer's pickles, models without a tokenizer, a package icon. These
+are the gaps Biotech.Net had worked around.
+- **ESM.** `TransformerModel` runs `model_type: esm` (ESM-1b, ESM-1v, ESM-2, Nucleotide Transformer
+  v1) through a new pre-norm path, `EsmEncoder`: rotary or learned positions, token dropout, the
+  final norm, the shared kernels. It refuses NT v2's SwiGLU and ESMFold by name. Two new entry points
+  come with it: `MaskedLanguageLogits(ids, position)` for variant scoring, and `PredictContacts` from
+  ESM's contact head.
+- **The ESM tokenizer.** `HfTokenizer.FromEsmVocabulary` is transformers' `EsmTokenizer`, detected
+  from `tokenizer_config.json` or from the vocabulary itself.
+- **Pickles.** The pickle reader decodes NumPy scalars (`numpy.core`/`numpy._core.multiarray.scalar`,
+  `numpy.dtype`, `_codecs.encode`) as data. Every other global is still refused. `PickleReader.LoadFile`
+  is new.
+- **No tokenizer.** `TransformerModel` opens a folder or repository that has no tokenizer
+  (`HasTokenizer`, `Hidden(int[])`). Tokenizer calls on such a model throw an error that names the id
+  entry points.
+- **Icon.** The packages carry an icon drawn by `tools/IconGen`.
+
+Checked against transformers 5.17 to 1e-10 on tiny checkpoints and to 5e-15 on `facebook/esm2_t6_8M_UR50D`.
+503 tests (3 download-gated).
 
 **2026-10-13** — 0.10.0: TrOCR. `TrOcrModel` (in `GraviTransformers.Vision`) reads one line of printed
 text per image - `Load`, `Recognize`, `RecognizeBatch`, greedy or beam search, following transformers'

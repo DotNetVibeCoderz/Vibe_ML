@@ -169,6 +169,24 @@ and the raw elements. `Open` walks those headers to index the storages; data is 
 when a tensor is asked for. On `ProsusAI/finbert` the legacy `pytorch_model.bin` and the
 safetensors conversion give identical class probabilities.
 
+### Data pickles and NumPy scalars
+
+The same reader opens pickles that hold data rather than tensors. Geneformer publishes its gene
+dictionaries this way, and its `gene_median_dictionary.pkl` stores every median as a NumPy scalar:
+
+```csharp
+var medians = (Dictionary<object, object?>)PickleReader.LoadFile("gene_median_dictionary_gc104M.pkl")!;
+var median = (double)medians["ENSG00000000003"];
+```
+
+A NumPy scalar is pickled as a call to `numpy.core.multiarray.scalar(dtype, raw bytes)`, and NumPy 2
+writes the module as `numpy._core`. The reader recognises that call, `numpy.dtype`, and
+`_codecs.encode` (protocol 2's way of storing bytes). It decodes the bytes itself, honouring the
+dtype's byte order. Floats come back as `double`, integers as `long` (`ulong` above `long.MaxValue`),
+booleans as `bool` and NumPy strings as `string`. Nothing is called, and every other global is still
+refused: a pickle that names `os.system` or `datetime.date` throws `NotSupportedException` before
+anything runs.
+
 ## Uploading
 
 ```csharp

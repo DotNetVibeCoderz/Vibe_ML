@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.10.0 is published: **28 projects, 462 tests** (2 download-gated), the whole solution builds clean, and the
-nine packages are on nuget.org as `Gravicode.HFNet.*`. `requirements.md` remains the specification of record;
+v0.11.0 is built and tested but not yet published (0.10.0 is the latest on nuget.org): **29 projects, 503
+tests** (3 download-gated), the whole solution builds clean, and the nine packages go to nuget.org as
+`Gravicode.HFNet.*`, now with an icon (`assets/icon.png`, drawn by `tools/IconGen`). `requirements.md` remains the specification of record;
 [Progress.md](Progress.md) says what exists and [PLAN.md](PLAN.md) says where it is going.
 
 Target framework is **.NET 10**. The solution file is `HF.Net.sln` (classic format — `dotnet new sln`
@@ -212,6 +213,28 @@ root rather than here — see below.
   which is why the tiny fixture tokenizer is 240 KB of nmt_nfkc table.
 - **Download-gated tests use `HFNET_DOWNLOAD_TESTS=1`** (`Assert.SkipUnless`). The default suite stays
   offline; `TrOcrPublishedTests` pulls trocr-small and trocr-base.
+- **ESM is not BERT, though its tensors have BERT's names.** It is pre-norm (`attention.LayerNorm` before
+  attention, `LayerNorm` before the feed-forward, `emb_layer_norm_after` at the end), ESM-2 rotates q/k
+  ("rotate half") instead of adding positions, and token dropout scales embeddings by
+  `0.88 / (1 - masked/tokens)`. It therefore runs on `EsmEncoder`, built from the checkpoint, and has
+  no foundation encoder: `TransformerModel.Encoder` throws on it, and PEFT refuses it through
+  `RequireFoundationEncoder`. The observed mask ratio is float32 in transformers even in a float64 model,
+  and `EsmEncoder` copies that.
+- **transformers rotates q/k in float32 even inside a float64 model** (`apply_rotary_pos_emb` calls
+  `.float()`), on top of float32 angles. `make_esm.py` patches both. Without that, expect 3e-7, not 1e-12.
+- **transformers 5 saves ESM's block norms as `gamma`/`beta`** but `emb_layer_norm_after` as
+  `weight`/`bias`. `EsmEncoder.LoadNorm` takes either spelling.
+- **`EsmTokenizer` turns a run of unknown characters into one `<unk>`**, counts `<unk>` as special when
+  decoding, and joins decoded tokens with spaces. ESM's contact head hard-codes `<eos>` as id 2.
+- **A model may have no tokenizer** (Geneformer). `Tokenizer` then throws, `HasTokenizer` is false, and
+  `Hidden(int[])` / `MaskedLanguageLogits` are the way in. `HfTokenizer.TryFromDirectory` /
+  `TryFromPretrained` return null only when there are no tokenizer files at all.
+- **The pickle reader decodes NumPy scalars itself** (`numpy.core`/`numpy._core.multiarray.scalar`,
+  `numpy.dtype`, `_codecs.encode`). Never "support" a pickle by adding a callable to `AllowedGlobals`
+  without decoding its arguments as data in `Reduce`.
+- **`EsmPublishedTests` also runs when a Hugging Face token is available** (`HF_TOKEN`, the file
+  `HFNET_HF_TOKEN_FILE` names, or the credential file below), not only with `HFNET_DOWNLOAD_TESTS=1`.
+  It skips itself if the Hub cannot be reached.
 - **Heredocs with large C# or Markdown content fail in this environment.** Use the Write tool for
   anything substantial.
 
@@ -304,7 +327,8 @@ than `Assert.Equal(a, b, decimals)`, which rounds and fails spuriously.
 
 ```powershell
 dotnet build HF.Net.sln -c Release
-dotnet test                                                     # all 440
+dotnet test                                                     # all 503
+dotnet run --project tools/IconGen -- assets                    # redraw the package icon (svg + png)
 dotnet test tests/GraviHub.Tests
 dotnet test tests/GraviHub.Tests --filter "FullyQualifiedName~SafeTensors"
 dotnet run --project samples/GraviTransformers.Console -- bert-base-uncased

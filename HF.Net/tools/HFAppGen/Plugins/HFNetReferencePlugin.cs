@@ -70,7 +70,9 @@ public sealed class HFNetReferencePlugin
               PyTorchCheckpoint.Open(path)       -> dispose it; .Read(name), .TryRead, .Contains
               PyTorchCheckpoint.ReadAll(path)
               Resolves names against an allow-list, so nothing in the file is executed.
-              The pre-1.6 bare-pickle format is refused with a message saying so.
+              The pre-1.6 bare-pickle format is read too.
+              PickleReader.LoadFile(path) reads data pickles - dicts of NumPy scalars, as Geneformer
+                publishes - decoding the scalars to double/long/bool; every other global is refused.
 
             GOTCHAS
               HF_TOKEN is read from the environment; without one, private and gated repos 404.
@@ -189,7 +191,11 @@ public sealed class HFNetReferencePlugin
               .FillMask("The capital of France is [MASK].", topK: 5) -> MaskFill[]
               .Similarity(a, b)          cosine similarity of the two embeddings
               TransformerModel.SupportedModelTypes   bert roberta xlm-roberta distilbert electra
-                                                     camembert mpnet deberta
+                                                     camembert mpnet deberta esm
+              ESM (protein models): TransformerModel.Load("facebook/esm2_t6_8M_UR50D")
+              .MaskedLanguageLogits(ids, position) -> double[] logits, for variant scoring
+              .PredictContacts(sequence)  -> [L, L] contact probabilities (.HasContactHead)
+              .HasTokenizer - false when the repo ships none (Geneformer); use .Hidden(int[] ids)
 
             Prediction: .Label .Score .Index          MaskFill: .Token .Score .Sequence
 

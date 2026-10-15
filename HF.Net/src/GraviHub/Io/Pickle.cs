@@ -20,6 +20,16 @@ namespace Gravicode.HFNet.GraviHub.Io;
 /// <see cref="List{T}"/> for lists and tuples, <see cref="PickleGlobal"/> for a resolved name, and
 /// <see cref="PickleReduce"/> for a constructor call that the caller interprets.
 /// </para>
+/// <para>
+/// <b>NumPy scalars are decoded to plain values</b> (since 0.11): a <c>numpy.float32(0.5)</c> stored
+/// in a dict - which is how Geneformer's <c>gene_median_dictionary.pkl</c> holds every median - comes
+/// back as the <see cref="double"/> 0.5. Such a scalar is pickled as a call to
+/// <c>numpy.core.multiarray.scalar(dtype, raw bytes)</c>, so the reader recognises exactly that
+/// call, and <c>numpy.dtype</c> and <c>_codecs.encode</c> (how protocol 2 writes the bytes), and
+/// decodes the bytes itself: nothing is called and no other name is admitted. Floats come back as
+/// <see cref="double"/>, integers as <see cref="long"/> (<see cref="ulong"/> above
+/// <see cref="long.MaxValue"/>), booleans as <see cref="bool"/>, NumPy strings as <see cref="string"/>.
+/// </para>
 /// </remarks>
 public sealed class PickleReader
 {
@@ -39,6 +49,21 @@ public sealed class PickleReader
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _persistentLoad = persistentLoad;
+    }
+
+    /// <summary>
+    /// Reads a pickle file that holds data - dicts, lists, tuples, strings, numbers, NumPy scalars -
+    /// such as Geneformer's <c>token_dictionary.pkl</c> and <c>gene_median_dictionary.pkl</c>.
+    /// </summary>
+    /// <param name="path">The <c>.pkl</c> file.</param>
+    /// <returns>The object tree; see the class remarks for the types it is made of.</returns>
+    /// <exception cref="NotSupportedException">The file names a global outside the allow-list - it would run code.</exception>
+    public static object? LoadFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        using var stream = new BufferedStream(File.OpenRead(path), 1 << 16);
+        return new PickleReader(stream).Load();
     }
 
     /// <summary>Runs the stream to its <c>STOP</c> opcode and returns the single result.</summary>
@@ -85,6 +110,8 @@ public sealed class PickleReader
                 case (byte)'\x8e': Push(ReadBytes((int)ReadUInt64())); break; // BINBYTES8
                 case (byte)'V': Push(ReadLine()); break;                      // UNICODE
                 case (byte)'S': Push(Unquote(ReadLine())); break;             // STRING
+                case (byte)'U': Push(ReadLatin1((byte)_stream.ReadByte())); break; // SHORT_BINSTRING
+                case (byte)'T': Push(ReadLatin1(ReadInt32())); break;         // BINSTRING
 
                 // ---------------------------------------------------------- memo
                 case (byte)'q': Memoize((byte)_stream.ReadByte()); break;     // BINPUT
@@ -263,7 +290,45 @@ public sealed class PickleReader
             return;
         }
 
+        // NumPy scalars, and the two calls their pickles are built from. Each is decoded here from
+        // its arguments - data in, data out - and none of them is ever invoked.
+        switch (global?.Qualified)
+        {
+            case "numpy.dtype":
+                Push(NumpyDtype.FromArguments(arguments));
+                return;
+
+            case "_codecs.encode":
+                Push(EncodeBytes(arguments));
+                return;
+
+            case "numpy.core.multiarray.scalar":
+            case "numpy._core.multiarray.scalar":
+                Push(NumpyDtype.DecodeScalar(arguments));
+                return;
+        }
+
         Push(new PickleReduce(global, arguments));
+    }
+
+    /// <summary>
+    /// <c>_codecs.encode(text, "latin1")</c>: how protocol 2 stores bytes (a NumPy scalar's data among
+    /// them) as a Python 2 compatible string.
+    /// </summary>
+    private static byte[] EncodeBytes(List<object?> arguments)
+    {
+        if (arguments.Count < 1 || arguments[0] is not string text)
+        {
+            throw new InvalidDataException("_codecs.encode in a pickle should take a string.");
+        }
+
+        var encoding = arguments.Count > 1 ? arguments[1] as string : "utf-8";
+        return encoding?.ToLowerInvariant() switch
+        {
+            "latin1" or "latin-1" or "iso-8859-1" => Encoding.Latin1.GetBytes(text),
+            "utf-8" or "utf8" => Encoding.UTF8.GetBytes(text),
+            _ => throw new NotSupportedException($"The pickle encodes bytes as '{encoding}'; only latin1 and utf-8 are read."),
+        };
     }
 
     /// <summary>Applies <c>BUILD</c>, which sets state on the object beneath it.</summary>
@@ -284,6 +349,12 @@ public sealed class PickleReader
         }
 
         if (target is PickleReduce reduce) reduce.State = state;
+
+        // A dtype's state tuple carries its byte order: (version, '<' | '>' | '|' | '=', ...).
+        if (target is NumpyDtype dtype && state is List<object?> { Count: > 1 } tuple && tuple[1] is string order)
+        {
+            dtype.ByteOrder = order;
+        }
     }
 
     private void PersistentId(object? id)
@@ -359,6 +430,9 @@ public sealed class PickleReader
 
     private string ReadUtf8(int count) => Encoding.UTF8.GetString(ReadBytes(count));
 
+    /// <summary>Python 2 <c>str</c>, bytes as characters - how protocol 2 also carries a NumPy scalar's data.</summary>
+    private string ReadLatin1(int count) => Encoding.Latin1.GetString(ReadBytes(count));
+
     private string ReadLine()
     {
         var builder = new StringBuilder();
@@ -411,7 +485,105 @@ public sealed class PickleReader
         "numpy.ndarray",
         "numpy.dtype",
         "_codecs.encode",
+
+        // NumPy scalars: decoded from (dtype, bytes) by NumpyDtype.DecodeScalar, never called.
+        // NumPy 2 writes the module as numpy._core.
+        "numpy.core.multiarray.scalar",
+        "numpy._core.multiarray.scalar",
     };
+}
+
+/// <summary>A NumPy <c>dtype</c> read from a pickle: its type string and byte order.</summary>
+/// <remarks>
+/// It exists to decode the NumPy scalars that refer to it; a dtype stored on its own comes back as
+/// one of these.
+/// </remarks>
+public sealed class NumpyDtype
+{
+    private NumpyDtype(string typeString) => TypeString = typeString;
+
+    /// <summary>The type string without a byte-order mark, for example <c>f8</c>, <c>i4</c>, <c>b1</c>, <c>U5</c>.</summary>
+    public string TypeString { get; }
+
+    /// <summary><c>&lt;</c> little-endian, <c>&gt;</c> big-endian, <c>|</c> not applicable, <c>=</c> native.</summary>
+    public string ByteOrder { get; internal set; } = "<";
+
+    internal static NumpyDtype FromArguments(List<object?> arguments)
+    {
+        if (arguments.Count < 1 || arguments[0] is not string type || type.Length == 0)
+        {
+            throw new InvalidDataException("numpy.dtype in a pickle should take a type string such as 'f8'.");
+        }
+
+        var dtype = new NumpyDtype(type.TrimStart('<', '>', '|', '='));
+        if (type[0] is '<' or '>' or '|' or '=') dtype.ByteOrder = type[0].ToString();
+        return dtype;
+    }
+
+    /// <summary>Decodes <c>scalar(dtype, raw bytes)</c> into a .NET value.</summary>
+    internal static object DecodeScalar(List<object?> arguments)
+    {
+        if (arguments.Count < 2 || arguments[0] is not NumpyDtype dtype)
+        {
+            throw new InvalidDataException("numpy.core.multiarray.scalar in a pickle should take a dtype and its raw bytes.");
+        }
+
+        var data = arguments[1] switch
+        {
+            byte[] bytes => (byte[])bytes.Clone(),
+            string text => Encoding.Latin1.GetBytes(text),
+            _ => throw new InvalidDataException($"The NumPy {dtype.TypeString} scalar carries no raw bytes."),
+        };
+
+        return dtype.Decode(data);
+    }
+
+    private object Decode(byte[] data)
+    {
+        var kind = TypeString[0];
+        var width = TypeString.Length > 1 && int.TryParse(TypeString.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var w) ? w : data.Length;
+
+        if (kind is 'U')
+        {
+            var text = ByteOrder == ">" ? new UTF32Encoding(bigEndian: true, byteOrderMark: false).GetString(data) : Encoding.UTF32.GetString(data);
+            return text.TrimEnd('\0');
+        }
+
+        if (kind is 'S' or 'a') return data.AsSpan().TrimEnd((byte)0).ToArray();
+
+        if (data.Length != width)
+        {
+            throw new InvalidDataException($"A NumPy {TypeString} scalar should hold {width} bytes but holds {data.Length}.");
+        }
+
+        // Every fixed-width value below is read little-endian; a big-endian one is turned first.
+        if (ByteOrder == ">") Array.Reverse(data);
+
+        return (kind, data.Length) switch
+        {
+            ('f', 8) => BinaryPrimitives.ReadDoubleLittleEndian(data),
+            ('f', 4) => (double)BinaryPrimitives.ReadSingleLittleEndian(data),
+            ('f', 2) => (double)BinaryPrimitives.ReadHalfLittleEndian(data),
+            ('i', 8) => BinaryPrimitives.ReadInt64LittleEndian(data),
+            ('i', 4) => (long)BinaryPrimitives.ReadInt32LittleEndian(data),
+            ('i', 2) => (long)BinaryPrimitives.ReadInt16LittleEndian(data),
+            ('i', 1) => (long)(sbyte)data[0],
+            ('u', 8) => Unsigned(BinaryPrimitives.ReadUInt64LittleEndian(data)),
+            ('u', 4) => (long)BinaryPrimitives.ReadUInt32LittleEndian(data),
+            ('u', 2) => (long)BinaryPrimitives.ReadUInt16LittleEndian(data),
+            ('u', 1) => (long)data[0],
+            ('b', 1) => data[0] != 0,
+            _ => throw new NotSupportedException(
+                $"NumPy {TypeString} scalars are not read; floats, integers, booleans and strings are. "
+                + "Convert the value to a Python float or int before pickling it."),
+        };
+    }
+
+    /// <summary>A <see cref="long"/> where it fits, so that small unsigned values compare like every other integer.</summary>
+    private static object Unsigned(ulong value) => value > long.MaxValue ? value : (long)value;
+
+    /// <inheritdoc />
+    public override string ToString() => $"dtype('{ByteOrder}{TypeString}')";
 }
 
 /// <summary>A resolved <c>GLOBAL</c>: a module-qualified Python name, not a callable.</summary>

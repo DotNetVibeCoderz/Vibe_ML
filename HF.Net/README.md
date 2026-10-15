@@ -34,7 +34,7 @@ Each mirrors a package in the Python Hugging Face stack.
 | **GraviHub** | `huggingface_hub` | Hub download and upload, a readable local cache, and readers for the formats the Hub serves: **safetensors** and **`pytorch_model.bin`** |
 | **GraviTokenizers** | `tokenizers` | WordPiece, byte-level BPE, Unigram and CLIP, loading `tokenizer.json` — with character offsets that point back into the original text |
 | **GraviDatasets** | `datasets` | CSV, Parquet, JSON and JSON Lines, Hub datasets, splits, streaming and memory-mapped reads |
-| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT, CLIP and TrOCR (package `GraviTransformers.Vision`): classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification, printed-text OCR — and streaming for models larger than memory |
+| **GraviTransformers** | `transformers` | Pretrained BERT-family encoders and ESM protein language models; GPT-2, Llama, Mistral, Qwen and Pythia decoders; ViT, CLIP and TrOCR (package `GraviTransformers.Vision`): classification, fill-mask, named entities, question answering, embeddings, text generation, image and zero-shot classification, printed-text OCR — and streaming for models larger than memory |
 | **GraviPEFT** | `peft` | LoRA and prefix tuning in the Hugging Face PEFT format — train, apply, merge, save, load |
 | **GraviAccelerate** | `accelerate` | Device selection across CPU SIMD and ILGPU, sharding, weighted gradient averaging, honest throughput measurement |
 | **GraviOptimum** | `optimum` | ONNX Runtime inference with an explicitly chosen execution provider, and weight quantisation that reports its measured error |

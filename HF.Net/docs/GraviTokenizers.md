@@ -39,7 +39,8 @@ one yields ids the model was never trained on, and nothing downstream will tell 
 3. `sentencepiece.bpe.model` - an XLM-RoBERTa SentencePiece model, converted as transformers'
    `XLMRobertaTokenizer` converts it: fairseq's ids (`<s> <pad> </s> <unk>` first, every other piece
    one place higher than in the file, `<mask>` last) and the model's own `Precompiled` table
-4. `vocab.txt` - original BERT WordPiece
+4. `vocab.txt` - original BERT WordPiece, or ESM's `EsmTokenizer` when `tokenizer_config.json` names
+   it (or, with no class named, when the file holds `<cls>` and `<eos>` and no `[CLS]`)
 
 ```csharp
 HfTokenizer.FromPretrained("bert-base-uncased");
@@ -48,9 +49,27 @@ HfTokenizer.FromBertVocabulary("vocab.txt", lowercase: true);
 HfTokenizer.FromGpt2Files("vocab.json", "merges.txt");
 HfTokenizer.FromRobertaFiles("vocab.json", "merges.txt");
 HfTokenizer.FromSentencePieceModel("sentencepiece.bpe.model");
+HfTokenizer.FromEsmVocabulary("vocab.txt");                  // ESM-1b, ESM-2, Nucleotide Transformer
 ```
 
 A loader that only understands the first cannot open a large share of the older and smaller models.
+`TryFromPretrained` and `TryFromDirectory` return `null` when there are no tokenizer files at all
+(Geneformer ships none). Files that are present but broken still throw.
+
+### ESM
+
+Read as BERT WordPiece, an ESM `vocab.txt` turns a whole protein into a single unknown token, which
+is what 0.10 did. `FromEsmVocabulary` reproduces transformers' `EsmTokenizer` instead:
+
+- Every vocabulary entry is matched verbatim, longest first. One residue is one token on ESM-2; the
+  Nucleotide Transformer's 6-mers fall back to single nucleotides.
+- Whitespace is ignored, and `<cls> <pad> <eos> <unk> <mask>` are recognised anywhere in the text.
+- **A run of unknown characters is one `<unk>`**: `"MKJJXB"` is `<cls> M K <unk> X B <eos>`.
+- The template is `<cls> $A <eos>` for one sequence and `<cls> $A <eos> $B <eos>` for a pair, with no
+  `<eos>` when `tokenizer_config.json` sets `"eos_token": null`.
+- Decoding joins tokens with spaces, and `skipSpecialTokens` drops `<unk>` too, as the reference does.
+
+The ids match transformers' on ESM-2's vocabulary for every awkward input in `EsmTokenizerTests`.
 
 ## Checked against the reference
 

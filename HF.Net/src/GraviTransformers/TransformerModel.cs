@@ -44,26 +44,30 @@ public readonly record struct MaskFill(string Token, double Score, string Sequen
 public sealed class TransformerModel : IDisposable
 {
     private readonly WeightStore _weights;
+    private readonly HfTokenizer? _tokenizer;
+    private readonly Encoder? _encoder;
     private readonly ClassificationHead? _classifier;
     private readonly MaskedLanguageHead? _maskedLanguage;
     private readonly TokenClassificationHead? _tokenClassifier;
     private readonly QuestionAnsweringHead? _questionAnswering;
-    private CompiledEncoder _compiled;
+    private readonly EsmContactHead? _contacts;
+    private IInferenceEncoder _compiled;
     private bool _disposed;
 
     private TransformerModel(
         string repoId,
         PretrainedConfig config,
-        HfTokenizer tokenizer,
-        Encoder encoder,
+        HfTokenizer? tokenizer,
+        Encoder? encoder,
+        IInferenceEncoder inference,
         WeightStore weights,
         LoadReport report)
     {
         RepoId = repoId;
         Config = config;
-        Tokenizer = tokenizer;
-        Encoder = encoder;
         Report = report;
+        _tokenizer = tokenizer;
+        _encoder = encoder;
         _weights = weights;
 
         // Order matters: a token classifier stores classifier.weight with the same shape a
@@ -73,8 +77,9 @@ public sealed class TransformerModel : IDisposable
         _classifier = _tokenClassifier is null ? ClassificationHead.TryLoad(weights, config) : null;
         _maskedLanguage = MaskedLanguageHead.TryLoad(weights, config, encoder);
         _questionAnswering = QuestionAnsweringHead.TryLoad(weights);
+        _contacts = EsmContactHead.TryLoad(weights, config);
 
-        _compiled = CompiledEncoder.Build(encoder, config);
+        _compiled = inference;
     }
 
     /// <summary>The Hub id this model came from.</summary>
@@ -83,8 +88,20 @@ public sealed class TransformerModel : IDisposable
     /// <summary>The model's configuration.</summary>
     public PretrainedConfig Config { get; }
 
+    /// <summary>Whether a tokenizer was found beside the weights.</summary>
+    /// <remarks>
+    /// Some models take ids made elsewhere and ship no tokenizer at all - Geneformer's ids are
+    /// ranked genes. Such a model still loads; give it ids through <see cref="Hidden(int[], int[])"/>,
+    /// <see cref="Forward"/> or <see cref="MaskedLanguageLogits"/>.
+    /// </remarks>
+    public bool HasTokenizer => _tokenizer is not null;
+
     /// <summary>The tokenizer that matches these weights.</summary>
-    public HfTokenizer Tokenizer { get; }
+    /// <exception cref="InvalidOperationException">The model was loaded without one; see <see cref="HasTokenizer"/>.</exception>
+    public HfTokenizer Tokenizer => _tokenizer ?? throw new InvalidOperationException(
+        $"'{RepoId}' has no tokenizer: its folder or repository holds no tokenizer.json, vocab.json + merges.txt, "
+        + "sentencepiece.bpe.model or vocab.txt. Pass token ids instead - Hidden(int[]), Forward or MaskedLanguageLogits - "
+        + "or load a tokenizer yourself with HfTokenizer.FromDirectory and encode with it.");
 
     /// <summary>The encoder stack, from Gravicode.Science.GraviText.</summary>
     /// <remarks>
@@ -92,18 +109,38 @@ public sealed class TransformerModel : IDisposable
     /// its parameters. After changing any of them, call <see cref="WeightsChanged"/>, or the next
     /// forward pass still uses the old values.
     /// </remarks>
-    public Encoder Encoder { get; }
+    /// <exception cref="NotSupportedException">
+    /// The model is ESM, which the foundation's post-norm encoder cannot represent; it runs from the
+    /// checkpoint directly and has no editable copy.
+    /// </exception>
+    public Encoder Encoder => _encoder ?? throw new NotSupportedException(
+        $"'{RepoId}' is an ESM model: pre-norm, with {(Config.Esm?.PositionEmbeddingType == "rotary" ? "rotary" : "learned")} positions. "
+        + "The foundation's encoder is post-norm BERT and cannot hold it, so ESM runs from the checkpoint directly "
+        + "and has no editable encoder - which is also why LoRA and prefix tuning do not apply to it.");
 
     /// <summary>Rebuilds the inference copy after <see cref="Encoder"/>'s parameters were changed.</summary>
     /// <remarks>
     /// Inference runs on float32 copies of the weights laid out for the kernels, which is most of
     /// why it is fast. <c>PeftModel.Merge</c> calls this itself; call it after changing weights
-    /// any other way.
+    /// any other way. On ESM, which has no editable encoder, there is nothing to rebuild.
     /// </remarks>
     public void WeightsChanged()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _compiled = CompiledEncoder.Build(Encoder, Config);
+        if (_encoder is not null) _compiled = CompiledEncoder.Build(_encoder, Config);
+    }
+
+    /// <summary>Throws unless the foundation's encoder backs this model, which training needs.</summary>
+    /// <param name="feature">What needs it, for the message.</param>
+    internal void RequireFoundationEncoder(string feature)
+    {
+        if (_encoder is null)
+        {
+            throw new NotSupportedException(
+                $"{feature} is not available for '{RepoId}' ({Config.ModelType}). It trains through the BERT-family "
+                + "encoder's own forward and backward pass, and ESM's pre-norm, rotary blocks are a different model. "
+                + "Use the frozen embeddings (Hidden, Embed) as features instead.");
+        }
     }
 
     /// <summary>What the checkpoint load found.</summary>
@@ -131,6 +168,9 @@ public sealed class TransformerModel : IDisposable
     /// <summary>Whether the checkpoint carries an extractive question answering head.</summary>
     public bool HasQuestionAnsweringHead => _questionAnswering is not null;
 
+    /// <summary>Whether the checkpoint carries ESM's contact prediction head; see <see cref="PredictContacts(string)"/>.</summary>
+    public bool HasContactHead => _contacts is not null;
+
     /// <summary>The label names, when the model has a classification head.</summary>
     public IReadOnlyList<string> Labels =>
         [.. Enumerable.Range(0, Config.LabelCount).Select(i => Config.IdToLabel.GetValueOrDefault(i, $"LABEL_{i}"))];
@@ -140,6 +180,10 @@ public sealed class TransformerModel : IDisposable
     /// <summary>Loads a model from a directory: <c>config.json</c>, the weights and the tokenizer files.</summary>
     /// <param name="directory">A folder such as one <c>save_pretrained</c> writes, or a cached snapshot.</param>
     /// <exception cref="NotSupportedException">The architecture is not an encoder this can run.</exception>
+    /// <remarks>
+    /// A folder with no tokenizer files still opens: the encoder runs from ids, and anything that
+    /// needs text throws saying so. See <see cref="HasTokenizer"/>.
+    /// </remarks>
     public static TransformerModel Open(string directory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
@@ -151,8 +195,7 @@ public sealed class TransformerModel : IDisposable
 
         try
         {
-            var (encoder, report) = CheckpointLoader.Load(config, weights);
-            return new TransformerModel(directory, config, HfTokenizer.FromDirectory(directory), encoder, weights, report);
+            return Build(directory, config, weights, HfTokenizer.TryFromDirectory(directory));
         }
         catch
         {
@@ -162,10 +205,11 @@ public sealed class TransformerModel : IDisposable
     }
 
     /// <summary>Downloads a model from the Hub and loads it.</summary>
-    /// <param name="repoId">A model id such as <c>bert-base-uncased</c>.</param>
+    /// <param name="repoId">A model id such as <c>bert-base-uncased</c> or <c>facebook/esm2_t6_8M_UR50D</c>.</param>
     /// <param name="revision">A branch, tag or commit.</param>
     /// <param name="progress">Receives download progress.</param>
     /// <exception cref="NotSupportedException">The architecture is not an encoder this can run.</exception>
+    /// <remarks>A repository with no tokenizer files still loads; see <see cref="HasTokenizer"/>.</remarks>
     public static TransformerModel Load(
         string repoId, string revision = "main", IProgress<TransferProgress>? progress = null)
     {
@@ -178,10 +222,7 @@ public sealed class TransformerModel : IDisposable
 
         try
         {
-            var (encoder, report) = CheckpointLoader.Load(config, weights);
-            var tokenizer = HfTokenizer.FromPretrained(repoId, revision);
-
-            return new TransformerModel(repoId, config, tokenizer, encoder, weights, report);
+            return Build(repoId, config, weights, HfTokenizer.TryFromPretrained(repoId, revision));
         }
         catch
         {
@@ -190,19 +231,59 @@ public sealed class TransformerModel : IDisposable
         }
     }
 
+    /// <summary>Fills the encoder the config names: ESM from the checkpoint, the BERT family through the foundation.</summary>
+    private static TransformerModel Build(string id, PretrainedConfig config, WeightStore weights, HfTokenizer? tokenizer)
+    {
+        if (config.Esm is not null)
+        {
+            var (esm, esmReport) = EsmEncoder.Load(weights, config);
+            return new TransformerModel(id, config, tokenizer, encoder: null, esm, weights, esmReport);
+        }
+
+        var (encoder, report) = CheckpointLoader.Load(config, weights);
+        return new TransformerModel(id, config, tokenizer, encoder, CompiledEncoder.Build(encoder, config), weights, report);
+    }
+
     /// <summary>The encoder families this can run.</summary>
     /// <remarks>
     /// Decoder-only and encoder-decoder models are refused rather than half-loaded. Their blocks are
-    /// shaped differently - causal masking, cross-attention, rotary positions - and filling an
-    /// encoder from their weights produces a model that runs and returns nonsense.
+    /// shaped differently - causal masking, cross-attention - and filling an encoder from their
+    /// weights produces a model that runs and returns nonsense. ESM (protein and nucleotide language
+    /// models) is an encoder with its own blocks, run by a separate path; see <see cref="EsmOptions"/>.
     /// </remarks>
     public static IReadOnlySet<string> SupportedModelTypes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "bert", "roberta", "xlm-roberta", "distilbert", "electra", "camembert", "mpnet", "deberta",
+        "bert", "roberta", "xlm-roberta", "distilbert", "electra", "camembert", "mpnet", "deberta", "esm",
     };
 
     private static void RequireSupported(PretrainedConfig config, string repoId)
     {
+        if (config.Esm is { } esm)
+        {
+            if (esm.IsFoldingModel)
+            {
+                throw new NotSupportedException(
+                    $"'{repoId}' is ESMFold, a structure model built on ESM-2 plus a folding trunk. GraviTransformers runs "
+                    + "ESM language models; load facebook/esm2_t36_3B_UR50D (the language model inside it) for embeddings.");
+            }
+
+            if (!esm.BiasedFeedForward)
+            {
+                throw new NotSupportedException(
+                    $"'{repoId}' uses the gated (SwiGLU) feed-forward of the Nucleotide Transformer v2 (add_bias_fnn: false), "
+                    + "which this ESM encoder does not implement. ESM-1b, ESM-1v, ESM-2 and Nucleotide Transformer v1 are supported.");
+            }
+
+            if (esm.PositionEmbeddingType is not ("rotary" or "absolute"))
+            {
+                throw new NotSupportedException(
+                    $"'{repoId}' uses '{esm.PositionEmbeddingType}' position embeddings; this ESM encoder runs rotary (ESM-2) "
+                    + "and absolute (ESM-1b) ones.");
+            }
+
+            return;
+        }
+
         if (SupportedModelTypes.Contains(config.ModelType)) return;
 
         if (CausalLanguageModelConfig.Supported.Contains(config.ModelType))
@@ -285,6 +366,86 @@ public sealed class TransformerModel : IDisposable
         // Segment 0 is folded into the word embeddings; segment 1 adds the difference between the
         // two segment vectors, before the embedding norm, as the reference does.
         return _compiled.Forward(ids, attentionMask, typeIds, Report.SegmentDelta);
+    }
+
+    /// <summary>The final hidden states for token ids made elsewhere, one row per id.</summary>
+    /// <param name="ids">Token ids, special tokens included - nothing is added.</param>
+    /// <param name="attentionMask">1 for a real token, 0 for padding; all ones when omitted.</param>
+    /// <remarks>
+    /// The path for a model without a tokenizer (Geneformer's ranked genes), and for callers who
+    /// already hold ids. Every position is segment 0.
+    /// </remarks>
+    public NdArray Hidden(int[] ids, int[]? attentionMask = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(ids);
+
+        return _compiled.Forward(ids, attentionMask ?? Ones(ids.Length));
+    }
+
+    /// <summary>The masked language head's logits over the vocabulary at one position.</summary>
+    /// <param name="ids">Token ids, typically with <c>[MASK]</c> or <c>&lt;mask&gt;</c> at <paramref name="position"/>.</param>
+    /// <param name="position">The position to score, counting special tokens.</param>
+    /// <returns>One raw logit per vocabulary entry, as <c>model(ids).logits[position]</c> in transformers.</returns>
+    /// <exception cref="InvalidOperationException">The checkpoint has no masked language head.</exception>
+    /// <remarks>
+    /// What variant-effect scoring with a protein model needs: mask a residue, then compare the
+    /// log-softmax of these logits at the mutant and at the wild type.
+    /// </remarks>
+    public double[] MaskedLanguageLogits(int[] ids, int position)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(ids);
+        ArgumentOutOfRangeException.ThrowIfNegative(position);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(position, ids.Length);
+
+        if (_maskedLanguage is null)
+        {
+            throw new InvalidOperationException(
+                $"'{RepoId}' has no masked language modelling head. Load the checkpoint published for "
+                + "masked language modelling (BertForMaskedLM, EsmForMaskedLM), not a fine-tuned classifier.");
+        }
+
+        var hidden = _compiled.Forward(ids, Ones(ids.Length));
+        return _maskedLanguage.Apply(hidden.Row(position));
+    }
+
+    /// <summary>Residue-residue contact probabilities for a protein, from ESM's contact head.</summary>
+    /// <param name="sequence">The protein, one letter per residue.</param>
+    /// <returns><c>[L, L]</c> for <c>L</c> residues, symmetric, each entry a probability.</returns>
+    /// <exception cref="InvalidOperationException">The checkpoint has no contact head.</exception>
+    public NdArray PredictContacts(string sequence)
+    {
+        ArgumentNullException.ThrowIfNull(sequence);
+        return PredictContacts(Tokenizer.Encode(sequence).ToIdArray());
+    }
+
+    /// <summary>Contact probabilities for ids already wrapped in <c>&lt;cls&gt;</c> and <c>&lt;eos&gt;</c>.</summary>
+    /// <param name="ids">One unpadded sequence.</param>
+    /// <returns><c>[L, L]</c>, where <c>L</c> is two fewer than the number of ids.</returns>
+    /// <remarks>transformers' <c>EsmForMaskedLM.predict_contacts</c>; see <c>EsmContactHead</c>.</remarks>
+    public NdArray PredictContacts(int[] ids)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(ids);
+
+        if (_contacts is null || _compiled is not EsmEncoder esm)
+        {
+            throw new InvalidOperationException(
+                $"'{RepoId}' has no contact prediction head. ESM checkpoints carry one (esm.contact_head.regression); "
+                + "other architectures do not predict contacts.");
+        }
+
+        var attentions = new List<double[]>(Config.Layers);
+        esm.Forward(ids, Ones(ids.Length), attentions);
+        return _contacts.Apply(ids, attentions, Config.Heads);
+    }
+
+    private static int[] Ones(int count)
+    {
+        var ones = new int[count];
+        Array.Fill(ones, 1);
+        return ones;
     }
 
     /// <summary>A single vector for a text, mean-pooled over its tokens.</summary>
@@ -503,5 +664,7 @@ public sealed class TransformerModel : IDisposable
     public override string ToString()
         => $"{RepoId}: {Config}"
             + (HasClassificationHead ? " +classifier" : "")
-            + (HasMaskedLanguageHead ? " +mlm" : "");
+            + (HasMaskedLanguageHead ? " +mlm" : "")
+            + (HasContactHead ? " +contacts" : "")
+            + (HasTokenizer ? "" : " (no tokenizer)");
 }

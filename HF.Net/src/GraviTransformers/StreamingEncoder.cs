@@ -43,6 +43,15 @@ public sealed class StreamingEncoder : IDisposable
 
     private StreamingEncoder(string id, PretrainedConfig config, HfTokenizer tokenizer, WeightStore weights)
     {
+        // ESM-1b has BERT's tensor names and position table, so it would pass every check below and
+        // then run post-norm over pre-norm weights.
+        if (config.Esm is not null)
+        {
+            throw new NotSupportedException(
+                $"'{id}' is an ESM model, which is pre-norm and cannot be streamed by this BERT-family encoder. "
+                + "Load it whole with TransformerModel.Load.");
+        }
+
         Id = id;
         Config = config;
         Tokenizer = tokenizer;
@@ -118,7 +127,7 @@ public sealed class StreamingEncoder : IDisposable
         catch { weights.Dispose(); throw; }
     }
 
-    /// <summary>The final hidden states for a text, one row per token - what <see cref="TransformerModel.Hidden"/> returns.</summary>
+    /// <summary>The final hidden states for a text, one row per token - what <see cref="TransformerModel.Hidden(string, int)"/> returns.</summary>
     /// <param name="text">The input.</param>
     /// <param name="maxLength">Truncation limit in tokens.</param>
     public NdArray Hidden(string text, int maxLength = 512)

@@ -76,8 +76,8 @@ public sealed partial class HfTokenizer
 
         PadId = ResolveId("[PAD]", "<pad>");
         UnknownId = ResolveId("[UNK]", "<unk>");
-        ClassifierId = ResolveId("[CLS]", "<s>");
-        SeparatorId = ResolveId("[SEP]", "</s>");
+        ClassifierId = ResolveId("[CLS]", "<s>", "<cls>");
+        SeparatorId = ResolveId("[SEP]", "</s>", "<eos>");
         MaskId = ResolveId("[MASK]", "<mask>");
     }
 
@@ -113,6 +113,21 @@ public sealed partial class HfTokenizer
     /// the first cannot open a large share of the older and smaller models.
     /// </remarks>
     public static HfTokenizer FromPretrained(string repoId, string revision = "main")
+        => TryFromPretrained(repoId, revision) ?? throw new HubException(
+            $"'{repoId}' has no tokenizer files this loader recognises (tokenizer.json, vocab.json + merges.txt, "
+            + $"an XLM-RoBERTa {SentencePieceFile}, or vocab.txt).")
+        {
+            RepoId = repoId,
+        };
+
+    /// <summary>
+    /// Downloads a repository's tokenizer, or returns <c>null</c> when the repository ships no
+    /// tokenizer files at all - as models fed with precomputed ids, Geneformer among them, do not.
+    /// </summary>
+    /// <param name="repoId">A model id.</param>
+    /// <param name="revision">A branch, tag or commit.</param>
+    /// <remarks>Files that are present but malformed still throw; only their absence is <c>null</c>.</remarks>
+    public static HfTokenizer? TryFromPretrained(string repoId, string revision = "main")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoId);
 
@@ -146,21 +161,13 @@ public sealed partial class HfTokenizer
 
         if (available.Contains("vocab.txt"))
         {
-            var lowercase = true;
-            if (available.Contains("tokenizer_config.json"))
-            {
-                lowercase = ReadLowercaseFlag(Hub.DownloadFile(repoId, "tokenizer_config.json", revision));
-            }
+            var vocab = Hub.DownloadFile(repoId, "vocab.txt", revision);
+            if (IsEsm(configPath, vocab)) return FromEsmVocabulary(vocab, ReadAppendsEos(configPath));
 
-            return FromBertVocabulary(Hub.DownloadFile(repoId, "vocab.txt", revision), lowercase);
+            return FromBertVocabulary(vocab, configPath is null || ReadLowercaseFlag(configPath));
         }
 
-        throw new HubException(
-            $"'{repoId}' has no tokenizer files this loader recognises (tokenizer.json, vocab.json + merges.txt, "
-            + $"an XLM-RoBERTa {SentencePieceFile}, or vocab.txt).")
-        {
-            RepoId = repoId,
-        };
+        return null;
     }
 
     /// <summary>Loads a tokenizer from a <c>tokenizer.json</c> file.</summary>
@@ -417,6 +424,16 @@ public sealed partial class HfTokenizer
     /// <c>special_tokens_map.json</c>; a CLIP vocabulary is recognised and read as CLIP's.
     /// </remarks>
     public static HfTokenizer FromDirectory(string directory)
+        => TryFromDirectory(directory) ?? throw new FileNotFoundException(
+            $"'{directory}' holds no tokenizer.json, vocab.json with merges.txt, XLM-RoBERTa {SentencePieceFile}, or vocab.txt.");
+
+    /// <summary>
+    /// Loads the tokenizer in a folder, or returns <c>null</c> when the folder holds no tokenizer
+    /// files at all.
+    /// </summary>
+    /// <param name="directory">A model folder.</param>
+    /// <remarks>Files that are present but malformed still throw; only their absence is <c>null</c>.</remarks>
+    public static HfTokenizer? TryFromDirectory(string directory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
 
@@ -443,12 +460,14 @@ public sealed partial class HfTokenizer
         }
         else if (File.Exists(Path.Combine(directory, "vocab.txt")))
         {
-            tokenizer = FromBertVocabulary(Path.Combine(directory, "vocab.txt"), configPath is null || ReadLowercaseFlag(configPath));
+            var vocab = Path.Combine(directory, "vocab.txt");
+            tokenizer = IsEsm(configPath, vocab)
+                ? FromEsmVocabulary(vocab, ReadAppendsEos(configPath))
+                : FromBertVocabulary(vocab, configPath is null || ReadLowercaseFlag(configPath));
         }
         else
         {
-            throw new FileNotFoundException(
-                $"'{directory}' holds no tokenizer.json, vocab.json with merges.txt, XLM-RoBERTa {SentencePieceFile}, or vocab.txt.");
+            return null;
         }
 
         return ReadPadToken(configPath) is not null

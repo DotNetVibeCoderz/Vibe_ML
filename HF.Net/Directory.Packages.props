@@ -31,6 +31,10 @@
     <!-- Image decode/encode for the vision and diffusion pipelines. -->
     <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
 
+    <!-- tools/IconGen draws the package icon. The version Avalonia 12.1 already brings in, so pinning
+         it here changes nothing for HFAppGen or HF Gallery. -->
+    <PackageVersion Include="SkiaSharp" Version="3.119.4" />
+
     <!-- Visualization hooks used by samples and notebooks. -->
     <PackageVersion Include="ScottPlot" Version="5.1.59" />
 

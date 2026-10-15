@@ -48,6 +48,7 @@ public sealed class PrefixTuningModel
 
     private PrefixTuningModel(TransformerModel model, NdArray prefix, int seed)
     {
+        model.RequireFoundationEncoder("Prefix tuning");
         _model = model;
         _prefix = prefix;
         _seed = seed;

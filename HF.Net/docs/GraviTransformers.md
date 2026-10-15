@@ -33,8 +33,10 @@ weight files open.
 
 ```csharp
 TransformerModel.SupportedModelTypes
-// bert  roberta  xlm-roberta  distilbert  electra  camembert  mpnet  deberta
+// bert  roberta  xlm-roberta  distilbert  electra  camembert  mpnet  deberta  esm
 ```
+
+`esm` (protein and nucleotide language models) runs on its own path; see [ESM](#esm-protein-language-models).
 
 Anything else is **refused**, not half-loaded:
 
@@ -128,6 +130,63 @@ model.Similarity("the cat sat on the mat", "quarterly earnings beat");     // 0.
 `Embed` **mean-pools** over the tokens rather than taking `[CLS]`. On a model that has not been
 fine-tuned for sentence similarity, `[CLS]` is close to constant and makes every pair of sentences
 look alike. `EmbedBatch` parallelises across inputs, which is where the throughput is.
+
+### Models without a tokenizer
+
+Some models take ids made somewhere else and ship no tokenizer at all. Geneformer's ids are genes
+ranked by expression. `Open` and `Load` accept such a folder or repository. The encoder runs from
+ids, and anything that needs text throws an error that says what to call instead:
+
+```csharp
+using var model = TransformerModel.Open(geneformerFolder);
+
+model.HasTokenizer;                          // false
+var hidden = model.Hidden(ids);              // [ids, hidden], every id given, nothing added
+var logits = model.MaskedLanguageLogits(ids, position: 5);
+model.Hidden("text");                        // InvalidOperationException: ... has no tokenizer ... Pass token ids instead
+```
+
+## ESM (protein language models)
+
+ESM-1b, ESM-1v, ESM-2 and the Nucleotide Transformer v1 (`model_type: esm`) load like any other encoder:
+
+```csharp
+using var model = TransformerModel.Load("facebook/esm2_t6_8M_UR50D");
+
+var hidden = model.Hidden("MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG", maxLength: 1026);
+model.FillMask("<mask>QIFVKTLTGK...", topK: 1);              // M 99.1 %
+
+// Variant effect, masked marginal: mask residue 11, compare the mutant with the wild type.
+var ids = model.Tokenizer.Encode(sequence).ToIdArray();     // <cls> at 0, so residue 11 is token 11
+ids[11] = model.Tokenizer.MaskId;
+var logits = model.MaskedLanguageLogits(ids, 11);
+var k11p = logits[model.Tokenizer.TokenToId("P")] - logits[model.Tokenizer.TokenToId("K")];   // -2.0974
+
+var contacts = model.PredictContacts(sequence);             // [L, L] contact probabilities
+```
+
+ESM keeps BERT's tensor names, but almost every one of them means something different, so it does
+not go through the BERT encoder:
+
+- **Pre-norm.** `attention.LayerNorm` runs before attention and `LayerNorm` runs before the
+  feed-forward. A final `emb_layer_norm_after` closes the stack. Read as post-norm BERT, every tensor
+  loads and the output is confident nonsense.
+- **Rotary positions** (ESM-2). There is no position table. Queries and keys are rotated with
+  "rotate half" pairing. ESM-1b's learned positions count from `pad + 1`, as RoBERTa's do.
+- **Token dropout.** `<mask>` embeddings are zeroed and every embedding is scaled by
+  `0.88 / (1 - masked / tokens)`. Without that step, every hidden state comes out about 12% too small.
+- **The tokenizer is `EsmTokenizer`.** Each vocabulary entry is matched verbatim, longest first, and
+  the result is wrapped in `<cls> ... <eos>`. See [GraviTokenizers](GraviTokenizers.md).
+
+On `facebook/esm2_t6_8M_UR50D` the hidden states agree with transformers in float64 to **5e-15**,
+and the K11P score above matches Python's to nine digits. The contact head (`HasContactHead`) is
+transformers' `predict_contacts`: symmetrise, average-product correction, logistic regression, matched
+to 1e-9.
+
+Two things are refused, each with a message saying so: the Nucleotide Transformer v2's gated
+feed-forward (`add_bias_fnn: false`), and ESMFold. LoRA and prefix tuning refuse ESM as well, because
+they train through the BERT encoder's own backward pass. `model.Encoder` throws on ESM for the same
+reason. There is no editable foundation encoder behind it.
 
 ## Vision
 

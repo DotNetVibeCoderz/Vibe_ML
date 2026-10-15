@@ -59,6 +59,9 @@ public sealed record PretrainedConfig
     /// </remarks>
     public int PositionOffset { get; init; }
 
+    /// <summary>The ESM-specific settings, present only when <see cref="ModelType"/> is <c>esm</c>.</summary>
+    public EsmOptions? Esm { get; init; }
+
     /// <summary>Number of classes, or 0 when the model has no classification head.</summary>
     public int LabelCount => IdToLabel.Count;
 
@@ -87,9 +90,24 @@ public sealed record PretrainedConfig
             }
         }
 
+        var esm = string.Equals(modelType, "esm", StringComparison.OrdinalIgnoreCase)
+            ? new EsmOptions
+            {
+                PositionEmbeddingType = ReadString(root, "position_embedding_type") ?? "absolute",
+                TokenDropout = ReadBool(root, "token_dropout") ?? false,
+                MaskTokenId = ReadInt(root, "mask_token_id") ?? 32,
+                PadTokenId = ReadInt(root, "pad_token_id") ?? 1,
+                EmbeddingNormBefore = ReadBool(root, "emb_layer_norm_before") ?? false,
+                RopeTheta = ReadDouble(root, "rope_theta") ?? 10000.0,
+                BiasedFeedForward = ReadBool(root, "add_bias_fnn") ?? true,
+                IsFoldingModel = ReadBool(root, "is_folding_model") ?? false,
+            }
+            : null;
+
         return new PretrainedConfig
         {
             ModelType = modelType,
+            Esm = esm,
             Architectures = root.TryGetProperty("architectures", out var architectures)
                 && architectures.ValueKind == JsonValueKind.Array
                 ? [.. architectures.EnumerateArray().Select(a => a.GetString() ?? "")]
@@ -109,9 +127,16 @@ public sealed record PretrainedConfig
             LayerNormEpsilon = ReadDouble(root, "layer_norm_eps", "layer_norm_epsilon") ?? 1e-12,
             Activation = ReadString(root, "hidden_act", "activation", "activation_function") ?? "gelu",
             IdToLabel = labels,
-            PositionOffset = modelType is "roberta" or "xlm-roberta" or "camembert" ? 2 : 0,
+            PositionOffset = modelType is "roberta" or "xlm-roberta" or "camembert" ? 2
+                : esm is { PositionEmbeddingType: "absolute" } ? esm.PadTokenId + 1
+                : 0,
         };
     }
+
+    private static bool? ReadBool(JsonElement root, string name)
+        => root.TryGetProperty(name, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
 
     /// <summary>Downloads and reads a Hub model's <c>config.json</c>.</summary>
     /// <param name="repoId">A model id.</param>
@@ -160,4 +185,43 @@ public sealed record PretrainedConfig
     public override string ToString()
         => $"{ModelType} ({Layers}L x {HiddenSize}H x {Heads} heads, vocab {VocabularySize:N0}"
             + (LabelCount > 0 ? $", {LabelCount} labels)" : ")");
+}
+
+/// <summary>
+/// The parts of an ESM <c>config.json</c> that a BERT config does not have.
+/// </summary>
+/// <remarks>
+/// ESM (ESM-1b, ESM-1v, ESM-2, the Nucleotide Transformer) shares BERT's parameter names but not its
+/// forward pass: it is pre-norm, ESM-2 rotates queries and keys instead of adding position embeddings,
+/// and masked tokens are zeroed and the rest rescaled. Each of those is read from here rather than
+/// guessed, because each one, wrong, still gives plausible numbers.
+/// </remarks>
+public sealed record EsmOptions
+{
+    /// <summary><c>rotary</c> (ESM-2, Nucleotide Transformer v2) or <c>absolute</c> (ESM-1b, Nucleotide Transformer v1).</summary>
+    public string PositionEmbeddingType { get; init; } = "absolute";
+
+    /// <summary>
+    /// Whether <c>&lt;mask&gt;</c> embeddings are zeroed and the rest scaled by
+    /// <c>(1 - 0.15 * 0.8) / (1 - masked / tokens)</c>, as ESM was trained.
+    /// </summary>
+    public bool TokenDropout { get; init; }
+
+    /// <summary>The id of <c>&lt;mask&gt;</c>.</summary>
+    public int MaskTokenId { get; init; } = 32;
+
+    /// <summary>The id of <c>&lt;pad&gt;</c>; absolute positions start at one past it.</summary>
+    public int PadTokenId { get; init; } = 1;
+
+    /// <summary>Whether a layer norm runs on the embeddings before the first layer (ESM-1b).</summary>
+    public bool EmbeddingNormBefore { get; init; }
+
+    /// <summary>The rotary base, 10000 on every published ESM.</summary>
+    public double RopeTheta { get; init; } = 10000.0;
+
+    /// <summary>False for the Nucleotide Transformer v2's gated (SwiGLU) feed-forward, which is not supported.</summary>
+    public bool BiasedFeedForward { get; init; } = true;
+
+    /// <summary>True for ESMFold, a structure model rather than a language model; not supported.</summary>
+    public bool IsFoldingModel { get; init; }
 }

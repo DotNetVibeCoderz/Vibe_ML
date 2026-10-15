@@ -44,6 +44,7 @@ public sealed class PeftModel
 
     private PeftModel(TransformerModel model, LoraAdapterSet adapters, bool merged)
     {
+        model.RequireFoundationEncoder("LoRA");
         _model = model;
         Adapters = adapters;
         IsMerged = merged;

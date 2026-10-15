@@ -41,7 +41,8 @@ bagian di hilir yang akan memberi tahu Anda.
    `XLMRobertaTokenizer` milik transformers mengonversinya: id fairseq (`<s> <pad> </s> <unk>` lebih
    dulu, setiap potongan lain satu tempat lebih tinggi daripada di berkas, `<mask>` terakhir) dan
    tabel `Precompiled` milik model itu sendiri
-4. `vocab.txt` — WordPiece BERT orisinal
+4. `vocab.txt` — WordPiece BERT orisinal, atau `EsmTokenizer` milik ESM bila `tokenizer_config.json`
+   menyebutnya (atau, bila tidak ada kelas yang disebut, bila berkas memuat `<cls>` dan `<eos>` tanpa `[CLS]`)
 
 ```csharp
 HfTokenizer.FromPretrained("bert-base-uncased");
@@ -50,9 +51,29 @@ HfTokenizer.FromBertVocabulary("vocab.txt", lowercase: true);
 HfTokenizer.FromGpt2Files("vocab.json", "merges.txt");
 HfTokenizer.FromRobertaFiles("vocab.json", "merges.txt");
 HfTokenizer.FromSentencePieceModel("sentencepiece.bpe.model");
+HfTokenizer.FromEsmVocabulary("vocab.txt");                  // ESM-1b, ESM-2, Nucleotide Transformer
 ```
 
 Pemuat yang hanya memahami bentuk pertama tidak bisa membuka sebagian besar model lama dan kecil.
+`TryFromPretrained` dan `TryFromDirectory` mengembalikan `null` bila tidak ada berkas tokenizer sama
+sekali (Geneformer tidak menyertakannya). Berkas yang ada tetapi rusak tetap melempar galat.
+
+### ESM
+
+Jika dibaca sebagai WordPiece BERT, `vocab.txt` milik ESM mengubah seluruh protein menjadi satu token
+tak dikenal, dan itulah yang terjadi di 0.10. `FromEsmVocabulary` mereproduksi `EsmTokenizer` milik
+transformers:
+
+- Setiap entri kosakata dicocokkan apa adanya, yang terpanjang lebih dulu. Satu residu adalah satu
+  token pada ESM-2; 6-mer milik Nucleotide Transformer jatuh kembali ke nukleotida tunggal.
+- Spasi diabaikan, dan `<cls> <pad> <eos> <unk> <mask>` dikenali di mana pun dalam teks.
+- **Satu deretan karakter tak dikenal adalah satu `<unk>`**: `"MKJJXB"` menjadi `<cls> M K <unk> X B <eos>`.
+- Templatnya `<cls> $A <eos>` untuk satu urutan dan `<cls> $A <eos> $B <eos>` untuk pasangan, tanpa
+  `<eos>` bila `tokenizer_config.json` berisi `"eos_token": null`.
+- Decoding menggabungkan token dengan spasi, dan `skipSpecialTokens` ikut membuang `<unk>`, seperti
+  rujukannya.
+
+Id-nya cocok dengan transformers pada kosakata ESM-2 untuk setiap masukan sulit di `EsmTokenizerTests`.
 
 ## Dicocokkan dengan rujukan
 
