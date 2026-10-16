@@ -217,4 +217,38 @@ public class SpecialMiscTests
         var nd = Special.Ndtr(new NdArray([0.0], 1)).AsSpan();
         Assert.Equal(0.5, nd[0]);
     }
+
+    [Fact]
+    public void Cbrt_IsExactOnPerfectCubesOnEveryPlatform()
+    {
+        // glibc's cbrt returns -3.0000000000000004 for -27; the library must not inherit that.
+        for (var k = -1000; k <= 1000; k++)
+            Assert.Equal((double)k, Special.Cbrt((double)k * k * k));
+        Assert.Equal(0.5, Special.Cbrt(0.125));
+        Assert.Equal(double.NegativeInfinity, Special.Cbrt(double.NegativeInfinity));
+        Assert.Equal(0.0, Special.Cbrt(0.0));
+        Assert.True(double.IsNaN(Special.Cbrt(double.NaN)));
+        var rng = new Random(5);
+        for (var i = 0; i < 10_000; i++)
+        {
+            var x = (rng.NextDouble() - 0.5) * Math.Pow(10, rng.Next(-300, 300));
+            // Correctly rounded: neither neighbouring double is closer to the true cube root. The
+            // platform cbrt cannot be the reference - Windows' is 2-3 ulps off at 1.5e192 and
+            // glibc's misses perfect cubes - so y³ - x is evaluated in double-double instead.
+            var y = Special.Cbrt(x);
+            var here = Math.Abs(CubeResidual(y, x));
+            Assert.True(here <= Math.Abs(CubeResidual(Math.BitIncrement(y), x)), $"cbrt({x:R}) = {y:R} (up)");
+            Assert.True(here <= Math.Abs(CubeResidual(Math.BitDecrement(y), x)), $"cbrt({x:R}) = {y:R} (down)");
+        }
+    }
+
+    /// <summary>y³ - x, with y³ carried as an unevaluated sum so the comparison is not rounding noise.</summary>
+    private static double CubeResidual(double y, double x)
+    {
+        var square = y * y;
+        var squareError = Math.FusedMultiplyAdd(y, y, -square);
+        var cube = square * y;
+        var cubeError = Math.FusedMultiplyAdd(square, y, -cube) + squareError * y;
+        return (cube - x) + cubeError;
+    }
 }

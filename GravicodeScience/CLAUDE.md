@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 v0.1.0 is implemented and complete against `requirements.md`, and a seventh library, **SciNet**
-(SciPy for .NET), has been added beside the original six: 28 projects, **2,698 tests passing**
-(1,639 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
+(SciPy for .NET), has been added beside the original six: 28 projects, **2,699 tests passing**
+(1,640 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
 suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 

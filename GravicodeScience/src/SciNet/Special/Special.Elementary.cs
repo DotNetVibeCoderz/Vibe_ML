@@ -36,7 +36,21 @@ public static partial class Special
     }
 
     /// <summary>Real cube root (scipy.special.cbrt).</summary>
-    public static double Cbrt(double x) => Math.Cbrt(x);
+    /// <remarks>
+    /// <c>Math.Cbrt</c> is the C library's, and neither common one is correctly rounded: on Linux
+    /// <c>Math.Cbrt(-27)</c> is -3.0000000000000004, and on Windows <c>Math.Cbrt(1.5237e192)</c> is
+    /// 2–3 ulps off. One Newton step on y³ = x, with the residual formed through FMA, makes perfect
+    /// cubes exact and gives the same, correctly rounded answer on both.
+    /// </remarks>
+    public static double Cbrt(double x)
+    {
+        var y = Math.Cbrt(x);
+        if (y == 0 || !double.IsFinite(y)) return y;
+        var y2 = y * y;
+        var y2Error = Math.FusedMultiplyAdd(y, y, -y2);              // y² = y2 + y2Error exactly
+        var residual = Math.FusedMultiplyAdd(y2, y, -x) + y2Error * y; // y³ - x
+        return y - residual / (3.0 * y2);
+    }
 
     /// <summary>2^x (scipy.special.exp2).</summary>
     public static double Exp2(double x) => Math.Pow(2.0, x);

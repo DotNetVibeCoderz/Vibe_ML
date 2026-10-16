@@ -101,16 +101,21 @@ public class OdeTests
     }
 
     [Theory]
-    [InlineData(OdeMethod.Radau, -1.5105962316351569, 2865)]
-    [InlineData(OdeMethod.Bdf, -1.4899038286092663, 1888)]
-    public void VanDerPolStiff_MatchesScipy(OdeMethod m, double y0End, int nfev)
+    [InlineData(OdeMethod.Radau, -1.5105962316351569, 2865, 1e-3)]
+    [InlineData(OdeMethod.Bdf, -1.4899038286092663, 1888, 3e-2)]
+    public void VanDerPolStiff_MatchesScipy(OdeMethod m, double y0End, int nfev, double methodError)
     {
-        // At the default rtol 1e-3 the end value carries ~1e-3 of error; finite-difference Jacobians
-        // differ from scipy's in the last bits (scipy perturbs columns in one vectorised call), and
-        // over 3000 time units with thousands of steps that moves the answer within that tolerance.
+        // The true y0(3000) is -1.5106069367598518 (scipy Radau, rtol = atol = 1e-12). At the default
+        // rtol 1e-3, BDF lands 1.4% away from it - in scipy and here alike - so that, not scipy's
+        // digits, is what the solver can promise. The end value is also sensitive to the last bit of
+        // exp/log: Linux's libm moved the BDF answer by 2.3e-3 against Windows. So it is pinned to the
+        // truth within the method's own error, and to scipy only within what libm differences allow.
+        const double truth = -1.5106069367598518;
         var r = Integrate.SolveIvp(VanDerPol1000, 0, 3000, [2, 0], m);
         Assert.True(r.Success, r.Message);
-        IntegrateAssert.Close(y0End, r.Y[0, r.T.Length - 1], 2e-3, "y0(3000)");
+        var end = r.Y[0, r.T.Length - 1];
+        IntegrateAssert.Close(truth, end, methodError, "y0(3000) against the true value");
+        IntegrateAssert.Close(y0End, end, 5e-3, "y0(3000) against scipy");
         Assert.True(Math.Abs(r.Nfev - nfev) <= nfev / 20, $"nfev {r.Nfev} vs scipy {nfev}");
     }
 

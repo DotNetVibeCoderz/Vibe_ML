@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v1.2.0 · **Target framework**: .NET 10 · **Tests**: 2,698 passing, 0 failing
+**Release**: v1.2.0 · **Target framework**: .NET 10 · **Tests**: 2,699 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -17,7 +17,7 @@ Roadmap: [PLAN.md](PLAN.md)
 | GraviText | ✅ Complete | 171 tests |
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
-| SciNet | ✅ Complete | 1,639 tests — SciPy for .NET, all 15 `scipy.*` modules |
+| SciNet | ✅ Complete | 1,640 tests — SciPy for .NET, all 15 `scipy.*` modules |
 | Sample apps | ✅ Complete | 7 apps, all run end to end |
 | Notebooks | ✅ Complete | 7 notebooks, cells compile-checked |
 | Benchmarks | ✅ Complete | 7 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
@@ -201,7 +201,7 @@ remains the better baseline on a small dataset.
 - [x] **v0.4** Kalman filter and RTS smoother, pinned against the closed-form steady-state gain
 - [x] **v0.4** WAIC and PSIS-LOO with Pareto-k diagnostics
 
-### SciNet — 1,639 tests
+### SciNet — 1,640 tests
 
 - [x] `Special`: gamma/beta and incomplete forms with inverses, erf family and Faddeeva, Bessel of
   real order (scaled, spherical, zeros), Airy, orthogonal polynomials and Gauss rules,
@@ -323,7 +323,7 @@ Each is now covered by a regression test.
 ## Next
 
 **SciNet** (SciPy for .NET) was added as a seventh library, with its sample, notebook, benchmark
-suite, bilingual docs and a NuGet icon for every package; the suite grew from 1,059 to 2,698.
+suite, bilingual docs and a NuGet icon for every package; the suite grew from 1,059 to 2,699.
 SciNet's honest limits are listed in [docs/SciNet.md](docs/SciNet.md) — notably `Splu` (about 7×
 behind SuperLU), `Eigsh` (about 4.5× behind ARPACK) and dense matrix functions behind LAPACK.
 

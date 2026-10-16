@@ -4,7 +4,7 @@ A data science and AI ecosystem for **.NET 10** — seven libraries that mirror 
 each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
-[![tests](https://img.shields.io/badge/tests-2698%20passing-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-2699%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![nuget](https://img.shields.io/badge/nuget-Gravicode.Science.*-004880)](https://www.nuget.org/packages?q=Gravicode.Science)
 
@@ -74,7 +74,7 @@ samples/      seven console apps, each printing real results
 notebooks/    seven .NET Interactive notebooks with charts
 benchmarks/   seven BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        2,698 tests
+tests/        2,699 tests
 tools/        ScienceAppGen — an IDE that builds apps from a prompt; the icon generator
 assets/       NuGet package icons
 docs/         English, with Bahasa Indonesia in docs/id/
@@ -113,7 +113,7 @@ Details in [ScienceAppGen.md](docs/ScienceAppGen.md).
 
 [SciNet](docs/SciNet.md) covers every `scipy.*` module — special functions, constants, optimize,
 integrate, interpolate, linalg, differentiate, fft, signal, stats, ndimage, cluster, sparse
-(with `sparse.linalg` and `csgraph`), spatial and io — on top of GraviNum, with 1,639 tests pinned
+(with `sparse.linalg` and `csgraph`), spatial and io — on top of GraviNum, with 1,640 tests pinned
 against SciPy 1.17.1 values.
 
 ```csharp
