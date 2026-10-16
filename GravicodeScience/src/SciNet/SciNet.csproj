@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    SciNet - SciPy for .NET. Builds on GraviNum only, like GraviProb: every SciPy module that
+    needs arrays, decompositions or random numbers takes them from the foundation rather than
+    carrying a second copy.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.SciNet</RootNamespace>
+    <AssemblyName>Gravicode.Science.SciNet</AssemblyName>
+    <PackageId>Gravicode.Science.SciNet</PackageId>
+    <Description>SciNet - SciPy for .NET: special functions, optimisation, integration and ODEs, interpolation, statistics, signal processing, FFT, sparse matrices and solvers, spatial algorithms, clustering, n-dimensional image processing, physical constants and scientific file formats. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>scipy;scientific-computing;optimization;ode;interpolation;statistics;signal-processing;fft;sparse;spatial;special-functions;dotnet;gravicode</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviNum\GraviNum.csproj" />
+  </ItemGroup>
+
+  <!-- Scalar reference kernels (e.g. the sample-by-sample sosfilt loop) stay internal; the tests
+       check the fast paths against them. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="SciNet.Tests" />
+  </ItemGroup>
+
+</Project>

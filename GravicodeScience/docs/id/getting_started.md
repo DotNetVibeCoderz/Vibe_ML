@@ -2,7 +2,7 @@
 
 *[English](../getting_started.md)*
 
-Enam library, satu contoh untuk masing-masing. Semua potongan kode di bawah berjalan apa adanya
+Tujuh library, satu contoh untuk masing-masing. Semua potongan kode di bawah berjalan apa adanya
 setelah solusi di-build.
 
 - [GraviNum — array dan aljabar linear](#gravinum)
@@ -199,6 +199,38 @@ Console.WriteLine($"P(condong ke angka) = {aboveHalf:P1}");
 
 ---
 
+## SciNet
+
+```csharp
+using Gravicode.Science.SciNet;
+
+// Pegas teredam: x'' + 0.4 x' + 4 x = 0, dari x = 1 dalam keadaan diam.
+void Spring(double t, ReadOnlySpan<double> y, Span<double> dy)
+{
+    dy[0] = y[1];
+    dy[1] = -0.4 * y[1] - 4 * y[0];
+}
+
+var motion = Integrate.SolveIvp(Spring, 0, 20, [1.0, 0.0], OdeMethod.Dop853, rtol: 1e-10, atol: 1e-12,
+    tEval: Enumerable.Range(0, 201).Select(i => i * 0.1).ToArray());
+var t = motion.T;
+var x = motion.Y.Row(0).ToArray();
+
+// Pulihkan redaman dan frekuensi hanya dari lintasannya.
+var fit = Optimize.CurveFit((ti, p) => Math.Exp(-p[0] * ti) * (Math.Cos(p[1] * ti) + p[0] / p[1] * Math.Sin(p[1] * ti)),
+    t, x, p0: [0.1, 1.5]);
+Console.WriteLine($"decay {fit.Popt[0]:F4} (exact 0.2), frequency {fit.Popt[1]:F4} (exact {Math.Sqrt(3.96):F4})");
+
+// Kuadratur selubungnya, dan satu probabilitas ekor normal.
+var area = Integrate.Quad(ti => Math.Exp(-0.4 * ti), 0, 20);
+Console.WriteLine($"integral of the envelope squared: {area.Value:F6} +/- {area.AbsErr:E1}");
+Console.WriteLine($"P(|Z| > 1.96) = {2 * Stats.Norm().Sf(1.96):F4}");
+```
+
+[Panduan lengkap →](SciNet.md)
+
+---
+
 ## Menggunakan beberapa library bersamaan
 
 Library dirancang agar bisa saling mengoper data tanpa kode perekat:
@@ -220,8 +252,8 @@ var tfidf = new TfidfVectorizer().FitTransform(reviews);     // GraviText -> Gra
 
 | | |
 |---|---|
-| **Program siap jalan** | [`samples/`](../../samples) — enam aplikasi konsol, satu per library |
-| **Interaktif** | [`notebooks/`](../../notebooks) — enam notebook .NET Interactive dengan grafik |
+| **Program siap jalan** | [`samples/`](../../samples) — tujuh aplikasi konsol, satu per library |
+| **Interaktif** | [`notebooks/`](../../notebooks) — tujuh notebook .NET Interactive dengan grafik |
 | **Performa** | [benchmarks.md](benchmarks.md) — angka CPU dan GPU hasil pengukuran |
 | **Data** | [datasets.md](datasets.md) — isi `datasets/` dan asal-usulnya |
 

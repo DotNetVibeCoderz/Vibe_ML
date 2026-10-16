@@ -60,7 +60,7 @@ jobs:
       - name: Restore
         run: dotnet restore Gravicode.Science.sln
 
-      # Warnings are not errors here on purpose: the six shipping libraries build clean, and
+      # Warnings are not errors here on purpose: the seven shipping libraries build clean, and
       # failing the build on a warning in the Avalonia tool would gate the packages on the IDE.
       - name: Build
         run: dotnet build Gravicode.Science.sln -c Release --no-restore

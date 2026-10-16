@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import sys
@@ -25,6 +26,16 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import scipy.linalg
+import scipy.cluster.hierarchy
+import scipy.fft
+import scipy.integrate
+import scipy.interpolate
+import scipy.ndimage
+import scipy.optimize
+import scipy.signal
+import scipy.sparse.linalg
+import scipy.spatial
+import scipy.special
 import scipy.sparse
 import networkx as nx
 from sklearn.cluster import KMeans
@@ -358,6 +369,120 @@ def main() -> None:
         "1,000,000 normal log densities (vectorised)",
         lambda: float(np.sum(-0.5 * np.log(2 * np.pi) - 0.5 * grid * grid)),
     )
+
+    # ------------------------------------------------------------ SciPy (vs SciNet)
+    # Same inputs as the .NET side: u(i, salt) is the formula U(i, salt) there, so both halves solve
+    # the same problems. Microsecond kernels get the same 40 warm-up calls as on the .NET side.
+
+    def u(n: int, salt: int) -> np.ndarray:
+        v = np.sin(np.arange(n) * 12.9898 + salt * 78.233) * 43758.5453
+        return v - np.floor(v)
+
+    def points(n: int, d: int, salt: int) -> np.ndarray:
+        return u(n * d, salt).reshape(n, d)
+
+    erf_input = 8 * u(1_000_000, 1) - 4
+    measure("scinet_erf_1m", "SciPy", "erf over 1,000,000 values", lambda: scipy.special.erf(erf_input), warmup=10)
+
+    complex_signal = u(65536, 2) + 1j * u(65536, 3)
+    measure("scinet_fft_65536", "SciPy", "complex FFT, 65,536 points", lambda: scipy.fft.fft(complex_signal), warmup=40)
+    real_signal = u(1 << 20, 4)
+    measure("scinet_rfft_1m", "SciPy", "real FFT, 2^20 points", lambda: scipy.fft.rfft(real_signal), warmup=10)
+    dct_signal = u(65536, 5)
+    measure("scinet_dct_65536", "SciPy", "DCT-II, 65,536 points", lambda: scipy.fft.dct(dct_signal), warmup=40)
+
+    measure("scinet_quad", "SciPy", "quad of log(x)/sqrt(x) on [0,1]",
+            lambda: scipy.integrate.quad(lambda x: math.log(x) / math.sqrt(x), 0, 1), warmup=40)
+
+    def lorenz(t, y):
+        return [10 * (y[1] - y[0]), y[0] * (28 - y[2]) - y[1], y[0] * y[1] - 8.0 / 3.0 * y[2]]
+
+    measure("scinet_ivp_lorenz", "SciPy", "solve_ivp Lorenz 0..100, RK45, rtol 1e-9",
+            lambda: scipy.integrate.solve_ivp(lorenz, (0, 100), [1.0, 1.0, 1.0], method="RK45", rtol=1e-9, atol=1e-9),
+            repeats=5, warmup=1)
+
+    def vdp(t, y):
+        return [y[1], 1000 * (1 - y[0] * y[0]) * y[1] - y[0]]
+
+    measure("scinet_ivp_vdp", "SciPy", "solve_ivp Van der Pol mu=1000, BDF",
+            lambda: scipy.integrate.solve_ivp(vdp, (0, 3000), [2.0, 0.0], method="BDF"), repeats=5, warmup=1)
+
+    rosen_start = -np.ones(100)
+    measure("scinet_bfgs_rosen100", "SciPy", "minimize BFGS, Rosenbrock-100 with gradient",
+            lambda: scipy.optimize.minimize(scipy.optimize.rosen, rosen_start, method="BFGS", jac=scipy.optimize.rosen_der),
+            repeats=5, warmup=1)
+    fit_x = np.arange(10_000) * 0.001
+    fit_y = 2.5 * np.exp(-1.3 * fit_x) + 0.5 + 0.05 * (u(10_000, 6) - 0.5)
+    measure("scinet_curve_fit_10k", "SciPy", "curve_fit exponential decay, 10,000 points",
+            lambda: scipy.optimize.curve_fit(lambda x, a, b, c: a * np.exp(-b * x) + c, fit_x, fit_y, p0=[1.0, 1.0, 1.0]),
+            repeats=5, warmup=3)
+    assignment = points(500, 500, 7)
+    measure("scinet_lsa_500", "SciPy", "linear_sum_assignment 500x500",
+            lambda: scipy.optimize.linear_sum_assignment(assignment), repeats=5, warmup=3)
+
+    clouds = points(2000, 64, 8)
+    measure("scinet_cdist_2000x64", "SciPy", "cdist 2000x2000 in 64-D, euclidean",
+            lambda: scipy.spatial.distance.cdist(clouds, clouds), repeats=5, warmup=3)
+    cloud3 = points(100_000, 3, 9)
+    measure("scinet_kdtree_100k", "SciPy", "KD-tree build + 5-NN query, 100k points in 3-D",
+            lambda: scipy.spatial.cKDTree(cloud3).query(cloud3, k=5, workers=-1), repeats=5, warmup=1)
+    cloud2 = points(100_000, 2, 10)
+    measure("scinet_delaunay_100k", "SciPy", "Delaunay triangulation, 100k points",
+            lambda: scipy.spatial.Delaunay(cloud2), repeats=5, warmup=1)
+    linkage_data = points(2000, 8, 11)
+    measure("scinet_linkage_ward_2000", "SciPy", "hierarchical clustering, Ward, 2000 points",
+            lambda: scipy.cluster.hierarchy.linkage(linkage_data, method="ward"), repeats=5, warmup=1)
+
+    knots = np.arange(1000) * 0.01
+    spline = scipy.interpolate.CubicSpline(knots, np.sin(knots))
+    spline_queries = u(1_000_000, 12) * 9.99
+    measure("scinet_spline_eval_1m", "SciPy", "cubic spline, evaluate 1,000,000 points",
+            lambda: spline(spline_queries), warmup=10)
+    grid_axis = np.arange(100) / 99.0
+    grid_values = u(100 * 100 * 100, 13).reshape(100, 100, 100)
+    regular = scipy.interpolate.RegularGridInterpolator((grid_axis, grid_axis, grid_axis), grid_values)
+    grid_queries = points(1_000_000, 3, 14)
+    measure("scinet_regular_grid_1m", "SciPy", "RegularGridInterpolator linear, 1,000,000 points in 3-D",
+            lambda: regular(grid_queries), repeats=5, warmup=1)
+
+    def tridiagonal(n: int):
+        return scipy.sparse.diags([-np.ones(n - 1), 2 * np.ones(n), -np.ones(n - 1)], [-1, 0, 1], format="csr")
+
+    second = tridiagonal(200)
+    poisson = scipy.sparse.kronsum(second, second, format="csr")
+    ones = np.ones(40_000)
+    measure("scinet_cg_poisson_200", "SciPy", "conjugate gradient, 2-D Poisson 200x200, rtol 1e-8",
+            lambda: scipy.sparse.linalg.cg(poisson, ones, rtol=1e-8, maxiter=5000), repeats=5, warmup=1)
+    small = tridiagonal(100)
+    poisson_small = scipy.sparse.kronsum(small, small, format="csc")
+    measure("scinet_splu_poisson_100", "SciPy", "sparse LU factor + solve, 2-D Poisson 100x100",
+            lambda: scipy.sparse.linalg.splu(poisson_small).solve(ones[:10_000]), repeats=5, warmup=1)
+    expm_input = u(200 * 200, 15).reshape(200, 200) - 0.5
+    measure("scinet_expm_200", "SciPy", "matrix exponential, 200x200",
+            lambda: scipy.linalg.expm(expm_input), repeats=5, warmup=3)
+
+    image = u(2048 * 2048, 16).reshape(2048, 2048)
+    measure("scinet_gaussian_2048", "SciPy", "gaussian_filter sigma 3, 2048x2048",
+            lambda: scipy.ndimage.gaussian_filter(image, 3.0), repeats=5, warmup=1)
+    image1k = u(1024 * 1024, 17).reshape(1024, 1024)
+    measure("scinet_median_1024", "SciPy", "median_filter 5x5, 1024x1024",
+            lambda: scipy.ndimage.median_filter(image1k, 5), repeats=5, warmup=1)
+
+    samples = u(1_000_000, 18)
+    b, a = scipy.signal.butter(4, 0.1)
+    measure("scinet_lfilter_1m", "SciPy", "lfilter Butterworth order 4, 1,000,000 samples",
+            lambda: scipy.signal.lfilter(b, a, samples), warmup=10)
+    sos = scipy.signal.butter(8, 0.1, output="sos")
+    measure("scinet_sosfiltfilt_1m", "SciPy", "sosfiltfilt Butterworth order 8, 1,000,000 samples",
+            lambda: scipy.signal.sosfiltfilt(sos, samples), warmup=10)
+    long_recording = u(10_000_000, 19)
+    measure("scinet_welch_10m", "SciPy", "welch PSD, 10,000,000 samples, nperseg 4096",
+            lambda: scipy.signal.welch(long_recording, nperseg=4096), repeats=5, warmup=1)
+    conv_kernel = u(10_000, 20)
+    measure("scinet_fftconvolve_1m", "SciPy", "fftconvolve 1,000,000 x 10,000",
+            lambda: scipy.signal.fftconvolve(samples, conv_kernel), repeats=5, warmup=1)
+    measure("scinet_find_peaks_1m", "SciPy", "find_peaks with prominence, 1,000,000 samples",
+            lambda: scipy.signal.find_peaks(samples, prominence=0.5), repeats=5, warmup=1)
 
     # ------------------------------------------------------------ output
 

@@ -1,4 +1,4 @@
-# Gravicode.Science - publish the six packages to NuGet.
+# Gravicode.Science - publish the seven packages to NuGet.
 #
 # Triggered by a tag, so the tag and the package version cannot disagree: the version is read
 # from the tag and passed to `dotnet pack`, rather than being read from a file that someone

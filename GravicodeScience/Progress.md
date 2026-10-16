@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v1.1.0 · **Target framework**: .NET 10 · **Tests**: 1,059 passing, 0 failing
+**Release**: v1.2.0 · **Target framework**: .NET 10 · **Tests**: 2,698 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -10,20 +10,21 @@ Roadmap: [PLAN.md](PLAN.md)
 
 | Area | Status | Notes |
 |---|---|---|
-| Solution and build | ✅ Complete | 24 projects, central package management, Release build clean |
+| Solution and build | ✅ Complete | 28 projects, central package management, Release build clean |
 | GraviNum | ✅ Complete | 301 tests |
 | GraviFrame | ✅ Complete | 165 tests |
 | GraviLearn | ✅ Complete | 176 tests |
 | GraviText | ✅ Complete | 171 tests |
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
-| Sample apps | ✅ Complete | 6 apps, all run end to end, all covering v0.5 |
-| Notebooks | ✅ Complete | 6 notebooks, cells compile-checked, 18 inline charts |
-| Benchmarks | ✅ Complete | 6 suites; GraviNum measured and published |
+| SciNet | ✅ Complete | 1,639 tests — SciPy for .NET, all 15 `scipy.*` modules |
+| Sample apps | ✅ Complete | 7 apps, all run end to end |
+| Notebooks | ✅ Complete | 7 notebooks, cells compile-checked |
+| Benchmarks | ✅ Complete | 7 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
 | Datasets | ✅ Complete | 4 real, 4 generated |
 | Documentation | ✅ Complete | 10 pages × 2 languages, with a visualisation gallery per library |
 | Screenshots | ✅ Complete | 13 rendered by the samples, plus 6 of ScienceAppGen |
-| Packaging | ✅ Complete | 6 NuGet packages with XML docs and `.snupkg`, packed and verified |
+| Packaging | ✅ Complete | 7 NuGet packages with XML docs, `.snupkg` and a per-library icon, packed and verified |
 | CI | ✅ Complete | Build + test on Linux and Windows, notebook cells compiled, tag-driven release |
 
 ---
@@ -200,6 +201,34 @@ remains the better baseline on a small dataset.
 - [x] **v0.4** Kalman filter and RTS smoother, pinned against the closed-form steady-state gain
 - [x] **v0.4** WAIC and PSIS-LOO with Pareto-k diagnostics
 
+### SciNet — 1,639 tests
+
+- [x] `Special`: gamma/beta and incomplete forms with inverses, erf family and Faddeeva, Bessel of
+  real order (scaled, spherical, zeros), Airy, orthogonal polynomials and Gauss rules,
+  hypergeometric, zeta, Lambert W, elliptic and Carlson, cephes distribution functions
+- [x] `Constants`: all 445 CODATA 2022 entries, units, prefixes, temperature conversion
+- [x] `Optimize`: 13 local methods incl. a ported L-BFGS-B, roots (scalar and systems), least
+  squares with robust losses, `CurveFit`, `Nnls`, `Linprog`, `Milp`, `LinearSumAssignment`,
+  differential evolution, dual annealing, basin hopping, DIRECT, brute
+- [x] `Integrate`: QUADPACK port (QAGS/QAGI/QAGP/QAWO/QAWF/QAWS/QAWC), multi-dimensional, tanh-sinh,
+  cubature, QMC; `SolveIvp` with RK23/RK45/DOP853/Radau/BDF/LSODA, events and dense output;
+  `SolveBvp`
+- [x] `Interpolate`: splines (cubic, PCHIP, Akima, B-spline, FITPACK `curfit` port), PPoly/BPoly,
+  rational interpolators, regular grids, scattered data (nearest, linear, Clough–Tocher, RBF)
+- [x] `Linalg` and `Differentiate`: matrix functions, Schur/Hessenberg/LDL/polar, structured
+  solvers, Sylvester/Lyapunov/Riccati equations, special matrices; adaptive derivatives
+- [x] `Fft`: mixed-radix Stockham engine with SIMD, cached plans, real/n-D/DCT/DST
+- [x] `Signal`: FIR/IIR design, filtering, LTI, windows, waveforms, spectral analysis,
+  convolution, resampling, Savitzky–Golay, peak finding
+- [x] `Stats`: 61 continuous, 17 discrete and 8 multivariate distributions with fitting; ~60
+  hypothesis tests; descriptive statistics; KDE; bootstrap and permutation tests; Sobol, Halton
+  and Latin hypercube engines
+- [x] `NdImage`: filters, interpolation, morphology, distance transforms, measurements, in all
+  eight boundary modes
+- [x] `Cluster`, `Sparse` (formats, iterative and direct solvers, eigensolvers, csgraph),
+  `Spatial` (KD-tree, distances, hulls, Delaunay, Voronoi, rotations), `IO` (MATLAB, Matrix Market,
+  Harwell–Boeing, NetCDF, WAV, ARFF, Fortran, IDL)
+
 ---
 
 ## Bugs found and fixed during development
@@ -292,6 +321,11 @@ Each is now covered by a regression test.
 ---
 
 ## Next
+
+**SciNet** (SciPy for .NET) was added as a seventh library, with its sample, notebook, benchmark
+suite, bilingual docs and a NuGet icon for every package; the suite grew from 1,059 to 2,698.
+SciNet's honest limits are listed in [docs/SciNet.md](docs/SciNet.md) — notably `Splu` (about 7×
+behind SuperLU), `Eigsh` (about 4.5× behind ARPACK) and dense matrix functions behind LAPACK.
 
 See [PLAN.md](PLAN.md). **v0.4 is complete**, and **five of six v0.5 items are done**: Arrow
 interchange, out-of-core dataframes, sparse training paths, the pretrained-weight loader, and the

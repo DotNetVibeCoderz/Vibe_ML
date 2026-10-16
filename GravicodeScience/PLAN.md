@@ -722,6 +722,21 @@ These are not versioned; they run alongside everything above.
 
 ---
 
+## SciNet — after its first release
+
+SciNet covers every `scipy.*` module, and the comparison harness shows where it still trails
+SciPy. In order of value:
+
+1. **A supernodal sparse LU.** `Splu` is left-looking Gilbert–Peierls and about 7× behind SuperLU;
+   that also limits shift-invert `Eigsh`.
+2. **Implicitly restarted Lanczos/Arnoldi without full reorthogonalisation**, to close most of
+   the 4.5× gap to ARPACK.
+3. **Blocked Householder kernels** for Schur, Hessenberg and `expm`'s Padé solves, or routing them
+   to `NativeLapack` when a LAPACK is installed — SciPy's lead on dense matrix functions is LAPACK.
+4. **KD-tree build and Ward linkage** — both allocate in the hot loop; scipy is 1.3–1.4× ahead.
+5. **Missing pieces**: `trust-constr`, SHGO, `ShortTimeFFT` as a class, Struve/`Hyperu`, Box–Cox,
+   circular statistics, 3-D Delaunay, NetCDF-4/MAT v7.3 (both need an HDF5 reader).
+
 ## Non-goals
 
 Worth stating so the scope stays legible:

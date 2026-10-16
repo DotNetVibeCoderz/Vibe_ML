@@ -28,7 +28,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-LIBRARIES = ["GraviNum", "GraviFrame", "GraviLearn", "GraviText", "GraviGraph", "GraviProb"]
+LIBRARIES = ["GraviNum", "GraviFrame", "GraviLearn", "GraviText", "GraviGraph", "GraviProb", "SciNet"]
 
 # CS0219 unused variable, CS8321 unused local function, CS0168 declared and never used: all
 # normal in a notebook, where a cell exists to show a value rather than to consume one.

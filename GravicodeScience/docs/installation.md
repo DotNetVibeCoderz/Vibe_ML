@@ -119,7 +119,7 @@ var a = NdArray.Arange(6).Reshape(2, 3);
 Console.WriteLine(a.Dot(a.T));
 ```
 
-Or run any of the six samples, which print the same report before doing their work:
+Or run any of the seven samples, which print the same report before doing their work:
 
 ```bash
 dotnet run --project samples/GraviNum.Console

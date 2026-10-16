@@ -2,7 +2,7 @@
 
 *[Bahasa Indonesia](id/getting_started.md)*
 
-Six libraries, one example each. Every snippet below runs as written once the solution is built.
+Seven libraries, one example each. Every snippet below runs as written once the solution is built.
 
 - [GraviNum — arrays and linear algebra](#gravinum)
 - [GraviFrame — dataframes](#graviframe)
@@ -198,6 +198,38 @@ Console.WriteLine($"P(biased toward heads) = {aboveHalf:P1}");
 
 ---
 
+## SciNet
+
+```csharp
+using Gravicode.Science.SciNet;
+
+// A damped spring: x'' + 0.4 x' + 4 x = 0, from x = 1 at rest.
+void Spring(double t, ReadOnlySpan<double> y, Span<double> dy)
+{
+    dy[0] = y[1];
+    dy[1] = -0.4 * y[1] - 4 * y[0];
+}
+
+var motion = Integrate.SolveIvp(Spring, 0, 20, [1.0, 0.0], OdeMethod.Dop853, rtol: 1e-10, atol: 1e-12,
+    tEval: Enumerable.Range(0, 201).Select(i => i * 0.1).ToArray());
+var t = motion.T;
+var x = motion.Y.Row(0).ToArray();
+
+// Recover the damping and frequency from the trajectory alone.
+var fit = Optimize.CurveFit((ti, p) => Math.Exp(-p[0] * ti) * (Math.Cos(p[1] * ti) + p[0] / p[1] * Math.Sin(p[1] * ti)),
+    t, x, p0: [0.1, 1.5]);
+Console.WriteLine($"decay {fit.Popt[0]:F4} (exact 0.2), frequency {fit.Popt[1]:F4} (exact {Math.Sqrt(3.96):F4})");
+
+// Quadrature of the envelope, and one normal tail probability.
+var area = Integrate.Quad(ti => Math.Exp(-0.4 * ti), 0, 20);
+Console.WriteLine($"integral of the envelope squared: {area.Value:F6} +/- {area.AbsErr:E1}");
+Console.WriteLine($"P(|Z| > 1.96) = {2 * Stats.Norm().Sf(1.96):F4}");
+```
+
+[Full guide →](SciNet.md)
+
+---
+
 ## Using several libraries together
 
 The libraries are designed to hand data to each other without conversion glue:
@@ -219,8 +251,8 @@ var tfidf = new TfidfVectorizer().FitTransform(reviews);     // GraviText -> Gra
 
 | | |
 |---|---|
-| **Runnable programs** | [`samples/`](../samples) — six console apps, one per library |
-| **Interactive** | [`notebooks/`](../notebooks) — six .NET Interactive notebooks with charts |
+| **Runnable programs** | [`samples/`](../samples) — seven console apps, one per library |
+| **Interactive** | [`notebooks/`](../notebooks) — seven .NET Interactive notebooks with charts |
 | **Performance** | [benchmarks.md](benchmarks.md) — measured CPU and GPU numbers |
 | **Data** | [datasets.md](datasets.md) — what ships in `datasets/` and where it came from |
 

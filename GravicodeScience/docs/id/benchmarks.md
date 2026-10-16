@@ -267,6 +267,29 @@ menjalankan urutan 10.000 langkah justru untuk menguji hal itu.
 
 ---
 
+## SciNet
+
+Suite BenchmarkDotNet milik SciNet (`benchmarks/SciNet.Benchmark`) mengukur mesin FFT-nya
+terhadap milik GraviNum dan terhadap jalur skalarnya sendiri, solver ODE, serta eksekusi serial
+melawan paralel untuk kernel yang paralel per baris:
+
+```bash
+dotnet run --project benchmarks/SciNet.Benchmark -c Release -- --filter "*FftEngine*"
+```
+
+| Transformasi | Plan SciNet | `Fft` GraviNum | |
+|---|---:|---:|---|
+| kompleks, n = 1000 | 7,4 µs | 208 µs | 28× (GraviNum lewat Bluestein) |
+| kompleks, n = 1024 | 5,2 µs | 25,3 µs | 4,9× |
+| kompleks, n = 65.536 | 1,09 ms | 2,70 ms | 2,5× |
+| kompleks, n = 10.007 (prima) | 570 µs | 4,44 ms | 7,8× |
+| riil, n = 2²⁰ | 18,9 ms | 75,0 ms | 4,0× |
+
+SciNet tidak punya jalur GPU. Paralelismenya adalah `Parallel.For` atas baris, garis, segmen,
+atau kueri yang independen, di atas ambang yang diukur; SIMD-nya ada di butterfly FFT, kernel
+jarak, dan fungsi khusus elemen per elemen. Perbandingan dengan SciPy ada di bawah, di
+[SciNet versus SciPy](#scinet-versus-scipy).
+
 ## Dibandingkan dengan ekosistem Python
 
 Pertanyaan yang harus dijawab setiap library data science di .NET adalah bagaimana ia dibandingkan
@@ -486,6 +509,23 @@ perbandingannya adalah kode ber-JIT melawan bytecode CPython, dan hasilnya tidak
 Untuk loop log-densitas, padanan **tervektorisasi** NumPy memakan 12,17 ms — masih 5,8× lebih
 lambat daripada loop skalar .NET, karena bentuk tervektorisasi harus memuat array antara berisi
 1 juta elemen sementara loop menyimpan semuanya di register.
+
+### SciNet versus SciPy
+
+26 beban kerja, input yang sama di kedua sisi, .NET dengan 40 panggilan pemanasan per beban kerja
+(tiered JIT mengompilasi ulang setelah ~30 panggilan; dengan 5, solusi Lorenz terukur 19 ms,
+bukan 5,6 ms). Tabel lengkap ada di [SciNet.md](SciNet.md#performa-dibandingkan-scipy) dan di
+laporan perbandingan.
+
+| Di mana pekerjaannya… | Pemenang | Contoh |
+|---|---|---|
+| **Callback Python di setiap evaluasi** | **.NET**, 9–180× | `solve_ivp` Lorenz 180×, BDF 119×, BFGS 11×, `quad` 9× |
+| Baris, garis, atau segmen yang bisa diparalelkan | **.NET**, 3–10× | `welch` 10×, interpolasi grid 4,2×, `gaussian_filter` 4×, `cdist` 3,8× |
+| Algoritma yang lebih baik atau predikat eksak | .NET 3,1× | Delaunay dengan aritmetika eksak |
+| Filter rekursif, FFT ukuran menengah | setara hingga SciPy 1,7× | `lfilter`, `sosfiltfilt`, FFT kompleks, DCT |
+| **Pustaka terkompilasi yang matang** | **SciPy**, 1,3–7,4× | SuperLU 7,4×, `expm` LAPACK 3,6×, `curve_fit` MINPACK 1,7×, KD-tree dan assignment C++ |
+
+Rekap untuk SciNet: lebih cepat di 16, lebih lambat di 8, setara di 2.
 
 ### Rekapitulasi, dan artinya
 

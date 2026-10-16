@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\..\src\GraviText\GraviText.csproj" />
     <ProjectReference Include="..\..\..\src\GraviGraph\GraviGraph.csproj" />
     <ProjectReference Include="..\..\..\src\GraviProb\GraviProb.csproj" />
+    <ProjectReference Include="..\..\..\src\SciNet\SciNet.csproj" />
   </ItemGroup>
 
 </Project>

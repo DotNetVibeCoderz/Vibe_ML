@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
 using Gravicode.Science.GraviFrame;
@@ -12,6 +12,7 @@ using Gravicode.Science.GraviLearn.Trees;
 using Gravicode.Science.GraviNum;
 using Gravicode.Science.GraviText.Vectorization;
 using Gravicode.Science.GraviProb;
+using SciNet = Gravicode.Science.SciNet;
 
 // ---------------------------------------------------------------------------
 // The .NET half of the cross-stack comparison.
@@ -218,6 +219,133 @@ Measure("csv_read_200k", "GraviFrame", "read 200,000-row CSV", () => DataFrame.R
     });
 }
 
+// ---------------------------------------------------------------- SciNet (vs SciPy)
+// Inputs come from the same deterministic formula on both sides (U below), not from either
+// stack's RNG, so the two halves solve the same problems. Every SciNet workload gets 40 warm-up
+// calls on this side: tiered JIT recompiles a hot method after ~30 calls, and with 5 the Lorenz
+// solve measured 19 ms against 6.5 ms at steady state. Python has no JIT, so its warm-up only
+// warms caches and stays short.
+{
+    double[] Uniform(int n, int salt) => Enumerable.Range(0, n).Select(i => U(i, salt)).ToArray();
+    NdArray Points(int n, int d, int salt) => new(Uniform(n * d, salt), n, d);
+
+    var erfInput = new NdArray(Uniform(1_000_000, 1).Select(v => 8 * v - 4).ToArray(), 1_000_000);
+    Measure("scinet_erf_1m", "SciNet", "erf over 1,000,000 values", () => Sink.Consume(SciNet.Special.Erf(erfInput).At(0)), warmup: 40);
+
+    var complexSignal = Uniform(65536, 2).Select((v, i) => new Complex(v, U(i, 3))).ToArray();
+    Measure("scinet_fft_65536", "SciNet", "complex FFT, 65,536 points", () => Sink.Consume(SciNet.Fft.Fft1D(complexSignal)[1].Real), warmup: 40);
+    var realSignal = Uniform(1 << 20, 4);
+    Measure("scinet_rfft_1m", "SciNet", "real FFT, 2^20 points", () => Sink.Consume(SciNet.Fft.Rfft(realSignal)[1].Real), warmup: 40);
+    var dctSignal = Uniform(65536, 5);
+    Measure("scinet_dct_65536", "SciNet", "DCT-II, 65,536 points", () => Sink.Consume(SciNet.Fft.Dct(dctSignal)[0]), warmup: 40);
+
+    Measure("scinet_quad", "SciNet", "quad of log(x)/sqrt(x) on [0,1]",
+        () => Sink.Consume(SciNet.Integrate.Quad(x => Math.Log(x) / Math.Sqrt(x), 0, 1).Value), warmup: 40);
+
+    Measure("scinet_ivp_lorenz", "SciNet", "solve_ivp Lorenz 0..100, RK45, rtol 1e-9", () =>
+    {
+        var r = SciNet.Integrate.SolveIvp(static (double t, ReadOnlySpan<double> y, Span<double> dy) =>
+        {
+            dy[0] = 10 * (y[1] - y[0]);
+            dy[1] = y[0] * (28 - y[2]) - y[1];
+            dy[2] = y[0] * y[1] - 8.0 / 3.0 * y[2];
+        }, 0, 100, [1.0, 1.0, 1.0], SciNet.OdeMethod.Rk45, rtol: 1e-9, atol: 1e-9);
+        Sink.Consume(r.T.Length);
+    }, repeats: 5, warmup: 40);
+    Measure("scinet_ivp_vdp", "SciNet", "solve_ivp Van der Pol mu=1000, BDF", () =>
+    {
+        var r = SciNet.Integrate.SolveIvp(static (double t, ReadOnlySpan<double> y, Span<double> dy) =>
+        {
+            dy[0] = y[1];
+            dy[1] = 1000 * (1 - y[0] * y[0]) * y[1] - y[0];
+        }, 0, 3000, [2.0, 0.0], SciNet.OdeMethod.Bdf);
+        Sink.Consume(r.T.Length);
+    }, repeats: 5, warmup: 40);
+
+    var rosenStart = Enumerable.Repeat(-1.0, 100).ToArray();
+    Measure("scinet_bfgs_rosen100", "SciNet", "minimize BFGS, Rosenbrock-100 with gradient", () =>
+        Sink.Consume(SciNet.Optimize.Minimize(SciNet.Optimize.Rosen, rosenStart,
+            SciNet.MinimizeMethod.Bfgs, jac: SciNet.Optimize.RosenDer).Fun), repeats: 5, warmup: 40);
+    var fitX = Enumerable.Range(0, 10_000).Select(i => i * 0.001).ToArray();
+    var fitY = fitX.Select((x, i) => 2.5 * Math.Exp(-1.3 * x) + 0.5 + 0.05 * (U(i, 6) - 0.5)).ToArray();
+    Measure("scinet_curve_fit_10k", "SciNet", "curve_fit exponential decay, 10,000 points", () =>
+        Sink.Consume(SciNet.Optimize.CurveFit(static (double[] x, double[] p) =>
+        {
+            var y = new double[x.Length];
+            for (var i = 0; i < x.Length; i++) y[i] = p[0] * Math.Exp(-p[1] * x[i]) + p[2];
+            return y;
+        }, fitX, fitY, p0: [1.0, 1.0, 1.0]).Popt[0]), repeats: 5, warmup: 40);
+    var assignment = Points(500, 500, 7);
+    Measure("scinet_lsa_500", "SciNet", "linear_sum_assignment 500x500",
+        () => Sink.Consume(SciNet.Optimize.LinearSumAssignment(assignment).Item2[0]), repeats: 5, warmup: 40);
+
+    var clouds = Points(2000, 64, 8);
+    Measure("scinet_cdist_2000x64", "SciNet", "cdist 2000x2000 in 64-D, euclidean",
+        () => Sink.Consume(SciNet.Spatial.Distance.Cdist(clouds, clouds).At(1)), repeats: 5, warmup: 40);
+    var cloud3 = Points(100_000, 3, 9);
+    Measure("scinet_kdtree_100k", "SciNet", "KD-tree build + 5-NN query, 100k points in 3-D", () =>
+    {
+        var tree = new SciNet.Spatial.KDTree(cloud3);
+        Sink.Consume(tree.Query(cloud3, k: 5).Distances.At(1));
+    }, repeats: 5, warmup: 40);
+    var cloud2 = Points(100_000, 2, 10);
+    Measure("scinet_delaunay_100k", "SciNet", "Delaunay triangulation, 100k points",
+        () => Sink.Consume(new SciNet.Spatial.Delaunay(cloud2).Simplices.Length), repeats: 5, warmup: 40);
+    var linkageData = Points(2000, 8, 11);
+    Measure("scinet_linkage_ward_2000", "SciNet", "hierarchical clustering, Ward, 2000 points",
+        () => Sink.Consume(SciNet.Cluster.Linkage(linkageData, SciNet.LinkageMethod.Ward).At(0)), repeats: 5, warmup: 40);
+
+    var knots = Enumerable.Range(0, 1000).Select(i => i * 0.01).ToArray();
+    var spline = new SciNet.CubicSpline(knots, knots.Select(Math.Sin).ToArray());
+    var splineQueries = Uniform(1_000_000, 12).Select(v => v * 9.99).ToArray();
+    Measure("scinet_spline_eval_1m", "SciNet", "cubic spline, evaluate 1,000,000 points",
+        () => Sink.Consume(spline.Evaluate(splineQueries)[0]), warmup: 40);
+    var gridAxis = Enumerable.Range(0, 100).Select(i => i / 99.0).ToArray();
+    var gridValues = new NdArray(Uniform(100 * 100 * 100, 13), 100, 100, 100);
+    var regular = new SciNet.RegularGridInterpolator([gridAxis, gridAxis, gridAxis], gridValues);
+    var gridQueries = Points(1_000_000, 3, 14);
+    Measure("scinet_regular_grid_1m", "SciNet", "RegularGridInterpolator linear, 1,000,000 points in 3-D",
+        () => Sink.Consume(regular.Evaluate(gridQueries).At(0)), repeats: 5, warmup: 40);
+
+    double[][] Tridiagonal(int n) =>
+        [Enumerable.Repeat(-1.0, n - 1).ToArray(), Enumerable.Repeat(2.0, n).ToArray(), Enumerable.Repeat(-1.0, n - 1).ToArray()];
+    var second = SciNet.Sparse.SparseMatrices.Diags(Tridiagonal(200), [-1, 0, 1]);
+    var poisson = SciNet.Sparse.SparseMatrices.Kronsum(second, second);
+    var ones = Enumerable.Repeat(1.0, 40_000).ToArray();
+    Measure("scinet_cg_poisson_200", "SciNet", "conjugate gradient, 2-D Poisson 200x200, rtol 1e-8",
+        () => Sink.Consume(SciNet.Sparse.SparseLinalg.Cg(poisson, ones, rtol: 1e-8, maxiter: 5000).X[0]), repeats: 5, warmup: 40);
+    var small = SciNet.Sparse.SparseMatrices.Diags(Tridiagonal(100), [-1, 0, 1]);
+    var poissonSmall = SciNet.Sparse.SparseMatrices.Kronsum(small, small);
+    Measure("scinet_splu_poisson_100", "SciNet", "sparse LU factor + solve, 2-D Poisson 100x100",
+        () => Sink.Consume(SciNet.Sparse.SparseLinalg.Splu(poissonSmall).Solve(ones.AsSpan(0, 10_000))[0]), repeats: 5, warmup: 40);
+    var expmInput = new NdArray(Uniform(200 * 200, 15).Select(v => v - 0.5).ToArray(), 200, 200);
+    Measure("scinet_expm_200", "SciNet", "matrix exponential, 200x200",
+        () => Sink.Consume(SciNet.Linalg.Expm(expmInput).At(0)), repeats: 5, warmup: 40);
+
+    var image = new NdArray(Uniform(2048 * 2048, 16), 2048, 2048);
+    Measure("scinet_gaussian_2048", "SciNet", "gaussian_filter sigma 3, 2048x2048",
+        () => Sink.Consume(SciNet.NdImage.GaussianFilter(image, 3.0).At(0)), repeats: 5, warmup: 40);
+    var image1k = new NdArray(Uniform(1024 * 1024, 17), 1024, 1024);
+    Measure("scinet_median_1024", "SciNet", "median_filter 5x5, 1024x1024",
+        () => Sink.Consume(SciNet.NdImage.MedianFilter(image1k, 5).At(0)), repeats: 5, warmup: 40);
+
+    var samples = Uniform(1_000_000, 18);
+    var butter = SciNet.Signal.Butter(4, 0.1);
+    Measure("scinet_lfilter_1m", "SciNet", "lfilter Butterworth order 4, 1,000,000 samples",
+        () => Sink.Consume(SciNet.Signal.Lfilter(butter.B, butter.A, samples)[0]), warmup: 40);
+    var sos = SciNet.Signal.ButterSos(8, 0.1);
+    Measure("scinet_sosfiltfilt_1m", "SciNet", "sosfiltfilt Butterworth order 8, 1,000,000 samples",
+        () => Sink.Consume(SciNet.Signal.Sosfiltfilt(sos, samples)[0]), warmup: 40);
+    var longRecording = Uniform(10_000_000, 19);
+    Measure("scinet_welch_10m", "SciNet", "welch PSD, 10,000,000 samples, nperseg 4096",
+        () => Sink.Consume(SciNet.Signal.Welch(longRecording, nperseg: 4096).Pxx[1]), repeats: 5, warmup: 40);
+    var convKernel = Uniform(10_000, 20);
+    Measure("scinet_fftconvolve_1m", "SciNet", "fftconvolve 1,000,000 x 10,000",
+        () => Sink.Consume(SciNet.Signal.Fftconvolve(samples, convKernel)[0]), repeats: 5, warmup: 40);
+    Measure("scinet_find_peaks_1m", "SciNet", "find_peaks with prominence, 1,000,000 samples",
+        () => Sink.Consume(SciNet.Signal.FindPeaks(samples, prominence: 0.5).Peaks.Length), repeats: 5, warmup: 40);
+}
+
 // ---------------------------------------------------------------- output
 
 var payload = new Payload(
@@ -237,6 +365,17 @@ File.Delete(csvPath);
 return;
 
 // ---------------------------------------------------------------- helpers
+
+/// <summary>
+/// The deterministic input both halves of the SciNet comparison use: a hash of (index, salt) mapped
+/// to [0, 1). Same formula as <c>u()</c> in python_benchmarks.py.
+/// </summary>
+static double U(int i, int salt)
+{
+    var v = Math.Sin(i * 12.9898 + salt * 78.233) * 43758.5453;
+    return v - Math.Floor(v);
+}
+
 
 void Measure(string id, string library, string operation, Action action, int repeats = 7, int warmup = 2)
 {

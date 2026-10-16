@@ -32,6 +32,16 @@ GROUPS = [
     ("Text", ["tfidf_20k", "tokenize_20k"]),
     ("Graphs", ["pagerank_50k", "bfs_50k", "components_50k", "dijkstra_50k"]),
     ("Probabilistic", ["mcmc_4x5000", "logpdf_1m", "logpdf_1m_vectorised"]),
+    ("SciNet vs SciPy", [
+        "scinet_erf_1m", "scinet_fft_65536", "scinet_rfft_1m", "scinet_dct_65536",
+        "scinet_quad", "scinet_ivp_lorenz", "scinet_ivp_vdp",
+        "scinet_bfgs_rosen100", "scinet_curve_fit_10k", "scinet_lsa_500",
+        "scinet_cdist_2000x64", "scinet_kdtree_100k", "scinet_delaunay_100k", "scinet_linkage_ward_2000",
+        "scinet_spline_eval_1m", "scinet_regular_grid_1m",
+        "scinet_cg_poisson_200", "scinet_splu_poisson_100", "scinet_expm_200",
+        "scinet_gaussian_2048", "scinet_median_1024", "scinet_lfilter_1m", "scinet_sosfiltfilt_1m",
+        "scinet_welch_10m", "scinet_fftconvolve_1m", "scinet_find_peaks_1m",
+    ]),
 ]
 
 

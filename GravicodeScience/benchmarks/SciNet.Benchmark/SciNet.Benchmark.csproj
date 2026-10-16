@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.Benchmarks.SciNet</RootNamespace>
+    <AssemblyName>SciNet.Benchmark</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <ProjectReference Include="..\..\src\SciNet\SciNet.csproj" />
+  </ItemGroup>
+
+</Project>

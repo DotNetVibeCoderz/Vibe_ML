@@ -1,10 +1,10 @@
 ?# Gravicode.Science
 
-A data science and AI ecosystem for **.NET 10** — six libraries that mirror the Python stack,
+A data science and AI ecosystem for **.NET 10** — seven libraries that mirror the Python stack,
 each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
-[![tests](https://img.shields.io/badge/tests-1059%20passing-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-2698%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![nuget](https://img.shields.io/badge/nuget-Gravicode.Science.*-004880)](https://www.nuget.org/packages?q=Gravicode.Science)
 
@@ -19,6 +19,7 @@ Published from
 | [**GraviText**](docs/GraviText.md) | HuggingFace Transformers | Tokenization, embeddings, transformers, NLP tasks |
 | [**GraviGraph**](docs/GraviGraph.md) | PyTorch Geometric / DGL | Graph structures, embeddings, GNNs |
 | [**GraviProb**](docs/GraviProb.md) | PyMC / Stan | Distributions, MCMC and NUTS, variational inference, probabilistic models |
+| [**SciNet**](docs/SciNet.md) | SciPy | Special functions, optimisation, ODEs, interpolation, statistics, signal, FFT, sparse, spatial, ndimage, scientific file formats |
 
 ## Install
 
@@ -29,6 +30,7 @@ dotnet add package Gravicode.Science.GraviLearn    # machine learning
 dotnet add package Gravicode.Science.GraviText     # NLP
 dotnet add package Gravicode.Science.GraviGraph    # graphs and GNNs
 dotnet add package Gravicode.Science.GraviProb     # Bayesian inference
+dotnet add package Gravicode.Science.SciNet        # SciPy for .NET
 ```
 
 Take only what you need — every package pulls in `GraviNum`, and nothing else is mandatory. See
@@ -67,13 +69,14 @@ Console.WriteLine(Metrics.ClassificationReport(split.TestY, pipeline.Predict(spl
 ## What is in the box
 
 ```
-src/          six class libraries
-samples/      six console apps, each printing real results
-notebooks/    six .NET Interactive notebooks with charts
-benchmarks/   six BenchmarkDotNet suites, plus the Python comparison harness
+src/          seven class libraries
+samples/      seven console apps, each printing real results
+notebooks/    seven .NET Interactive notebooks with charts
+benchmarks/   seven BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        1,059 tests
-tools/        ScienceAppGen — an IDE that builds apps from a prompt
+tests/        2,698 tests
+tools/        ScienceAppGen — an IDE that builds apps from a prompt; the icon generator
+assets/       NuGet package icons
 docs/         English, with Bahasa Indonesia in docs/id/
 ```
 
@@ -104,6 +107,38 @@ run without a line typed in between.
 
 Details in [ScienceAppGen.md](docs/ScienceAppGen.md).
 
+## SciNet — SciPy for .NET
+
+![The seven package icons](assets/icons/preview.png)
+
+[SciNet](docs/SciNet.md) covers every `scipy.*` module — special functions, constants, optimize,
+integrate, interpolate, linalg, differentiate, fft, signal, stats, ndimage, cluster, sparse
+(with `sparse.linalg` and `csgraph`), spatial and io — on top of GraviNum, with 1,639 tests pinned
+against SciPy 1.17.1 values.
+
+```csharp
+using Gravicode.Science.SciNet;
+
+void Lorenz(double t, ReadOnlySpan<double> y, Span<double> dy)
+{
+    dy[0] = 10 * (y[1] - y[0]);
+    dy[1] = y[0] * (28 - y[2]) - y[1];
+    dy[2] = y[0] * y[1] - 8.0 / 3.0 * y[2];
+}
+
+var orbit = Integrate.SolveIvp(Lorenz, 0, 100, [1.0, 1.0, 1.0], OdeMethod.Rk45, rtol: 1e-9, atol: 1e-9);
+var best = Optimize.Minimize(Optimize.Rosen, [1.3, 0.7, 0.8, 1.9, 1.2], MinimizeMethod.Bfgs, jac: Optimize.RosenDer);
+var lowpass = Signal.Butter(4, 20.0, FilterType.Lowpass, fs: 1000);
+var test = Stats.TtestInd(a, b, equalVar: false);
+```
+
+In many places it reproduces SciPy's *path*, not just its answer: `quad` returns SciPy's
+evaluation count, `solve_ivp` takes SciPy's step sequence, BFGS and L-BFGS-B take SciPy's
+iterations, and `linkage` produces SciPy's matrix exactly. It is fastest wherever SciPy calls back
+into Python — the Lorenz system above takes 5.6 ms against SciPy's 1,004 ms — and slower where SciPy
+hands work to LAPACK, SuperLU or ARPACK. Both sides of that are measured in
+[docs/SciNet.md](docs/SciNet.md#performance-against-scipy).
+
 ## Design
 
 **`GraviNum` is the foundation.** Every other library builds on its array and linear-algebra
@@ -111,7 +146,8 @@ layer, and nothing above it is ever referenced back down.
 
 ```
 GraviNum ──┬── GraviFrame ── GraviLearn ── GraviText ── GraviGraph
-           └── GraviProb
+           ├── GraviProb
+           └── SciNet
 ```
 
 **Views, not copies.** Reshaping, transposing and slicing an `NdArray` produce views over one
@@ -187,6 +223,8 @@ failure rather than as a plausible-looking number:
 | Datasets | [datasets.md](docs/datasets.md) | [id/datasets.md](docs/id/datasets.md) |
 | ScienceAppGen | [ScienceAppGen.md](docs/ScienceAppGen.md) | [id/ScienceAppGen.md](docs/id/ScienceAppGen.md) |
 | Publishing and CI | [publishing.md](docs/publishing.md) | [id/publishing.md](docs/id/publishing.md) |
+| SciNet (SciPy for .NET) | [SciNet.md](docs/SciNet.md) | [id/SciNet.md](docs/id/SciNet.md) |
+| Package icons | [assets/icons/README.md](assets/icons/README.md) | |
 
 Per-library guides sit alongside them in [`docs/`](docs) and [`docs/id/`](docs/id).
 
@@ -203,6 +241,7 @@ dotnet run --project samples/GraviLearn.Console   # Iris: forests, cross-validat
 dotnet run --project samples/GraviText.Console    # bilingual sentiment, embeddings, transformer
 dotnet run --project samples/GraviGraph.Console   # Cora: PageRank, centrality, GCN
 dotnet run --project samples/GraviProb.Console    # Bayesian coin toss, HMM, Bayesian network
+dotnet run --project samples/SciNet.Console       # ODEs, optimisation, filters, statistics, file formats
 ```
 
 They also render the charts in [`docs/screenshots/`](docs/screenshots).

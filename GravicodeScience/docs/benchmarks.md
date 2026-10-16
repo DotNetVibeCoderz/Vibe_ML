@@ -264,6 +264,29 @@ specifically to exercise that.
 
 ---
 
+## SciNet
+
+SciNet's BenchmarkDotNet suite (`benchmarks/SciNet.Benchmark`) measures its FFT engine against
+GraviNum's and its own scalar path, the ODE solvers, and serial against parallel execution of
+the row-parallel kernels:
+
+```bash
+dotnet run --project benchmarks/SciNet.Benchmark -c Release -- --filter "*FftEngine*"
+```
+
+| Transform | SciNet plan | GraviNum `Fft` | |
+|---|---:|---:|---|
+| complex, n = 1000 | 7.4 µs | 208 µs | 28× (GraviNum goes through Bluestein) |
+| complex, n = 1024 | 5.2 µs | 25.3 µs | 4.9× |
+| complex, n = 65,536 | 1.09 ms | 2.70 ms | 2.5× |
+| complex, n = 10,007 (prime) | 570 µs | 4.44 ms | 7.8× |
+| real, n = 2²⁰ | 18.9 ms | 75.0 ms | 4.0× |
+
+SciNet has no GPU path. Its parallelism is `Parallel.For` over independent rows, lines, segments
+or queries, above measured thresholds; its SIMD is in the FFT butterflies, the distance kernels and
+the element-wise special functions. The comparison against SciPy is below, in
+[SciNet vs SciPy](#scinet-vs-scipy).
+
 ## Against the Python stack
 
 The question every .NET data-science library has to answer is how it compares to NumPy, pandas
@@ -481,6 +504,22 @@ is not close.
 For the log-density loop, NumPy's *vectorised* equivalent takes 12.17 ms — still 5.8× slower than
 the .NET scalar loop, because the vectorised form has to materialise a 1M-element intermediate
 array while the loop keeps everything in registers.
+
+### SciNet vs SciPy
+
+26 workloads, same inputs on both sides, .NET with 40 warm-up calls per workload (tiered JIT
+recompiles after ~30; with 5, the Lorenz solve measured 19 ms instead of 5.6 ms). Full table in
+[SciNet.md](SciNet.md#performance-against-scipy) and in the comparison report.
+
+| Where the work is… | Winner | Examples |
+|---|---|---|
+| A **Python callback per evaluation** | **.NET**, 9–180× | `solve_ivp` Lorenz 180×, BDF 119×, BFGS 11×, `quad` 9× |
+| Parallelisable rows, lines or segments | **.NET**, 3–10× | `welch` 10×, regular-grid interpolation 4.2×, `gaussian_filter` 4×, `cdist` 3.8× |
+| A better algorithm or exact predicates | .NET 3.1× | Delaunay with exact arithmetic |
+| Recursive filters, mid-size FFTs | parity to SciPy 1.7× | `lfilter`, `sosfiltfilt`, complex FFT, DCT |
+| **Mature compiled libraries** | **SciPy**, 1.3–7.4× | SuperLU 7.4×, LAPACK `expm` 3.6×, MINPACK `curve_fit` 1.7×, C++ KD-tree and assignment |
+
+Tally for SciNet: faster on 16, slower on 8, parity on 2.
 
 ### The tally, and what it means
 

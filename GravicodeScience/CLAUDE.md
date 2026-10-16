@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.1.0 is implemented and complete against `requirements.md`: 24 projects, ~15.5k lines of library
-code, **1,059 tests passing**, six samples that run end to end, six notebooks, six benchmark suites,
-and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
+v0.1.0 is implemented and complete against `requirements.md`, and a seventh library, **SciNet**
+(SciPy for .NET), has been added beside the original six: 28 projects, **2,698 tests passing**
+(1,639 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
+suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
 Target framework is **.NET 10** (SDK 10.0.400 installed locally). The solution file is
@@ -227,6 +228,73 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
   (0.86–1.01×) but costs **17–21% on `Exp`**, which is hot in every softmax and likelihood. Do not
   repeat the claim that migrating is only a scheduling decision.
 
+### SciNet specifics
+
+SciNet (`src/SciNet`, namespace `Gravicode.Science.SciNet`) depends on GraviNum only. Function-style
+modules are static partial facades in the root namespace (`Special`, `Constants`, `Optimize`,
+`Integrate`, `Interpolate`, `Linalg`, `Differentiate`, `Fft`, `Signal`, `Stats`, `NdImage`,
+`Cluster`); type-heavy ones are sub-namespaces (`.Sparse`, `.Spatial`, `.IO`). Each module lives in
+its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
+
+- **`Linalg` (SciNet, scipy.linalg) and `LinAlg` (GraviNum, numpy.linalg) differ only by case, on
+  purpose.** And scipy's `fft()` is `Fft.Fft1D()` - a method cannot share its class's name.
+- **SciPy 1.17.1 is the reference, but not an oracle.** Its tails are wrong for several
+  distributions (pearson3, f, truncnorm, halfnorm, weibull_max, foldnorm, genlogistic quantiles
+  below 1e-15), its exact Ansari-Bradley frequencies are float32, Dunnett and n-D KDE box
+  integrals are randomised, `BarycentricInterpolator.add_xi` has a sign bug, `optimal_leaf_ordering`
+  is often not optimal, and `netcdf_file` writes 0-d variables into the record section. Those
+  cases are pinned against mpmath or brute force instead, and the code deliberately differs.
+- **Parity tests reproduce SciPy's *path*, so they depend on its arithmetic order.**
+  `100*(a*a)` versus `(100*a)*a` in Rosenbrock, numpy's `linspace` rounding, and QUADPACK's
+  error-flag bookkeeping all changed iteration or evaluation counts. Ports that must match counts
+  (QUADPACK, L-BFGS-B, FITPACK `curfit`, the `*ord` band-stop search) were ported line by line -
+  L-BFGS-B keeps the Fortran's 1-based column-major indexing. Don't "modernise" them.
+- **SciPy's nfev includes overheads**: MINPACK wrappers count two validation calls, and `num_jac`
+  evaluations inside implicit ODE solvers are not counted. Pin the algorithm's own count.
+- **Measure .NET kernels with at least 40 warm-up calls.** In the comparison harness the Lorenz
+  solve measured 19 ms with 5 warm-ups and 5.6 ms at steady state. Python needs no JIT warm-up,
+  so the harness warms the .NET side longer on purpose.
+- **Run benchmarks with nothing else on the machine.** A comparison run that overlapped a few
+  builds put Delaunay and Ward 2-3x slower and flipped several verdicts.
+- **`Special.Ndtr(-inf)` used to be NaN** - the double-double split computed inf - inf. Any box
+  probability with an open side goes through it. Pinned now; check infinities when touching
+  split-precision code. RGamma(-inf) = NaN and J0(+-inf) = 0 differ from SciPy deliberately.
+- **Continued-fraction stop tests need ~3e-16, not 1e-16**; at 1e-16 they stall one ulp short and
+  run to the iteration cap. Don't decrement a recurrence coefficient (`fact -= 1/x`); recompute it.
+  .NET's `double.LogP1`/`ExpM1` are the naive formulas - use `Special.Log1p`/`Expm1`.
+- **Discrete quantiles use SciPy's predicate literally** (smallest k with Cdf(k) >= q). The
+  "equivalent" Sf(k) <= 1 - q breaks `Ppf(Cdf(k)) == k` in floating point.
+- **FFT twiddles reduce the integer argument mod the period first** - `Math.Cos(pi*k(2j+1)/2N)`
+  is off by ~1e-13 at N = 1000 from argument rounding alone, in the tests as well as the code.
+  `irfft` must drop the imaginary parts of bins 0 and Nyquist. The SIMD/scalar FFT choice is a
+  generic struct parameter, not a field read inside the butterfly loop.
+- **`next_fast_len(real=True)` can return an odd length**, which loses the half-length real-FFT
+  trick; FFT convolution pads to an even 5-smooth length instead.
+- **NdImage boundary modes mean different things for filters and for interpolation.** For spline
+  interpolation, out-of-range taps are mirrored for `Wrap` and `Constant` too; `Nearest` and
+  `GridConstant` are padded by 12 samples and filtered in the larger domain. `affine_transform`
+  adds the offset before the matrix products, or order-0 samples cross a rounding boundary.
+- **Delaunay/Voronoi need exact predicates and must merge cocircular triangles**, or lattices
+  give duplicate Voronoi vertices and zero-length ridges.
+- **Rectangular linear assignment needs zero column potentials**; initialising them to column
+  minima gives valid-looking, suboptimal matchings.
+- **ARPACK's `LI`/`SI` rank by |imaginary part|.** Ranking by the signed value split conjugate
+  pairs and "converged" to non-eigenvalues; `Eigs`/`Eigsh` now recheck the residual and throw.
+- **Sobol points are computed from their index via the Gray code**, so fast-forward is free and
+  parallel draws equal serial ones. Halton must divide by the base, not multiply by 1/b.
+- **An eigen-based matrix root of a singular covariance carries sqrt(eps) ~ 1.5e-8 on the zero
+  eigenvalue** (GraviNum's `SymmetricEigen` returns it as ~2e-16, which is correct). Clamp tiny
+  eigenvalues before taking roots.
+- **`Utf8Parser.TryParse(double)` misrounds some halfway values with trailing zeros**; the Matrix
+  Market fast parser falls back to `double.TryParse` and is checked bit for bit against it. .NET
+  custom number formats cap at 15 significant digits - use `"E16"` to round-trip.
+- **MATLAB is column-major**: every `MatFile.Load` transposes into row-major, which is the one
+  place `loadmat` is slower than SciPy.
+- **`InternalsVisibleTo SciNet.Tests` is deliberate.** Scalar reference kernels (e.g. the
+  sample-by-sample sosfilt loop) stay internal and the tests check the fast paths against them.
+- **`CriticalFrequencies` has a `CollectionBuilder`**, so `Signal.Butter(4, [5.0, 50.0],
+  FilterType.Bandpass)` compiles. Without it the most natural C# spelling of a band did not.
+
 ### ScienceAppGen specifics
 
 - **Anthropic has no official Semantic Kernel connector** — `AnthropicChatCompletionService` is
@@ -248,8 +316,13 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
 
 ## Packaging and CI
 
-The six libraries under `src/` pack as `Gravicode.Science.*`; everything else is
-`IsPackable=false`. Metadata lives once in `Directory.Build.props`, not in six `.csproj` files.
+The seven libraries under `src/` pack as `Gravicode.Science.*`; everything else is
+`IsPackable=false`. Metadata lives once in `Directory.Build.props`, not in seven `.csproj` files.
+
+- **Each package's icon is `assets/icons/$(MSBuildProjectName).png`**, packed as `icon.png` by
+  `Directory.Build.props`, so a new library needs an icon with exactly its project name or packing
+  fails. Regenerate with `python tools/icons/make_icons.py` (headless Chrome/Edge renders the SVGs);
+  the colour system is explained in `assets/icons/README.md`.
 
 - **`PublishRepositoryUrl` must stay unset.** `PackageProjectUrl` and `RepositoryUrl` both point at
   `https://github.com/DotNetVibeCoderz/Vibe_ML/tree/main/GravicodeScience` — the subdirectory, not
@@ -276,7 +349,7 @@ The six libraries under `src/` pack as `Gravicode.Science.*`; everything else is
 
 ## Architecture
 
-`Gravicode.Science` is a data-science/AI ecosystem for .NET: six libraries that mirror the Python stack, each with a matching sample console app, notebook, benchmark project, and test project.
+`Gravicode.Science` is a data-science/AI ecosystem for .NET: seven libraries that mirror the Python stack, each with a matching sample console app, notebook, benchmark project, and test project.
 
 | Project | Python analogue | Core responsibility |
 |---|---|---|
@@ -286,12 +359,14 @@ The six libraries under `src/` pack as `Gravicode.Science.*`; everything else is
 | `GraviText` | HuggingFace Transformers | Tokenization, embeddings, `TransformerModel`, sentiment/NER/classification |
 | `GraviGraph` | PyTorch Geometric / DGL | Graph structures, PageRank/centrality, node2vec, GCN/GAT |
 | `GraviProb` | PyMC / Stan | Distributions, `BayesianModel`, MCMC & variational inference |
+| `SciNet` | SciPy | Special functions, optimize, integrate/ODE, interpolate, linalg, fft, signal, stats, ndimage, cluster, sparse, spatial, io |
 
 **The dependency direction matters:** `GraviNum` is the foundation — every other library builds on its array/tensor and linear-algebra layer. Never introduce a dependency from `GraviNum` back up the stack. The actual graph as built:
 
 ```
 GraviNum ──┬── GraviFrame ── GraviLearn ── GraviText ── GraviGraph
-           └── GraviProb
+           ├── GraviProb
+           └── SciNet
 ```
 
 `GraviText` references `GraviLearn` because its task pipelines train real classifiers rather than reimplementing them; `GraviGraph` references `GraviText` because node2vec is random walks fed to skip-gram.
@@ -303,13 +378,14 @@ Interop targets that constrain public API design: ML.NET, ONNX Runtime, and BLAS
 ## Repository layout
 
 ```
-src/            one class library per Gravi* project
-samples/        Gravi*.Console apps (one per library)
+src/            one class library per Gravi* project, plus SciNet
+samples/        Gravi*.Console and SciNet.Console apps (one per library)
 notebooks/      .NET Interactive .ipynb, one per library
-benchmarks/     Gravi*.Benchmark projects (CPU vs GPU comparisons)
+benchmarks/     *.Benchmark projects (CPU vs GPU comparisons), comparison/ (.NET vs Python harness)
 datasets/       iris.csv, titanic.csv, mnist_subset/, imdb_reviews.csv, cora_graph.json,
                 bayesian_coin.csv, finance_timeseries.csv
-tests/          Gravi*.Tests
+tests/          Gravi*.Tests and SciNet.Tests
+assets/icons/   NuGet package icons (generated by tools/icons/make_icons.py)
 docs/           installation, getting_started, one page per library, benchmarks, datasets,
                 screenshots/ (rendered by the samples), and id/ mirroring every page
 Gravicode.Science.sln

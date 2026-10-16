@@ -1,0 +1,5 @@
+@relation sparse
+@attribute a numeric
+@attribute b numeric
+@data
+{0 1, 1 2}

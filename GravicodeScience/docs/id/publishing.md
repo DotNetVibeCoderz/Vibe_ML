@@ -1,13 +1,13 @@
 # Penerbitan dan CI
 
-Enam paket dikirim dari `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviLearn`,
-`.GraviText`, `.GraviGraph`, dan `.GraviProb`. Selebihnya di repositori ini — sample, benchmark,
+Tujuh paket dikirim dari `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviLearn`,
+`.GraviText`, `.GraviGraph`, `.GraviProb`, dan `.SciNet`. Selebihnya di repositori ini — sample, benchmark,
 notebook, tes, ScienceAppGen — ditandai `IsPackable=false` dan tidak pernah ikut terbit.
 
 ## Di mana metadatanya berada
 
 Semuanya di `Directory.Build.props`, dalam satu grup properti yang berlaku untuk setiap proyek di
-bawah `src/`. Meletakkannya di sana, bukan di enam berkas `.csproj`, adalah yang menjaga
+bawah `src/`. Meletakkannya di sana, bukan di tujuh berkas `.csproj`, adalah yang menjaga
 paket-paketnya tidak saling melenceng: satu versi, satu lisensi, satu URL repositori.
 
 ```xml
@@ -85,8 +85,8 @@ Paketnya jatuh ke `artifacts/packages/`, yang diabaikan git.
 | Job | Berjalan di | Yang dikerjakan |
 |---|---|---|
 | `build` | ubuntu-latest, windows-latest | Restore, build Release, jalankan 1.059 tes, unggah `.trx` |
-| `notebooks` | ubuntu-latest | Mengompilasi setiap sel kode dari keenam notebook |
-| `pack` | ubuntu-latest | Memaketkan keenam pustaka dan mengunggahnya sebagai artifact |
+| `notebooks` | ubuntu-latest | Mengompilasi setiap sel kode dari ketujuh notebook |
+| `pack` | ubuntu-latest | Memaketkan ketujuh pustaka dan mengunggahnya sebagai artifact |
 
 Matriksnya `fail-fast: false` — satu platform yang gagal tetap layak dilihat pada platform lainnya.
 
@@ -98,7 +98,7 @@ dijalankan, dan baik build maupun rangkaian tes tidak bisa melihatnya.
 mengompilasinya terhadap pustakanya — yang justru *lebih ketat* daripada notebook-nya, karena .NET
 Interactive mengizinkan sebuah variabel dideklarasikan ulang antar sel dan pemeriksaan ini tidak.
 
-Peringatan tidak diperlakukan sebagai kesalahan. Keenam pustaka yang dikirim build bersih;
+Peringatan tidak diperlakukan sebagai kesalahan. Ketujuh pustaka yang dikirim build bersih;
 ScienceAppGen punya tiga peringatan yang sudah diketahui, dan gagal karenanya berarti
 menggantungkan paketnya pada IDE.
 

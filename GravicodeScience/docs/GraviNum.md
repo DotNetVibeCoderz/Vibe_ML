@@ -275,7 +275,7 @@ carrying about seven significant digits against double's sixteen. `NdArrayConver
 gives a threshold appropriate to the width, because one written for `double` silently over-asserts
 on `float`.
 
-**The six libraries still use `NdArray`.** Migrating them so that it becomes `NdArray<double>` is a
+**The other libraries still use `NdArray`.** Migrating them so that it becomes `NdArray<double>` is a
 separate change; what is here is the proven core, checked against the `double` path element by
 element. `Single.SingleKernels` remains as the original hand-written prototype the generic version
 was measured against.

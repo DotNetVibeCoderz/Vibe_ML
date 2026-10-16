@@ -1,0 +1,19 @@
+% SciNet ARFF fixture: quoted names, strings, nominal, dates, missing values
+% comment lines and blank lines are ignored
+
+@RELATION 'weather data'
+
+@ATTRIBUTE outlook {sunny, overcast, 'light rain'}
+@ATTRIBUTE 'air temperature' NUMERIC
+@ATTRIBUTE humidity integer
+@ATTRIBUTE note STRING
+@ATTRIBUTE when DATE "yyyy-MM-dd HH:mm:ss"
+@ATTRIBUTE windy {TRUE, FALSE}
+
+@DATA
+sunny, 85.5, 85, 'hot, dry', "2024-07-01 14:30:00", FALSE
+overcast, ?, 86, ?, ?, TRUE
+'light rain', -3.25e1, ?, 'it\'s "quoted"', "2024-01-31 00:00:05", ?
+% a comment between rows
+
+?, 1e-3, 70, '?', "1999-12-31 23:59:59", FALSE

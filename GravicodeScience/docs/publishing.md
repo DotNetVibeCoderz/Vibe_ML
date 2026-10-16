@@ -1,13 +1,13 @@
 # Publishing and CI
 
-Six packages ship from `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviLearn`,
-`.GraviText`, `.GraviGraph` and `.GraviProb`. Everything else in the repository — samples,
+Seven packages ship from `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviLearn`,
+`.GraviText`, `.GraviGraph`, `.GraviProb` and `.SciNet`. Everything else in the repository — samples,
 benchmarks, notebooks, tests, ScienceAppGen — is marked `IsPackable=false` and never leaves.
 
 ## Where the metadata lives
 
 All of it is in `Directory.Build.props`, in one property group that applies to any project under
-`src/`. Putting it there rather than in six `.csproj` files is what keeps the packages from
+`src/`. Putting it there rather than in seven `.csproj` files is what keeps the packages from
 drifting apart: there is one version, one licence, one repository URL.
 
 ```xml
@@ -81,8 +81,8 @@ Packages land in `artifacts/packages/`, which is gitignored.
 | Job | Runs on | What it does |
 |---|---|---|
 | `build` | ubuntu-latest, windows-latest | Restore, build Release, run all 1,059 tests, upload the `.trx` |
-| `notebooks` | ubuntu-latest | Compiles every code cell of all six notebooks |
-| `pack` | ubuntu-latest | Packs the six libraries and uploads them as an artifact |
+| `notebooks` | ubuntu-latest | Compiles every code cell of all seven notebooks |
+| `pack` | ubuntu-latest | Packs the seven libraries and uploads them as an artifact |
 
 The matrix is `fail-fast: false` — one platform failing is worth seeing on the other.
 
@@ -94,7 +94,7 @@ notebook's code cells into one file and compiles it against the libraries — wh
 than the notebook, since .NET Interactive allows a variable to be redeclared across cells and this
 does not.
 
-Warnings are not treated as errors. The six shipping libraries build clean; ScienceAppGen has
+Warnings are not treated as errors. The seven shipping libraries build clean; ScienceAppGen has
 three known warnings, and failing on those would gate the packages on the IDE.
 
 ### The workflow files live at the repository root

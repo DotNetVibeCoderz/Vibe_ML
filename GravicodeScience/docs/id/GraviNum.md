@@ -279,7 +279,7 @@ membawa sekitar tujuh digit signifikan melawan enam belas milik double.
 `NdArrayConvert.ComparisonTolerance<T>()` memberi ambang yang sesuai lebarnya, karena ambang yang
 ditulis untuk `double` diam-diam terlalu ketat bagi `float`.
 
-**Keenam library masih memakai `NdArray`.** Memigrasikannya sehingga menjadi `NdArray<double>`
+**Library-library lainnya masih memakai `NdArray`.** Memigrasikannya sehingga menjadi `NdArray<double>`
 adalah perubahan tersendiri; yang ada di sini adalah intinya yang sudah terbukti, diperiksa
 terhadap jalur `double` elemen demi elemen. `Single.SingleKernels` tetap ada sebagai prototipe
 tulisan tangan yang menjadi pembanding versi generik ini.
