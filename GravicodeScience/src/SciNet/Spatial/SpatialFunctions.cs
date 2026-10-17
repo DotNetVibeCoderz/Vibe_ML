@@ -113,4 +113,14 @@ public static class SpatialFunctions
         }
         return new NdArray(result, t.Length, d);
     }
+
+    /// <summary>
+    /// The simplex of <paramref name="tri"/> containing each point of <paramref name="xi"/>, -1
+    /// outside (scipy's <c>tsearch</c>, an alias of <see cref="Delaunay.FindSimplex(NdArray, bool, double?)"/>).
+    /// </summary>
+    public static int[] Tsearch(Delaunay tri, NdArray xi)
+    {
+        ArgumentNullException.ThrowIfNull(tri);
+        return tri.FindSimplex(xi);
+    }
 }

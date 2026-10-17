@@ -35,10 +35,15 @@ public enum ColumnOrdering
 /// </remarks>
 public sealed class SparseLuFactorization : ILinearOperator
 {
-    private readonly int[] _lp, _li, _up, _ui;
-    private readonly double[] _lx, _ux;
-    private readonly int[] _pinv; // original row -> pivot position
-    private readonly int[] _q;    // pivot position -> original column
+    // Either CSC factors (the left-looking reference path) or a supernodal factorisation.
+    private int[] _lp = [], _li = [], _up = [], _ui = [];
+    private double[] _lx = [], _ux = [];
+    private int[] _pinv = []; // original row -> pivot position
+    private int[] _q = [];    // pivot position -> original column
+    private int[] _permC = [];
+    private readonly SupernodalLu? _sn;
+    private readonly object _exportLock = new();
+    private bool _exported;
 
     internal SparseLuFactorization(int n, int[] lp, int[] li, double[] lx, int[] up, int[] ui, double[] ux, int[] pinv, int[] q)
     {
@@ -46,8 +51,18 @@ public sealed class SparseLuFactorization : ILinearOperator
         _lp = lp; _li = li; _lx = lx; _up = up; _ui = ui; _ux = ux; _pinv = pinv; _q = q;
         var permC = new int[n];
         for (var k = 0; k < n; k++) permC[q[k]] = k;
-        PermC = permC;
+        _permC = permC;
+        _exported = true;
     }
+
+    internal SparseLuFactorization(SupernodalLu sn)
+    {
+        N = sn.N;
+        _sn = sn;
+    }
+
+    /// <summary>The supernodal factorisation behind this object, when <see cref="SparseLinalg.Splu"/> produced one.</summary>
+    internal SupernodalLu? Supernodal => _sn;
 
     /// <summary>Order of the factorised matrix.</summary>
     public int N { get; }
@@ -55,20 +70,42 @@ public sealed class SparseLuFactorization : ILinearOperator
     int ILinearOperator.Rows => N;
     int ILinearOperator.Columns => N;
 
+    /// <summary>Converts supernodal storage to CSC factors the first time they are asked for.</summary>
+    private void EnsureCsc()
+    {
+        if (_exported) return;
+        lock (_exportLock)
+        {
+            if (_exported) return;
+            var (permR, permC, l, u) = _sn!.Export();
+            _pinv = permR;
+            _permC = permC;
+            _q = new int[N];
+            for (var j = 0; j < N; j++) _q[permC[j]] = j;
+            _lp = l.Indptr.ToArray(); _li = l.Indices.ToArray(); _lx = l.Data.ToArray();
+            _up = u.Indptr.ToArray(); _ui = u.Indices.ToArray(); _ux = u.Data.ToArray();
+            _exported = true;
+        }
+    }
+
     /// <summary>Unit lower-triangular factor (CSC).</summary>
-    public CscMatrix L => new(_lx, _li, _lp, N, N, copy: true);
+    public CscMatrix L { get { EnsureCsc(); return new(_lx, _li, _lp, N, N, copy: true); } }
 
     /// <summary>Upper-triangular factor (CSC).</summary>
-    public CscMatrix U => new(_ux, _ui, _up, N, N, copy: true);
+    public CscMatrix U { get { EnsureCsc(); return new(_ux, _ui, _up, N, N, copy: true); } }
 
     /// <summary>Row permutation: original row <c>i</c> becomes row <c>PermR[i]</c>.</summary>
-    public int[] PermR => (int[])_pinv.Clone();
+    public int[] PermR { get { EnsureCsc(); return (int[])_pinv.Clone(); } }
 
     /// <summary>Column permutation: original column <c>j</c> becomes column <c>PermC[j]</c>.</summary>
-    public int[] PermC { get; }
+    public int[] PermC { get { EnsureCsc(); return (int[])_permC.Clone(); } }
 
-    /// <summary>Stored entries in L plus U (the fill the ordering is trying to keep down).</summary>
-    public int Nnz => _lp[N] + _up[N];
+    /// <summary>
+    /// Entries in L plus U (the fill the ordering is trying to keep down): the non-zeros of
+    /// <see cref="L"/> and <see cref="U"/>. The supernodal storage also holds explicit zeros from
+    /// supernode amalgamation; those are not counted.
+    /// </summary>
+    public int Nnz => _sn is not null ? (int)Math.Min(int.MaxValue, _sn.NonZeros) : _lp[N] + _up[N];
 
     /// <summary>Solves <c>A x = b</c> (or <c>Aᵀ x = b</c> with <paramref name="transpose"/>).</summary>
     public double[] Solve(ReadOnlySpan<double> b, bool transpose = false)
@@ -100,6 +137,7 @@ public sealed class SparseLuFactorization : ILinearOperator
 
     internal void SolveInto(ReadOnlySpan<double> b, Span<double> x)
     {
+        if (_sn is not null) { _sn.Solve(b, x); return; }
         var c = new double[N];
         for (var i = 0; i < N; i++) c[_pinv[i]] = b[i];
         for (var j = 0; j < N; j++)
@@ -121,6 +159,7 @@ public sealed class SparseLuFactorization : ILinearOperator
 
     internal void SolveTransposeInto(ReadOnlySpan<double> b, Span<double> x)
     {
+        if (_sn is not null) { _sn.SolveTranspose(b, x); return; }
         var w = new double[N];
         for (var k = 0; k < N; k++) w[k] = b[_q[k]];
         // Uᵀ w' = w: column j of U is row j of Uᵀ.
@@ -242,38 +281,37 @@ public static partial class SparseLinalg
     /// A fill-reducing column permutation <c>q</c> (<c>q[k]</c> = original column eliminated k-th).
     /// </summary>
     /// <remarks>
-    /// Minimum degree on a quotient graph in the spirit of AMD (Amestoy, Davis &amp; Duff 1996):
-    /// eliminated nodes become elements that absorb their neighbours' elements, so the graph never
-    /// grows. Degrees use the cruder bound <c>|Aᵢ| + Σ|Lₑ|</c> and there is no supervariable
-    /// detection or aggressive absorption, so this is slower than AMD on large meshes and its
-    /// orderings differ from SuperLU's in detail. Ties go to the lowest index, so it is deterministic.
+    /// Approximate minimum degree (Amestoy, Davis &amp; Duff 1996) with aggressive absorption,
+    /// supervariables and dense-row removal, on the pattern the option names: <c>A + Aᵀ</c>, or
+    /// <c>AᵀA</c> (rows denser than <c>10√n</c> dropped first, as COLAMD does). COLAMD itself is
+    /// not ported; <see cref="ColumnOrdering.Colamd"/> orders <c>AᵀA</c>, or <c>A + Aᵀ</c> when the
+    /// pattern is symmetric. Deterministic.
     /// </remarks>
     public static int[] ColumnPermutation(SparseMatrixBase a, ColumnOrdering ordering)
     {
         var n = a.Columns;
-        if (ordering == ColumnOrdering.Natural) { var id = new int[n]; for (var i = 0; i < n; i++) id[i] = i; return id; }
-        var csr = a.ToCsr();
+        if (ordering == ColumnOrdering.Natural) return Identity(n);
+        var csr = a.ToCsr().SumDuplicates();
         // Colamd on a structurally symmetric matrix: order A + Aᵀ instead. Measured on the
         // 100×100 Poisson matrix, the AᵀA ordering gave 2.6× the fill of the A + Aᵀ one
         // (1.39M vs 0.54M entries in L + U; SuperLU's COLAMD gives 0.65M) — squaring the pattern
         // is the wrong graph when the matrix is already symmetric.
         if (ordering == ColumnOrdering.Colamd && a.Rows == a.Columns && IsPatternSymmetric(csr)) ordering = ColumnOrdering.MmdAtPlusA;
-        // Symmetric pattern on the columns.
-        var adj = new HashSet<int>[n];
-        for (var j = 0; j < n; j++) adj[j] = [];
         if (ordering == ColumnOrdering.MmdAtPlusA)
         {
             if (a.Rows != a.Columns) throw new ArgumentException("MmdAtPlusA needs a square matrix.");
-            foreach (var (i, j, _) in csr.EnumerateEntries())
-                if (i != j) { adj[i].Add(j); adj[j].Add(i); }
+            var (sp, si) = SparseAmd.SymmetricPattern(n, csr.Indptr, csr.Indices);
+            return SparseAmd.Order(n, sp, si);
         }
-        else
-        {
-            // Columns sharing a row are adjacent in AᵀA: each row is a clique, which is exactly an
-            // "element" in the quotient graph. Seeding rows as elements avoids forming AᵀA.
-            return MinimumDegree(n, csr);
-        }
-        return MinimumDegree(n, adj, null);
+        var (tp, ti) = SparseAmd.AtAPattern(a.Rows, n, csr.Indptr, csr.Indices);
+        return SparseAmd.Order(n, tp, ti);
+    }
+
+    private static int[] Identity(int n)
+    {
+        var id = new int[n];
+        for (var i = 0; i < n; i++) id[i] = i;
+        return id;
     }
 
     private static bool IsPatternSymmetric(CsrMatrix a)
@@ -284,109 +322,59 @@ public static partial class SparseLinalg
         return c.Indptr.SequenceEqual(t.Indptr) && c.Indices.SequenceEqual(t.Indices);
     }
 
-    private static int[] MinimumDegree(int n, CsrMatrix rowsAsElements)
+    /// <summary>
+    /// A maximum transversal (Duff's MC21: depth-first augmenting paths after a cheap-assignment
+    /// pass; the structure of CSparse <c>cs_maxtrans</c>) on the non-zero entries. Returns
+    /// <c>rowOf[j]</c>, the row matched to column j, or null when the matrix is structurally singular.
+    /// </summary>
+    internal static int[]? MaxTransversal(int n, int[] ap, int[] ai, double[] ax)
     {
-        var adj = new HashSet<int>[n];
-        for (var j = 0; j < n; j++) adj[j] = [];
-        var elements = new List<int[]>();
-        var c = rowsAsElements.SumDuplicates();
-        for (var i = 0; i < c.Rows; i++)
-        {
-            var len = c.Indptr[i + 1] - c.Indptr[i];
-            if (len == 0) continue;
-            if (len == 2)
-            {
-                int u = c.Indices[c.Indptr[i]], v = c.Indices[c.Indptr[i] + 1];
-                adj[u].Add(v); adj[v].Add(u);
-                continue;
-            }
-            if (len > 2) elements.Add(c.Indices.Slice(c.Indptr[i], len).ToArray());
-        }
-        return MinimumDegree(n, adj, elements);
-    }
-
-    private static int[] MinimumDegree(int n, HashSet<int>[] adj, List<int[]>? initialElements)
-    {
-        // Elements are numbered n.. for initial ones; an eliminated variable p becomes element p.
-        var elemMembers = new Dictionary<int, int[]>();
-        var varElems = new List<int>[n];
-        for (var i = 0; i < n; i++) varElems[i] = [];
-        var nextId = n;
-        if (initialElements is not null)
-            foreach (var e in initialElements)
-            {
-                var id = nextId++;
-                elemMembers[id] = e;
-                foreach (var v in e) varElems[v].Add(id);
-            }
-        var absorbed = new HashSet<int>();
-        var eliminated = new bool[n];
-        var degree = new int[n];
-        var mark = new int[n];
-        var stamp = 0;
-        int ExternalDegree(int i)
-        {
-            stamp++;
-            mark[i] = stamp;
-            var d = 0;
-            foreach (var j in adj[i]) if (mark[j] != stamp) { mark[j] = stamp; d++; }
-            foreach (var e in varElems[i])
-                foreach (var j in elemMembers[e])
-                    if (mark[j] != stamp) { mark[j] = stamp; d++; }
-            return d;
-        }
-        // Exact external degree while elements are small; bounded otherwise.
-        int Degree(int i, int live)
-        {
-            var bound = adj[i].Count;
-            foreach (var e in varElems[i]) bound += elemMembers[e].Length - 1;
-            return bound <= 64 ? ExternalDegree(i) : Math.Min(bound, live - 1);
-        }
-        var pq = new PriorityQueue<int, (int, int)>();
-        for (var i = 0; i < n; i++) { degree[i] = Degree(i, n); pq.Enqueue(i, (degree[i], i)); }
-        var order = new int[n];
-        var lp = new List<int>();
+        var jmatch = new int[n]; // row -> column
+        Array.Fill(jmatch, -1);
+        var cheap = new int[n];
+        Array.Copy(ap, cheap, n);
+        var visited = new int[n];
+        Array.Fill(visited, -1);
+        var js = new int[n]; var isr = new int[n]; var ps = new int[n];
         for (var k = 0; k < n; k++)
         {
-            int p;
-            while (true)
+            var head = 0;
+            js[0] = k;
+            var found = false;
+            while (head >= 0)
             {
-                pq.TryDequeue(out p, out var pri);
-                if (!eliminated[p] && pri.Item1 == degree[p]) break;
+                var j = js[head];
+                if (visited[j] != k)
+                {
+                    visited[j] = k;
+                    var p = cheap[j];
+                    for (; p < ap[j + 1]; p++)
+                    {
+                        var i = ai[p];
+                        if (ax[p] != 0 && jmatch[i] == -1) { found = true; isr[head] = i; break; }
+                    }
+                    cheap[j] = found ? p + 1 : p;
+                    if (found) break;
+                    ps[head] = ap[j];
+                }
+                var q = ps[head];
+                for (; q < ap[j + 1]; q++)
+                {
+                    var i = ai[q];
+                    if (ax[q] == 0 || jmatch[i] < 0 || visited[jmatch[i]] == k) continue;
+                    ps[head] = q + 1;
+                    isr[head] = i;
+                    js[++head] = jmatch[i];
+                    break;
+                }
+                if (q == ap[j + 1]) head--;
             }
-            order[k] = p;
-            eliminated[p] = true;
-            // Lp = adj(p) ∪ members of p's elements, minus p.
-            stamp++;
-            mark[p] = stamp;
-            lp.Clear();
-            foreach (var j in adj[p]) if (!eliminated[j] && mark[j] != stamp) { mark[j] = stamp; lp.Add(j); }
-            foreach (var e in varElems[p])
-            {
-                foreach (var j in elemMembers[e]) if (!eliminated[j] && mark[j] != stamp) { mark[j] = stamp; lp.Add(j); }
-                absorbed.Add(e);
-                elemMembers.Remove(e);
-            }
-            var lpStamp = stamp;
-            var members = lp.ToArray();
-            elemMembers[p] = members;
-            adj[p].Clear();
-            varElems[p].Clear();
-            foreach (var i in members)
-            {
-                adj[i].RemoveWhere(j => j == p || (j < n && mark[j] == lpStamp));
-                varElems[i].RemoveAll(absorbed.Contains);
-                varElems[i].Add(p);
-            }
-            absorbed.Clear();
-            var live = n - k - 1;
-            foreach (var i in members)
-            {
-                degree[i] = Degree(i, live);
-                pq.Enqueue(i, (degree[i], i));
-            }
+            if (!found) return null;
+            for (var p = head; p >= 0; p--) jmatch[isr[p]] = js[p];
         }
-        return order;
+        var rowOf = new int[n];
+        for (var i = 0; i < n; i++) rowOf[jmatch[i]] = i;
+        return rowOf;
     }
 
     // ------------------------------------------------------------------ sparse LU
@@ -400,17 +388,79 @@ public static partial class SparseLinalg
     /// Threshold partial pivoting: the diagonal entry is kept as pivot when
     /// <c>|a_diag| ≥ thresh · max|column|</c>. 1.0 (default) is plain partial pivoting with ties
     /// going to the diagonal; smaller values preserve sparsity at some cost in stability; 0 always
-    /// takes the diagonal when it is non-zero.
+    /// takes the diagonal when it is non-zero. Every multiplier in L is bounded by <c>1/thresh</c>.
     /// </param>
     /// <remarks>
-    /// Left-looking Gilbert–Peierls: column <c>k</c> of <c>L</c> and <c>U</c> comes from one sparse
-    /// triangular solve <c>L x = A(:, q[k])</c>, whose non-zero pattern is found first by a
-    /// depth-first search of <c>L</c>'s graph, so the work is proportional to flops, not to n
-    /// (Gilbert &amp; Peierls 1988; the structure follows Davis's CSparse <c>cs_lu</c>). No
-    /// supernodes, so it is slower than SuperLU on large 3-D problems; the factors are exact up to
-    /// rounding either way. Throws if the matrix is structurally or numerically singular.
+    /// <para>Multifrontal (Duff &amp; Reid 1983; the unsymmetric scheme of MUMPS): the symbolic
+    /// analysis runs on <c>A + Aᵀ</c> under the fill-reducing order — elimination tree, postorder,
+    /// column counts, supernodes with relaxed amalgamation — and each supernode is factorised as a
+    /// dense front with blocked GEMM updates. Pivots that fail the threshold test against their
+    /// whole front column are delayed to the parent front, so the pivot sequence is still chosen
+    /// numerically. A zero-free diagonal is first established by a maximum transversal when the
+    /// diagonal has zeros.</para>
+    /// <para><see cref="ColumnOrdering.MmdAtPlusA"/> and <see cref="ColumnOrdering.Colamd"/> both
+    /// order <c>A + Aᵀ</c> (after the transversal) here, because that is the graph whose fill a
+    /// multifrontal method pays for; <see cref="ColumnOrdering.MmdAtA"/> orders <c>AᵀA</c>. Fill is
+    /// comparable to SuperLU's, not identical. Throws if the matrix is structurally or numerically
+    /// singular. The left-looking Gilbert–Peierls factorisation this replaced is kept internally as
+    /// the reference the tests compare against.</para>
     /// </remarks>
     public static SparseLuFactorization Splu(SparseMatrixBase a, ColumnOrdering permcSpec = ColumnOrdering.Colamd, double diagPivotThresh = 1.0)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        if (a.Rows != a.Columns) throw new ArgumentException($"Splu needs a square matrix, got {a.Rows}x{a.Columns}.");
+        if (diagPivotThresh < 0 || diagPivotThresh > 1) throw new ArgumentException("diagPivotThresh must be in [0, 1].");
+        var n = a.Rows;
+        var csc = a.ToCsc().SumDuplicates();
+        int[] ap = csc.Indptr.ToArray(), ai = csc.Indices.ToArray();
+        var ax = csc.Data.ToArray();
+
+        // Zero-free diagonal: the symmetric analysis must see every pivot's own entry.
+        var rowOf = Identity(n);
+        var zeroDiag = false;
+        for (var j = 0; j < n && !zeroDiag; j++)
+        {
+            var ok = false;
+            for (var p = ap[j]; p < ap[j + 1]; p++) if (ai[p] == j && ax[p] != 0) { ok = true; break; }
+            zeroDiag = !ok;
+        }
+        if (zeroDiag)
+            rowOf = MaxTransversal(n, ap, ai, ax) ?? throw new InvalidOperationException("Splu: matrix is structurally singular.");
+
+        // Pattern of the row-permuted matrix (row rowOf[j] moves to position j).
+        var posOfRow = new int[n];
+        for (var j = 0; j < n; j++) posOfRow[rowOf[j]] = j;
+        var a1i = new int[ai.Length];
+        for (var p = 0; p < ai.Length; p++) a1i[p] = posOfRow[ai[p]];
+        var (sp, si) = SparseAmd.SymmetricPattern(n, ap, a1i);
+        int[] order;
+        switch (permcSpec)
+        {
+            case ColumnOrdering.Natural: order = Identity(n); break;
+            case ColumnOrdering.MmdAtA:
+            {
+                var csr = csc.ToCsr();
+                var (tp, ti) = SparseAmd.AtAPattern(n, n, csr.Indptr, csr.Indices);
+                order = SparseAmd.Order(n, tp, ti);
+                break;
+            }
+            default: order = SparseAmd.Order(n, sp, si); break;
+        }
+        var sym = SparseSymbolic.Analyze(n, sp, si, order);
+        return new SparseLuFactorization(SupernodalLu.Factor(n, ap, ai, ax, rowOf, sym, diagPivotThresh));
+    }
+
+    /// <summary>
+    /// The left-looking Gilbert–Peierls LU that <see cref="Splu"/> used before the multifrontal
+    /// rewrite — kept as an independent reference: same contract, entirely different algorithm.
+    /// </summary>
+    /// <remarks>
+    /// Column <c>k</c> of <c>L</c> and <c>U</c> comes from one sparse triangular solve
+    /// <c>L x = A(:, q[k])</c>, whose non-zero pattern is found first by a depth-first search of
+    /// <c>L</c>'s graph, so the work is proportional to flops, not to n (Gilbert &amp; Peierls 1988;
+    /// the structure follows Davis's CSparse <c>cs_lu</c>). No supernodes: several times slower.
+    /// </remarks>
+    internal static SparseLuFactorization SpluGilbertPeierls(SparseMatrixBase a, ColumnOrdering permcSpec = ColumnOrdering.Colamd, double diagPivotThresh = 1.0)
     {
         ArgumentNullException.ThrowIfNull(a);
         if (a.Rows != a.Columns) throw new ArgumentException($"Splu needs a square matrix, got {a.Rows}x{a.Columns}.");

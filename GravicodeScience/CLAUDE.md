@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 v0.1.0 is implemented and complete against `requirements.md`, and a seventh library, **SciNet**
-(SciPy for .NET), has been added beside the original six: 28 projects, **2,699 tests passing**
-(1,640 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
+(SciPy for .NET), has been added beside the original six: 28 projects, **3,257 tests passing**
+(2,198 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
 suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -294,6 +294,41 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
   sample-by-sample sosfilt loop) stay internal and the tests check the fast paths against them.
 - **`CriticalFrequencies` has a `CollectionBuilder`**, so `Signal.Butter(4, [5.0, 50.0],
   FilterType.Bandpass)` compiles. Without it the most natural C# spelling of a band did not.
+- **libm differs between Linux and Windows in the last bit, and CI runs both.** glibc's `cbrt`
+  returns -3.0000000000000004 for -27 and Windows' is 2-3 ulps off elsewhere, so `Special.Cbrt`
+  adds a Newton step. Never assert exact equality on anything through `Math.Exp/Log/Pow/Cbrt`;
+  chaotic or stiff ODE end values move by ~1e-3 between platforms at default tolerances.
+- **Warm up by time, not only by count.** Forty short calls can all land inside the tier-0
+  call-counting delay; `Vector<T>` span code then ran 30x slower than optimised (1.3 us vs 46 ns).
+  Warm up for 1-2 s before timing a microsecond kernel.
+- **GraviNum `LinAlg.Dot` below its 8M multiply-add packing threshold is slow** (a 200-cube took
+  4.7 ms, a 400-cube 3.4 ms). SciNet's dense kernels use their own `LinalgGemm` (0.3 ms).
+- **Native is not automatically faster.** SciPy's bundled OpenBLAS `dgesv` was 10x slower than the
+  managed recursive LU, so `expm`'s solve stays managed; Schur/Eig route to `dgees`/`dgeev` only
+  because they measured faster. Measure each routine before routing it to LAPACK.
+- **Thick-restart Lanczos must keep the projected matrix exactly arrow + tridiagonal**, and the
+  restart size is ARPACK's k + min(nconv, (m-k)/2). Feeding reorthogonalisation coefficients back
+  in left ε‖A‖ noise and SA never converged; keeping half the basis doubled the matvecs.
+- **The multifrontal pivot test must compare against the whole front column, border rows
+  included**, or the multipliers in L stop being bounded by 1/u. `Nnz` counts non-zeros, not the
+  padded supernode storage.
+- **Every Schur/linkage speed-up kept per-element arithmetic order**, which is why both stayed
+  bit-identical; linkage's Z is pinned against SciPy bit for bit, so keep the Lance-Williams
+  operand order.
+- **trust-constr follows SciPy's path only if x0 is not clipped into the bounds** (the barrier
+  slacks absorb the violation) and the quasi-Newton update runs on rejected trial points too.
+  A truncated-Newton port matches step counts only with a bit-identical gradient: Hessian-vector
+  products divide by ~1e-8.
+- **HDF5: chunk linear indexes use the *maximum* dimensions, not the current ones**; dense
+  attributes over 64 KiB are "huge" fractal-heap objects whose heap ID is a B-tree key, not an
+  address; HDF5 2.0 writes layout message version 5 with `libver='latest'`.
+- **N-d Delaunay lifts with |p-q|², not |p|²-|q|²**, and needs Qhull's extra point above the
+  paraboloid or cospherical input (cube corners) lifts to a flat set. Order 3-D Voronoi ridges by
+  walking the tetrahedra round the edge, not by angle.
+- **mpmath `quad` over infinite ranges is not a trustworthy reference in deep tails** (1e-3
+  relative error at 1e-45), nor is `nsum`'s default on power-law tails. Use closed forms, finite
+  intervals or Euler-Maclaurin. And never place a quadrature break point a few ulps from an
+  endpoint - the degenerate sub-interval cost Landau's CDF 1e-4.
 
 ### ScienceAppGen specifics
 

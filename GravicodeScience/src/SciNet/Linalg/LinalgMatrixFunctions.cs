@@ -44,64 +44,74 @@ public static partial class Linalg
         var data = a.ToArray();
         LinalgKernels.RequireFinite(data, nameof(Expm));
         if (n == 1) return new NdArray([Math.Exp(data[0])], 1, 1);
-        return ExpmCore(new NdArray(data, n, n), data, n);
+        return ExpmCore(data, n);
     }
 
-    private static NdArray ExpmCore(NdArray a, double[] data, int n)
+    private static NdArray ExpmCore(double[] data, int n)
     {
         var triangular = LinalgKernels.IsUpperTriangular(data, n);
         var exact = n < 200;
+        // |A| and ‖A‖₁ feed every ℓ(A, m) test; computed once rather than per degree tried.
+        var abs = new double[data.Length];
+        for (var i = 0; i < abs.Length; i++) abs[i] = Math.Abs(data[i]);
+        var norm1 = LinalgKernels.OneNorm(data, n, n);
 
-        var a2 = LinalgKernels.Mul(a, a);
-        var a4 = LinalgKernels.Mul(a2, a2);
-        var a6 = LinalgKernels.Mul(a2, a4);
-        var d4 = Math.Pow(LinalgKernels.OneNorm(a4), 0.25);
-        var d6 = Math.Pow(LinalgKernels.OneNorm(a6), 1.0 / 6.0);
+        var a2 = LinalgKernels.Mul(data, data, n, n, n);
+        var a4 = LinalgKernels.Mul(a2, a2, n, n, n);
+        var a6 = LinalgKernels.Mul(a2, a4, n, n, n);
+        var d4 = Math.Pow(LinalgKernels.OneNorm(a4, n, n), 0.25);
+        var d6 = Math.Pow(LinalgKernels.OneNorm(a6, n, n), 1.0 / 6.0);
         var eta1 = Math.Max(d4, d6);
 
-        if (eta1 <= 1.495585217958292e-2 && Ell(data, n, 3, 0) == 0)
-            return PadeSolve(a, [a2], Pade3, n, 0, triangular, data);
-        if (eta1 <= 2.539398330063230e-1 && Ell(data, n, 5, 0) == 0)
-            return PadeSolve(a, [a2, a4], Pade5, n, 0, triangular, data);
+        if (eta1 <= 1.495585217958292e-2 && Ell(abs, norm1, n, 3, 0) == 0)
+            return PadeSolve(data, [a2], Pade3, n, triangular);
+        if (eta1 <= 2.539398330063230e-1 && Ell(abs, norm1, n, 5, 0) == 0)
+            return PadeSolve(data, [a2, a4], Pade5, n, triangular);
 
-        var d8 = Math.Pow(exact ? LinalgKernels.OneNorm(LinalgKernels.Mul(a4, a4)) : PowerNormEstimate(a, 8), 1.0 / 8.0);
+        // A⁸ is kept when it was formed exactly: degree 9 needs it as a term.
+        var a8 = exact ? LinalgKernels.Mul(a4, a4, n, n, n) : null;
+        var d8 = Math.Pow(a8 is not null ? LinalgKernels.OneNorm(a8, n, n) : PowerNormEstimate(n, a4, a4), 1.0 / 8.0);
         var eta3 = Math.Max(d6, d8);
-        if (eta3 <= 9.504178996162932e-1 && Ell(data, n, 7, 0) == 0)
-            return PadeSolve(a, [a2, a4, a6], Pade7, n, 0, triangular, data);
-        if (eta3 <= 2.097847961257068 && Ell(data, n, 9, 0) == 0)
-            return PadeSolve(a, [a2, a4, a6, LinalgKernels.Mul(a4, a4)], Pade9, n, 0, triangular, data);
+        if (eta3 <= 9.504178996162932e-1 && Ell(abs, norm1, n, 7, 0) == 0)
+            return PadeSolve(data, [a2, a4, a6], Pade7, n, triangular);
+        if (eta3 <= 2.097847961257068 && Ell(abs, norm1, n, 9, 0) == 0)
+            return PadeSolve(data, [a2, a4, a6, a8 ?? LinalgKernels.Mul(a4, a4, n, n, n)], Pade9, n, triangular);
 
-        var d10 = Math.Pow(exact ? LinalgKernels.OneNorm(LinalgKernels.Mul(a4, a6)) : PowerNormEstimate(a, 10), 0.1);
+        var d10 = Math.Pow(exact ? LinalgKernels.OneNorm(LinalgKernels.Mul(a4, a6, n, n, n), n, n) : PowerNormEstimate(n, a4, a6), 0.1);
         var eta4 = Math.Max(d8, d10);
         var eta5 = Math.Min(eta3, eta4);
         const double theta13 = 4.25;
         var s = eta5 == 0 ? 0 : Math.Max((int)Math.Ceiling(Math.Log2(eta5 / theta13)), 0);
-        s += Ell(data, n, 13, s);
+        s += Ell(abs, norm1, n, 13, s);
         if (s > 1000) throw new LinalgException("Expm: scaling exponent overflow; the matrix norm is too large.");
 
-        var scale = Math.Pow(2.0, -s);
-        var asc = Scaled(a, scale);
-        var a2s = Scaled(a2, scale * scale);
-        var a4s = Scaled(a4, Math.Pow(scale, 4));
-        var a6s = Scaled(a6, Math.Pow(scale, 6));
+        // The scaling 2^-s is folded into the Padé coefficients and the products' alpha instead of
+        // copying four scaled matrices: a power of two scales exactly, so the result is the same.
+        var c1 = Math.Pow(2.0, -s);
+        var c2 = c1 * c1;
+        var c4 = c2 * c2;
+        var c6 = c4 * c2;
         var b = Pade13;
-        var ident = NdArray.Eye(n);
-
-        var w1 = Lin(b[13], a6s, b[11], a4s, b[9], a2s);
-        var w2 = Lin(b[7], a6s, b[5], a4s, b[3], a2s);
-        LinalgKernels.AddDiagonal(w2.AsSpan(), n, b[1]);
-        var z1 = Lin(b[12], a6s, b[10], a4s, b[8], a2s);
-        var z2 = Lin(b[6], a6s, b[4], a4s, b[2], a2s);
-        LinalgKernels.AddDiagonal(z2.AsSpan(), n, b[0]);
-        var w = LinalgKernels.Combine(1.0, LinalgKernels.Mul(a6s, w1), 1.0, w2);
-        var u = LinalgKernels.Mul(asc, w);
-        var v = LinalgKernels.Combine(1.0, LinalgKernels.Mul(a6s, z1), 1.0, z2);
-        _ = ident;
-        var r = SolvePq(u, v, n);
-        return Square(r, s, n, triangular, data);
+        var w1 = Lin3(b[13] * c6, a6, b[11] * c4, a4, b[9] * c2, a2);
+        var w2 = Lin3(b[7] * c6, a6, b[5] * c4, a4, b[3] * c2, a2);
+        LinalgKernels.AddDiagonal(w2, n, b[1]);
+        var z1 = Lin3(b[12] * c6, a6, b[10] * c4, a4, b[8] * c2, a2);
+        var v = Lin3(b[6] * c6, a6, b[4] * c4, a4, b[2] * c2, a2);
+        LinalgKernels.AddDiagonal(v, n, b[0]);
+        var u = new double[n * n];
+        unsafe
+        {
+            fixed (double* p6 = a6, pw1 = w1, pw2 = w2, pz1 = z1, pv = v, pa = data, pu = u)
+            {
+                LinalgGemm.Gemm(n, n, n, c6, p6, n, pw1, n, 1.0, pw2, n);   // W = A6s W1 + W2
+                LinalgGemm.Gemm(n, n, n, c1, pa, n, pw2, n, 0.0, pu, n);    // U = As W
+                LinalgGemm.Gemm(n, n, n, c6, p6, n, pz1, n, 1.0, pv, n);    // V = A6s Z1 + Z2
+            }
+        }
+        return Square(SolvePq(u, v, n), s, n, triangular, data);
     }
 
-    private static NdArray PadeSolve(NdArray a, NdArray[] evenPowers, double[] b, int n, int s, bool triangular, double[] data)
+    private static NdArray PadeSolve(double[] a, double[][] evenPowers, double[] b, int n, bool triangular)
     {
         // U = A * sum b_{2k+1} A^{2k}, V = sum b_{2k} A^{2k}.
         var uInner = new double[n * n];
@@ -110,32 +120,44 @@ public static partial class Linalg
         LinalgKernels.AddDiagonal(v, n, b[0]);
         for (var k = 0; k < evenPowers.Length; k++)
         {
-            var p = evenPowers[k].AsContiguous().AsSpan();
-            LinAlg.AxpySpan(b[2 * k + 3], p, uInner);
-            LinAlg.AxpySpan(b[2 * k + 2], p, v);
+            LinAlg.AxpySpan(b[2 * k + 3], evenPowers[k], uInner);
+            LinAlg.AxpySpan(b[2 * k + 2], evenPowers[k], v);
         }
-        var u = LinalgKernels.Mul(a, new NdArray(uInner, n, n));
-        var r = SolvePq(u, new NdArray(v, n, n), n);
-        return Square(r, s, n, triangular, data);
+        var u = LinalgKernels.Mul(a, uInner, n, n, n);
+        return Square(SolvePq(u, v, n), 0, n, triangular, a);
     }
 
-    /// <summary>R = (V - U)⁻¹ (V + U).</summary>
-    private static NdArray SolvePq(NdArray u, NdArray v, int n)
+    /// <summary>R = (V - U)⁻¹ (V + U), overwriting both buffers; returns R.</summary>
+    private static double[] SolvePq(double[] u, double[] v, int n)
     {
-        var q = LinalgKernels.Combine(-1.0, u, 1.0, v);
-        var p = LinalgKernels.Combine(1.0, u, 1.0, v);
-        return Solve(q, p, LinalgMatrixStructure.General);
+        // Q = V - U into u's buffer, P = V + U into v's.
+        for (var i = 0; i < u.Length; i++)
+        {
+            var ui = u[i];
+            var vi = v[i];
+            u[i] = vi - ui;
+            v[i] = vi + ui;
+        }
+        LinalgKernels.RequireFinite(u, nameof(Solve));
+        // Deliberately managed even when a LAPACK is installed: numpy/scipy's OpenBLAS dgesv
+        // measured 60 ms against 7 ms for this LU + blocked solve at n = 400 (row-major LAPACKE
+        // transposes in and out, and its threads compete with .NET's pool).
+        var swaps = new int[n];
+        var zero = LinalgKernels.LuInPlace(u, n, swaps);
+        if (zero >= 0) throw new LinalgSingularMatrixException($"Solve: matrix is exactly singular (zero pivot at {zero}).");
+        LinalgKernels.LuSolveInPlace(u, swaps, n, v, n, transpose: false);
+        return v;
     }
 
-    private static NdArray Square(NdArray r, int s, int n, bool triangular, double[] t)
+    private static NdArray Square(double[] r, int s, int n, bool triangular, double[] t)
     {
-        if (triangular) FixTriangular(r.AsSpan(), t, n, Math.Pow(2.0, -s));
+        if (triangular) FixTriangular(r, t, n, Math.Pow(2.0, -s));
         for (var i = s - 1; i >= 0; i--)
         {
-            r = LinalgKernels.Mul(r, r);
-            if (triangular) FixTriangular(r.AsSpan(), t, n, Math.Pow(2.0, -i));
+            r = LinalgKernels.Mul(r, r, n, n, n);
+            if (triangular) FixTriangular(r, t, n, Math.Pow(2.0, -i));
         }
-        return r;
+        return new NdArray(r, n, n);
     }
 
     /// <summary>Exact diagonal and superdiagonal of exp(scale·T) for upper-triangular T (Higham eq. 10.42).</summary>
@@ -158,7 +180,12 @@ public static partial class Linalg
     /// Padé backward-error bound holds, from the exact 1-norm of |A|^{2m+1} (a non-negative
     /// matrix, whose 1-norm is the largest entry of 1ᵀ|A|^{2m+1} — n² work per power).
     /// </summary>
-    private static int Ell(double[] a, int n, int m, int s)
+    /// <param name="abs">|A| element-wise, row-major.</param>
+    /// <param name="norm1">‖A‖₁.</param>
+    /// <param name="n">Order.</param>
+    /// <param name="m">Padé degree.</param>
+    /// <param name="s">Squarings already chosen.</param>
+    private static unsafe int Ell(double[] abs, double norm1, int n, int m, int s)
     {
         double c = m switch
         {
@@ -168,51 +195,78 @@ public static partial class Linalg
             9 => 5914384781877410214400.0,
             _ => 113250775606021113483283660800000000.0,
         };
+        if (norm1 == 0.0) return 0;
         var p = 2 * m + 1;
         var v = new double[n];
         Array.Fill(v, 1.0);
         var next = new double[n];
-        var abs = new double[n * n];
-        for (var i = 0; i < abs.Length; i++) abs[i] = Math.Abs(a[i]);
         var logScale = 0.0; // keep v normalised so |A|^27 cannot overflow
-        for (var k = 0; k < p; k++)
+        fixed (double* pa = abs, pn = next)
         {
-            Array.Clear(next);
-            for (var i = 0; i < n; i++)
-                if (v[i] != 0.0) LinAlg.AxpySpan(v[i], abs.AsSpan(i * n, n), next);
-            var mx = 0.0;
-            foreach (var x in next) mx = Math.Max(mx, x);
-            if (mx == 0.0) return 0;
-            for (var i = 0; i < n; i++) v[i] = next[i] / mx;
-            logScale += Math.Log2(mx);
+            for (var k = 0; k < p; k++)
+            {
+                Array.Clear(next);
+                // Four rows per pass over `next`: a quarter of the loads and stores of plain axpys.
+                var i = 0;
+                for (; i + 4 <= n; i += 4)
+                    AbsRowsAccumulate(pa + (long)i * n, n, v[i], v[i + 1], v[i + 2], v[i + 3], pn);
+                for (; i < n; i++)
+                    if (v[i] != 0.0) LinalgBlocked.Axpy(v[i], pa + (long)i * n, pn, n);
+                var mx = 0.0;
+                foreach (var x in next) mx = Math.Max(mx, x);
+                if (mx == 0.0) return 0;
+                for (var q = 0; q < n; q++) v[q] = next[q] / mx;
+                logScale += Math.Log2(mx);
+            }
         }
-        var norm1 = LinalgKernels.OneNorm(a, n, n);
-        if (norm1 == 0.0) return 0;
         // log2(alpha) with alpha = ||2^-s|A||^p||_1 / (||2^-s A||_1 * c)
         var log2Alpha = logScale - p * s - (Math.Log2(norm1) - s) - Math.Log2(c);
         var value = (int)Math.Ceiling((log2Alpha + 53.0) / (2.0 * m));
         return Math.Max(value, 0);
     }
 
-    /// <summary>Hager/Higham lower-bound estimate of ‖Aᵖ‖₁ using only matrix-vector products.</summary>
-    private static double PowerNormEstimate(NdArray a, int p)
+    /// <summary><c>y += v0 r0 + v1 r1 + v2 r2 + v3 r3</c> for four consecutive rows of stride n.</summary>
+    private static unsafe void AbsRowsAccumulate(double* r0, int n, double v0, double v1, double v2, double v3, double* y)
     {
-        var n = a.Shape[0];
-        var data = a.AsContiguous().AsSpan().ToArray();
-        double[] Apply(double[] x, bool transpose)
+        var r1 = r0 + n; var r2 = r1 + n; var r3 = r2 + n;
+        var w0 = System.Runtime.Intrinsics.Vector256.Create(v0);
+        var w1 = System.Runtime.Intrinsics.Vector256.Create(v1);
+        var w2 = System.Runtime.Intrinsics.Vector256.Create(v2);
+        var w3 = System.Runtime.Intrinsics.Vector256.Create(v3);
+        var j = 0;
+        for (; j <= n - 4; j += 4)
         {
-            var y = x;
-            for (var k = 0; k < p; k++)
-            {
-                var z = new double[n];
-                if (!transpose)
-                    for (var i = 0; i < n; i++) z[i] = LinAlg.InnerSpan(data.AsSpan(i * n, n), y);
-                else
-                    for (var i = 0; i < n; i++) if (y[i] != 0.0) LinAlg.AxpySpan(y[i], data.AsSpan(i * n, n), z);
-                y = z;
-            }
-            return y;
+            var acc = System.Runtime.Intrinsics.Vector256.Load(y + j)
+                + w0 * System.Runtime.Intrinsics.Vector256.Load(r0 + j)
+                + w1 * System.Runtime.Intrinsics.Vector256.Load(r1 + j)
+                + w2 * System.Runtime.Intrinsics.Vector256.Load(r2 + j)
+                + w3 * System.Runtime.Intrinsics.Vector256.Load(r3 + j);
+            System.Runtime.Intrinsics.Vector256.Store(acc, y + j);
         }
+        for (; j < n; j++) y[j] += v0 * r0[j] + v1 * r1[j] + v2 * r2[j] + v3 * r3[j];
+    }
+
+    /// <summary>
+    /// Hager/Higham lower-bound estimate of ‖F₁F₂‖₁ for two commuting powers of A (A⁸ = A⁴A⁴,
+    /// A¹⁰ = A⁴A⁶), using only matrix-vector products.
+    /// </summary>
+    /// <remarks>
+    /// Applying the already-formed powers costs two matrix-vector products per application instead
+    /// of p products with A itself: the estimate is of the same matrix, four to five times cheaper.
+    /// </remarks>
+    private static double PowerNormEstimate(int n, double[] f1, double[] f2)
+    {
+        double[] MatVec(double[] m, double[] x, bool transpose)
+        {
+            var z = new double[n];
+            if (!transpose)
+                for (var i = 0; i < n; i++) z[i] = LinAlg.InnerSpan(m.AsSpan(i * n, n), x);
+            else
+                for (var i = 0; i < n; i++) if (x[i] != 0.0) LinAlg.AxpySpan(x[i], m.AsSpan(i * n, n), z);
+            return z;
+        }
+        double[] Apply(double[] x, bool transpose)
+            => transpose ? MatVec(f2, MatVec(f1, x, true), true) : MatVec(f1, MatVec(f2, x, false), false);
 
         var xv = new double[n];
         Array.Fill(xv, 1.0 / n);
@@ -243,6 +297,13 @@ public static partial class Linalg
         foreach (var t in ya) altEst += Math.Abs(t);
         altEst = 2.0 * altEst / (3.0 * n);
         return Math.Max(est, altEst);
+    }
+
+    private static double[] Lin3(double c1, double[] x1, double c2, double[] x2, double c3, double[] x3)
+    {
+        var r = new double[x1.Length];
+        for (var i = 0; i < r.Length; i++) r[i] = c1 * x1[i] + c2 * x2[i] + c3 * x3[i];
+        return r;
     }
 
     private static NdArray Scaled(NdArray a, double f)

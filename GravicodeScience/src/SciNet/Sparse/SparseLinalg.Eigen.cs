@@ -106,12 +106,15 @@ public static partial class SparseLinalg
     /// <param name="returnEigenvectors">Also compute eigenvectors.</param>
     /// <param name="opInv">Explicit <c>(A − σI)⁻¹</c> for operators that are not sparse matrices.</param>
     /// <remarks>
-    /// Thick-restart Lanczos (Wu &amp; Simon 2000), equivalently Krylov–Schur for symmetric
-    /// matrices, with full classical Gram–Schmidt reorthogonalisation applied twice. Full
-    /// reorthogonalisation costs O(n·ncv) per step but removes the ghost eigenvalues of plain
-    /// Lanczos, which is what makes the result trustworthy without ARPACK's selective schemes.
-    /// Convergence uses ARPACK's test <c>‖r‖ ≤ tol·max(ε^{2/3}, |θ|)</c>. When <c>ncv ≥ n</c> the
-    /// problem is solved densely (the Krylov space would be the whole space anyway).
+    /// Thick-restart Lanczos (Wu &amp; Simon 2000) — mathematically the implicitly restarted
+    /// Lanczos of ARPACK with exact shifts — with ARPACK's restart policy (keep the k wanted Ritz
+    /// vectors plus up to half the free space for converged ones) and full reorthogonalisation
+    /// by classical Gram–Schmidt with the DGKS correction, run as blocked level-2 sweeps over the
+    /// basis. The projected matrix is kept exactly arrow + tridiagonal. Convergence uses ARPACK's
+    /// test <c>‖r‖ ≤ tol·max(ε^{2/3}, |θ|)</c>, and every returned pair is re-checked against the
+    /// operator itself. Shift-invert factorises <c>A − σI</c> by sparse Cholesky when σ is below
+    /// the Gershgorin bound of a symmetric A, otherwise by <see cref="Splu"/>. When <c>ncv ≥ n</c>
+    /// the problem is solved densely (the Krylov space would be the whole space anyway).
     /// </remarks>
     public static EigshResult Eigsh(ILinearOperator a, int k = 6, EigshWhich which = EigshWhich.LM, double? sigma = null,
         double[]? v0 = null, int? ncv = null, int? maxiter = null, double tol = 0, bool returnEigenvectors = true, ILinearOperator? opInv = null)
@@ -173,7 +176,33 @@ public static partial class SparseLinalg
         if (a is not SparseMatrixBase s)
             throw new ArgumentException("Shift-invert needs a sparse matrix (to factorise A − σI) or an explicit opInv.");
         var shifted = s.ToCsr().Subtract(SparseMatrices.Identity(s.Rows).Scale(sigma));
+        // Below the Gershgorin bound a symmetric A − σI is positive semi-definite: try the
+        // Cholesky (half the factor work), and fall back to LU if a pivot still fails.
+        if (s.Rows == s.Columns && sigma <= GershgorinLowerBound(s.ToCsr()))
+        {
+            var csc = shifted.ToCsc().SumDuplicates();
+            if (IsNumericallySymmetric(csc, 1e-14))
+            {
+                try { return Cholesky(csc); }
+                catch (SparseNotPositiveDefiniteException) { }
+            }
+        }
         return Splu(shifted);
+    }
+
+    /// <summary><c>min_i (a_ii − Σ_{j≠i} |a_ij|)</c>: no eigenvalue of a symmetric A lies below it.</summary>
+    private static double GershgorinLowerBound(CsrMatrix a)
+    {
+        var lo = double.PositiveInfinity;
+        var ptr = a.Indptr; var idx = a.Indices; var val = a.Data;
+        for (var i = 0; i < a.Rows; i++)
+        {
+            double d = 0, off = 0;
+            for (var p = ptr[i]; p < ptr[i + 1]; p++)
+                if (idx[p] == i) d += val[p]; else off += Math.Abs(val[p]);
+            lo = Math.Min(lo, d - off);
+        }
+        return lo;
     }
 
     /// <summary>Indices of the values ordered from most to least wanted.</summary>
@@ -224,52 +253,68 @@ public static partial class SparseLinalg
     }
 
     /// <summary>
-    /// Orthogonalises <paramref name="w"/> against columns 0..<paramref name="count"/>−1 of the row-major
-    /// basis <paramref name="v"/> (each basis vector contiguous), twice, accumulating the coefficients.
+    /// Orthogonalises <paramref name="w"/> against rows 0..<paramref name="count"/>−1 of the basis
+    /// (CGS with the DGKS correction), accumulating the coefficients. Returns ‖w‖ afterwards.
     /// </summary>
-    private static void Orthogonalize(double[] v, int n, int count, double[] w, Span<double> coef)
-    {
-        coef.Slice(0, count).Clear();
-        for (var pass = 0; pass < 2; pass++)
-            for (var i = 0; i < count; i++)
-            {
-                var vi = v.AsSpan(i * n, n);
-                var c = Dot(vi, w);
-                coef[i] += c;
-                Axpy(-c, vi, w);
-            }
-    }
+    private static double Orthogonalize(double[] v, int n, int count, Span<double> w, Span<double> coef, Span<double> scratch, double norm0)
+        => SparseKrylovKernels.Orthogonalize(v, n, count, w, coef, scratch, norm0);
 
-    /// <summary>A unit vector orthogonal to the basis, used when the Krylov space becomes invariant.</summary>
-    private static double[] FreshDirection(double[] v, int n, int count, GraviRandom rng)
+    /// <summary>
+    /// A unit vector orthogonal to the basis, written to row <paramref name="count"/>: used when the
+    /// Krylov space becomes invariant (β = 0), so the iteration can continue in a fresh direction.
+    /// </summary>
+    private static void FreshDirection(double[] v, int n, int count, GraviRandom rng, Span<double> coef, Span<double> scratch)
     {
-        var coef = new double[count];
+        var w = v.AsSpan(count * n, n);
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            var w = new double[n];
             for (var i = 0; i < n; i++) w[i] = rng.Uniform(-1, 1);
-            Orthogonalize(v, n, count, w, coef);
-            var nw = Nrm2(w);
-            if (nw > 1e-8)
+            var n0 = SparseKrylovKernels.Norm(w);
+            var nw = Orthogonalize(v, n, count, w, coef, scratch, n0);
+            if (nw > 1e-8 * n0)
             {
                 ScaleInPlace(w, 1 / nw);
-                return w;
+                return;
             }
         }
         throw new InvalidOperationException("Could not extend the Krylov basis: the space is exhausted.");
+    }
+
+    /// <summary>
+    /// ARPACK's choice of how many Ritz vectors to keep at a restart (<c>dsaup2</c>/<c>dnaup2</c>):
+    /// the k wanted plus up to half the free space for those already converged, so the next
+    /// cycle builds many new vectors rather than few. Keeping half the basis every time (as this
+    /// code once did) costs ~2× the operator applications on a clustered spectrum.
+    /// </summary>
+    private static int RestartSize(int k, int m, int converged)
+    {
+        var keep = k + Math.Min(converged, (m - k) / 2);
+        if (keep == 1) keep = m >= 6 ? m / 2 : 2;
+        return Math.Min(keep, m - 1);
     }
 
     private static (double[] Theta, double[] Vecs, int Restarts, int MatVecs) ThickRestartLanczos(
         ILinearOperator op, int n, int k, int m, EigshWhich which, double[]? v0, int maxRestarts, double tol, bool wantVectors)
     {
         var v = new double[(m + 1) * n];
+        var alt = new double[(m + 1) * n];
         var start = StartVector(n, v0);
         var s0 = Nrm2(start);
         if (s0 == 0) throw new ArgumentException("v0 must be non-zero.");
         for (var i = 0; i < n; i++) v[i] = start[i] / s0;
-        var h = new double[(m + 1) * m]; // row-major (m+1)×m
+        // The projected matrix is kept exactly arrow + tridiagonal: diag(θ) for the kept Ritz
+        // vectors, their couplings to the residual direction, then the Lanczos α/β. The other
+        // Gram–Schmidt coefficients are reorthogonalisation corrections and are discarded, as in
+        // ARPACK and TRLan: folding them back in puts O(ε‖A‖) noise into the couplings, and then
+        // the residual bound of a small eigenvalue can never pass the relative test (SA on a
+        // Laplacian never converged that way).
+        var tri = new double[m * m];
+        var bm = 0.0;
         var coef = new double[m + 1];
+        var scratch = new double[m + 1];
         var w = new double[n];
+        var t = new double[m * m];
+        var sel = new double[m * m];
         var rng = new GraviRandom(7);
         var j0 = 0;
         var matvecs = 0;
@@ -279,29 +324,28 @@ public static partial class SparseLinalg
             {
                 op.MatVec(v.AsSpan(j * n, n), w);
                 matvecs++;
-                var wn0 = Nrm2(w);
-                Orthogonalize(v, n, j + 1, w, coef);
-                for (var i = 0; i <= j; i++) h[i * m + j] = coef[i];
-                var beta = Nrm2(w);
+                var wn0 = SparseKrylovKernels.Norm(w);
+                var beta = Orthogonalize(v, n, j + 1, w, coef, scratch, wn0);
+                tri[j * m + j] = coef[j];
                 if (beta <= 1e-12 * Math.Max(wn0, 1e-300) || beta == 0)
                 {
-                    h[(j + 1) * m + j] = 0;
-                    FreshDirection(v, n, j + 1, rng).CopyTo(v, (j + 1) * n);
+                    beta = 0;
+                    FreshDirection(v, n, j + 1, rng, coef, scratch);
                 }
-                else
+                if (j + 1 < m) { tri[(j + 1) * m + j] = beta; tri[j * m + j + 1] = beta; }
+                else bm = beta;
+                if (beta != 0)
                 {
-                    h[(j + 1) * m + j] = beta;
-                    for (var i = 0; i < n; i++) v[(j + 1) * n + i] = w[i] / beta;
+                    var dst = v.AsSpan((j + 1) * n, n);
+                    var inv = 1 / beta;
+                    for (var i = 0; i < n; i++) dst[i] = w[i] * inv;
                 }
             }
-            // Ritz pairs of the symmetric m×m projection.
-            var t = new double[m * m];
-            for (var i = 0; i < m; i++)
-                for (var j = 0; j < m; j++) t[i * m + j] = 0.5 * (h[i * m + j] + h[j * m + i]);
-            var eig = Linalg.Eigh(new NdArray(t, m, m));
+            // Ritz pairs of the m×m projection.
+            Array.Copy(tri, t, t.Length);
+            var eig = Linalg.Eigh(new NdArray((double[])t.Clone(), m, m));
             var y = eig.Vectors.AsContiguous().ToArray(); // m×m, columns are eigenvectors
             var thetaAll = eig.Values;
-            var bm = h[m * m + (m - 1)];
             var rank = RankSymmetric(thetaAll, which, k);
             var converged = 0;
             for (var c = 0; c < k; c++)
@@ -310,42 +354,42 @@ public static partial class SparseLinalg
                 var res = Math.Abs(bm * y[(m - 1) * m + i]);
                 if (res <= tol * Math.Max(Eps23, Math.Abs(thetaAll[i]))) converged++;
             }
-            if (converged == k || restart >= maxRestarts)
+            var done = converged == k || restart >= maxRestarts;
+            var keep = done ? k : RestartSize(k, m, converged);
+            // Rotate the basis: row c of the new basis is V y[:, rank[c]].
+            for (var r = 0; r < m; r++)
+                for (var c = 0; c < keep; c++) sel[r * keep + c] = y[r * m + rank[c]];
+            if (done)
             {
                 if (converged < k)
                     throw new SparseEigenNoConvergenceException($"Eigsh: {converged} of {k} eigenpairs converged after {restart} restarts.", converged);
                 var theta = new double[k];
+                for (var c = 0; c < k; c++) theta[c] = thetaAll[rank[c]];
                 var vecs = new double[wantVectors ? n * k : 0];
-                for (var c = 0; c < k; c++)
+                if (wantVectors)
                 {
-                    var i = rank[c];
-                    theta[c] = thetaAll[i];
-                    if (!wantVectors) continue;
-                    var dst = vecs.AsSpan(c * n, n);
-                    for (var r = 0; r < m; r++) Axpy(y[r * m + i], v.AsSpan(r * n, n), dst);
-                    ScaleInPlace(dst, 1 / Nrm2(dst));
+                    SparseKrylovKernels.Combine(v, n, m, sel, k, vecs);
+                    for (var c = 0; c < k; c++)
+                    {
+                        var dst = vecs.AsSpan(c * n, n);
+                        ScaleInPlace(dst, 1 / SparseKrylovKernels.Norm(dst));
+                    }
+                    VerifyRitzPairs(op, n, theta, vecs, thetaAll, tol);
                 }
-                if (wantVectors) VerifyRitzPairs(op, n, theta, vecs, thetaAll, tol);
                 return (theta, vecs, restart, matvecs);
             }
-            // Thick restart: keep the best `keep` Ritz vectors plus the residual direction.
-            var keep = Math.Min(m - 1, k + Math.Max(1, Math.Min(converged, (m - k) / 2)));
-            keep = Math.Max(keep, Math.Min(m - 1, k + (m - k) / 2));
-            var newV = new double[(m + 1) * n];
+            SparseKrylovKernels.Combine(v, n, m, sel, keep, alt);
+            v.AsSpan(m * n, n).CopyTo(alt.AsSpan(keep * n, n));
+            (v, alt) = (alt, v);
+            Array.Clear(tri);
             for (var c = 0; c < keep; c++)
             {
                 var i = rank[c];
-                var dst = newV.AsSpan(c * n, n);
-                for (var r = 0; r < m; r++) Axpy(y[r * m + i], v.AsSpan(r * n, n), dst);
-            }
-            v.AsSpan(m * n, n).CopyTo(newV.AsSpan(keep * n, n));
-            Array.Copy(newV, v, newV.Length);
-            Array.Clear(h);
-            for (var c = 0; c < keep; c++)
-            {
-                var i = rank[c];
-                h[c * m + c] = thetaAll[i];
-                h[keep * m + c] = bm * y[(m - 1) * m + i];
+                tri[c * m + c] = thetaAll[i];
+                // Coupling of kept Ritz vector c to the residual direction (the arrow).
+                var coupling = bm * y[(m - 1) * m + i];
+                tri[keep * m + c] = coupling;
+                tri[c * m + keep] = coupling;
             }
             j0 = keep;
         }
@@ -412,9 +456,11 @@ public static partial class SparseLinalg
     /// Implicitly restarted Arnoldi (Sorensen 1992, the method of ARPACK): after each Arnoldi cycle
     /// the unwanted Ritz values are applied as exact shifts — single shifts for real ones, double
     /// (real-arithmetic) shifts for complex-conjugate pairs — and the wanted set is never allowed
-    /// to split a conjugate pair. The shifted QR steps are done explicitly on the small Hessenberg
-    /// matrix. The projected eigenproblem uses SciNet's dense <c>Linalg.Eig</c>. Complex
-    /// <paramref name="sigma"/> is not supported.
+    /// to split a conjugate pair. How many vectors survive a restart follows ARPACK's
+    /// <c>dnaup2</c> (k plus up to half the free space for converged ones). Orthogonalisation is
+    /// classical Gram–Schmidt with the DGKS correction. The shifted QR steps are done explicitly
+    /// on the small Hessenberg matrix and the projected eigenproblem uses SciNet's dense
+    /// <c>Linalg.Eig</c>. Complex <paramref name="sigma"/> is not supported.
     /// </remarks>
     public static EigsResult Eigs(ILinearOperator a, int k = 6, EigsWhich which = EigsWhich.LM, double? sigma = null,
         double[]? v0 = null, int? ncv = null, int? maxiter = null, double tol = 0, bool returnEigenvectors = true, ILinearOperator? opInv = null)
@@ -486,7 +532,10 @@ public static partial class SparseLinalg
         for (var i = 0; i < n; i++) v[i] = start[i] / s0;
         var h = new double[(m + 1) * m];
         var coef = new double[m + 1];
+        var scratch = new double[m + 1];
         var w = new double[n];
+        var f = new double[n];
+        var alt = new double[(m + 1) * n];
         var rng = new GraviRandom(11);
         var j0 = 0;
         var matvecs = 0;
@@ -496,19 +545,20 @@ public static partial class SparseLinalg
             {
                 op.MatVec(v.AsSpan(j * n, n), w);
                 matvecs++;
-                var wn0 = Nrm2(w);
-                Orthogonalize(v, n, j + 1, w, coef);
+                var wn0 = SparseKrylovKernels.Norm(w);
+                var beta = Orthogonalize(v, n, j + 1, w, coef, scratch, wn0);
                 for (var i = 0; i <= j; i++) h[i * m + j] = coef[i];
-                var beta = Nrm2(w);
                 if (beta <= 1e-12 * Math.Max(wn0, 1e-300) || beta == 0)
                 {
                     h[(j + 1) * m + j] = 0;
-                    FreshDirection(v, n, j + 1, rng).CopyTo(v, (j + 1) * n);
+                    FreshDirection(v, n, j + 1, rng, coef, scratch);
                 }
                 else
                 {
                     h[(j + 1) * m + j] = beta;
-                    for (var i = 0; i < n; i++) v[(j + 1) * n + i] = w[i] / beta;
+                    var dst = v.AsSpan((j + 1) * n, n);
+                    var inv = 1 / beta;
+                    for (var i = 0; i < n; i++) dst[i] = w[i] * inv;
                 }
             }
             var hm = new double[m * m];
@@ -551,8 +601,9 @@ public static partial class SparseLinalg
                 return (outMu, vecs, restart, matvecs);
             }
 
-            // Number kept; never split a complex-conjugate pair across the wanted/unwanted boundary.
-            var kk = Math.Min(m - 2, k + Math.Max(1, (m - k) / 2));
+            // Number kept (ARPACK's policy); never split a complex-conjugate pair across the
+            // wanted/unwanted boundary.
+            var kk = Math.Min(m - 2, RestartSize(k, m, converged));
             if (kk < m && IsConjugatePair(mu[rank[kk - 1]], mu[rank[kk]])) kk = kk + 1 < m ? kk + 1 : kk - 1;
             if (kk < k) kk = k;
 
@@ -583,32 +634,31 @@ public static partial class SparseLinalg
                 }
             }
             // f_new = V Q[:, kk] H[kk, kk-1] + f Q[m-1, kk-1], with f = bm v_m.
-            var f = new double[n];
+            Array.Clear(f);
             var sub = hmat[kk, kk - 1];
             for (var q = 0; q < m; q++) Axpy(qtot[q, kk] * sub, v.AsSpan(q * n, n), f);
             Axpy(bm * qtot[m - 1, kk - 1], v.AsSpan(m * n, n), f);
-            var newV = new double[(m + 1) * n];
-            for (var c = 0; c < kk; c++)
-            {
-                var dst = newV.AsSpan(c * n, n);
-                for (var q = 0; q < m; q++) Axpy(qtot[q, c], v.AsSpan(q * n, n), dst);
-            }
-            Array.Copy(newV, v, newV.Length);
+            var sel = new double[m * kk];
+            for (var q = 0; q < m; q++)
+                for (var c = 0; c < kk; c++) sel[q * kk + c] = qtot[q, c];
+            SparseKrylovKernels.Combine(v, n, m, sel, kk, alt);
+            (v, alt) = (alt, v);
             Array.Clear(h);
             for (var i = 0; i < kk; i++)
                 for (var j = Math.Max(0, i - 1); j < kk; j++) h[i * m + j] = hmat[i, j];
             // Re-orthogonalise f; the coefficients are O(ε) drift and are dropped so H stays Hessenberg.
-            Orthogonalize(v, n, kk, f, coef);
-            var fn = Nrm2(f);
+            var fn = Orthogonalize(v, n, kk, f, coef, scratch, SparseKrylovKernels.Norm(f));
             if (fn <= 1e-14 * Math.Max(1, Math.Abs(bm)))
             {
                 h[kk * m + kk - 1] = 0;
-                FreshDirection(v, n, kk, rng).CopyTo(v, kk * n);
+                FreshDirection(v, n, kk, rng, coef, scratch);
             }
             else
             {
                 h[kk * m + kk - 1] = fn;
-                for (var i = 0; i < n; i++) v[kk * n + i] = f[i] / fn;
+                var dst = v.AsSpan(kk * n, n);
+                var inv = 1 / fn;
+                for (var i = 0; i < n; i++) dst[i] = f[i] * inv;
             }
             j0 = kk;
         }
@@ -695,9 +745,9 @@ public static partial class SparseLinalg
         var tall = m >= n;
         var dim = tall ? n : m;
         var inner = tall ? m : n;
+        var t = new double[inner]; // Eigsh applies the operator sequentially, so one buffer serves every call
         MatVecFunction normal = (x, y) =>
         {
-            var t = new double[inner];
             if (tall) { a.MatVec(x, t); a.RMatVec(t, y); }
             else { a.RMatVec(x, t); a.MatVec(t, y); }
         };

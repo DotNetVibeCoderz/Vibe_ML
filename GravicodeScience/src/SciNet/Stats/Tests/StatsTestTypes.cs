@@ -103,11 +103,18 @@ public sealed record KstestResult : SignificanceResult
 /// <summary>Result of <see cref="Stats.Anderson"/> (scipy's <c>AndersonResult</c>).</summary>
 /// <param name="Statistic">The Anderson–Darling statistic A².</param>
 /// <param name="CriticalValues">Critical values at <paramref name="SignificanceLevel"/>.</param>
-/// <param name="SignificanceLevel">Significance levels in percent, matching the critical values.</param>
+/// <param name="SignificanceLevel">Significance levels in percent, matching the critical values (for
+/// <c>"weibull_min"</c>, scipy's CDF levels 0.5...0.995 instead).</param>
 /// <param name="FitLocation">Location of the fitted distribution.</param>
 /// <param name="FitScale">Scale of the fitted distribution.</param>
 public sealed record AndersonResult(double Statistic, double[] CriticalValues, double[] SignificanceLevel, double FitLocation, double FitScale)
 {
+    /// <summary>The distribution tested (scipy's name, e.g. <c>"norm"</c>, <c>"weibull_min"</c>).</summary>
+    public string Distribution { get; init; } = "norm";
+
+    /// <summary>The fitted shape parameter for <c>"weibull_min"</c>; null for the location-scale families.</summary>
+    public double? FitShape { get; init; }
+
     /// <summary>
     /// p-value by linear interpolation of the critical-value table (scipy's <c>method='interpolate'</c>),
     /// clamped to the tabulated range — so it is only informative between the extreme levels.
@@ -118,6 +125,16 @@ public sealed record AndersonResult(double Statistic, double[] CriticalValues, d
         {
             var c = CriticalValues;
             var n = c.Length;
+            if (Distribution == "weibull_min")
+            {
+                // scipy: np.interp(A2, critical, 1 - sig), the levels being CDF values of A2.
+                if (Statistic <= c[0]) return 1 - SignificanceLevel[0];
+                if (Statistic >= c[n - 1]) return 1 - SignificanceLevel[n - 1];
+                var k = 0;
+                while (Statistic > c[k + 1]) k++;
+                var g = (Statistic - c[k]) / (c[k + 1] - c[k]);
+                return 1 - (SignificanceLevel[k] + g * (SignificanceLevel[k + 1] - SignificanceLevel[k]));
+            }
             if (Statistic <= c[0]) return SignificanceLevel[0] / 100;
             if (Statistic >= c[n - 1]) return SignificanceLevel[n - 1] / 100;
             var i = 0;

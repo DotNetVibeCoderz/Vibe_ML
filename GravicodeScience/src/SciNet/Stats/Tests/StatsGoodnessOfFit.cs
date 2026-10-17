@@ -204,10 +204,97 @@ public static partial class Stats
     private static readonly double[] AvalsLogistic = [0.426, 0.563, 0.66, 0.769, 0.906, 1.01];
     private static readonly double[] AvalsGumbel = [0.474, 0.637, 0.757, 0.877, 1.038];
 
+    // Lockhart & Stephens (1994), "Estimation and tests of fit for the three-parameter Weibull
+    // distribution", JRSS B 56(3), table 1: rows c = 1/m = 0, 0.05, ..., 0.5.
+    private static readonly double[,] AvalsWeibull =
+    {
+        { 0.292, 0.395, 0.467, 0.522, 0.617, 0.711, 0.836, 0.931 },
+        { 0.295, 0.399, 0.471, 0.527, 0.623, 0.719, 0.845, 0.941 },
+        { 0.298, 0.403, 0.476, 0.534, 0.631, 0.728, 0.856, 0.954 },
+        { 0.301, 0.408, 0.483, 0.541, 0.640, 0.738, 0.869, 0.969 },
+        { 0.305, 0.414, 0.490, 0.549, 0.650, 0.751, 0.885, 0.986 },
+        { 0.309, 0.421, 0.498, 0.559, 0.662, 0.765, 0.902, 1.007 },
+        { 0.314, 0.429, 0.508, 0.570, 0.676, 0.782, 0.923, 1.030 },
+        { 0.320, 0.438, 0.519, 0.583, 0.692, 0.802, 0.947, 1.057 },
+        { 0.327, 0.448, 0.532, 0.598, 0.711, 0.824, 0.974, 1.089 },
+        { 0.334, 0.469, 0.547, 0.615, 0.732, 0.850, 1.006, 1.125 },
+        { 0.342, 0.472, 0.563, 0.636, 0.757, 0.879, 1.043, 1.167 },
+    };
+
+    /// <summary>
+    /// Three-parameter Weibull MLE for the Anderson-Darling test: the root (m, u) of the first-order
+    /// conditions (Lockhart &amp; Stephens eqs. 5-6, scale profiled out by eq. 7), started from the
+    /// numerical MLE. Throws, as scipy does, when the fit puts the location at the sample minimum or
+    /// the shape below 1, where the tabulated critical values do not apply.
+    /// </summary>
+    private static (double M, double U, double S) AndersonWeibullFit(double[] x)
+    {
+        var n = x.Length;
+        var fit = WeibullMinDistribution.Fit(x);
+        double m = fit.C, u = fit.Loc;
+        var xmin = x.Min();
+        const string suggestion = " Maximum likelihood estimation is known to be challenging for the three-parameter Weibull distribution.";
+        bool AtMin(double uu) => Math.Abs(uu - xmin) <= 1e-8 + 1e-5 * Math.Abs(xmin);
+        if (AtMin(u) || m < 1)
+            throw new ArgumentException("Maximum likelihood estimation has converged to a solution in which the location is equal to the minimum of the data, the shape parameter is less than 1, or both. The table of critical values does not include this case." + suggestion);
+        (double, double) F(double mm, double uu)
+        {
+            double sxm = 0, sxmlog = 0, slog = 0, sinv = 0, sxm1 = 0;
+            for (var i = 0; i < n; i++)
+            {
+                var xu = x[i] - uu;
+                var lxu = Math.Log(xu);
+                var p = Math.Pow(xu, mm);
+                sxm += p; sxmlog += p * lxu; slog += lxu; sinv += 1 / xu; sxm1 += p / xu;
+            }
+            return (1 / mm - sxmlog / sxm + slog / n, (mm - 1) / mm * sinv - n * sxm1 / sxm);
+        }
+        // Damped Newton with a forward-difference Jacobian; u stays below the minimum.
+        var (f1, f2) = F(m, u);
+        for (var it = 0; it < 200; it++)
+        {
+            var norm = Math.Abs(f1) + Math.Abs(f2);
+            if (norm < 1e-14 * n) break;
+            var hm = 1e-7 * Math.Max(1, Math.Abs(m));
+            var hu = 1e-7 * Math.Max(1e-3, Math.Abs(xmin - u));
+            var (a1, a2) = F(m + hm, u);
+            var (b1, b2) = F(m, u - hu);
+            double j11 = (a1 - f1) / hm, j21 = (a2 - f2) / hm, j12 = -(b1 - f1) / hu, j22 = -(b2 - f2) / hu;
+            var det = j11 * j22 - j12 * j21;
+            if (det == 0 || !double.IsFinite(det)) break;
+            var dm = -(j22 * f1 - j12 * f2) / det;
+            var du = -(-j21 * f1 + j11 * f2) / det;
+            var t = 1.0;
+            var improved = false;
+            for (var ls = 0; ls < 60; ls++)
+            {
+                var mn = m + t * dm; var un = u + t * du;
+                if (mn > 0 && un < xmin)
+                {
+                    var (g1, g2) = F(mn, un);
+                    if (double.IsFinite(g1) && double.IsFinite(g2) && Math.Abs(g1) + Math.Abs(g2) < norm)
+                    {
+                        m = mn; u = un; f1 = g1; f2 = g2; improved = true;
+                        break;
+                    }
+                }
+                t *= 0.5;
+            }
+            if (!improved) break;
+        }
+        if (!(Math.Abs(f1) < 1e-6 && Math.Abs(f2) < 1e-6 * n))
+            throw new ArgumentException("Solution of MLE first-order conditions failed; `anderson` cannot continue." + suggestion);
+        double s = 0;
+        for (var i = 0; i < n; i++) s += Math.Pow(x[i] - u, m) / n;
+        return (m, u, Math.Pow(s, 1 / m));
+    }
+
     /// <summary>
     /// Anderson–Darling test that the data come from a family with estimated parameters, scipy's
     /// <c>anderson</c>: <c>"norm"</c>, <c>"expon"</c>, <c>"logistic"</c>, <c>"gumbel_r"</c>,
-    /// <c>"gumbel_l"</c> (alias <c>"gumbel"</c>/<c>"extreme1"</c>). Critical values are Stephens' (1974,
+    /// <c>"gumbel_l"</c> (alias <c>"gumbel"</c>/<c>"extreme1"</c>) and <c>"weibull_min"</c> (three-parameter
+    /// MLE, Lockhart &amp; Stephens' asymptotic critical values with significance levels given as CDF
+    /// levels 0.5...0.995, as scipy 1.17). Other critical values are Stephens' (1974,
     /// 1977) small-sample-adjusted tables rounded to 3 decimals, as scipy; <see cref="AndersonResult.Pvalue"/>
     /// interpolates them (scipy's <c>method='interpolate'</c>). The logistic fit is solved to full
     /// precision where scipy stops at fsolve's xtol = 1e-5, so the statistic can differ in the 6th digit.
@@ -295,13 +382,39 @@ public static partial class Stats
                 crit = AvalsGumbel.Select(v => Math.Round(v / (1.0 + 0.2 / Math.Sqrt(n)), 3, MidpointRounding.ToEven)).ToArray();
                 break;
             }
+            case "weibull_min":
+            {
+                var (m, u, sc) = AndersonWeibullFit(y);
+                for (var i = 0; i < n; i++)
+                {
+                    var w = Math.Pow((y[i] - u) / sc, m);
+                    logcdf[i] = Math.Log(-Special.Expm1(-w));
+                    logsf[i] = -w;
+                }
+                var cTab = 1 / m;
+                sig = [0.5, 0.75, 0.85, 0.9, 0.95, 0.975, 0.99, 0.995];
+                crit = new double[8];
+                // Lockhart & Stephens (1994) table 1, linear in c = 1/m over [0, 0.5], last row beyond;
+                // rounded up (+0.0005) to stay conservative, as scipy.
+                var pos = Math.Clamp(cTab / 0.05, 0, 10);
+                var lo = (int)Math.Min(Math.Floor(pos), 9);
+                var f = pos - lo;
+                for (var j = 0; j < 8; j++)
+                {
+                    var v = cTab >= 0.5 ? AvalsWeibull[10, j] : AvalsWeibull[lo, j] + f * (AvalsWeibull[lo + 1, j] - AvalsWeibull[lo, j]);
+                    crit[j] = Math.Round(v + 0.0005, 3, MidpointRounding.ToEven);
+                }
+                var termsW = new double[n];
+                for (var i = 0; i < n; i++) termsW[i] = (2 * (i + 1) - 1.0) / n * (logcdf[i] + logsf[n - 1 - i]);
+                return new AndersonResult(-n - StatsTestMath.Sum(termsW), crit, sig, u, sc) { Distribution = "weibull_min", FitShape = m };
+            }
             default:
-                throw new ArgumentException("Invalid distribution; dist must be one of norm, expon, gumbel_l, gumbel_r, logistic.", nameof(dist));
+                throw new ArgumentException("Invalid distribution; dist must be one of norm, expon, gumbel_l, gumbel_r, logistic, weibull_min.", nameof(dist));
         }
         var terms = new double[n];
         for (var i = 0; i < n; i++) terms[i] = (2 * (i + 1) - 1.0) / n * (logcdf[i] + logsf[n - 1 - i]);
         var a2 = -n - StatsTestMath.Sum(terms);
-        return new AndersonResult(a2, crit, sig, loc, scale);
+        return new AndersonResult(a2, crit, sig, loc, scale) { Distribution = d };
     }
 
     /// <summary>

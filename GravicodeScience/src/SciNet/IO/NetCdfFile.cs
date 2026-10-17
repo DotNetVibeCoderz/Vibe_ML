@@ -5,7 +5,7 @@ using Gravicode.Science.GraviNum;
 
 namespace Gravicode.Science.SciNet.IO;
 
-/// <summary>NetCDF classic external data types.</summary>
+/// <summary>NetCDF external data types: the six classic types, and the NetCDF-4 additions (numbered as <c>NC_UBYTE</c> ... <c>NC_STRING</c>), which only NetCDF-4 files read with <see cref="NetCdfFile.Open(string, bool)"/> carry.</summary>
 public enum NetCdfType
 {
     /// <summary>Signed 8-bit integer.</summary>
@@ -20,17 +20,37 @@ public enum NetCdfType
     Float = 5,
     /// <summary>64-bit IEEE float.</summary>
     Double = 6,
+    /// <summary>Unsigned 8-bit integer (NetCDF-4).</summary>
+    UByte = 7,
+    /// <summary>Unsigned 16-bit integer (NetCDF-4).</summary>
+    UShort = 8,
+    /// <summary>Unsigned 32-bit integer (NetCDF-4).</summary>
+    UInt = 9,
+    /// <summary>Signed 64-bit integer (NetCDF-4; read as double, exact up to 2^53).</summary>
+    Int64 = 10,
+    /// <summary>Unsigned 64-bit integer (NetCDF-4; read as double, exact up to 2^53).</summary>
+    UInt64 = 11,
+    /// <summary>Variable-length string (NetCDF-4); read with <see cref="NetCdfVariable.GetStrings"/>.</summary>
+    String = 12,
 }
 
 /// <summary>
 /// NetCDF classic (CDF-1) and 64-bit-offset (CDF-2) files — <c>scipy.io.netcdf_file</c>, without
-/// memory mapping: variables are read lazily from the stream on first access and cached.
+/// memory mapping: variables are read lazily from the stream on first access and cached — and,
+/// read-only, NetCDF-4 files (which are HDF5 files; SciPy does not read them).
 /// </summary>
 /// <remarks>
 /// <para>Open an existing file with <see cref="Open(string, bool)"/>; build a new one with
 /// <see cref="Create"/>, <see cref="CreateDimension"/>, <see cref="CreateVariable"/>, set each
-/// variable's data, then <see cref="Save(string)"/>. NetCDF-4 (HDF5) and CDF-5 files are refused
-/// with <see cref="NotSupportedException"/>.</para>
+/// variable's data, then <see cref="Save(string)"/>. CDF-5 files are refused with
+/// <see cref="NotSupportedException"/>.</para>
+/// <para>NetCDF-4 files (<see cref="Version"/> 4) are read through SciNet's managed
+/// <see cref="Hdf5File"/> reader: dimensions come from the HDF5 dimension scales
+/// (<c>DIMENSION_LIST</c>, <c>_Netcdf4Dimid</c>), variables may be chunked and deflated, groups appear
+/// in <see cref="Groups"/> as nested <see cref="NetCdfFile"/> objects (a variable may use its
+/// ancestors' dimensions), and <see cref="MaskAndScale"/> applies as for classic files. The
+/// NetCDF-4 types (unsigned, 64-bit, string) are read; variables of user-defined types (compound,
+/// enum, vlen, opaque) are left out of <see cref="Variables"/>. Writing NetCDF-4 is not supported.</para>
 /// <para>Attribute values are <see cref="string"/> for text and, for numbers, a scalar
 /// (<see cref="sbyte"/>, <see cref="short"/>, <see cref="int"/>, <see cref="float"/>,
 /// <see cref="double"/>) when there is one value or an array of that type otherwise — SciPy's
@@ -46,6 +66,7 @@ public sealed class NetCdfFile : IDisposable
     private readonly OrderedDictionary<string, int?> _dims = new(StringComparer.Ordinal);
     private readonly OrderedDictionary<string, NetCdfVariable> _vars = new(StringComparer.Ordinal);
     private int _numRecs;
+    private readonly OrderedDictionary<string, NetCdfFile> _groups = new(StringComparer.Ordinal);
 
     private NetCdfFile(int version, bool maskAndScale, Stream? stream, bool ownsStream)
     {
@@ -56,8 +77,36 @@ public sealed class NetCdfFile : IDisposable
         _ownsStream = ownsStream;
     }
 
-    /// <summary>1 for classic format, 2 for 64-bit offset format.</summary>
+    /// <summary>NetCDF-4 (HDF5-based) file opened for reading; a group of one shares the root's stream.</summary>
+    private NetCdfFile(Stream stream, bool ownsStream, bool maskAndScale, string dataModel)
+    {
+        Version = 4;
+        MaskAndScale = maskAndScale;
+        _stream = stream;
+        _ownsStream = ownsStream;
+        _dataModel = dataModel;
+    }
+
+    private readonly string? _dataModel;
+
+    internal static NetCdfFile ForNetCdf4(Stream stream, bool ownsStream, bool maskAndScale, string dataModel) => new(stream, ownsStream, maskAndScale, dataModel);
+
+    /// <summary>1 for classic format, 2 for 64-bit offset format, 4 for NetCDF-4 (HDF5).</summary>
     public int Version { get; }
+
+    /// <summary>The data model as netCDF4-python names it: <c>NETCDF3_CLASSIC</c>, <c>NETCDF3_64BIT_OFFSET</c>, <c>NETCDF4_CLASSIC</c> or <c>NETCDF4</c>.</summary>
+    public string DataModel => _dataModel ?? (Version == 1 ? "NETCDF3_CLASSIC" : "NETCDF3_64BIT_OFFSET");
+
+    /// <summary>Sub-groups (NetCDF-4 only; always empty for classic files), each read like a file of its own.</summary>
+    public IReadOnlyDictionary<string, NetCdfFile> Groups => _groups;
+
+    internal void AddNetCdf4Dimension(string name, int? length) => _dims[name] = length;
+
+    internal void AddNetCdf4Variable(NetCdfVariable v) => _vars[v.Name] = v;
+
+    internal void AddNetCdf4Group(string name, NetCdfFile g) => _groups[name] = g;
+
+    internal int NetCdf4Records { set => _numRecs = value; }
 
     /// <summary>
     /// When true, reading replaces values equal to <c>_FillValue</c> (or <c>missing_value</c>) by
@@ -93,7 +142,7 @@ public sealed class NetCdfFile : IDisposable
     /// <param name="maskAndScale">See <see cref="MaskAndScale"/>.</param>
     public static NetCdfFile Create(int version = 1, bool maskAndScale = false) => new(version, maskAndScale, null, false);
 
-    /// <summary>Opens a NetCDF classic or 64-bit-offset file for reading.</summary>
+    /// <summary>Opens a NetCDF classic, 64-bit-offset or NetCDF-4 file for reading.</summary>
     /// <param name="path">File path.</param>
     /// <param name="maskAndScale">See <see cref="MaskAndScale"/>.</param>
     public static NetCdfFile Open(string path, bool maskAndScale = false)
@@ -110,7 +159,7 @@ public sealed class NetCdfFile : IDisposable
         stream.Position = 0;
         var n = stream.ReadAtLeast(head, 8, throwOnEndOfStream: false);
         if (n >= 4 && head[0] == 0x89 && head[1] == (byte)'H' && head[2] == (byte)'D' && head[3] == (byte)'F')
-            throw new NotSupportedException("This is a NetCDF-4 / HDF5 file. SciNet reads NetCDF classic (CDF-1) and 64-bit offset (CDF-2) only; convert it with 'nccopy -k classic' or use an HDF5 library.");
+            return NetCdf4Reader.Open(stream, maskAndScale, !leaveOpen);
         if (n < 4 || !head.AsSpan(0, 3).SequenceEqual(Magic)) throw new InvalidDataException("Not a NetCDF file: missing the 'CDF' signature.");
         if (head[3] == 5) throw new NotSupportedException("This is a CDF-5 (64-bit data) NetCDF file; SciNet reads CDF-1 and CDF-2 only.");
         if (head[3] is not (1 or 2)) throw new InvalidDataException($"Unknown NetCDF version byte {head[3]}.");
@@ -404,6 +453,7 @@ public sealed class NetCdfFile : IDisposable
     /// <summary>Writes the dataset to a stream.</summary>
     public void Save(Stream output)
     {
+        if (Version == 4) throw new NotSupportedException("Writing NetCDF-4 (HDF5) files is not supported; copy the variables into a file made with NetCdfFile.Create to save them as classic NetCDF.");
         var numrecs = _stream is null ? RecordCount : _numRecs;
         var vars = _vars.Values.ToList();
         // Pass 1: the header's size does not depend on the begin offsets, so measure it with zeros.
@@ -640,8 +690,11 @@ public sealed class NetCdfVariable
 
     internal NdArray? PendingData { get; private set; }
 
+    /// <summary>The HDF5 dataset behind a NetCDF-4 variable.</summary>
+    internal Hdf5Dataset? H5 { get; init; }
+
     /// <summary>Current shape (the record dimension has the file's record count); empty for a scalar.</summary>
-    public int[] Shape => _file.ShapeOf(Dimensions, _file.RecordCount);
+    public int[] Shape => H5 is { } h ? h.Shape : _file.ShapeOf(Dimensions, _file.RecordCount);
 
     /// <summary>
     /// The data, row-major over <see cref="Shape"/> (a scalar has shape [1]). With
@@ -679,6 +732,19 @@ public sealed class NetCdfVariable
             var fill = new double[MatLayout.Product(shape)];
             Array.Fill(fill, FillValue);
             return new NdArray(fill, shape.Length == 0 ? [1] : shape);
+        }
+        if (H5 is { } h)
+        {
+            if (Type == NetCdfType.String) throw new InvalidOperationException($"Variable '{Name}' holds strings; use GetStrings().");
+            if (Type == NetCdfType.Char)
+            {
+                // NC_CHAR is a one-byte HDF5 string type: keep the byte values, as for classic files.
+                var bytes = h.ReadRaw();
+                var d = new double[bytes.Length];
+                for (var i = 0; i < d.Length; i++) d[i] = bytes[i];
+                return _raw = new NdArray(d, shape.Length == 0 ? [1] : shape);
+            }
+            return _raw = h.Read();
         }
         _raw = new NdArray(_file.ReadRaw(this), shape.Length == 0 ? [1] : shape);
         return _raw;
@@ -733,6 +799,7 @@ public sealed class NetCdfVariable
     /// </summary>
     public string[] GetStrings()
     {
+        if (Type == NetCdfType.String) return H5!.ReadStrings().Select(x => x ?? "").ToArray();
         if (Type != NetCdfType.Char) throw new InvalidOperationException($"Variable '{Name}' is {Type}, not Char.");
         var raw = Raw().AsContiguous().AsSpan();
         var shape = Shape;
@@ -773,8 +840,11 @@ public sealed class NetCdfVariable
         return v switch
         {
             sbyte b => b, short s => s, int i => i, float f => f, double d => d,
+            byte b => b, ushort s => s, uint i => i, long l => l, ulong l => l,
             sbyte[] { Length: > 0 } a => a[0], short[] { Length: > 0 } a => a[0], int[] { Length: > 0 } a => a[0],
             float[] { Length: > 0 } a => a[0], double[] { Length: > 0 } a => a[0],
+            byte[] { Length: > 0 } a => a[0], ushort[] { Length: > 0 } a => a[0], uint[] { Length: > 0 } a => a[0],
+            long[] { Length: > 0 } a => a[0], ulong[] { Length: > 0 } a => a[0],
             string { Length: 1 } c => c[0], // a char variable's fill value is a one-character text attribute
             _ => null,
         };

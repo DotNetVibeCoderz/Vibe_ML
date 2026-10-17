@@ -51,7 +51,7 @@ public abstract class ContinuousDistribution : IUnivariateDistribution
     public virtual double[] Shapes => [];
 
     /// <summary>
-    /// A distribution of the same family with other parameters — what <see cref="FitTo"/> and generic
+    /// A distribution of the same family with other parameters — what <see cref="FitTo(double[], double?[], double?, double?)"/> and generic
     /// code use to build candidates. Throws <see cref="ArgumentException"/> for invalid parameters.
     /// </summary>
     public abstract ContinuousDistribution WithParameters(double[] shapes, double loc, double scale);
@@ -461,6 +461,70 @@ public abstract class ContinuousDistribution : IUnivariateDistribution
         if (data.Length == 0) throw new ArgumentException("data must not be empty.", nameof(data));
         foreach (var x in data)
             if (!double.IsFinite(x)) throw new ArgumentException("data must be finite.", nameof(data));
+        var fit = FitNumericallyCore(data, fixedShapes, floc, fscale, (d, p) => d.PenalizedNnlf(p, data));
+        // The penalised objective tolerates points of zero density; a fit that ends there is not an MLE.
+        if (double.IsPositiveInfinity(fit.NegativeLogLikelihood(data)))
+            throw new FitError($"The {Name} fit leaves some data outside the support of the fitted distribution ({fit}).");
+        return fit;
+    }
+
+    /// <summary>
+    /// Maximum-likelihood fit to censored data, scipy's <c>dist.fit(CensoredData)</c>. Uncensored
+    /// values contribute log pdf, left-censored log cdf, right-censored log sf and interval-censored
+    /// log(F(high) − F(low)). With no censored values this is exactly <see cref="FitTo(double[], double?[], double?, double?)"/> on the
+    /// uncensored values (closed forms included); otherwise the numerical MLE is used for every family,
+    /// as in scipy, started from the fit's usual guess on the "uncensored" proxy (endpoints for
+    /// one-sided censoring, midpoints for intervals).
+    /// </summary>
+    public ContinuousDistribution FitTo(CensoredData data, double?[]? fixedShapes = null, double? floc = null, double? fscale = null)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        if (data.Count == 0) throw new ArgumentException("data must not be empty.", nameof(data));
+        if (data.NumCensored() == 0) return FitTo(data.Uncensored, fixedShapes, floc, fscale);
+        return FitNumericallyCore(data.Uncensor(), fixedShapes, floc, fscale, (d, p) => d.PenalizedCensoredNnlf(p, data));
+    }
+
+    /// <summary>The censored negative log-likelihood (no penalty); +∞ when an observation has zero probability.</summary>
+    public double NegativeLogLikelihood(CensoredData data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        var total = 0.0;
+        foreach (var t in CensoredTerms(data))
+        {
+            if (!double.IsFinite(t)) return double.PositiveInfinity;
+            total -= t;
+        }
+        return total;
+    }
+
+    private IEnumerable<double> CensoredTerms(CensoredData data)
+    {
+        foreach (var x in data.Uncensored) yield return LogPdf(x);
+        foreach (var x in data.Left) yield return LogCdf(x);
+        foreach (var x in data.Right) yield return LogSf(x);
+        var iv = data.Interval;
+        for (var i = 0; i < iv.GetLength(0); i++) yield return Math.Log(DeltaCdf(iv[i, 0], iv[i, 1]));
+    }
+
+    /// <summary>P(a &lt; X ≤ b), from the survival function when a is above the median so the upper tail keeps its digits.</summary>
+    internal double DeltaCdf(double a, double b)
+        => a > Median() ? Sf(a) - Sf(b) : Cdf(b) - Cdf(a);
+
+    private double PenalizedCensoredNnlf(double[] p, CensoredData data)
+    {
+        const double penalty = 70978.0;
+        var total = 0.0;
+        var bad = 0;
+        foreach (var t in CensoredTerms(data))
+        {
+            if (double.IsFinite(t)) total -= t;
+            else bad++;
+        }
+        return total + bad * penalty;
+    }
+
+    private ContinuousDistribution FitNumericallyCore(double[] data, double?[]? fixedShapes, double? floc, double? fscale, Func<ContinuousDistribution, double[], double> nnlf)
+    {
         var k = Shapes.Length;
         if (fixedShapes != null && fixedShapes.Length > k) throw new ArgumentException($"{Name} has {k} shape parameter(s).", nameof(fixedShapes));
         var full = new double[k + 2];
@@ -490,7 +554,9 @@ public abstract class ContinuousDistribution : IUnivariateDistribution
         {
             var t = (double[])full.Clone();
             for (var i = 0; i < free.Count; i++) t[free[i]] = p[i];
-            return PenalizedNnlf(t, k, data);
+            if (!(t[k + 1] > 0) || !double.IsFinite(t[k])) return double.PositiveInfinity;
+            var d = WithParametersOrNull(t[..k], t[k], t[k + 1]);
+            return d == null ? double.PositiveInfinity : nnlf(d, t);
         }
 
         var x0 = new double[free.Count];
@@ -510,7 +576,11 @@ public abstract class ContinuousDistribution : IUnivariateDistribution
             bestF = res.Fun;
         }
         for (var i = 0; i < free.Count; i++) full[free[i]] = best[i];
-        return WithParameters(full[..k], full[k], full[k + 1]);
+        try { return WithParameters(full[..k], full[k], full[k + 1]); }
+        catch (ArgumentException ex)
+        {
+            throw new FitError("Optimization converged to parameters that are outside the range allowed by the distribution.", ex);
+        }
     }
 
     private static double FitScaleGivenLoc(ContinuousDistribution standard, double[] data, double loc)
@@ -531,11 +601,9 @@ public abstract class ContinuousDistribution : IUnivariateDistribution
         catch (ArgumentException) { return null; }
     }
 
-    private double PenalizedNnlf(double[] p, int k, double[] data)
+    private double PenalizedNnlf(double[] p, double[] data)
     {
-        if (!(p[k + 1] > 0) || !double.IsFinite(p[k])) return double.PositiveInfinity;
-        var d = WithParametersOrNull(p[..k], p[k], p[k + 1]);
-        if (d == null) return double.PositiveInfinity;
+        var d = this;
         const double penalty = 70978.0; // 100·log(DBL_MAX), as scipy's _LOGXMIN-based penalty
         var total = 0.0;
         var bad = 0;

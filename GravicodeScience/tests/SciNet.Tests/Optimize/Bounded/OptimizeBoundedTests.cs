@@ -122,7 +122,10 @@ public class OptimizeBoundedTests
         var r = Optimize.Minimize(Optimize.Rosen, Start(n), MinimizeMethod.Tnc, jac: Optimize.RosenDer,
             options: new TncOptions { MaxFun = 20000, Gtol = 1e-10 });
         Assert.True(r.Success, r.ToString());
-        foreach (var v in r.X) Assert.True(Math.Abs(v - 1) < 1e-4, r.ToString());
+        // TNC is a port of tnc.c now, and stops where tnc.c does: on the f-change test, which scipy
+        // 1.17.1 meets 1.01e-4 from the optimum at n = 10 with these options. 1e-4 was the old
+        // simplified method's accuracy, not scipy's.
+        foreach (var v in r.X) Assert.True(Math.Abs(v - 1) < 1e-3, r.ToString());
     }
 
     [Fact]

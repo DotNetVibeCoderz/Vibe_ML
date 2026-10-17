@@ -56,11 +56,13 @@ internal static class LinalgKernels
         return r;
     }
 
-    /// <summary>Matrix product through GraviNum's blocked, parallel <c>LinAlg.Dot</c>.</summary>
-    public static NdArray Mul(NdArray a, NdArray b) => LinAlg.Dot(a, b);
+    /// <summary>Matrix product through SciNet's packed kernel (or native BLAS when GraviNum finds one).</summary>
+    public static NdArray Mul(NdArray a, NdArray b) => LinalgGemm.Mul(a, b);
 
     public static double[] Mul(double[] a, double[] b, int m, int k, int n)
-        => LinAlg.Dot(new NdArray(a, m, k), new NdArray(b, k, n)).ToArray();
+        => Gravicode.Science.GraviNum.Compute.NativeBlas.ShouldUse(m, n, k)
+            ? LinAlg.Dot(new NdArray(a, m, k), new NdArray(b, k, n)).ToArray()
+            : LinalgGemm.Multiply(a, b, m, k, n);
 
     /// <summary><c>alpha*a + beta*b</c> element-wise into a new array.</summary>
     public static NdArray Combine(double alpha, NdArray a, double beta, NdArray b)
@@ -133,6 +135,13 @@ internal static class LinalgKernels
     /// <param name="swaps">Receives the row <em>swaps</em>: at step i, row i was exchanged with row swaps[i].</param>
     /// <returns>-1 on success, otherwise the first column with an exactly zero pivot.</returns>
     public static int LuInPlace(Span<double> a, int n, int[] swaps)
+        => n >= LinalgBlocked.LuThreshold ? LinalgBlocked.Lu(a, n, swaps) : LuInPlaceUnblocked(a, n, swaps);
+
+    /// <summary>
+    /// The unblocked right-looking LU, one row axpy per multiplier. Used below
+    /// <see cref="LinalgBlocked.LuThreshold"/> and kept as the reference the blocked form is tested against.
+    /// </summary>
+    public static int LuInPlaceUnblocked(Span<double> a, int n, int[] swaps)
     {
         var firstZero = -1;
         for (var k = 0; k < n; k++)
@@ -234,6 +243,12 @@ internal static class LinalgKernels
         return perm;
     }
 
+    /// <summary>Right-hand-side count from which the blocked triangular solves pay for themselves.</summary>
+    internal const int BlockedSolveMinColumns = 8;
+
+    /// <summary>Order from which the blocked triangular solves pay for themselves.</summary>
+    internal const int BlockedSolveMinOrder = 64;
+
     /// <summary>Solves <c>A X = B</c> (or <c>Aᵀ X = B</c>) from a packed LU, overwriting <paramref name="b"/>.</summary>
     public static void LuSolveInPlace(ReadOnlySpan<double> lu, int[] swaps, int n, Span<double> b, int k, bool transpose)
     {
@@ -241,6 +256,13 @@ internal static class LinalgKernels
         {
             for (var i = 0; i < n; i++)
                 if (swaps[i] != i) b.Slice(i * k, k).SwapWith(b.Slice(swaps[i] * k, k));
+            if (k >= BlockedSolveMinColumns && n >= BlockedSolveMinOrder)
+            {
+                // Many right-hand sides (an inverse, expm's Padé solve): level-3 blocked solves.
+                LinalgBlocked.LowerUnitSolve(lu, n, b, k);
+                LinalgBlocked.UpperSolve(lu, n, b, k);
+                return;
+            }
             TriangularSolveInPlace(lu, n, b, k, lower: true, transpose: false, unitDiagonal: true);
             TriangularSolveInPlace(lu, n, b, k, lower: false, transpose: false, unitDiagonal: false);
         }
@@ -447,8 +469,42 @@ internal static class LinalgKernels
         return r;
     }
 
-    /// <summary>Complex product C = A B (m×k times k×n), i-k-j order so the inner loop is contiguous.</summary>
+    /// <summary>Complex product C = A B (m×k times k×n).</summary>
+    /// <remarks>
+    /// Above a 32-cube the product is formed as four real products of the split real and
+    /// imaginary parts through <see cref="LinalgGemm"/>: <c>Cr = ArBr − AiBi</c>, <c>Ci = ArBi + AiBr</c>.
+    /// <see cref="Complex"/> arithmetic in a scalar loop ran at well under a gigaflop and was most
+    /// of the time in Sylvester, sqrtm and logm once the Schur forms got faster. Not Gauss's
+    /// three-product trick: it saves a quarter of the flops but loses accuracy in the imaginary
+    /// part when |A||B| is large compared with the result.
+    /// </remarks>
     public static Complex[] CMul(Complex[] a, Complex[] b, int m, int k, int n)
+    {
+        if ((long)m * k * n >= 32L * 32 * 32) return CMulSplit(a, b, m, k, n);
+        return CMulNaive(a, b, m, k, n);
+    }
+
+    private static unsafe Complex[] CMulSplit(Complex[] a, Complex[] b, int m, int k, int n)
+    {
+        var ar = new double[m * k]; var ai = new double[m * k];
+        var br = new double[k * n]; var bi = new double[k * n];
+        for (var i = 0; i < ar.Length; i++) { ar[i] = a[i].Real; ai[i] = a[i].Imaginary; }
+        for (var i = 0; i < br.Length; i++) { br[i] = b[i].Real; bi[i] = b[i].Imaginary; }
+        var cr = new double[m * n]; var ci = new double[m * n];
+        fixed (double* par = ar, pai = ai, pbr = br, pbi = bi, pcr = cr, pci = ci)
+        {
+            LinalgGemm.Gemm(m, n, k, 1.0, par, k, pbr, n, 0.0, pcr, n);
+            LinalgGemm.Gemm(m, n, k, -1.0, pai, k, pbi, n, 1.0, pcr, n);
+            LinalgGemm.Gemm(m, n, k, 1.0, par, k, pbi, n, 0.0, pci, n);
+            LinalgGemm.Gemm(m, n, k, 1.0, pai, k, pbr, n, 1.0, pci, n);
+        }
+        var c = new Complex[m * n];
+        for (var i = 0; i < c.Length; i++) c[i] = new Complex(cr[i], ci[i]);
+        return c;
+    }
+
+    /// <summary>The scalar complex product, i-k-j order so the inner loop is contiguous; the reference for <see cref="CMul"/>.</summary>
+    internal static Complex[] CMulNaive(Complex[] a, Complex[] b, int m, int k, int n)
     {
         var c = new Complex[m * n];
         void Row(int i)

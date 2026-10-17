@@ -355,7 +355,14 @@ public static partial class Linalg
         var h = a.ToArray();
         LinalgKernels.RequireFinite(h, nameof(Hessenberg));
         var q = calcQ ? new double[n * n] : null;
-        LinalgSchurKernel.Hessenberg(h, q, n);
+        // Native only from 200 rows: below that the managed reduction measured faster than
+        // OpenBLAS's dgehrd + dorghr (1.8 ms against 3.7 ms at n = 100).
+        if (n >= 200 && LinalgNativeLapack.ShouldUse(n))
+        {
+            var info = LinalgNativeLapack.Hessenberg(h, n, q);
+            if (info != 0) throw new LinalgException($"Hessenberg: LAPACK dgehrd/dorghr failed (info = {info}).");
+        }
+        else LinalgSchurKernel.Hessenberg(h, q, n);
         return new HessenbergResult(new NdArray(h, n, n), q is null ? null : new NdArray(q, n, n));
     }
 
@@ -426,6 +433,7 @@ public static partial class Linalg
         var n = a.Shape[0];
         var t = a.ToArray();
         LinalgKernels.RequireFinite(t, nameof(Eig));
+        if (LinalgNativeLapack.ShouldUse(n)) return EigNative(t, n);
         var scale = LinalgSchurKernel.Balance(t, n);
         var z = new double[n * n];
         var (re, im) = LinalgSchurKernel.RealSchur(t, z, n);
@@ -433,25 +441,28 @@ public static partial class Linalg
 
         var values = new Complex[n];
         var vectors = new Complex[n * n];
+        // Eigenvectors of the triangle as the columns of X (upper triangular), then all of them
+        // back-transformed at once, V = Z X, as one complex product: the per-vector complex dot
+        // products this replaced were O(n³) scalar Complex arithmetic and half of Eig's time.
+        var xs = new Complex[n * n];
         var x = new Complex[n];
-        var v = new Complex[n];
         for (var k = 0; k < n; k++)
         {
             values[k] = new Complex(re[k], im[k]);
+            if (im[k] < 0 && k > 0 && im[k - 1] > 0) continue;
+            LinalgSchurKernel.EigenvectorOfTriangular(ct, n, k, x);
+            for (var i = 0; i <= k; i++) xs[i * n + k] = x[i];
+        }
+        var zx = LinalgKernels.CMul(cz, xs, n, n, n);
+        var v = new Complex[n];
+        for (var k = 0; k < n; k++)
+        {
             if (im[k] < 0 && k > 0 && im[k - 1] > 0)
             {
                 for (var i = 0; i < n; i++) vectors[i * n + k] = Complex.Conjugate(vectors[i * n + k - 1]);
                 continue;
             }
-
-            LinalgSchurKernel.EigenvectorOfTriangular(ct, n, k, x);
-            for (var i = 0; i < n; i++)
-            {
-                var s = Complex.Zero;
-                var row = cz.AsSpan(i * n, k + 1);
-                for (var j = 0; j <= k; j++) s += row[j] * x[j];
-                v[i] = s * scale[i];
-            }
+            for (var i = 0; i < n; i++) v[i] = zx[i * n + k] * scale[i];
 
             var isReal = im[k] == 0.0;
             var norm = 0.0;
@@ -459,6 +470,47 @@ public static partial class Linalg
             for (var i = 0; i < n; i++)
             {
                 if (isReal) v[i] = v[i].Real;
+                var mag = Complex.Abs(v[i]);
+                norm += mag * mag;
+                if (mag > Complex.Abs(v[big])) big = i;
+            }
+            norm = Math.Sqrt(norm);
+            var phase = isReal ? Complex.One : Complex.Conjugate(v[big]) / Complex.Abs(v[big]);
+            for (var i = 0; i < n; i++) vectors[i * n + k] = v[i] * phase / norm;
+        }
+        return new LinalgEigResult(values, new ComplexNdArray(vectors, n, n));
+    }
+
+    /// <summary>
+    /// <c>dgeev</c> path of <see cref="Eig"/>: LAPACK's packed real vectors unpacked into complex
+    /// columns and normalised exactly as the managed path normalises them (unit 2-norm, a complex
+    /// vector rotated so its largest component is real and positive).
+    /// </summary>
+    private static LinalgEigResult EigNative(double[] t, int n)
+    {
+        var wr = new double[n];
+        var wi = new double[n];
+        var vr = new double[n * n];
+        var info = LinalgNativeLapack.Geev(t, n, wr, wi, vr);
+        if (info != 0) throw new LinalgException($"Eig: LAPACK dgeev failed (info = {info}).");
+        var values = new Complex[n];
+        var vectors = new Complex[n * n];
+        var v = new Complex[n];
+        for (var k = 0; k < n; k++)
+        {
+            values[k] = new Complex(wr[k], wi[k]);
+            var isReal = wi[k] == 0.0;
+            if (!isReal && wi[k] < 0 && k > 0)
+            {
+                for (var i = 0; i < n; i++) vectors[i * n + k] = Complex.Conjugate(vectors[i * n + k - 1]);
+                continue;
+            }
+            for (var i = 0; i < n; i++)
+                v[i] = isReal ? vr[i * n + k] : new Complex(vr[i * n + k], vr[i * n + k + 1]);
+            var norm = 0.0;
+            var big = 0;
+            for (var i = 0; i < n; i++)
+            {
                 var mag = Complex.Abs(v[i]);
                 norm += mag * mag;
                 if (mag > Complex.Abs(v[big])) big = i;

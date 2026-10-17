@@ -17,10 +17,11 @@ namespace Gravicode.Science.SciNet.Spatial;
 /// round trips agree to the last bits.</para>
 /// <para>A <see cref="Single"/> rotation returns shapes without the leading stack axis
 /// ((4), (3, 3), (3)), as scipy does; a stack of n returns (n, 4), (n, 3, 3), (n, 3).</para>
-/// <para>Not implemented: <c>RotationSpline</c>, <c>reduce</c> with symmetry groups,
-/// <c>create_group</c>, and infinite weights in <see cref="AlignVectors"/>.</para>
+/// <para><see cref="Reduce"/>, <see cref="CreateGroup"/> and <see cref="RotationSpline"/> live
+/// in RotationExtras.cs. Not implemented: infinite weights in <see cref="AlignVectors"/>, and
+/// scipy 1.17's N-d rotation arrays (<c>shape</c> beyond one stack axis).</para>
 /// </remarks>
-public sealed class Rotation
+public sealed partial class Rotation
 {
     private readonly double[] _q;
 

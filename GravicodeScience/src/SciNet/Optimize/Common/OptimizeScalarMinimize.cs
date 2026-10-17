@@ -250,8 +250,16 @@ public static partial class Optimize
         };
     }
 
-    /// <summary>SciPy's <c>_minimize_scalar_bounded</c> (Brent's <c>fmin</c> on an interval).</summary>
-    internal static MinimizeScalarResult Fminbound(Func<double, double> f, double x1, double x2, double xatol, int maxfun)
+    /// <summary>
+    /// Bounded scalar minimisation (<c>scipy.optimize.fminbound</c>, the engine of
+    /// <c>minimize_scalar(method='bounded')</c>): Brent's golden-section/parabolic <c>fmin</c> on [x1, x2].
+    /// </summary>
+    /// <param name="f">Function of one variable.</param>
+    /// <param name="x1">Lower end (finite).</param>
+    /// <param name="x2">Upper end (finite).</param>
+    /// <param name="xatol">Absolute tolerance on x (SciPy's <c>xtol</c>).</param>
+    /// <param name="maxfun">Maximum function evaluations.</param>
+    public static MinimizeScalarResult Fminbound(Func<double, double> f, double x1, double x2, double xatol = 1e-5, int maxfun = 500)
     {
         if (!double.IsFinite(x1) || !double.IsFinite(x2)) throw new ArgumentException("Optimization bounds must be finite scalars.");
         if (x1 > x2) throw new ArgumentException("The lower bound exceeds the upper bound.");

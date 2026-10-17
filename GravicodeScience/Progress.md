@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v1.2.0 · **Target framework**: .NET 10 · **Tests**: 2,699 passing, 0 failing
+**Release**: v1.3.0 · **Target framework**: .NET 10 · **Tests**: 3,257 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -17,7 +17,7 @@ Roadmap: [PLAN.md](PLAN.md)
 | GraviText | ✅ Complete | 171 tests |
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
-| SciNet | ✅ Complete | 1,640 tests — SciPy for .NET, all 15 `scipy.*` modules |
+| SciNet | ✅ Complete | 2,198 tests — SciPy for .NET, all 15 `scipy.*` modules |
 | Sample apps | ✅ Complete | 7 apps, all run end to end |
 | Notebooks | ✅ Complete | 7 notebooks, cells compile-checked |
 | Benchmarks | ✅ Complete | 7 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
@@ -201,7 +201,7 @@ remains the better baseline on a small dataset.
 - [x] **v0.4** Kalman filter and RTS smoother, pinned against the closed-form steady-state gain
 - [x] **v0.4** WAIC and PSIS-LOO with Pareto-k diagnostics
 
-### SciNet — 1,640 tests
+### SciNet — 2,198 tests
 
 - [x] `Special`: gamma/beta and incomplete forms with inverses, erf family and Faddeeva, Bessel of
   real order (scaled, spherical, zeros), Airy, orthogonal polynomials and Gauss rules,
@@ -225,6 +225,18 @@ remains the better baseline on a small dataset.
   and Latin hypercube engines
 - [x] `NdImage`: filters, interpolation, morphology, distance transforms, measurements, in all
   eight boundary modes
+- [x] **1.3.0** Multifrontal sparse LU (2× faster than SuperLU), supernodal sparse Cholesky,
+  thick-restart Lanczos (level with ARPACK); dense-kernel rewrite behind `expm`/Schur/Sylvester;
+  flat KD-tree and specialised linkage updates (both faster than SciPy)
+- [x] **1.3.0** `trust-constr`, SHGO, quadratic assignment, isotonic regression, a real `tnc.c`
+  port, the legacy `fmin*` interface; `ShortTimeFft`, residues; Struve, `Hyperu`, Kelvin,
+  cdflib inverses; `Fht`
+- [x] **1.3.0** Every `scipy.stats` family (109 continuous, 21 discrete) plus matrix and
+  directional multivariate laws; censored data, Kaplan–Meier, logrank; Box–Cox, Yeo–Johnson,
+  circular statistics, MGC, Sobol indices, `GoodnessOfFit`
+- [x] **1.3.0** N-d Delaunay, convex hull and linear scattered interpolation; 3-D Voronoi,
+  `HalfspaceIntersection`, `SphericalVoronoi`, `RotationSpline`, periodic KD-tree
+- [x] **1.3.0** A managed HDF5 reader, so MATLAB v7.3 and NetCDF-4 now load
 - [x] `Cluster`, `Sparse` (formats, iterative and direct solvers, eigensolvers, csgraph),
   `Spatial` (KD-tree, distances, hulls, Delaunay, Voronoi, rotations), `IO` (MATLAB, Matrix Market,
   Harwell–Boeing, NetCDF, WAV, ARFF, Fortran, IDL)
@@ -324,8 +336,9 @@ Each is now covered by a regression test.
 
 **SciNet** (SciPy for .NET) was added as a seventh library, with its sample, notebook, benchmark
 suite, bilingual docs and a NuGet icon for every package; the suite grew from 1,059 to 2,699.
-SciNet's honest limits are listed in [docs/SciNet.md](docs/SciNet.md) — notably `Splu` (about 7×
-behind SuperLU), `Eigsh` (about 4.5× behind ARPACK) and dense matrix functions behind LAPACK.
+**1.3.0** closed every gap 1.2.0 listed: sparse LU, Lanczos and dense kernels now match or beat
+SciPy, and the missing optimisers, distributions, geometry and HDF5 formats are in. The suite is
+3,257. SciNet now leads SciPy on 21 of 26 measured workloads.
 
 See [PLAN.md](PLAN.md). **v0.4 is complete**, and **five of six v0.5 items are done**: Arrow
 interchange, out-of-core dataframes, sparse training paths, the pretrained-weight loader, and the

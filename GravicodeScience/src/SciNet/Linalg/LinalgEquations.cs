@@ -11,8 +11,9 @@ public static partial class Linalg
     /// <remarks>
     /// Bartels–Stewart: Schur forms of A and B, transform Q, solve the triangular equation
     /// column by column, transform back. The triangular stage uses the <em>complex</em> Schur forms
-    /// (converted from the real ones), so each column is one upper-triangular solve with
-    /// <c>R + S[j,j] I</c> instead of LAPACK <c>trsyl</c>'s 1×1/2×2 block cases. For real data the
+    /// (converted from the real ones), so there are no 1×1/2×2 block cases as in LAPACK <c>trsyl</c>;
+    /// that triangular equation is solved by the recursive blocking of Jonsson &amp; Kågström (2002),
+    /// which puts all but O(mn·32) of its work into matrix products. For real data the
     /// solution is real and is returned as such. Unique iff no eigenvalue of A equals minus one of B.
     /// </remarks>
     /// <exception cref="LinalgSingularMatrixException">A and −B share an eigenvalue.</exception>
@@ -30,20 +31,8 @@ public static partial class Linalg
         // F = U^H Q V
         var f = LinalgKernels.CMul(LinalgKernels.CMul(LinalgKernels.CConjTranspose(u, m, m), LinalgKernels.ToComplex(q.AsContiguous().AsSpan()), m, m, n), v, m, n, n);
 
-        // R Y + Y S = F, S upper triangular: column j depends on columns < j.
-        var y = new Complex[m * n];
-        var col = new Complex[m];
-        for (var j = 0; j < n; j++)
-        {
-            for (var i = 0; i < m; i++)
-            {
-                var acc = f[i * n + j];
-                for (var k = 0; k < j; k++) acc -= y[i * n + k] * s[k * n + j];
-                col[i] = acc;
-            }
-            UpperSolveChecked(r, m, col, s[j * n + j], nameof(SolveSylvester));
-            for (var i = 0; i < m; i++) y[i * n + j] = col[i];
-        }
+        // R Y + Y S = F with R, S upper triangular, solved recursively in split real/imaginary form.
+        var y = LinalgSylvesterKernel.SolveTriangular(r, m, s, n, f, nameof(SolveSylvester));
         var x = LinalgKernels.CMul(LinalgKernels.CMul(u, y, m, m, n), LinalgKernels.CConjTranspose(v, n, n), m, n, n);
         return new NdArray(LinalgKernels.RealPart(x), m, n);
     }

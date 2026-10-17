@@ -9,14 +9,15 @@ namespace Gravicode.Science.SciNet.IO;
 public sealed record MatVariableInfo(string Name, int[] Shape, string ClassName);
 
 /// <summary>
-/// MATLAB MAT files — <c>scipy.io.loadmat</c>, <c>savemat</c>, <c>whosmat</c>. Reads level 4 and
-/// level 5 (MATLAB v4, v6, v7: compressed or not, either byte order) with every array class;
-/// writes level 5 (optionally compressed) and level 4.
+/// MATLAB MAT files — <c>scipy.io.loadmat</c>, <c>savemat</c>, <c>whosmat</c>. Reads level 4,
+/// level 5 (MATLAB v4, v6, v7: compressed or not, either byte order) and v7.3 (HDF5) with every
+/// array class; writes level 5 (optionally compressed) and level 4.
 /// </summary>
 /// <remarks>
-/// <para>MATLAB v7.3 files are HDF5 containers with a MAT header, and are refused with
-/// <see cref="NotSupportedException"/>: reading them needs an HDF5 implementation, which the BCL
-/// does not have.</para>
+/// <para>MATLAB v7.3 files are HDF5 containers behind a MAT header; they are read with SciNet's
+/// own managed <see cref="Hdf5File"/> reader into the same <see cref="MatValue"/> model, so a
+/// variable loads identically whichever format it was saved in (SciPy itself cannot read v7.3).
+/// Writing v7.3 is not supported.</para>
 /// <para>Arrays come back row-major with MATLAB's shape (<c>A(2,3)</c> is <c>array[1, 2]</c>).
 /// The conversion from MATLAB's column-major storage is a cache-blocked transpose — for a large
 /// 2-D double it is fused with the read, so no intermediate copy is made.</para>
@@ -48,7 +49,12 @@ public static class MatFile
     {
         var wanted = variableNames is null ? null : new HashSet<string>(variableNames, StringComparer.Ordinal);
         var (major, _) = Version(file);
-        var vars = major == 0 ? MatV4.Read(file, wanted) : MatV5Reader.Open(file).ReadAll(file, wanted);
+        var vars = major switch
+        {
+            0 => MatV4.Read(file, wanted),
+            2 => MatV73Reader.ReadAll(file, wanted),
+            _ => MatV5Reader.Open(file).ReadAll(file, wanted),
+        };
         if (!squeezeMe && !simplifyCells) return vars;
         var result = new OrderedDictionary<string, MatValue>(StringComparer.Ordinal);
         foreach (var (k, v) in vars)
@@ -91,7 +97,12 @@ public static class MatFile
     private static IReadOnlyList<MatVariableInfo> Whosmat(byte[] file)
     {
         var (major, _) = Version(file);
-        return major == 0 ? MatV4.List(file) : MatV5Reader.Open(file).List(file);
+        return major switch
+        {
+            0 => MatV4.List(file),
+            2 => MatV73Reader.List(file),
+            _ => MatV5Reader.Open(file).List(file),
+        };
     }
 
     /// <summary>
@@ -108,7 +119,9 @@ public static class MatFile
 
     private static (int Major, int Minor) Version(byte[] file)
     {
-        var v = Version(file, checkV73: true);
+        var v = Version(file, checkV73: false);
+        if (v.Major == 2 && !Hdf5File.IsHdf5(new MemoryStream(file, writable: false)))
+            throw new InvalidDataException("Malformed MAT file: the header says v7.3 (HDF5) but there is no HDF5 superblock.");
         return v;
     }
 
@@ -124,8 +137,6 @@ public static class MatFile
         var major = version >> 8;
         if (major == 2)
         {
-            if (checkV73)
-                throw new NotSupportedException("This is a MATLAB v7.3 MAT file, which is an HDF5 container. SciNet reads MAT levels 4 and 5 (v4, v6, v7) only; re-save it in MATLAB with save(..., '-v7') or read it with an HDF5 library.");
             return (2, 0);
         }
         if (major != 1) throw new InvalidDataException($"Not a MAT file: unknown version 0x{version:X4}.");
@@ -186,7 +197,7 @@ public static class MatFile
                 MatV4.Write(stream, vars);
                 break;
             case "7.3":
-                throw new NotSupportedException("Writing MATLAB v7.3 (HDF5) files is not supported; use format \"5\" with doCompression for MATLAB v7 files.");
+                throw new NotSupportedException("Writing MATLAB v7.3 (HDF5) files is not supported (SciNet reads them); use format \"5\" with doCompression for MATLAB v7 files.");
             default:
                 throw new ArgumentException("format must be \"5\" or \"4\".", nameof(format));
         }

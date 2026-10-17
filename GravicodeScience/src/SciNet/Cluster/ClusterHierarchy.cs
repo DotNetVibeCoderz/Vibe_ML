@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using Gravicode.Science.GraviNum;
 using Gravicode.Science.SciNet.Spatial;
 
@@ -40,7 +43,7 @@ public enum FclusterCriterion
 /// <summary>
 /// A node of a hierarchical clustering tree (scipy.cluster.hierarchy.ClusterNode).
 /// </summary>
-public sealed class ClusterNode
+public sealed class ClusterNode : IComparable<ClusterNode>
 {
     /// <summary>Node id: 0..n-1 for observations, n + row for the link in row <c>row</c> of Z.</summary>
     public int Id { get; }
@@ -70,6 +73,9 @@ public sealed class ClusterNode
         Id = id; Left = left; Right = right; Dist = dist;
         Count = left is null ? count : left.Count + right!.Count;
     }
+
+    /// <summary>Orders nodes by merge distance, as scipy's <c>ClusterNode.__lt__</c> does.</summary>
+    public int CompareTo(ClusterNode? other) => other is null ? 1 : Dist.CompareTo(other.Dist);
 
     /// <summary>Leaf ids from left to right.</summary>
     public List<int> PreOrder() => PreOrder(n => n.Id);
@@ -117,24 +123,65 @@ public static partial class Cluster
         return (long)n * i - (long)i * (i + 1) / 2 + (j - i - 1);
     }
 
-    private delegate double LinkageUpdate(double dxi, double dyi, double dxy, int nx, int ny, int ni);
+    /// <summary>Condensed index of (i, j) for i &lt; j, without the ordering test.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long CiOrdered(int n, int i, int j) => (long)n * i - (long)i * (i + 1) / 2 + (j - i - 1);
 
-    private static LinkageUpdate Update(LinkageMethod method) => method switch
+    /// <summary>
+    /// A Lance–Williams update as a struct, so each method's loop is compiled with its formula
+    /// inlined instead of calling a delegate per element.
+    /// </summary>
+    /// <remarks>
+    /// The expressions are exactly the ones the delegate version used, operand order included:
+    /// Linkage is pinned bit-for-bit against scipy's Z, and reassociating a single product would
+    /// be enough to flip a tie between two merges.
+    /// </remarks>
+    private interface ILinkageRule
     {
-        LinkageMethod.Single => (dxi, dyi, _, _, _, _) => Math.Min(dxi, dyi),
-        LinkageMethod.Complete => (dxi, dyi, _, _, _, _) => Math.Max(dxi, dyi),
-        LinkageMethod.Average => (dxi, dyi, _, nx, ny, _) => (nx * dxi + ny * dyi) / (nx + ny),
-        LinkageMethod.Weighted => (dxi, dyi, _, _, _, _) => 0.5 * (dxi + dyi),
-        LinkageMethod.Centroid => (dxi, dyi, dxy, nx, ny, _) =>
-            Math.Sqrt((((nx * dxi * dxi) + (ny * dyi * dyi)) - (nx * ny * dxy * dxy) / (nx + ny)) / (nx + ny)),
-        LinkageMethod.Median => (dxi, dyi, dxy, _, _, _) => Math.Sqrt(0.5 * (dxi * dxi + dyi * dyi) - 0.25 * dxy * dxy),
-        LinkageMethod.Ward => (dxi, dyi, dxy, nx, ny, ni) =>
+        double Update(double dxi, double dyi, double dxy, int nx, int ny, int ni);
+    }
+
+    private readonly struct CompleteRule : ILinkageRule
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double Update(double dxi, double dyi, double dxy, int nx, int ny, int ni) => Math.Max(dxi, dyi);
+    }
+
+    private readonly struct AverageRule : ILinkageRule
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double Update(double dxi, double dyi, double dxy, int nx, int ny, int ni) => (nx * dxi + ny * dyi) / (nx + ny);
+    }
+
+    private readonly struct WeightedRule : ILinkageRule
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double Update(double dxi, double dyi, double dxy, int nx, int ny, int ni) => 0.5 * (dxi + dyi);
+    }
+
+    private readonly struct CentroidRule : ILinkageRule
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double Update(double dxi, double dyi, double dxy, int nx, int ny, int ni)
+            => Math.Sqrt((((nx * dxi * dxi) + (ny * dyi * dyi)) - (nx * ny * dxy * dxy) / (nx + ny)) / (nx + ny));
+    }
+
+    private readonly struct MedianRule : ILinkageRule
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double Update(double dxi, double dyi, double dxy, int nx, int ny, int ni)
+            => Math.Sqrt(0.5 * (dxi * dxi + dyi * dyi) - 0.25 * dxy * dxy);
+    }
+
+    private readonly struct WardRule : ILinkageRule
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double Update(double dxi, double dyi, double dxy, int nx, int ny, int ni)
         {
             var t = 1.0 / (nx + ny + ni);
             return Math.Sqrt((ni + nx) * t * dxi * dxi + (ni + ny) * t * dyi * dyi - ni * t * dxy * dxy);
-        },
-        _ => throw new ArgumentException($"Unknown linkage method {method}."),
-    };
+        }
+    }
 
     /// <summary>
     /// Hierarchical clustering of a condensed distance matrix (length n(n-1)/2, as from
@@ -148,17 +195,52 @@ public static partial class Cluster
     public static NdArray Linkage(double[] y, LinkageMethod method = LinkageMethod.Single, bool optimalOrdering = false)
     {
         ArgumentNullException.ThrowIfNull(y);
+        return LinkageCore(y, method, optimalOrdering, owned: false);
+    }
+
+    /// <param name="y">Condensed distances.</param>
+    /// <param name="method">Agglomeration rule.</param>
+    /// <param name="optimalOrdering">Reorder the leaves optimally.</param>
+    /// <param name="owned">The buffer is private to this call (from pdist) and may be overwritten,
+    /// which saves copying n(n−1)/2 doubles — 16 MB at n = 2000.</param>
+    private static NdArray LinkageCore(double[] y, LinkageMethod method, bool optimalOrdering, bool owned)
+    {
         var n = Distance.NumObsY(y.LongLength);
-        foreach (var v in y) if (!double.IsFinite(v)) throw new ArgumentException("The condensed distance matrix must contain only finite values.");
+        if (!AllFinite(y)) throw new ArgumentException("The condensed distance matrix must contain only finite values.");
         if (n < 2) throw new ArgumentException("Linkage needs at least two observations.");
+        var work = owned && !optimalOrdering ? y : null;
         var z = method switch
         {
             LinkageMethod.Single => MstSingleLinkage(y, n),
-            LinkageMethod.Complete or LinkageMethod.Average or LinkageMethod.Weighted or LinkageMethod.Ward => NnChain(y, n, Update(method)),
-            _ => FastLinkage(y, n, Update(method)),
+            LinkageMethod.Complete => NnChain<CompleteRule>(work ?? (double[])y.Clone(), n),
+            LinkageMethod.Average => NnChain<AverageRule>(work ?? (double[])y.Clone(), n),
+            LinkageMethod.Weighted => NnChain<WeightedRule>(work ?? (double[])y.Clone(), n),
+            LinkageMethod.Ward => NnChain<WardRule>(work ?? (double[])y.Clone(), n),
+            LinkageMethod.Centroid => FastLinkage<CentroidRule>(work ?? (double[])y.Clone(), n),
+            LinkageMethod.Median => FastLinkage<MedianRule>(work ?? (double[])y.Clone(), n),
+            _ => throw new ArgumentException($"Unknown linkage method {method}."),
         };
         var zz = new NdArray(z, n - 1, 4);
         return optimalOrdering ? OptimalLeafOrdering(zz, y) : zz;
+    }
+
+    private static bool AllFinite(double[] y)
+    {
+        // x - x is 0 for finite x and NaN for ±inf or NaN, so one vector compare per lane suffices.
+        var i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var bad = Vector256<double>.Zero;
+            ref var start = ref MemoryMarshal.GetArrayDataReference(y);
+            for (; i <= y.Length - 4; i += 4)
+            {
+                var v = Vector256.LoadUnsafe(ref start, (nuint)i);
+                bad |= ~Vector256.Equals(v - v, Vector256<double>.Zero);
+            }
+            if (bad != Vector256<double>.Zero) return false;
+        }
+        for (; i < y.Length; i++) if (!double.IsFinite(y[i])) return false;
+        return true;
     }
 
     /// <summary>
@@ -170,11 +252,11 @@ public static partial class Cluster
         DistanceMetric metric = DistanceMetric.Euclidean, bool optimalOrdering = false)
     {
         ArgumentNullException.ThrowIfNull(x);
-        if (x.Rank == 1) return Linkage(x.ToArray(), method, optimalOrdering);
+        if (x.Rank == 1) return LinkageCore(x.ToArray(), method, optimalOrdering, owned: true);
         if (x.Rank != 2) throw new ArgumentException("`y` must be 1 or 2 dimensional.");
         if (method is LinkageMethod.Centroid or LinkageMethod.Median or LinkageMethod.Ward && metric != DistanceMetric.Euclidean)
             throw new ArgumentException($"`method={method}` requires the distance metric to be Euclidean.");
-        return Linkage(Distance.Pdist(x, metric), method, optimalOrdering);
+        return LinkageCore(Distance.Pdist(x, metric), method, optimalOrdering, owned: true);
     }
 
     private static double[] MstSingleLinkage(double[] dists, int n)
@@ -189,10 +271,24 @@ public static partial class Cluster
             var currentMin = double.PositiveInfinity;
             merged[x] = true;
             var y = -1;
-            for (var i = 0; i < n; i++)
+            // Column part of row x (i < x) is strided in condensed storage, the rest contiguous;
+            // both walked incrementally instead of recomputing the index per element.
+            var idx = (long)x - 1;          // Ci(n, 0, x)
+            for (var i = 0; i < x; i++)
+            {
+                if (!merged[i])
+                {
+                    var dist = dists[idx];
+                    if (d[i] > dist) d[i] = dist;
+                    if (d[i] < currentMin) { y = i; currentMin = d[i]; }
+                }
+                idx += n - i - 2;
+            }
+            var row = x + 1 < n ? CiOrdered(n, x, x + 1) - (x + 1) : 0;
+            for (var i = x + 1; i < n; i++)
             {
                 if (merged[i]) continue;
-                var dist = dists[Ci(n, x, i)];
+                var dist = dists[row + i];
                 if (d[i] > dist) d[i] = dist;
                 if (d[i] < currentMin) { y = i; currentMin = d[i]; }
             }
@@ -202,12 +298,33 @@ public static partial class Cluster
         return SortAndLabel(z, n);
     }
 
-    private static double[] NnChain(double[] dists, int n, LinkageUpdate newDist)
+    /// <summary>
+    /// Nearest-neighbour chain (Müllner 2011, as scipy's <c>nn_chain</c>) for the reducible
+    /// methods, on a condensed matrix that it overwrites.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Live clusters are kept in an ascending doubly-linked list, so scans skip merged slots
+    /// instead of testing a size per index — by the end almost every slot is dead. Within a scan
+    /// the condensed index advances incrementally: down a column for <c>i &lt; x</c> (stride
+    /// <c>n − i − 2</c>), along the row for <c>i &gt; x</c>.
+    /// </para>
+    /// <para>
+    /// Order of visits and comparisons is unchanged (ascending i, strict &lt;), so ties resolve
+    /// exactly as before and Z is bit-identical.
+    /// </para>
+    /// </remarks>
+    private static double[] NnChain<TRule>(double[] d, int n) where TRule : struct, ILinkageRule
     {
+        var rule = default(TRule);
         var z = new double[(n - 1) * 4];
-        var d = (double[])dists.Clone();
         var size = new int[n];
         Array.Fill(size, 1);
+        var next = new int[n + 1];
+        var prev = new int[n + 1];
+        // Sentinel n terminates the list; head is next[n].
+        for (var i = 0; i < n; i++) { next[i] = i + 1; prev[i] = i - 1 < 0 ? n : i - 1; }
+        next[n] = 0; prev[n] = n - 1;
         var chain = new int[n];
         var chainLength = 0;
         for (var k = 0; k < n - 1; k++)
@@ -215,7 +332,7 @@ public static partial class Cluster
             if (chainLength == 0)
             {
                 chainLength = 1;
-                for (var i = 0; i < n; i++) if (size[i] > 0) { chain[0] = i; break; }
+                chain[0] = next[n];
             }
             int x, y = 0;
             double currentMin;
@@ -229,10 +346,12 @@ public static partial class Cluster
                     currentMin = d[Ci(n, x, y)];
                 }
                 else currentMin = double.PositiveInfinity;
-                for (var i = 0; i < n; i++)
+
+                var rowX = x + 1 < n ? CiOrdered(n, x, x + 1) - (x + 1) : 0;
+                for (var i = next[n]; i != n; i = next[i])
                 {
-                    if (size[i] == 0 || x == i) continue;
-                    var dist = d[Ci(n, x, i)];
+                    if (i == x) continue;
+                    var dist = i < x ? d[CiOrdered(n, i, x)] : d[rowX + i];
                     if (dist < currentMin) { currentMin = dist; y = i; }
                 }
                 if (chainLength > 1 && y == chain[chainLength - 2]) break;
@@ -244,15 +363,24 @@ public static partial class Cluster
             z[4 * k] = x; z[4 * k + 1] = y; z[4 * k + 2] = currentMin; z[4 * k + 3] = nx + ny;
             size[x] = 0;
             size[y] = nx + ny;
-            for (var i = 0; i < n; i++)
+            // Unlink x.
+            next[prev[x]] = next[x];
+            prev[next[x]] = prev[x];
+
+            var rowx = CiOrdered(n, x, x + 1) - (x + 1);
+            var rowy = y + 1 < n ? CiOrdered(n, y, y + 1) - (y + 1) : 0;
+            for (var i = next[n]; i != n; i = next[i])
             {
+                if (i == y) continue;
                 var ni = size[i];
-                if (ni == 0 || i == y) continue;
-                d[Ci(n, i, y)] = newDist(d[Ci(n, i, x)], d[Ci(n, i, y)], currentMin, nx, ny, ni);
+                long ix = i < x ? CiOrdered(n, i, x) : rowx + i;
+                long iy = i < y ? CiOrdered(n, i, y) : rowy + i;
+                d[iy] = rule.Update(d[ix], d[iy], currentMin, nx, ny, ni);
             }
         }
         return SortAndLabel(z, n);
     }
+
 
     /// <summary>Stable sort by distance, then relabel with a union-find (scipy's label()).</summary>
     private static double[] SortAndLabel(double[] z, int n)
@@ -354,31 +482,41 @@ public static partial class Cluster
         }
     }
 
-    private static (int Key, double Value) FindMinDist(int n, double[] d, int[] size, int x)
+    /// <summary>Nearest live cluster above x: a contiguous walk along row x of the condensed matrix.</summary>
+    private static (int Key, double Value) FindMinDist(int n, double[] d, int[] next, int x)
     {
         var currentMin = double.PositiveInfinity;
         var y = -1;
-        for (var i = x + 1; i < n; i++)
+        var row = x + 1 < n ? CiOrdered(n, x, x + 1) - (x + 1) : 0;
+        for (var i = next[x]; i != n; i = next[i])
         {
-            if (size[i] == 0) continue;
-            var dist = d[Ci(n, x, i)];
+            var dist = d[row + i];
             if (dist < currentMin) { currentMin = dist; y = i; }
         }
         return (y, currentMin);
     }
 
-    private static double[] FastLinkage(double[] dists, int n, LinkageUpdate newDist)
+    /// <summary>
+    /// scipy's generic <c>fast_linkage</c> (Müllner's heap-of-nearest-neighbours algorithm) for the
+    /// non-reducible methods (centroid, median), on a condensed matrix that it overwrites.
+    /// </summary>
+    private static double[] FastLinkage<TRule>(double[] d, int n) where TRule : struct, ILinkageRule
     {
+        var rule = default(TRule);
         var z = new double[(n - 1) * 4];
-        var d = (double[])dists.Clone();
         var size = new int[n];
         Array.Fill(size, 1);
-        var clusterId = Enumerable.Range(0, n).ToArray();
+        var next = new int[n + 1];
+        var prev = new int[n + 1];
+        for (var i = 0; i < n; i++) { next[i] = i + 1; prev[i] = i - 1 < 0 ? n : i - 1; }
+        next[n] = 0; prev[n] = n - 1;
+        var clusterId = new int[n];
+        for (var i = 0; i < n; i++) clusterId[i] = i;
         var neighbor = new int[n - 1];
         var minDist = new double[n - 1];
         for (var x0 = 0; x0 < n - 1; x0++)
         {
-            var (key, value) = FindMinDist(n, d, size, x0);
+            var (key, value) = FindMinDist(n, d, next, x0);
             neighbor[x0] = key; minDist[x0] = value;
         }
         var heap = new LinkageHeap(minDist);
@@ -391,7 +529,7 @@ public static partial class Cluster
                 (x, dist) = heap.GetMin();
                 y = neighbor[x];
                 if (dist == d[Ci(n, x, y)]) break;
-                (y, dist) = FindMinDist(n, d, size, x);
+                (y, dist) = FindMinDist(n, d, next, x);
                 neighbor[x] = y; minDist[x] = dist;
                 heap.ChangeValue(x, dist);
             }
@@ -403,18 +541,24 @@ public static partial class Cluster
             size[x] = 0;
             size[y] = nx + ny;
             clusterId[y] = n + k;
-            for (var w = 0; w < n; w++)
+            next[prev[x]] = next[x];
+            prev[next[x]] = prev[x];
+
+            // x < y always here: x is the heap key, y its neighbour above it.
+            var rowx = CiOrdered(n, x, x + 1) - (x + 1);
+            var rowy = y + 1 < n ? CiOrdered(n, y, y + 1) - (y + 1) : 0;
+            for (var w = next[n]; w != n; w = next[w])
             {
-                var nz = size[w];
-                if (nz == 0 || w == y) continue;
-                d[Ci(n, w, y)] = newDist(d[Ci(n, w, x)], d[Ci(n, w, y)], dist, nx, ny, nz);
+                if (w == y) continue;
+                long iw = w < x ? CiOrdered(n, w, x) : rowx + w;
+                long iy = w < y ? CiOrdered(n, w, y) : rowy + w;
+                d[iy] = rule.Update(d[iw], d[iy], dist, nx, ny, size[w]);
             }
-            for (var w = 0; w < x; w++)
-                if (size[w] > 0 && neighbor[w] == x) neighbor[w] = y;
-            for (var w = 0; w < y; w++)
+            for (var w = next[n]; w < x; w = next[w])
+                if (neighbor[w] == x) neighbor[w] = y;
+            for (var w = next[n]; w < y; w = next[w])
             {
-                if (size[w] == 0) continue;
-                var dd = d[Ci(n, w, y)];
+                var dd = d[CiOrdered(n, w, y)];
                 if (dd < minDist[w])
                 {
                     neighbor[w] = y; minDist[w] = dd;
@@ -423,7 +567,7 @@ public static partial class Cluster
             }
             if (y < n - 1)
             {
-                var (zk, zd) = FindMinDist(n, d, size, y);
+                var (zk, zd) = FindMinDist(n, d, next, y);
                 if (zk != -1)
                 {
                     neighbor[y] = zk; minDist[y] = zd;

@@ -215,11 +215,12 @@ public class NetCdfTests
     }
 
     [Fact]
-    public void Netcdf4AndGarbage_AreRefused()
+    public void TruncatedNetcdf4AndGarbage_AreRefused()
     {
+        // NetCDF-4 is read now (see NetCdf4Tests); a bare HDF5 signature is a truncated file.
         var hdf = new byte[] { 0x89, (byte)'H', (byte)'D', (byte)'F', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0 };
-        var e = Assert.Throws<NotSupportedException>(() => NetCdfFile.Open(new MemoryStream(hdf)));
-        Assert.Contains("NetCDF-4", e.Message);
+        var e = Assert.Throws<InvalidDataException>(() => NetCdfFile.Open(new MemoryStream(hdf)));
+        Assert.Contains("HDF5", e.Message);
         Assert.Throws<NotSupportedException>(() => NetCdfFile.Open(new MemoryStream("CDF\u0005\0\0\0\0"u8.ToArray())));
         Assert.Throws<InvalidDataException>(() => NetCdfFile.Open(new MemoryStream("hello world"u8.ToArray())));
         var truncated = File.ReadAllBytes(Fixture("nc_v1.nc"))[..40];

@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.Intrinsics;
 using Gravicode.Science.GraviNum;
 
 namespace Gravicode.Science.SciNet;
@@ -109,7 +110,9 @@ internal static class LinalgSchurKernel
     /// order (a complex pair as <c>a + ib</c> then <c>a - ib</c>).
     /// </summary>
     /// <param name="t">Matrix in, Schur form out (row-major n×n).</param>
-    /// <param name="z">Receives the orthogonal Schur vectors, or null to skip accumulating them.</param>
+    /// <param name="z">Receives the orthogonal Schur vectors, or null to skip accumulating them.
+    /// When null only the eigenvalues are wanted, and <paramref name="t"/> is left holding the
+    /// diagonal blocks but not a valid Schur form (LAPACK's <c>wantt = false</c>).</param>
     /// <param name="n">Order.</param>
     public static (double[] Re, double[] Im) RealSchur(double[] t, double[]? z, int n)
     {
@@ -117,32 +120,50 @@ internal static class LinalgSchurKernel
         var wi = new double[n];
         if (n == 0) return (wr, wi);
 
-        // Accumulating Z needs a buffer; with none requested, a scratch one keeps hqr2's code
-        // path single. The cost is O(n^3) extra only when the caller did not ask.
-        var zz = z ?? new double[n * n];
-        Hessenberg(t, zz, n);
-        // The iteration rotates pairs/triples of Z's columns; on a row-major buffer those are
-        // strided, so it works on Zᵀ, where each rotation streams through contiguous rows.
-        var accumulate = z is not null;
-        if (accumulate) TransposeInPlace(zz, n);
-        Francis(t, zz, n, wr, wi, accumulate);
-        Clean(t, zz, n, wr, wi, accumulate);
-        if (accumulate) TransposeInPlace(zz, n);
+        if (LinalgNativeLapack.ShouldUse(n))
+        {
+            // dgees: same standardised 2×2 blocks (dlanv2), same eigenvalue order convention.
+            var info = LinalgNativeLapack.Gees(t, n, z, wr, wi);
+            if (info != 0) throw new LinalgException($"Schur: LAPACK dgees failed (info = {info}).");
+            return (wr, wi);
+        }
+
+        Hessenberg(t, z, n);
+        Francis(t, z, n, wr, wi, wantT: z is not null);
+        Clean(t, z, n, wr, wi);
         return (wr, wi);
     }
 
-    private static void TransposeInPlace(double[] a, int n)
-    {
-        for (var i = 0; i < n; i++)
-            for (var j = i + 1; j < n; j++) (a[i * n + j], a[j * n + i]) = (a[j * n + i], a[i * n + j]);
-    }
+    /// <summary>Rows × reflectors below which a deferred update is applied on one thread.</summary>
+    private const long DeferredParallelWork = 6_000;
 
-    /// <summary>The hqr2 iteration on a Hessenberg matrix, full Schur form (not just the active block).</summary>
-    private static void Francis(double[] H, double[] V, int nn, double[] d, double[] e, bool accumulate)
+    /// <summary>
+    /// The hqr2 iteration on a Hessenberg matrix: the full Schur form when <paramref name="wantT"/>,
+    /// otherwise only the active diagonal block (eigenvalues only).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each double-shift sweep applies a chain of 3×3 reflectors <c>P_k</c>, each from the left to
+    /// rows k..k+2 and from the right to columns k..k+2. On a row-major buffer the right-hand
+    /// application walks three columns down every row — a cache line touched per row per
+    /// reflector — and the Schur vectors get the same treatment. That walk was most of the runtime
+    /// once the matrix stopped fitting in L2.
+    /// </para>
+    /// <para>
+    /// The bulge chase itself only reads the band around the diagonal, so the right-hand update
+    /// is split: rows <c>i ≥ k − 1</c> get <c>P_k</c> at once (the chase needs them), rows above
+    /// get every reflector of the sweep afterwards, each row walking left to right through its own
+    /// contiguous memory, rows in parallel. Row i receives exactly the reflectors with
+    /// <c>k ≥ i + 2</c> late, and nothing reads or writes row i between their original time and the
+    /// end of the sweep, so the arithmetic — and the result, bit for bit — is unchanged. The Schur
+    /// vectors are never read by the chase, so all of their updates are deferred the same way;
+    /// keeping Z row-major (not transposed, as the previous version did) makes those row walks too.
+    /// </para>
+    /// </remarks>
+    private static void Francis(double[] H, double[]? Z, int nn, double[] d, double[] e, bool wantT)
     {
         var n = nn - 1;
         const int low = 0;
-        var high = nn - 1;
         var exshift = 0.0;
         double p = 0, q = 0, r = 0, s = 0, z = 0;
         double w, x, y;
@@ -150,6 +171,10 @@ internal static class LinalgSchurKernel
         var norm = 0.0;
         for (var i = 0; i < nn; i++)
             for (var j = Math.Max(i - 1, 0); j < nn; j++) norm += Math.Abs(H[i * nn + j]);
+
+        // Reflector k of the current sweep: (x, y, z, q, r) and 0 = skipped, 2 = last (two rows), 3.
+        var refl = new double[5 * nn];
+        var kind = new byte[nn];
 
         var iter = 0;
         var totalIter = 0;
@@ -215,12 +240,12 @@ internal static class LinalgSchurKernel
                         H[i * nn + n - 1] = q * z + p * H[i * nn + n];
                         H[i * nn + n] = q * H[i * nn + n] - p * z;
                     }
-                    if (accumulate)
-                        for (var i = low; i <= high; i++)
+                    if (Z is not null)
+                        for (var i = 0; i < nn; i++)
                         {
-                            z = V[(n - 1) * nn + i];
-                            V[(n - 1) * nn + i] = q * z + p * V[(n) * nn + i];
-                            V[(n) * nn + i] = q * V[(n) * nn + i] - p * z;
+                            z = Z[i * nn + n - 1];
+                            Z[i * nn + n - 1] = q * z + p * Z[i * nn + n];
+                            Z[i * nn + n] = q * Z[i * nn + n] - p * z;
                         }
                     H[n * nn + n - 1] = 0.0;
                 }
@@ -303,9 +328,21 @@ internal static class LinalgSchurKernel
                     if (i > m + 2) H[i * nn + i - 3] = 0.0;
                 }
 
-                // Double QR step on rows l..n and columns m..n.
-                for (var k = m; k <= n - 1; k++)
+                // Only the active block [l, n] when the Schur form is not wanted.
+                var colEnd = wantT ? nn : n + 1;
+                var rowStart = wantT ? 0 : l;
+
+                // Double QR step on rows l..n and columns m..n, in chunks of reflectors: within a
+                // chunk the left updates go only as far right as the chase will read before the
+                // chunk ends (column ke + 3); the columns beyond take the whole chunk afterwards,
+                // in parallel stripes. Per element the arithmetic and its order are unchanged.
+                for (var ks = m; ks <= n - 1; ks += SweepChunk)
                 {
+                var ke = Math.Min(n - 1, ks + SweepChunk - 1);
+                var colLimit = Math.Min(colEnd, ke + 4);
+                for (var k = ks; k <= ke; k++)
+                {
+                    kind[k] = 0;
                     var notlast = k != n - 1;
                     if (k != m)
                     {
@@ -332,20 +369,15 @@ internal static class LinalgSchurKernel
                     q /= p;
                     r /= p;
 
-                    for (var j = k; j < nn; j++)
-                    {
-                        p = H[k * nn + j] + q * H[(k + 1) * nn + j];
-                        if (notlast)
-                        {
-                            p += r * H[(k + 2) * nn + j];
-                            H[(k + 2) * nn + j] -= p * z;
-                        }
-                        H[k * nn + j] -= p * x;
-                        H[(k + 1) * nn + j] -= p * y;
-                    }
+                    kind[k] = notlast ? (byte)3 : (byte)2;
+                    refl[5 * k] = x; refl[5 * k + 1] = y; refl[5 * k + 2] = z;
+                    refl[5 * k + 3] = q; refl[5 * k + 4] = r;
 
+                    LeftReflect(H, nn, k, k, colLimit, x, y, z, q, r, notlast);
+
+                    // Right: rows the chase still reads now (i ≥ k − 1), the rest after the sweep.
                     var top = Math.Min(n, k + 3);
-                    for (var i = 0; i <= top; i++)
+                    for (var i = Math.Max(rowStart, k - 1); i <= top; i++)
                     {
                         p = x * H[i * nn + k] + y * H[i * nn + k + 1];
                         if (notlast)
@@ -356,20 +388,213 @@ internal static class LinalgSchurKernel
                         H[i * nn + k] -= p;
                         H[i * nn + k + 1] -= p * q;
                     }
-
-                    if (accumulate)
-                        for (var i = low; i <= high; i++)
-                        {
-                            p = x * V[(k) * nn + i] + y * V[(k + 1) * nn + i];
-                            if (notlast)
-                            {
-                                p += z * V[(k + 2) * nn + i];
-                                V[(k + 2) * nn + i] -= p * r;
-                            }
-                            V[(k) * nn + i] -= p;
-                            V[(k + 1) * nn + i] -= p * q;
-                        }
                 }
+                if (colLimit < colEnd) DeferredColumns(H, nn, ks, ke, colLimit, colEnd, refl, kind);
+                }
+
+                // Deferred right-hand updates: row i takes reflectors k ≥ max(m, i + 2).
+                DeferredRows(H, nn, rowStart, n - 2, m, n - 1, 2, refl, kind);
+                if (Z is not null) DeferredRows(Z, nn, 0, nn, m, n - 1, int.MinValue / 2, refl, kind);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Left application of reflector k to rows k..k+2 (k..k+1 when last), columns k..colEnd-1,
+    /// vectorised over the columns with the same per-element arithmetic as the scalar loop.
+    /// </summary>
+    private static unsafe void LeftReflect(double[] H, int nn, int k, int colStart, int colEnd,
+        double x, double y, double z, double q, double r, bool notlast)
+    {
+        fixed (double* hp = H)
+        {
+            var r0 = hp + (long)k * nn;
+            var r1 = r0 + nn;
+            var j = colStart;
+            if (notlast)
+            {
+                var r2 = r1 + nn;
+                var vq = Vector256.Create(q); var vr = Vector256.Create(r);
+                var vx = Vector256.Create(x); var vy = Vector256.Create(y); var vz = Vector256.Create(z);
+                for (; j <= colEnd - 4; j += 4)
+                {
+                    var h0 = Vector256.Load(r0 + j);
+                    var h1 = Vector256.Load(r1 + j);
+                    var h2 = Vector256.Load(r2 + j);
+                    var pv = h0 + vq * h1 + vr * h2;
+                    Vector256.Store(h2 - pv * vz, r2 + j);
+                    Vector256.Store(h0 - pv * vx, r0 + j);
+                    Vector256.Store(h1 - pv * vy, r1 + j);
+                }
+                for (; j < colEnd; j++)
+                {
+                    var pp = r0[j] + q * r1[j] + r * r2[j];
+                    r2[j] -= pp * z;
+                    r0[j] -= pp * x;
+                    r1[j] -= pp * y;
+                }
+            }
+            else
+            {
+                var vq = Vector256.Create(q); var vx = Vector256.Create(x); var vy = Vector256.Create(y);
+                for (; j <= colEnd - 4; j += 4)
+                {
+                    var h0 = Vector256.Load(r0 + j);
+                    var h1 = Vector256.Load(r1 + j);
+                    var pv = h0 + vq * h1;
+                    Vector256.Store(h0 - pv * vx, r0 + j);
+                    Vector256.Store(h1 - pv * vy, r1 + j);
+                }
+                for (; j < colEnd; j++)
+                {
+                    var pp = r0[j] + q * r1[j];
+                    r0[j] -= pp * x;
+                    r1[j] -= pp * y;
+                }
+            }
+        }
+    }
+
+    /// <summary>Reflectors per chunk of a sweep (see the chunk loop in <see cref="Francis"/>).</summary>
+    private const int SweepChunk = 48;
+
+    /// <summary>
+    /// The left-hand updates of reflectors ks..ke on columns [c0, c1), which the chase does not
+    /// read during the chunk: column stripes in parallel, each applying the reflectors in order.
+    /// </summary>
+    private static void DeferredColumns(double[] H, int nn, int ks, int ke, int c0, int c1, double[] refl, byte[] kind)
+    {
+        var work = (long)(c1 - c0) * (ke - ks + 1);
+        if (work < 2 * DeferredParallelWork || Environment.ProcessorCount == 1)
+        {
+            Stripe(c0, c1);
+            return;
+        }
+        var stripes = Math.Min(2 * Environment.ProcessorCount, Math.Max(1, (c1 - c0) / 32));
+        var width = ((c1 - c0 + stripes - 1) / stripes + 3) / 4 * 4;
+        stripes = (c1 - c0 + width - 1) / width;
+        Parallel.For(0, stripes, t => Stripe(c0 + t * width, Math.Min(c1, c0 + (t + 1) * width)));
+
+        void Stripe(int s0, int s1)
+        {
+            for (var k = ks; k <= ke; k++)
+            {
+                var kk = kind[k];
+                if (kk == 0) continue;
+                var o = 5 * k;
+                LeftReflect(H, nn, k, s0, s1, refl[o], refl[o + 1], refl[o + 2], refl[o + 3], refl[o + 4], kk == 3);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies the sweep's reflectors from the right to rows [rowStart, rowEnd) of M: row i takes
+    /// reflectors max(kFirst, i + offset) .. kLast in order, walking along its own memory.
+    /// </summary>
+    private static void DeferredRows(double[] M, int nn, int rowStart, int rowEnd, int kFirst, int kLast,
+        int offset, double[] refl, byte[] kind)
+    {
+        if (rowEnd <= rowStart || kLast < kFirst) return;
+        var work = (long)(rowEnd - rowStart) * (kLast - kFirst + 1);
+        if (work < DeferredParallelWork || Environment.ProcessorCount == 1)
+        {
+            WalkRange(M, nn, rowStart, rowEnd, kFirst, kLast, offset, refl, kind);
+            return;
+        }
+        var chunks = Math.Min(rowEnd - rowStart, 4 * Environment.ProcessorCount);
+        var per = (rowEnd - rowStart + chunks - 1) / chunks;
+        Parallel.For(0, chunks, c =>
+        {
+            var i0 = rowStart + c * per;
+            var i1 = Math.Min(rowEnd, i0 + per);
+            WalkRange(M, nn, i0, i1, kFirst, kLast, offset, refl, kind);
+        });
+    }
+
+    /// <summary>
+    /// Rows [i0, i1) four at a time: each row's walk is a dependent chain (a reflector reads the
+    /// value the previous one just wrote), latency-bound at roughly 18 cycles per reflector on its
+    /// own. Four independent rows in one loop let the core overlap the chains.
+    /// </summary>
+    private static void WalkRange(double[] M, int nn, int i0, int i1, int kFirst, int kLast, int offset,
+        double[] refl, byte[] kind)
+    {
+        var i = i0;
+        for (; i + 4 <= i1; i += 4)
+        {
+            // Rows start at different reflectors when offset applies: catch the first three up
+            // to the fourth's start on their own, then walk all four together.
+            var start = Math.Max(kFirst, i + 3 + offset);
+            for (var r = 0; r < 3; r++)
+                WalkRow(M, nn, i + r, Math.Max(kFirst, i + r + offset), Math.Min(kLast, start - 1), refl, kind);
+            if (start <= kLast) WalkRows4(M, nn, i, start, kLast, refl, kind);
+        }
+        for (; i < i1; i++) WalkRow(M, nn, i, Math.Max(kFirst, i + offset), kLast, refl, kind);
+    }
+
+    private static unsafe void WalkRows4(double[] M, int nn, int i, int kFrom, int kTo, double[] refl, byte[] kind)
+    {
+        fixed (double* mp = M, rp = refl)
+        {
+            var r0 = mp + (long)i * nn; var r1 = r0 + nn; var r2 = r1 + nn; var r3 = r2 + nn;
+            var k = kFrom;
+            // Rolling window of columns k, k+1, k+2 per row, held in registers.
+            double a0 = r0[k], a1 = r0[k + 1], b0 = r1[k], b1 = r1[k + 1];
+            double c0 = r2[k], c1 = r2[k + 1], d0 = r3[k], d1 = r3[k + 1];
+            double a2 = 0, b2 = 0, c2 = 0, d2 = 0;
+            if (k + 2 < nn) { a2 = r0[k + 2]; b2 = r1[k + 2]; c2 = r2[k + 2]; d2 = r3[k + 2]; }
+            for (; k <= kTo; k++)
+            {
+                var kk = kind[k];
+                if (kk != 0)
+                {
+                    var co = rp + 5 * k;
+                    double x = co[0], y = co[1], q = co[3];
+                    if (kk == 3)
+                    {
+                        double z = co[2], rr = co[4];
+                        var pa = x * a0 + y * a1; pa += z * a2; a2 -= pa * rr; a0 -= pa; a1 -= pa * q;
+                        var pb = x * b0 + y * b1; pb += z * b2; b2 -= pb * rr; b0 -= pb; b1 -= pb * q;
+                        var pc = x * c0 + y * c1; pc += z * c2; c2 -= pc * rr; c0 -= pc; c1 -= pc * q;
+                        var pd = x * d0 + y * d1; pd += z * d2; d2 -= pd * rr; d0 -= pd; d1 -= pd * q;
+                    }
+                    else
+                    {
+                        var pa = x * a0 + y * a1; a0 -= pa; a1 -= pa * q;
+                        var pb = x * b0 + y * b1; b0 -= pb; b1 -= pb * q;
+                        var pc = x * c0 + y * c1; c0 -= pc; c1 -= pc * q;
+                        var pd = x * d0 + y * d1; d0 -= pd; d1 -= pd * q;
+                    }
+                }
+                r0[k] = a0; r1[k] = b0; r2[k] = c0; r3[k] = d0;
+                a0 = a1; b0 = b1; c0 = c1; d0 = d1;
+                a1 = a2; b1 = b2; c1 = c2; d1 = d2;
+                if (k + 3 < nn) { a2 = r0[k + 3]; b2 = r1[k + 3]; c2 = r2[k + 3]; d2 = r3[k + 3]; }
+            }
+            // k = kTo + 1: flush the two columns still held (k ≤ n ≤ nn − 1 always exists).
+            r0[k] = a0; r1[k] = b0; r2[k] = c0; r3[k] = d0;
+            if (k + 1 < nn) { r0[k + 1] = a1; r1[k + 1] = b1; r2[k + 1] = c1; r3[k + 1] = d1; }
+        }
+    }
+
+    private static unsafe void WalkRow(double[] M, int nn, int i, int kFrom, int kTo, double[] refl, byte[] kind)
+    {
+        fixed (double* mp = M, rp = refl)
+        {
+            var row = mp + (long)i * nn;
+            for (var k = kFrom; k <= kTo; k++)
+            {
+                var kk = kind[k];
+                if (kk == 0) continue;
+                var c = rp + 5 * k;
+                var p = c[0] * row[k] + c[1] * row[k + 1];
+                if (kk == 3)
+                {
+                    p += c[2] * row[k + 2];
+                    row[k + 2] -= p * c[4];
+                }
+                row[k] -= p;
+                row[k + 1] -= p * c[3];
             }
         }
     }
@@ -378,7 +603,7 @@ internal static class LinalgSchurKernel
     /// Zeroes everything below the quasi-triangle and standardises each complex 2×2 block with
     /// <c>dlanv2</c>, recomputing the eigenvalues from the final blocks.
     /// </summary>
-    private static void Clean(double[] T, double[] Z, int n, double[] wr, double[] wi, bool accumulate)
+    private static void Clean(double[] T, double[]? Z, int n, double[] wr, double[] wi)
     {
         // Which subdiagonals belong to a complex block: hqr2 reported a positive imaginary part
         // at the first index of each pair.
@@ -422,13 +647,13 @@ internal static class LinalgSchurKernel
                 T[i * n + k] = cs * t1 + sn * t2;
                 T[i * n + k + 1] = -sn * t1 + cs * t2;
             }
-            if (accumulate)
+            if (Z is not null)
                 for (var i = 0; i < n; i++)
                 {
-                    var z1 = Z[k * n + i];
-                    var z2 = Z[(k + 1) * n + i];
-                    Z[k * n + i] = cs * z1 + sn * z2;
-                    Z[(k + 1) * n + i] = -sn * z1 + cs * z2;
+                    var z1 = Z[i * n + k];
+                    var z2 = Z[i * n + k + 1];
+                    Z[i * n + k] = cs * z1 + sn * z2;
+                    Z[i * n + k + 1] = -sn * z1 + cs * z2;
                 }
 
             T[k * n + k] = a;

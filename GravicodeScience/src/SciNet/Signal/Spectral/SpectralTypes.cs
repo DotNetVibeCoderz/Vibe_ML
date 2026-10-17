@@ -81,7 +81,7 @@ public enum SpectralAverage
     Median,
 }
 
-/// <summary>What <see cref="Signal.Spectrogram"/> returns.</summary>
+/// <summary>What <see cref="Signal.Spectrogram(double[], double, SpectralWindow, int?, int?, int?, DetrendType?, bool, SpectralScaling, SpectrogramMode)"/> returns.</summary>
 public enum SpectrogramMode
 {
     /// <summary>Power spectral density (or power spectrum).</summary>
@@ -96,7 +96,7 @@ public enum SpectrogramMode
     Phase,
 }
 
-/// <summary>How <see cref="Signal.Stft"/> extends the signal by half a segment at each end.</summary>
+/// <summary>How <see cref="Signal.Stft(double[], double, SpectralWindow, int, int?, int?, DetrendType?, bool, StftBoundary, bool, SpectralScaling)"/> extends the signal by half a segment at each end.</summary>
 public enum StftBoundary
 {
     /// <summary>No extension.</summary>

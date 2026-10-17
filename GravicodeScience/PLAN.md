@@ -722,20 +722,27 @@ These are not versioned; they run alongside everything above.
 
 ---
 
-## SciNet — after its first release
+## SciNet — 1.3.0 closed the 1.2.0 list — ✅ done
 
-SciNet covers every `scipy.*` module, and the comparison harness shows where it still trails
-SciPy. In order of value:
+All five items from 1.2.0 are done: a multifrontal sparse LU (now 2× faster than SuperLU) and
+supernodal Cholesky; thick-restart Lanczos level with ARPACK; the dense kernels behind
+`expm`/Schur/Sylvester (with LAPACK routing when present); a flat KD-tree and specialised linkage;
+and the missing pieces — `trust-constr`, SHGO, `ShortTimeFft`, Struve/`Hyperu`, Box–Cox, circular
+statistics, N-d Delaunay, and an HDF5 reader for MATLAB v7.3 and NetCDF-4. Every `scipy.stats`
+family is in.
 
-1. **A supernodal sparse LU.** `Splu` is left-looking Gilbert–Peierls and about 7× behind SuperLU;
-   that also limits shift-invert `Eigsh`.
-2. **Implicitly restarted Lanczos/Arnoldi without full reorthogonalisation**, to close most of
-   the 4.5× gap to ARPACK.
-3. **Blocked Householder kernels** for Schur, Hessenberg and `expm`'s Padé solves, or routing them
-   to `NativeLapack` when a LAPACK is installed — SciPy's lead on dense matrix functions is LAPACK.
-4. **KD-tree build and Ward linkage** — both allocate in the hot loop; scipy is 1.3–1.4× ahead.
-5. **Missing pieces**: `trust-constr`, SHGO, `ShortTimeFFT` as a class, Struve/`Hyperu`, Box–Cox,
-   circular statistics, 3-D Delaunay, NetCDF-4/MAT v7.3 (both need an HDF5 reader).
+What is still open, in order of value:
+
+1. **`curve_fit` and `lfilter`** — the last two workloads where SciPy leads (1.7× and 1.4×).
+2. **Multishift QR with aggressive early deflation** for Schur/Eig (~1.5× behind LAPACK at n = 200),
+   and a blocked Hessenberg reduction.
+3. **Writing HDF5** (MATLAB v7.3, NetCDF-4) — reading is done.
+4. **SciPy's new random-variable framework** (`make_distribution`, `Normal`, `Mixture`) and the
+   method objects (`BootstrapMethod`, …); Mathieu functions; N-d rotation arrays and
+   `RigidTransform`.
+5. **GraviNum's `LinAlg.Dot` below its packing threshold** is slower than SciNet's own GEMM (a
+   200-cube took 4.7 ms against 0.3 ms); folding SciNet's kernel back into GraviNum would speed up
+   every library.
 
 ## Non-goals
 

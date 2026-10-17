@@ -131,14 +131,17 @@ public sealed class NearestNDInterpolator : ScatteredInterpolatorBase
 
 /// <summary>
 /// Piecewise-linear interpolation on the Delaunay triangulation
-/// (scipy.interpolate.LinearNDInterpolator), 2-D (the triangulation is 2-D only). Points
-/// outside the convex hull get <see cref="FillValue"/>.
+/// (scipy.interpolate.LinearNDInterpolator), in any dimension ≥ 2. Points outside the convex
+/// hull get <see cref="FillValue"/>. Inside, the value is the barycentric combination of the
+/// containing simplex's vertex values, so for points in general position (a unique Delaunay
+/// triangulation) it agrees with scipy to rounding; on cospherical data the triangulation, and
+/// so the interpolant, can legitimately differ.
 /// </summary>
 public class LinearNDInterpolator : ScatteredInterpolatorBase
 {
     private protected readonly Delaunay _tri;
-    private protected readonly int[] _simplices; // (ns, 3)
-    private protected readonly double[] _transform; // (ns, 3, 2)
+    private protected readonly int[] _simplices; // (ns, d + 1)
+    private protected readonly double[] _transform; // (ns, d + 1, d)
 
     /// <summary>Value outside the convex hull.</summary>
     public double FillValue { get; set; }
@@ -147,14 +150,11 @@ public class LinearNDInterpolator : ScatteredInterpolatorBase
     public LinearNDInterpolator(NdArray points, NdArray values, double fillValue = double.NaN, bool rescale = false)
         : base(points, values, rescale)
     {
-        if (_d != 2) throw new NotSupportedException("LinearNDInterpolator needs a Delaunay triangulation, which is implemented for 2-D points only.");
+        if (_d < 2) throw new NotSupportedException("LinearNDInterpolator needs points of dimension 2 or more (use Interp1d in 1-D).");
         _tri = new Delaunay(new NdArray((double[])_points.Clone(), _n, _d));
         FillValue = fillValue;
-        var ns = _tri.NSimplex;
-        _simplices = new int[ns * 3];
-        var s = _tri.Simplices;
-        for (var i = 0; i < ns; i++) for (var k = 0; k < 3; k++) _simplices[i * 3 + k] = s[i, k];
-        _transform = _tri.Transform.ToArray();
+        _simplices = (int[])_tri.TriangleBuffer.Clone();
+        _transform = _tri.TransformBuffer;
     }
 
     /// <summary>Scalar-valued convenience constructor.</summary>
@@ -173,13 +173,34 @@ public class LinearNDInterpolator : ScatteredInterpolatorBase
         c[2] = 1 - c[0] - c[1];
     }
 
-    private protected int[] Locate(double[] q, int m) => _tri.FindSimplex(new NdArray(q, m, 2));
+    private protected int[] Locate(double[] q, int m) => _tri.FindSimplex(new NdArray(q, m, _d));
 
     private protected override double[] EvaluateFlat(double[] q, int m)
     {
         var simplex = Locate(q, m);
         var nt = _nt;
         var res = new double[m * nt];
+        if (_d != 2)
+        {
+            var d = _d;
+            ForChunks(m, 8 + (d + 1L) * (d + nt), (s, e) =>
+            {
+                Span<double> c = stackalloc double[d + 1];
+                for (var i = s; i < e; i++)
+                {
+                    var o = res.AsSpan(i * nt, nt);
+                    var t = simplex[i];
+                    if (t < 0) { o.Fill(FillValue); continue; }
+                    _tri.BarycentricInto(_transform, t, q.AsSpan(i * d, d), c);
+                    for (var k = 0; k <= d; k++)
+                    {
+                        var v = _simplices[t * (d + 1) + k];
+                        for (var j = 0; j < nt; j++) o[j] += c[k] * _values[v * nt + j];
+                    }
+                }
+            });
+            return res;
+        }
         ForChunks(m, 8 + 3L * nt, (s, e) =>
         {
             Span<double> c = stackalloc double[3];
@@ -222,6 +243,7 @@ public sealed class CloughTocher2DInterpolator : LinearNDInterpolator
     public CloughTocher2DInterpolator(NdArray points, NdArray values, double fillValue = double.NaN, double tol = 1e-6, int maxiter = 400, bool rescale = false)
         : base(points, values, fillValue, rescale)
     {
+        if (_d != 2) throw new NotSupportedException("CloughTocher2DInterpolator is for 2-D points only.");
         _grad = new double[_n * _nt * 2];
         var (indptr, indices) = _tri.VertexNeighborVertices();
         var col = new double[_n];
@@ -385,7 +407,8 @@ public static partial class Interpolate
     /// <summary>
     /// Interpolates unstructured data (scipy.interpolate.griddata). points (n, d), values (n, …),
     /// xi (…, d). 1-D data go through <see cref="Interp1d"/> (nearest extrapolates, as scipy);
-    /// 2-D uses the Delaunay-based interpolators; nearest works in any dimension.
+    /// linear uses the N-d Delaunay triangulation in any dimension, cubic is 2-D only
+    /// (Clough–Tocher), nearest works in any dimension.
     /// </summary>
     public static NdArray Griddata(NdArray points, NdArray values, NdArray xi, GriddataMethod method = GriddataMethod.Linear,
         double fillValue = double.NaN, bool rescale = false)

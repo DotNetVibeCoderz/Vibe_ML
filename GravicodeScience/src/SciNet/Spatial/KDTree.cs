@@ -22,15 +22,16 @@ namespace Gravicode.Science.SciNet.Spatial;
 /// pairs under that order whatever the tree shape or thread count. cKDTree breaks ties by
 /// traversal order instead, so on data with equal distances the indices may differ from scipy's
 /// while the distances agree.</para>
-/// <para><b>Not supported:</b> periodic boundaries (scipy's <c>boxsize</c>) and the
-/// <c>weights</c> argument of <c>count_neighbors</c>.</para>
+/// <para><b>Periodic boxes and weights</b> (scipy's <c>boxsize</c> and <c>count_neighbors</c>
+/// weights) live in KDTreePeriodic.cs; they route around the kernels below, which are untouched
+/// when neither is used.</para>
 /// </remarks>
-public sealed class KDTree
+public sealed partial class KDTree
 {
     private const int ParallelThreshold = 256;
 
     private readonly double[] _data;   // input order
-    private readonly double[] _tree;   // tree order
+    private readonly double[] _tree;   // tree order, permuted alongside _index during the build
     private readonly int[] _index;     // tree position -> input row
 
     private int[] _start = [], _end = [], _left = [], _right = [];
@@ -86,33 +87,53 @@ public sealed class KDTree
         Mins = new double[m]; Maxes = new double[m];
         _index = new int[n];
         for (var i = 0; i < n; i++) _index[i] = i;
+        // The tree-order copy is permuted together with the index during the build, so every
+        // partition, select and bounding-box pass reads consecutive memory instead of chasing
+        // _index into the input buffer.
+        _tree = (double[])data.Clone();
         if (n > 0)
         {
-            Bounds(0, n, Mins, Maxes);
-            var cap = Math.Max(1, 4 * (n / Math.Max(1, leafSize / 2) + 1));
-            Grow(cap);
-            Build(0, n, (double[])Mins.Clone(), (double[])Maxes.Clone(), compact, balanced);
+            RowBounds(_tree, m, 0, n, Mins, Maxes);
+            var store = new KDTreeNodeStore(m, EstimateNodes(n, leafSize, balanced));
+            Build(store, 0, n, Mins, Maxes, compact, balanced);
+            (_start, _end, _left, _right, _lo, _hi, _nodes) =
+                (store.Start, store.End, store.Left, store.Right, store.Lo, store.Hi, store.Count);
         }
-        _tree = new double[n * m];
-        for (var t = 0; t < n; t++) Array.Copy(_data, _index[t] * m, _tree, t * m, m);
     }
 
     // ------------------------------------------------------------------ construction
 
-    private void Grow(int capacity)
+    /// <summary>Points per subtree from which its two halves are built on separate threads.</summary>
+    private const int ParallelBuildPoints = 16_384;
+
+    private static int EstimateNodes(int n, int leafSize, bool balanced)
     {
-        Array.Resize(ref _start, capacity); Array.Resize(ref _end, capacity);
-        Array.Resize(ref _left, capacity); Array.Resize(ref _right, capacity);
-        Array.Resize(ref _lo, capacity * M); Array.Resize(ref _hi, capacity * M);
+        // Median splits leave every leaf at least ceil((L+1)/2) full; sliding midpoint can leave
+        // single-point leaves, so it starts smaller and grows on demand.
+        var minLeaf = balanced ? Math.Max(1, (leafSize + 1) / 2) : Math.Max(1, leafSize / 2);
+        return Math.Max(1, 2 * (n / minLeaf) + 3);
     }
 
-    private void Bounds(int start, int end, Span<double> lo, Span<double> hi)
+    private static void RowBounds(double[] rows, int m, int start, int end, Span<double> lo, Span<double> hi)
     {
-        var m = M;
         lo.Fill(double.PositiveInfinity); hi.Fill(double.NegativeInfinity);
+        if (m == 3)
+        {
+            double l0 = lo[0], l1 = lo[1], l2 = lo[2], h0 = hi[0], h1 = hi[1], h2 = hi[2];
+            for (var t = start; t < end; t++)
+            {
+                var o = t * 3;
+                double a = rows[o], b = rows[o + 1], c = rows[o + 2];
+                if (a < l0) l0 = a; if (a > h0) h0 = a;
+                if (b < l1) l1 = b; if (b > h1) h1 = b;
+                if (c < l2) l2 = c; if (c > h2) h2 = c;
+            }
+            lo[0] = l0; lo[1] = l1; lo[2] = l2; hi[0] = h0; hi[1] = h1; hi[2] = h2;
+            return;
+        }
         for (var t = start; t < end; t++)
         {
-            var row = _data.AsSpan(_index[t] * m, m);
+            var row = rows.AsSpan(t * m, m);
             for (var j = 0; j < m; j++)
             {
                 var v = row[j];
@@ -122,18 +143,26 @@ public sealed class KDTree
         }
     }
 
-    private int Build(int start, int end, double[] boxLo, double[] boxHi, bool compact, bool balanced)
+    /// <summary>
+    /// Builds the subtree over tree positions [start, end) into <paramref name="store"/>, nodes in
+    /// preorder. Large subtrees build their two halves in parallel into private stores, appended
+    /// afterwards — which reproduces exactly the preorder numbering of a sequential build.
+    /// </summary>
+    private int Build(KDTreeNodeStore store, int start, int end, ReadOnlySpan<double> boxLo, ReadOnlySpan<double> boxHi,
+        bool compact, bool balanced)
     {
         var m = M;
-        if (_nodes == _start.Length) Grow(_start.Length * 2);
-        var node = _nodes++;
-        _start[node] = start; _end[node] = end; _left[node] = -1; _right[node] = -1;
+        var node = store.Add(start, end);
 
-        var dataLo = new double[m]; var dataHi = new double[m];
-        Bounds(start, end, dataLo, dataHi);
-        var lo = compact ? dataLo : boxLo;
-        var hi = compact ? dataHi : boxHi;
-        lo.CopyTo(_lo, node * m); hi.CopyTo(_hi, node * m);
+        // Node box, then the children's boxes: four rows of m, on the stack when m is small.
+        var scratch = m <= 32 ? stackalloc double[4 * m] : new double[4 * m];
+        var dataLo = scratch[..m];
+        var dataHi = scratch.Slice(m, m);
+        RowBounds(_tree, m, start, end, dataLo, dataHi);
+        ReadOnlySpan<double> lo = compact ? dataLo : boxLo;
+        ReadOnlySpan<double> hi = compact ? dataHi : boxHi;
+        lo.CopyTo(store.Lo.AsSpan(node * m, m));
+        hi.CopyTo(store.Hi.AsSpan(node * m, m));
 
         if (end - start <= LeafSize) return node;
 
@@ -150,7 +179,7 @@ public sealed class KDTree
         {
             mid = start + (end - start) / 2;
             Select(start, end, mid, dim);
-            split = _data[_index[mid] * m + dim];
+            split = _tree[mid * m + dim];
         }
         else
         {
@@ -161,28 +190,65 @@ public sealed class KDTree
                 // Midpoint rounded onto the minimum (adjacent doubles): slide to the minimum point.
                 var best = start;
                 for (var t = start + 1; t < end; t++)
-                    if (_data[_index[t] * m + dim] < _data[_index[best] * m + dim]) best = t;
-                (_index[start], _index[best]) = (_index[best], _index[start]);
+                    if (_tree[t * m + dim] < _tree[best * m + dim]) best = t;
+                SwapRows(start, best);
                 mid = start + 1;
-                split = _data[_index[start] * m + dim];
+                split = _tree[start * m + dim];
             }
             else if (mid == end)
             {
                 var best = start;
                 for (var t = start + 1; t < end; t++)
-                    if (_data[_index[t] * m + dim] > _data[_index[best] * m + dim]) best = t;
-                (_index[end - 1], _index[best]) = (_index[best], _index[end - 1]);
+                    if (_tree[t * m + dim] > _tree[best * m + dim]) best = t;
+                SwapRows(end - 1, best);
                 mid = end - 1;
-                split = _data[_index[end - 1] * m + dim];
+                split = _tree[(end - 1) * m + dim];
             }
         }
 
-        var leftHi = (double[])hi.Clone(); leftHi[dim] = Math.Min(leftHi[dim], split);
-        var rightLo = (double[])lo.Clone(); rightLo[dim] = Math.Max(rightLo[dim], split);
-        var l = Build(start, mid, (double[])lo.Clone(), leftHi, compact, balanced);
-        var r = Build(mid, end, rightLo, (double[])hi.Clone(), compact, balanced);
-        _left[node] = l; _right[node] = r;
+        var leftHi = scratch.Slice(2 * m, m);
+        var rightLo = scratch.Slice(3 * m, m);
+        hi.CopyTo(leftHi); leftHi[dim] = Math.Min(leftHi[dim], split);
+        lo.CopyTo(rightLo); rightLo[dim] = Math.Max(rightLo[dim], split);
+
+        int l, r;
+        if (end - start >= 2 * ParallelBuildPoints && Environment.ProcessorCount > 1)
+        {
+            // Spans cannot cross into the lambdas; the copies are four small arrays per split.
+            var lLo = lo.ToArray(); var lHi = leftHi.ToArray();
+            var rLo = rightLo.ToArray(); var rHi = hi.ToArray();
+            var ls = new KDTreeNodeStore(m, EstimateNodes(mid - start, LeafSize, balanced));
+            var rs = new KDTreeNodeStore(m, EstimateNodes(end - mid, LeafSize, balanced));
+            Parallel.Invoke(
+                () => Build(ls, start, mid, lLo, lHi, compact, balanced),
+                () => Build(rs, mid, end, rLo, rHi, compact, balanced));
+            l = store.Append(ls);
+            r = store.Append(rs);
+        }
+        else
+        {
+            l = Build(store, start, mid, lo, leftHi, compact, balanced);
+            r = Build(store, mid, end, rightLo, hi, compact, balanced);
+        }
+        store.Left[node] = l; store.Right[node] = r;
         return node;
+    }
+
+    private void SwapRows(int a, int b)
+    {
+        if (a == b) return;
+        (_index[a], _index[b]) = (_index[b], _index[a]);
+        var m = M;
+        var t = _tree;
+        if (m == 3)
+        {
+            int oa = a * 3, ob = b * 3;
+            (t[oa], t[ob]) = (t[ob], t[oa]);
+            (t[oa + 1], t[ob + 1]) = (t[ob + 1], t[oa + 1]);
+            (t[oa + 2], t[ob + 2]) = (t[ob + 2], t[oa + 2]);
+            return;
+        }
+        for (int j = 0, oa = a * m, ob = b * m; j < m; j++) (t[oa + j], t[ob + j]) = (t[ob + j], t[oa + j]);
     }
 
     /// <summary>Moves rows with coordinate &lt; split before the rest; returns the boundary.</summary>
@@ -192,28 +258,29 @@ public sealed class KDTree
         int i = start, j = end - 1;
         while (i <= j)
         {
-            if (_data[_index[i] * m + dim] < split) i++;
-            else { (_index[i], _index[j]) = (_index[j], _index[i]); j--; }
+            if (_tree[i * m + dim] < split) i++;
+            else { SwapRows(i, j); j--; }
         }
         return i;
     }
 
-    /// <summary>Quickselect (median-of-three, Hoare partition) on the index range.</summary>
+    /// <summary>Quickselect (median-of-three, Hoare partition) on the tree-order rows.</summary>
     private void Select(int start, int end, int k, int dim)
     {
         var m = M;
+        var t = _tree;
         int lo = start, hi = end - 1;
         while (hi > lo)
         {
             var midI = lo + (hi - lo) / 2;
-            double a = _data[_index[lo] * m + dim], b = _data[_index[midI] * m + dim], c = _data[_index[hi] * m + dim];
+            double a = t[lo * m + dim], b = t[midI * m + dim], c = t[hi * m + dim];
             var pivot = Math.Max(Math.Min(a, b), Math.Min(Math.Max(a, b), c));
             int i = lo, j = hi;
             while (i <= j)
             {
-                while (_data[_index[i] * m + dim] < pivot) i++;
-                while (_data[_index[j] * m + dim] > pivot) j--;
-                if (i <= j) { (_index[i], _index[j]) = (_index[j], _index[i]); i++; j--; }
+                while (t[i * m + dim] < pivot) i++;
+                while (t[j * m + dim] > pivot) j--;
+                if (i <= j) { SwapRows(i, j); i++; j--; }
             }
             if (k <= j) hi = j;
             else if (k >= i) lo = i;
@@ -385,6 +452,114 @@ public sealed class KDTree
         }
     }
 
+    /// <summary>Largest k served by the stack-allocated sorted buffer; beyond it the heap is used.</summary>
+    private const int SmallK = 32;
+
+    /// <summary>Queries per parallel work item, so the per-item overhead is paid once per chunk.</summary>
+    private const int QueryChunk = 64;
+
+    /// <summary>
+    /// k-nearest search for one point with a sorted candidate buffer on the stack and an explicit
+    /// node stack, no allocation. Visits nodes in exactly the order of the recursive search
+    /// (nearer child first, the farther one only if it can still beat the current k-th), so the
+    /// result is the same.
+    /// </summary>
+    /// <remarks>
+    /// For small k an insertion into a sorted array beats a binary heap: the k-th distance is
+    /// simply the last slot, and the final sort the heap needs disappears.
+    /// </remarks>
+    private void KnnSmall<TNorm>(TNorm norm, ReadOnlySpan<double> x, int k, double epsFac, double ub,
+        Span<double> bestD, Span<int> bestI, Span<int> stackNode, Span<double> stackDist)
+        where TNorm : struct, ISpatialNorm
+    {
+        var count = 0;
+        var m = M;
+        var tree = _tree;
+        var index = _index;
+        if (N > 0)
+        {
+            var top = 0;
+            var root = BoxMin(norm, 0, x);
+            // The root is entered whenever its box is within the bound, as the recursive search did.
+            if (root <= ub) { stackNode[0] = 0; stackDist[0] = 0.0; top = 1; }
+            while (top > 0)
+            {
+                top--;
+                var node = stackNode[top];
+                var bound = count < k ? ub : bestD[k - 1];
+                if (stackDist[top] > bound * epsFac) continue;
+
+                var l = _left[node];
+                if (l < 0)
+                {
+                    var end = _end[node];
+                    for (var t = _start[node]; t < end; t++)
+                    {
+                        var d = norm.Point(x, tree.AsSpan(t * m, m));
+                        var id = index[t];
+                        int pos;
+                        if (count < k)
+                        {
+                            if (!(d < ub)) continue;
+                            pos = count++;
+                        }
+                        else
+                        {
+                            var kd = bestD[k - 1];
+                            if (d > kd || (d == kd && id >= bestI[k - 1])) continue;
+                            pos = k - 1;
+                        }
+                        while (pos > 0 && (bestD[pos - 1] > d || (bestD[pos - 1] == d && bestI[pos - 1] > id)))
+                        {
+                            bestD[pos] = bestD[pos - 1];
+                            bestI[pos] = bestI[pos - 1];
+                            pos--;
+                        }
+                        bestD[pos] = d;
+                        bestI[pos] = id;
+                    }
+                    continue;
+                }
+                var r = _right[node];
+                var dl = BoxMin(norm, l, x);
+                var dr = BoxMin(norm, r, x);
+                // Far child first onto the stack, so the near one is popped (searched) first.
+                if (dr < dl)
+                {
+                    stackNode[top] = l; stackDist[top] = dl; top++;
+                    stackNode[top] = r; stackDist[top] = dr; top++;
+                }
+                else
+                {
+                    stackNode[top] = r; stackDist[top] = dr; top++;
+                    stackNode[top] = l; stackDist[top] = dl; top++;
+                }
+            }
+        }
+        for (var i = 0; i < k; i++)
+        {
+            if (i < count) bestD[i] = norm.FromPower(bestD[i]);
+            else { bestD[i] = double.PositiveInfinity; bestI[i] = N; }
+        }
+    }
+
+    /// <summary>Upper bound on the explicit stack: two entries per level of the deepest path.</summary>
+    private int StackDepth()
+    {
+        // Depth from the node layout: a sliding-midpoint tree can be deeper than log2(n).
+        var depth = new int[_nodes];
+        var max = 1;
+        for (var node = 0; node < _nodes; node++)
+        {
+            var l = _left[node];
+            if (l < 0) continue;
+            depth[l] = depth[node] + 1;
+            depth[_right[node]] = depth[node] + 1;
+            max = Math.Max(max, depth[node] + 1);
+        }
+        return 2 * max + 4;
+    }
+
     private void KnnBatch<TNorm>(TNorm norm, double[] queries, int q, int k, double eps, double p,
         double upperBound, double[] dist, int[] idx, int workers) where TNorm : struct, ISpatialNorm
     {
@@ -392,6 +567,35 @@ public sealed class KDTree
         var epsFac = EpsFactor(p, eps);
         var ubPow = norm.ToPower(upperBound);
         var w = Workers(workers);
+        if (k > SmallK)
+        {
+            KnnBatchHeap(norm, queries, q, k, epsFac, ubPow, dist, idx, w);
+            return;
+        }
+        var depth = StackDepth();
+        if (w == 1 || q < ParallelThreshold)
+        {
+            RunChunk(0, q);
+            return;
+        }
+        var chunks = (q + QueryChunk - 1) / QueryChunk;
+        Parallel.For(0, chunks, new ParallelOptions { MaxDegreeOfParallelism = w },
+            c => RunChunk(c * QueryChunk, Math.Min(q, (c + 1) * QueryChunk)));
+
+        void RunChunk(int from, int to)
+        {
+            var stackNode = depth <= 256 ? stackalloc int[depth] : new int[depth];
+            var stackDist = depth <= 256 ? stackalloc double[depth] : new double[depth];
+            for (var i = from; i < to; i++)
+                KnnSmall(norm, queries.AsSpan(i * m, m), k, epsFac, ubPow,
+                    dist.AsSpan(i * k, k), idx.AsSpan(i * k, k), stackNode, stackDist);
+        }
+    }
+
+    private void KnnBatchHeap<TNorm>(TNorm norm, double[] queries, int q, int k, double epsFac, double ubPow,
+        double[] dist, int[] idx, int w) where TNorm : struct, ISpatialNorm
+    {
+        var m = M;
         if (w == 1 || q < ParallelThreshold)
         {
             var heap = new KnnHeap(k);
@@ -413,6 +617,7 @@ public sealed class KDTree
         CheckP(p);
         if (k < 1) throw new ArgumentException("k must be at least 1.", nameof(k));
         if (double.IsNaN(ub) || ub < 0) throw new ArgumentException("distanceUpperBound must be non-negative.");
+        if (_box is not null) { PeriodicKnn(queries, q, k, eps, p, ub, dist, idx, workers); return; }
         if (p == 2) KnnBatch(new SpatialNormL2(), queries, q, k, eps, p, ub, dist, idx, workers);
         else if (p == 1) KnnBatch(new SpatialNormL1(), queries, q, k, eps, p, ub, dist, idx, workers);
         else if (double.IsPositiveInfinity(p)) KnnBatch(new SpatialNormLInf(), queries, q, k, eps, p, ub, dist, idx, workers);
@@ -576,6 +781,12 @@ public sealed class KDTree
 
     private void Ball(ReadOnlySpan<double> x, double r, double p, double eps, List<int> result)
     {
+        if (_box is not null) { PeriodicBall(x, r, p, eps, result); return; }
+        BallFlat(x, r, p, eps, result);
+    }
+
+    private void BallFlat(ReadOnlySpan<double> x, double r, double p, double eps, List<int> result)
+    {
         if (p == 2) BallRoot(new SpatialNormL2(), x, r, eps, p, result);
         else if (p == 1) BallRoot(new SpatialNormL1(), x, r, eps, p, result);
         else if (double.IsPositiveInfinity(p)) BallRoot(new SpatialNormLInf(), x, r, eps, p, result);
@@ -584,6 +795,7 @@ public sealed class KDTree
 
     private long BallCount(ReadOnlySpan<double> x, double r, double p, double eps)
     {
+        if (_box is not null) { var list = new List<int>(); PeriodicBall(x, r, p, eps, list); return list.Count; }
         if (p == 2) return BallCountRoot(new SpatialNormL2(), x, r, eps, p);
         if (p == 1) return BallCountRoot(new SpatialNormL1(), x, r, eps, p);
         if (double.IsPositiveInfinity(p)) return BallCountRoot(new SpatialNormLInf(), x, r, eps, p);
@@ -745,7 +957,7 @@ public sealed class KDTree
         {
             var a = _data.AsSpan(i * m, m);
             foreach (var j in lists[i])
-                result.Add((i, j, Minkowski(a, other._data.AsSpan(j * m, m), p)));
+                result.Add((i, j, other._box is null ? Minkowski(a, other._data.AsSpan(j * m, m), p) : other.PeriodicDistance(a, j, p)));
         }
         return result;
     }
@@ -791,6 +1003,13 @@ public sealed class KDTree
         CheckP(p);
         if (other.M != M) throw new ArgumentException("Both trees must have the same dimension.", nameof(other));
         foreach (var rr in r) if (double.IsNaN(rr)) throw new ArgumentException("Radii must not be NaN.", nameof(r));
+        if (other._box is not null)
+        {
+            var w = CountNeighborsGeneral(other, r, null, null, p, cumulative);
+            var counts = new long[w.Length];
+            for (var i = 0; i < w.Length; i++) counts[i] = (long)Math.Round(w[i]);
+            return counts;
+        }
         var nr = r.Length;
         var order = new int[nr];
         for (var i = 0; i < nr; i++) order[i] = i;
@@ -857,5 +1076,50 @@ public sealed class KDTree
         }
         CountNode(norm, l, x, rp, a, bb, diff);
         CountNode(norm, _right[node], x, rp, a, bb, diff);
+    }
+}
+
+/// <summary>
+/// Growable flat node arrays for <see cref="KDTree"/>: one allocation per field rather than per
+/// node, and appendable so subtrees built on other threads can be spliced in preorder.
+/// </summary>
+internal sealed class KDTreeNodeStore(int m, int capacity)
+{
+    private readonly int _m = m;
+    public int[] Start = new int[capacity], End = new int[capacity], Left = new int[capacity], Right = new int[capacity];
+    public double[] Lo = new double[capacity * m], Hi = new double[capacity * m];
+    public int Count;
+
+    public int Add(int start, int end)
+    {
+        if (Count == Start.Length) Grow(Math.Max(4, Count * 2));
+        var node = Count++;
+        Start[node] = start; End[node] = end; Left[node] = -1; Right[node] = -1;
+        return node;
+    }
+
+    /// <summary>Appends another store's nodes, renumbering its child links; returns its root's new id.</summary>
+    public int Append(KDTreeNodeStore other)
+    {
+        var offset = Count;
+        if (Count + other.Count > Start.Length) Grow(Math.Max(Count + other.Count, Start.Length * 2));
+        Array.Copy(other.Start, 0, Start, offset, other.Count);
+        Array.Copy(other.End, 0, End, offset, other.Count);
+        for (var i = 0; i < other.Count; i++)
+        {
+            Left[offset + i] = other.Left[i] < 0 ? -1 : other.Left[i] + offset;
+            Right[offset + i] = other.Right[i] < 0 ? -1 : other.Right[i] + offset;
+        }
+        Array.Copy(other.Lo, 0, Lo, offset * _m, other.Count * _m);
+        Array.Copy(other.Hi, 0, Hi, offset * _m, other.Count * _m);
+        Count += other.Count;
+        return offset;
+    }
+
+    private void Grow(int capacity)
+    {
+        Array.Resize(ref Start, capacity); Array.Resize(ref End, capacity);
+        Array.Resize(ref Left, capacity); Array.Resize(ref Right, capacity);
+        Array.Resize(ref Lo, capacity * _m); Array.Resize(ref Hi, capacity * _m);
     }
 }

@@ -3,7 +3,7 @@ using Gravicode.Science.GraviNum;
 namespace Gravicode.Science.SciNet.Spatial;
 
 /// <summary>
-/// Convex hull of a 2-D or 3-D point set (scipy.spatial.ConvexHull, triangulated output).
+/// Convex hull of a point set in any dimension ≥ 2 (scipy.spatial.ConvexHull, triangulated output).
 /// </summary>
 /// <remarks>
 /// <para><b>2-D</b> uses Andrew's monotone chain; <b>3-D</b> uses quickhull with conflict lists
@@ -19,8 +19,13 @@ namespace Gravicode.Science.SciNet.Spatial;
 /// inside. 3-D facets are triangles; a flat face of the hull (a cube side) is split into
 /// several, as with scipy's default <c>Qt</c> option, though not necessarily into the same
 /// triangles.</para>
-/// <para>A flat input (all points collinear in 2-D, coplanar in 3-D) throws, as Qhull does.
-/// Dimensions above 3 are not implemented.</para>
+/// <para><b>4-D and above</b> use the general quickhull (<c>QuickhullNd</c>) with the exact
+/// minor-expansion orientation predicate; facets are (d−1)-simplices, <see cref="Vertices"/> are
+/// ascending, <see cref="Area"/> is the total (d−1)-volume of the boundary and
+/// <see cref="Volume"/> the d-volume, as scipy reports them. The output is simplicial (Qhull's
+/// <c>Qt</c>), so a flat face of the hull is split into simplices, not necessarily scipy's.</para>
+/// <para>A flat input (all points in a lower-dimensional affine subspace) throws, as Qhull
+/// does.</para>
 /// </remarks>
 public sealed class ConvexHull
 {
@@ -32,14 +37,14 @@ public sealed class ConvexHull
     /// <summary>Number of input points.</summary>
     public int NPoints { get; }
 
-    /// <summary>Dimension (2 or 3).</summary>
+    /// <summary>Dimension of the points.</summary>
     public int NDim { get; }
 
-    /// <summary>Indices of the hull vertices (2-D: counter-clockwise; 3-D: ascending).</summary>
+    /// <summary>Indices of the hull vertices (2-D: counter-clockwise; otherwise ascending).</summary>
     public int[] Vertices { get; }
 
     /// <summary>Facets as point indices, [nfacet, NDim]: edges in 2-D, triangles in 3-D (outward
-    /// counter-clockwise).</summary>
+    /// counter-clockwise), (d−1)-simplices above (no orientation guarantee, as in scipy).</summary>
     public int[,] Simplices { get; }
 
     /// <summary><c>Neighbors[f, k]</c> is the facet opposite vertex <c>Simplices[f, k]</c>.</summary>
@@ -48,13 +53,37 @@ public sealed class ConvexHull
     /// <summary>Facet hyperplanes [unit outward normal, offset], shape (nfacet, NDim + 1).</summary>
     public NdArray Equations { get; }
 
-    /// <summary>Perimeter in 2-D, surface area in 3-D.</summary>
+    /// <summary>Perimeter in 2-D, surface area in 3-D, boundary (d−1)-volume above.</summary>
     public double Area { get; }
 
-    /// <summary>Enclosed area in 2-D, volume in 3-D.</summary>
+    /// <summary>Enclosed area in 2-D, volume in 3-D, d-volume above.</summary>
+
+    /// <summary>Lower corner of the points' bounding box (scipy's <c>min_bound</c>).</summary>
+    public double[] MinBound
+    {
+        get
+        {
+            var r = new double[NDim];
+            Array.Fill(r, double.PositiveInfinity);
+            for (var i = 0; i < NPoints; i++) for (var j = 0; j < NDim; j++) r[j] = Math.Min(r[j], _pts[i * NDim + j]);
+            return r;
+        }
+    }
+
+    /// <summary>Upper corner of the points' bounding box (scipy's <c>max_bound</c>).</summary>
+    public double[] MaxBound
+    {
+        get
+        {
+            var r = new double[NDim];
+            Array.Fill(r, double.NegativeInfinity);
+            for (var i = 0; i < NPoints; i++) for (var j = 0; j < NDim; j++) r[j] = Math.Max(r[j], _pts[i * NDim + j]);
+            return r;
+        }
+    }
     public double Volume { get; }
 
-    /// <summary>Builds the hull of the rows of <paramref name="points"/> (shape (n, 2) or (n, 3)).</summary>
+    /// <summary>Builds the hull of the rows of <paramref name="points"/>, shape (n, d), d ≥ 2.</summary>
     public ConvexHull(NdArray points) : this(SpatialInput.Copy(points, out var n, out var d, nameof(points)), n, d) { }
 
     /// <summary>Builds the hull of a rectangular array of points.</summary>
@@ -63,7 +92,10 @@ public sealed class ConvexHull
     /// <summary>Builds from a jagged array of points.</summary>
     public ConvexHull(double[][] points) : this(SpatialInput.Copy(points, out var n, out var d), n, d) { }
 
-    private ConvexHull(double[] pts, int n, int d)
+    /// <summary>Builds through the general N-d quickhull even in 3-D (tests cross-check the two).</summary>
+    internal static ConvexHull GeneralNd(NdArray points) => new(SpatialInput.Copy(points, out var n, out var d, nameof(points)), n, d, forceNd: true);
+
+    private ConvexHull(double[] pts, int n, int d, bool forceNd = false)
     {
         SpatialInput.RequireFinite(pts, "Hull points");
         _pts = pts; NPoints = n; NDim = d;
@@ -92,7 +124,7 @@ public sealed class ConvexHull
             Area = per;
             Volume = 0.5 * area;
         }
-        else if (d == 3)
+        else if (d == 3 && !forceNd)
         {
             var faces = Hull3D(pts, n);
             var f = faces.Count;
@@ -125,7 +157,53 @@ public sealed class ConvexHull
             Area = area;
             Volume = vol;
         }
-        else throw new ArgumentException($"ConvexHull supports 2-D and 3-D points, got {d}-D.");
+        else if (d >= 3)
+        {
+            if (d > SpatialPredicates.MaxNdDimension) throw new ArgumentException($"ConvexHull supports at most {SpatialPredicates.MaxNdDimension} dimensions, got {d}.");
+            var qh = new QuickhullNd(pts, n, d, lifted: false, excess: null, floatCoords: pts);
+            qh.Run(Enumerable.Range(0, n).ToArray());
+            var f = qh.FacetCount;
+            Simplices = new int[f, d];
+            Neighbors = new int[f, d];
+            var used = new SortedSet<int>();
+            for (var i = 0; i < f; i++)
+                for (var k = 0; k < d; k++)
+                {
+                    Simplices[i, k] = qh.Vertices[i * d + k];
+                    Neighbors[i, k] = qh.Neighbors[i * d + k];
+                    used.Add(Simplices[i, k]);
+                }
+            Vertices = [.. used];
+            var c = new double[d];
+            foreach (var v in Vertices) for (var j = 0; j < d; j++) c[j] += pts[v * d + j];
+            for (var j = 0; j < d; j++) c[j] /= Vertices.Length;
+            double fact = 1; for (var k = 2; k < d; k++) fact *= k; // (d-1)!
+            var eq = new double[f * (d + 1)];
+            double area = 0, vol = 0;
+            for (var i = 0; i < f; i++)
+            {
+                var o = i * (d + 1);
+                double len = 0;
+                for (var j = 0; j < d; j++) len += qh.Planes[o + j] * qh.Planes[o + j];
+                len = Math.Sqrt(len);
+                area += len / fact;
+                var v0 = Simplices[i, 0];
+                double h = 0, off = 0;
+                for (var j = 0; j < d; j++)
+                {
+                    h += qh.Planes[o + j] * (pts[v0 * d + j] - c[j]);
+                    var nj = qh.Planes[o + j] / len;
+                    eq[o + j] = nj;
+                    off -= nj * pts[v0 * d + j];
+                }
+                eq[o + d] = off;
+                vol += h / (fact * d);
+            }
+            Equations = new NdArray(eq, f, d + 1);
+            Area = area;
+            Volume = vol;
+        }
+        else throw new ArgumentException($"ConvexHull needs points of dimension 2 or more, got {d}-D.");
     }
 
     // ------------------------------------------------------------------ 2-D

@@ -94,7 +94,8 @@ internal sealed class StatsPsd
 /// </remarks>
 public sealed class MultivariateNormalDistribution
 {
-    private readonly StatsPsd _psd;
+    private readonly StatsPsd? _psd;
+    private readonly Covariance? _covObj;
     private readonly double[] _cov;
 
     /// <summary>Multivariate normal with the given mean and covariance.</summary>
@@ -108,14 +109,33 @@ public sealed class MultivariateNormalDistribution
         _cov = cov.AsContiguous().ToArray();
     }
 
+    /// <summary>
+    /// Multivariate normal with the covariance given as a <see cref="SciNet.Covariance"/> object (scipy's
+    /// <c>cov=Covariance</c>): densities and draws use its whitening/colouring directly, so a precision,
+    /// diagonal, Cholesky or eigen form is never re-factorised. A singular form (zero diagonal entries or
+    /// eigenvalues) gives the density on its support, as <c>allowSingular</c> does.
+    /// </summary>
+    public MultivariateNormalDistribution(double[] mean, Covariance cov)
+    {
+        ArgumentNullException.ThrowIfNull(mean);
+        ArgumentNullException.ThrowIfNull(cov);
+        if (mean.Length != cov.Dim) throw new ArgumentException("mean and cov dimensions differ.", nameof(mean));
+        _covObj = cov;
+        MeanVector = (double[])mean.Clone();
+        _cov = cov.CovarianceMatrix.AsContiguous().ToArray();
+    }
+
+    /// <summary>The covariance object this distribution was built from (null when built from a matrix).</summary>
+    public Covariance? CovarianceObject => _covObj;
+
     /// <summary>The dimension.</summary>
-    public int Dim => _psd.Dim;
+    public int Dim => _psd?.Dim ?? _covObj!.Dim;
     /// <summary>The mean vector.</summary>
     public double[] MeanVector { get; }
     /// <summary>The covariance matrix (a copy).</summary>
     public NdArray Cov => new((double[])_cov.Clone(), Dim, Dim);
     /// <summary>Rank of the covariance.</summary>
-    public int Rank => _psd.Rank;
+    public int Rank => _psd?.Rank ?? _covObj!.Rank;
 
     /// <summary>Log density at one point.</summary>
     public double LogPdf(ReadOnlySpan<double> x)
@@ -123,7 +143,15 @@ public sealed class MultivariateNormalDistribution
         if (x.Length != Dim) throw new ArgumentException("x has the wrong dimension.", nameof(x));
         Span<double> d = Dim <= 64 ? stackalloc double[Dim] : new double[Dim];
         for (var i = 0; i < Dim; i++) d[i] = x[i] - MeanVector[i];
-        if (!_psd.InSupport(d)) return double.NegativeInfinity;
+        if (_covObj != null)
+        {
+            if (!_covObj.InSupport(d)) return double.NegativeInfinity;
+            var w = _covObj.Whiten(d.ToArray());
+            var m = 0.0;
+            foreach (var v in w) m += v * v;
+            return -0.5 * (_covObj.Rank * Math.Log(2 * Math.PI) + _covObj.LogPdet + m);
+        }
+        if (!_psd!.InSupport(d)) return double.NegativeInfinity;
         return -0.5 * (_psd.Rank * Math.Log(2 * Math.PI) + _psd.LogPdet + _psd.Mahalanobis(d));
     }
 
@@ -137,7 +165,7 @@ public sealed class MultivariateNormalDistribution
     public double[] Pdf(NdArray x) => StatsMultivariate.Rows(x, Dim, r => Pdf(r));
 
     /// <summary>Differential entropy, ½(r(1 + log 2π) + log pdet Σ).</summary>
-    public double Entropy() => 0.5 * (_psd.Rank * (1 + Math.Log(2 * Math.PI)) + _psd.LogPdet);
+    public double Entropy() => 0.5 * (Rank * (1 + Math.Log(2 * Math.PI)) + (_psd?.LogPdet ?? _covObj!.LogPdet));
 
     /// <summary>
     /// P(lower ≤ X ≤ x), scipy's <c>cdf</c> (with <c>lower_limit</c>). Randomised quasi-Monte Carlo;
@@ -158,7 +186,17 @@ public sealed class MultivariateNormalDistribution
         var n = Dim;
         var r = new double[size * n];
         var z = new double[n];
-        var f = _psd.SqrtFactor;
+        if (_covObj != null)
+        {
+            for (var s = 0; s < size; s++)
+            {
+                for (var k = 0; k < n; k++) z[k] = StatsRandom.Normal(rng);
+                var c = _covObj.Colorize(z);
+                for (var i = 0; i < n; i++) r[s * n + i] = MeanVector[i] + c[i];
+            }
+            return new NdArray(r, size, n);
+        }
+        var f = _psd!.SqrtFactor;
         for (var s = 0; s < size; s++)
         {
             for (var k = 0; k < n; k++) z[k] = StatsRandom.Normal(rng);

@@ -212,6 +212,22 @@ public sealed class NonlinearConstraint : IMinimizeConstraint
         Fun = fun; Lb = (double[])lb.Clone(); Ub = (double[])ub.Clone(); Jac = jac; KeepFeasible = keepFeasible;
     }
 
+    /// <summary>
+    /// Hessian of <c>Σ vᵢ funᵢ(x)</c> as a function of <c>(x, v)</c>, shape <c>(n, n)</c>, used by
+    /// TrustConstr. When null TrustConstr approximates it with <see cref="HessianUpdate"/> (BFGS by
+    /// default, as SciPy).
+    /// </summary>
+    public Func<double[], double[], NdArray>? Hess { get; init; }
+
+    /// <summary>
+    /// Quasi-Newton strategy for the constraint Hessian when <see cref="Hess"/> is null (TrustConstr).
+    /// Null means a fresh <see cref="BfgsHessianUpdate"/>. The instance is re-initialised by each solve.
+    /// </summary>
+    public HessianUpdateStrategy? HessianUpdate { get; init; }
+
+    /// <summary>Relative finite-difference step for the Jacobian (TrustConstr); null is √ε.</summary>
+    public double? FiniteDiffRelStep { get; init; }
+
     /// <summary>A scalar constraint <c>lb &lt;= fun(x) &lt;= ub</c>.</summary>
     public NonlinearConstraint(Func<double[], double> fun, double lb, double ub, Func<double[], double[]>? jac = null)
         : this(x => [fun(x)], [lb], [ub], jac is null ? null : x => { var g = jac(x); return new NdArray(g, 1, g.Length); }) { }
@@ -352,6 +368,64 @@ public sealed class OptimizeResult
 
     /// <summary>Local minimisation results attached by a global method's polishing step.</summary>
     public int Nlfev { get; set; }
+
+    /// <summary>Objective gradient at <see cref="X"/> (TrustConstr's <c>grad</c>).</summary>
+    public double[]? Grad { get; set; }
+
+    /// <summary>
+    /// Gradient of the Lagrangian <c>∇f + Σ Jᵢᵀ vᵢ</c> at <see cref="X"/> (TrustConstr); its infinity
+    /// norm is <see cref="Optimality"/>.
+    /// </summary>
+    public double[]? LagrangianGrad { get; set; }
+
+    /// <summary>
+    /// Lagrange multipliers per constraint, in the order given, with the bounds (when present) as a
+    /// final entry — SciPy's <c>v</c>. Sign convention: the Lagrangian gradient is <c>∇f + Jᵀv</c>, so
+    /// an active lower bound has a negative multiplier.
+    /// </summary>
+    public double[][]? V { get; set; }
+
+    /// <summary>Constraint values per constraint at <see cref="X"/> (TrustConstr's <c>constr</c>), bounds last.</summary>
+    public double[][]? Constr { get; set; }
+
+    /// <summary>Infinity norm of <see cref="LagrangianGrad"/> (TrustConstr).</summary>
+    public double? Optimality { get; set; }
+
+    /// <summary>Final trust-region radius (TrustConstr).</summary>
+    public double? TrRadius { get; set; }
+
+    /// <summary>Final penalty parameter of the merit function (TrustConstr).</summary>
+    public double? ConstrPenalty { get; set; }
+
+    /// <summary>Final barrier parameter (TrustConstr, interior-point branch only).</summary>
+    public double? BarrierParameter { get; set; }
+
+    /// <summary>Final barrier subproblem tolerance (TrustConstr, interior-point branch only).</summary>
+    public double? BarrierTolerance { get; set; }
+
+    /// <summary>Total projected-CG iterations (TrustConstr).</summary>
+    public int CgNiter { get; set; }
+
+    /// <summary>Why the last projected-CG solve stopped: 1 max iterations, 2 trust boundary, 3 negative curvature, 4 tolerance (TrustConstr).</summary>
+    public int CgStopCond { get; set; }
+
+    /// <summary>Wall-clock time in seconds (TrustConstr).</summary>
+    public double? ExecutionTime { get; set; }
+
+    /// <summary>Which algorithm ran, e.g. <c>"equality_constrained_sqp"</c> or <c>"tr_interior_point"</c>.</summary>
+    public string? Method { get; set; }
+
+    /// <summary>All local minima found by <c>Optimize.Shgo</c>, one per row, sorted by objective value.</summary>
+    public NdArray? Xl { get; set; }
+
+    /// <summary>Objective values of <see cref="Xl"/>, ascending.</summary>
+    public double[]? Funl { get; set; }
+
+    /// <summary>Gradient evaluations made by local minimisations (Shgo).</summary>
+    public int Nljev { get; set; }
+
+    /// <summary>Sampling points evaluated (Shgo's <c>tnev</c>), including infeasible ones that were not evaluated.</summary>
+    public int Tnev { get; set; }
 
     /// <inheritdoc />
     public override string ToString()

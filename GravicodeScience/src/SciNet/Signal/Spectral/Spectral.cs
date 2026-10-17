@@ -126,7 +126,8 @@ public static partial class Signal
     }
 
     private static (double[] F, Complex[] Pxy, double[]? Preal) CsdCore(double[] x, double[]? y, double fs, SpectralWindow? window,
-        int? nperseg, int? noverlap, int? nfft, DetrendType? detrend, bool onesided, SpectralScaling scaling, SpectralAverage average)
+        int? nperseg, int? noverlap, int? nfft, DetrendType? detrend, bool onesided, SpectralScaling scaling, SpectralAverage average,
+        Func<double[], double[]>? customDetrend = null)
     {
         var n = x.Length;
         window ??= "hann_periodic";
@@ -152,7 +153,7 @@ public static partial class Signal
         if (nov >= np) throw new ArgumentException($"noverlap={nov} must be less than nperseg={np}!", nameof(noverlap));
         if (nov < 0) throw new ArgumentException("noverlap must be non-negative.", nameof(noverlap));
         var scale = Scale(win, fs, scaling);
-        var engine = new SignalSpectralEngine(win, np, nov, nf, detrend, onesided);
+        var engine = new SignalSpectralEngine(win, np, nov, nf, detrend, onesided, customDetrend);
         var nseg = engine.Segments(n);
         var bins = engine.Bins;
         var freqs = onesided ? Fft.RfftFreq(nf, 1 / fs) : Fft.FftFreq(nf, 1 / fs);
@@ -231,12 +232,17 @@ public static partial class Signal
     public static (double[] F, double[] T, NdArray? Sxx, ComplexNdArray? SxxComplex) Spectrogram(double[] x, double fs = 1.0,
         SpectralWindow? window = null, int? nperseg = null, int? noverlap = null, int? nfft = null, DetrendType? detrend = DetrendType.Constant,
         bool returnOnesided = true, SpectralScaling scaling = SpectralScaling.Density, SpectrogramMode mode = SpectrogramMode.Psd)
+        => SpectrogramCore(x, fs, window, nperseg, noverlap, nfft, detrend, null, returnOnesided, scaling, mode);
+
+    private static (double[] F, double[] T, NdArray? Sxx, ComplexNdArray? SxxComplex) SpectrogramCore(double[] x, double fs,
+        SpectralWindow? window, int? nperseg, int? noverlap, int? nfft, DetrendType? detrend, Func<double[], double[]>? custom,
+        bool returnOnesided, SpectralScaling scaling, SpectrogramMode mode)
     {
         ArgumentNullException.ThrowIfNull(x);
         window ??= ("tukey_periodic", 0.25);
         var (win, np) = window.Resolve(nperseg, x.Length);
         var nov = noverlap ?? np / 8;
-        var (f, t, z) = SpectralHelper(x, fs, win, np, nov, nfft, detrend, returnOnesided, scaling, mode == SpectrogramMode.Psd, StftBoundary.None, false);
+        var (f, t, z) = SpectralHelper(x, fs, win, np, nov, nfft, detrend, returnOnesided, scaling, mode == SpectrogramMode.Psd, StftBoundary.None, false, custom);
         var bins = f.Length;
         var nseg = t.Length;
         if (mode == SpectrogramMode.Complex) return (f, t, null, new ComplexNdArray(z, bins, nseg));
@@ -287,11 +293,16 @@ public static partial class Signal
     public static (double[] F, double[] T, ComplexNdArray Zxx) Stft(double[] x, double fs = 1.0, SpectralWindow? window = null, int nperseg = 256,
         int? noverlap = null, int? nfft = null, DetrendType? detrend = null, bool returnOnesided = true, StftBoundary boundary = StftBoundary.Zeros,
         bool padded = true, SpectralScaling scaling = SpectralScaling.Spectrum)
+        => StftCore(x, fs, window, nperseg, noverlap, nfft, detrend, null, returnOnesided, boundary, padded, scaling);
+
+    private static (double[] F, double[] T, ComplexNdArray Zxx) StftCore(double[] x, double fs, SpectralWindow? window, int nperseg,
+        int? noverlap, int? nfft, DetrendType? detrend, Func<double[], double[]>? custom, bool returnOnesided, StftBoundary boundary,
+        bool padded, SpectralScaling scaling)
     {
         ArgumentNullException.ThrowIfNull(x);
         window ??= "hann_periodic";
         var (win, np) = window.Resolve(nperseg, x.Length);
-        var (f, t, z) = SpectralHelper(x, fs, win, np, noverlap, nfft, detrend, returnOnesided, scaling, false, boundary, padded);
+        var (f, t, z) = SpectralHelper(x, fs, win, np, noverlap, nfft, detrend, returnOnesided, scaling, false, boundary, padded, custom);
         return (f, t, new ComplexNdArray(z, f.Length, t.Length));
     }
 
@@ -383,7 +394,8 @@ public static partial class Signal
     /// bins × segments buffer (power when <paramref name="psd"/>, else the scaled STFT).
     /// </summary>
     private static (double[] F, double[] T, Complex[] Z) SpectralHelper(double[] x, double fs, double[] win, int np, int? noverlap, int? nfft,
-        DetrendType? detrend, bool onesided, SpectralScaling scaling, bool psd, StftBoundary boundary, bool padded)
+        DetrendType? detrend, bool onesided, SpectralScaling scaling, bool psd, StftBoundary boundary, bool padded,
+        Func<double[], double[]>? customDetrend = null)
     {
         var nf = nfft ?? np;
         if (nf < np) throw new ArgumentException("nfft must be greater than or equal to nperseg.", nameof(nfft));
@@ -419,7 +431,7 @@ public static partial class Signal
         }
         var scale = Scale(win, fs, scaling);
         if (!psd) scale = Math.Sqrt(scale);
-        var engine = new SignalSpectralEngine(win, np, nov, nf, detrend, onesided);
+        var engine = new SignalSpectralEngine(win, np, nov, nf, detrend, onesided, customDetrend);
         var nseg = engine.Segments(x.Length);
         var bins = engine.Bins;
         var z = engine.AllSegments(x, null, nseg, power: psd);

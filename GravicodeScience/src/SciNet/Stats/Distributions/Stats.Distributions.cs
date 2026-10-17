@@ -179,6 +179,8 @@ public static partial class Stats
 
     /// <summary>Multivariate normal, scipy's <c>multivariate_normal</c>.</summary>
     public static MultivariateNormalDistribution MultivariateNormal(double[] mean, NdArray cov, bool allowSingular = false) => new(mean, cov, allowSingular);
+    /// <summary>Multivariate normal with a factored <see cref="Covariance"/>, scipy's <c>multivariate_normal(mean, cov=Covariance)</c>.</summary>
+    public static MultivariateNormalDistribution MultivariateNormal(double[] mean, Covariance cov) => new(mean, cov);
     /// <summary>Multivariate t, scipy's <c>multivariate_t</c>.</summary>
     public static MultivariateTDistribution MultivariateT(double[] loc, NdArray shape, double df = 1.0, bool allowSingular = false) => new(loc, shape, df, allowSingular);
     /// <summary>Dirichlet, scipy's <c>dirichlet</c>.</summary>
@@ -198,7 +200,7 @@ public static partial class Stats
     /// <summary>
     /// Maximum-likelihood fit of any continuous family, scipy's <c>dist.fit</c>: the prototype names
     /// the family and its shapes are the starting point. Closed forms are used where the family has
-    /// them; see <see cref="ContinuousDistribution.FitTo"/>.
+    /// them; see <see cref="ContinuousDistribution.FitTo(double[], double?[], double?, double?)"/>.
     /// </summary>
     public static ContinuousDistribution Fit(ContinuousDistribution family, double[] data, double?[]? fixedShapes = null, double? floc = null, double? fscale = null)
     {

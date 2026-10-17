@@ -522,10 +522,11 @@ laporan perbandingan.
 | **Callback Python di setiap evaluasi** | **.NET**, 9–180× | `solve_ivp` Lorenz 180×, BDF 119×, BFGS 11×, `quad` 9× |
 | Baris, garis, atau segmen yang bisa diparalelkan | **.NET**, 3–10× | `welch` 10×, interpolasi grid 4,2×, `gaussian_filter` 4×, `cdist` 3,8× |
 | Algoritma yang lebih baik atau predikat eksak | .NET 3,1× | Delaunay dengan aritmetika eksak |
-| Filter rekursif, FFT ukuran menengah | setara hingga SciPy 1,7× | `lfilter`, `sosfiltfilt`, FFT kompleks, DCT |
-| **Pustaka terkompilasi yang matang** | **SciPy**, 1,3–7,4× | SuperLU 7,4×, `expm` LAPACK 3,6×, `curve_fit` MINPACK 1,7×, KD-tree dan assignment C++ |
+| Faktorisasi sparse dan dense yang ditulis ulang di 1.3.0 | **.NET**, 1,3–2,3× | `splu` 2,3× (LU multifrontal), `expm` 1,3×, Ward 1,7×, KD-tree 1,3× |
+| Filter rekursif, FFT ukuran menengah | setara hingga SciPy 1,6× | `lfilter`, FFT kompleks, DCT |
+| Model tervektorisasi plus MINPACK | **SciPy**, 1,7× | `curve_fit` |
 
-Rekap untuk SciNet: lebih cepat di 16, lebih lambat di 8, setara di 2.
+Rekap untuk SciNet: lebih cepat di 21, lebih lambat di 3, setara di 2 (1.2.0: 16, 8, 2).
 
 ### Rekapitulasi, dan artinya
 

@@ -338,11 +338,19 @@ public class MatFileTests
     }
 
     [Fact]
-    public void V73_IsRefusedWithAClearMessage()
+    public void V73_IsReadThroughTheHdf5Reader()
     {
-        var e = Assert.Throws<NotSupportedException>(() => MatFile.Load(Scipy("testhdf5_7.4_GLNX86.mat")));
-        Assert.Contains("HDF5", e.Message);
+        // Formerly refused with NotSupportedException; v7.3 is now read by SciNet's managed HDF5 reader.
+        // A real MATLAB 7.4 file: testdouble = 0:pi/4:2*pi, a 1 x 9 row.
+        var d = MatFile.Load(Scipy("testhdf5_7.4_GLNX86.mat"));
+        var a = Assert.IsType<MatArray>(d["testdouble"]);
+        Shape([1, 9], a.Dimensions);
+        var v = a.Real.ToArray();
+        for (var i = 0; i < 9; i++) Assert.True(Math.Abs(v[i] - i * Math.PI / 4) <= 1e-15, $"testdouble[{i}] = {v[i]}");
         Assert.Equal((2, 0), MatFile.GetVersion(Scipy("testhdf5_7.4_GLNX86.mat")));
+        var w = MatFile.Whosmat(Scipy("testhdf5_7.4_GLNX86.mat")).Single();
+        Assert.Equal(("testdouble", "double"), (w.Name, w.ClassName));
+        Assert.Equal(new[] { 1, 9 }, w.Shape);
     }
 
     // ------------------------------------------------------------- options

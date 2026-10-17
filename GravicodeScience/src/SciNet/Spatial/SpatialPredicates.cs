@@ -20,7 +20,7 @@ namespace Gravicode.Science.SciNet.Spatial;
 /// construction then corrupts its own mesh (crossing edges, or a cavity that is not
 /// star-shaped).</para>
 /// </remarks>
-internal static class SpatialPredicates
+internal static partial class SpatialPredicates
 {
     private const double Epsilon = 1.1102230246251565e-16; // 2^-53
     private const double CcwErrBoundA = (3.0 + 16.0 * Epsilon) * Epsilon;

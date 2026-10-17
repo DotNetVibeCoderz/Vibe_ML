@@ -516,10 +516,11 @@ recompiles after ~30; with 5, the Lorenz solve measured 19 ms instead of 5.6 ms)
 | A **Python callback per evaluation** | **.NET**, 9–180× | `solve_ivp` Lorenz 180×, BDF 119×, BFGS 11×, `quad` 9× |
 | Parallelisable rows, lines or segments | **.NET**, 3–10× | `welch` 10×, regular-grid interpolation 4.2×, `gaussian_filter` 4×, `cdist` 3.8× |
 | A better algorithm or exact predicates | .NET 3.1× | Delaunay with exact arithmetic |
-| Recursive filters, mid-size FFTs | parity to SciPy 1.7× | `lfilter`, `sosfiltfilt`, complex FFT, DCT |
-| **Mature compiled libraries** | **SciPy**, 1.3–7.4× | SuperLU 7.4×, LAPACK `expm` 3.6×, MINPACK `curve_fit` 1.7×, C++ KD-tree and assignment |
+| Sparse and dense factorisations rewritten in 1.3.0 | **.NET**, 1.3–2.3× | `splu` 2.3× (multifrontal LU), `expm` 1.3×, Ward 1.7×, KD-tree 1.3× |
+| Recursive filters, mid-size FFTs | parity to SciPy 1.6× | `lfilter`, complex FFT, DCT |
+| A vectorised model plus MINPACK | **SciPy**, 1.7× | `curve_fit` |
 
-Tally for SciNet: faster on 16, slower on 8, parity on 2.
+Tally for SciNet: faster on 21, slower on 3, parity on 2 (1.2.0: 16, 8, 2).
 
 ### The tally, and what it means
 

@@ -84,7 +84,14 @@ the tests use mpmath, and SciNet is the more accurate one in several places (Bes
 x = 1e5, `Ndtr` and `OwensT` deep in the tail, `LambertW` near the branch point, high-order
 Legendre weights, `Hyp2f1` when c − a − b is an integer, where SciPy returns NaN). Weaker spots,
 around 1e-13 to 1e-12: `Smirnov` for large n, incomplete-beta tails below 1e-280, Bessel values
-right at their zeros. `Hyp2f1` covers real z ≤ 1. Not implemented: Struve, `Hyperu`.
+right at their zeros. `Hyp2f1` covers real z ≤ 1.
+
+Also: Struve H/L, `Hyperu`, the Kelvin functions, Wright's generalised Bessel function, `Agm`,
+degree-argument trigonometry, and the cdflib inverses SciPy exposes — `Gdtrix`/`Gdtria`/`Gdtrib`,
+`Stdtridf`, `Bdtrik`, `Pdtrik`, `Nbdtrik`, and the non-central `Chndtr`, `Nctdtr`, `Ncfdtr` with
+their inverses. The inverses solve to full precision and return NaN where no parameter reaches
+the probability (SciPy returns its search limit, such as −1e100). Not implemented: Mathieu
+functions.
 
 ## Physical constants
 
@@ -130,19 +137,36 @@ var (rows, cols) = Optimize.LinearSumAssignment(cost);
 // global
 Optimize.DifferentialEvolution(f, bounds, seed: 7);
 Optimize.DualAnnealing(f, bounds);  Optimize.BasinHopping(f, x0);  Optimize.Direct(f, bounds);  Optimize.Brute(f, ranges);
+Optimize.Shgo(f, bounds, n: 64, iters: 3, samplingMethod: ShgoSamplingMethod.Sobol);   // all local minima in Xl/Funl
+
+// interior-point / SQP with general constraints
+Optimize.Minimize(f, x0, MinimizeMethod.TrustConstr, bounds: bounds,
+    constraints: [new LinearConstraint(A, lb, ub), new NonlinearConstraint(g, lb2, ub2)]);
+
+// assignment and isotonic regression
+Optimize.QuadraticAssignment(flow, distance);  Optimize.IsotonicRegression(y);
 ```
 
-Local methods: Nelder–Mead, Powell, CG, BFGS, Newton-CG, L-BFGS-B, TNC, SLSQP, COBYLA, dogleg,
-trust-ncg, trust-exact, trust-krylov. Roots: bisect, brentq, brenth, ridder, TOMS 748, Newton /
+Local methods: Nelder–Mead, Powell, CG, BFGS, Newton-CG, L-BFGS-B, TNC, SLSQP, COBYLA,
+trust-constr, dogleg, trust-ncg, trust-exact, trust-krylov. The legacy functional interface is
+there too (`Fmin`, `FminBfgs`, `FminLBfgsB`, `FminTnc`, `FminSlsqp`, `Leastsq`, `Brent`,
+`Fminbound`, `Broyden1`, `NewtonKrylov`, …), returning result objects rather than tuples. Roots: bisect, brentq, brenth, ridder, TOMS 748, Newton /
 secant / Halley, fixed point; for systems hybr, lm, Broyden 1/2, Anderson, linear mixing,
 diagonal Broyden, excitingmixing, Newton–Krylov, DF-SANE. Least squares: TRF, dogbox and
 Levenberg–Marquardt with five robust losses.
 
-**Not ports, and so with different iteration counts (solutions are tested):** TNC (projected
-truncated Newton), COBYLA (Powell-style, not PRIMA), SLSQP (Goldfarb–Idnani QP instead of Kraft's
-LSQ), Newton–Krylov (GMRES instead of LGMRES), DIRECT. Not implemented: `trust-constr`, SHGO,
-quadratic assignment. `Linprog` has no presolve; its interior-point method rebuilds A·D·Aᵀ densely
-and is slow on large problems — the simplex is the default.
+`trust-constr` is SciPy's algorithm — Byrd–Omojokun SQP for equality constraints, wrapped in a
+barrier method for inequalities and bounds — and follows SciPy's path: equality-only and
+bound-only problems take SciPy's iterations to ~1e-12. TNC is a line-by-line port of Nash's
+`tnc.c` (bounded Rosenbrock: 39 evaluations, like SciPy). SHGO reproduces SciPy's sampling and
+minimiser pool exactly with full simplicial refinement; with Sobol/Halton sampling its
+triangulation is its own, so the pool can differ while the best minima agree.
+
+**Not ports, and so with different iteration counts (solutions are tested):** COBYLA
+(Powell-style, not PRIMA), SLSQP (Goldfarb–Idnani QP instead of Kraft's LSQ), Newton–Krylov
+(GMRES instead of LGMRES), DIRECT. `trust-constr` is dense only. `Linprog` has no presolve; its
+interior-point method rebuilds A·D·Aᵀ densely and is slow on large problems — the simplex is the
+default.
 
 ## Integration and ODEs
 
@@ -215,8 +239,8 @@ Also: `PPoly`, `BPoly`, `BSpline` (derivative, antiderivative, integrate, sparse
 
 `RegularGridInterpolator`'s cubic and quintic methods are solved exactly; SciPy's iterative
 solver stops at 1e-6, so SciPy itself is only that accurate there. Limits: no periodic FITPACK
-fits, `Bisplrep` needs given knots, `RectBivariateSpline` is interpolating only (s = 0), scattered
-linear and Clough–Tocher interpolation are 2-D (the triangulation is 2-D).
+fits, `Bisplrep` needs given knots, `RectBivariateSpline` is interpolating only (s = 0), and
+Clough–Tocher is 2-D (as in SciPy). Scattered linear interpolation works in any dimension.
 `BarycentricInterpolator.AddXi` deliberately does **not** match SciPy 1.17.1, which has a sign bug
 there.
 
@@ -233,9 +257,14 @@ Linalg.SolveContinuousAre(a, b, q, r);  Linalg.SolveDiscreteAre(a, b, q, r);
 Linalg.Toeplitz(c);  Linalg.Hilbert(5);  Linalg.InvHilbertExact(5);  Linalg.Companion(p);
 ```
 
-SciNet adds what `scipy.linalg` has beyond `numpy.linalg`, reusing GraviNum's LU, QR, Cholesky,
-SVD and symmetric eigensolver underneath. `Expm` is Al-Mohy–Higham scaling-and-squaring with
-Padé degree selection; `ExpmFrechet` gives its Fréchet derivative.
+SciNet adds what `scipy.linalg` has beyond `numpy.linalg`, reusing GraviNum's QR, SVD and
+symmetric eigensolver underneath, with its own packed parallel matrix product, recursive blocked
+LU and blocked triangular solves for the dense kernels. `Expm` is Al-Mohy–Higham
+scaling-and-squaring with Padé degree selection — at or below SciPy's time from n = 200 up;
+`ExpmFrechet` gives its Fréchet derivative. The Francis QR sweeps behind `Schur`/`Eig` apply their
+reflectors deferred and in parallel; when GraviNum's `NativeLapack` finds a LAPACK at run time,
+`Schur`, `Eig` and `Eigvals` go to `dgees`/`dgeev` instead (`expm`'s solve stays managed: SciPy's
+bundled OpenBLAS `dgesv` measured 10× slower than it).
 
 `Differentiate.Derivative(f, x)` is `scipy.differentiate.derivative` — adaptive central
 differences with Richardson extrapolation and an honest error estimate — plus `Jacobian`,
@@ -243,8 +272,9 @@ differences with Richardson extrapolation and an honest error estimate — plus 
 
 **Approximations to know:** `FractionalMatrixPower` is `exp(t·log A)`, not Higham–Lin; Riccati
 solvers use the matrix sign function / structured doubling rather than SciPy's QZ (the
-stabilising solution is unique, so they agree to ~1e-11). Not implemented: Schur reordering,
-generalised `Eig(a, b)` via QZ, left eigenvectors.
+stabilising solution is unique, so they agree to ~1e-11). The managed Schur has no multishift
+QR or aggressive early deflation, which is the remaining gap to LAPACK (~1.5× at n = 200).
+Not implemented: Schur reordering, generalised `Eig(a, b)` via QZ, left eigenvectors.
 
 ## Sparse matrices, solvers and graphs
 
@@ -255,7 +285,8 @@ var d = SparseMatrices.Diags([lower, main, upper], [-1, 0, 1]);
 var laplacian = SparseMatrices.Kronsum(d, d);          // CsrMatrix
 var y = laplacian * x;                                  // SpMV;  sparse * sparse is a product
 var cg = SparseLinalg.Cg(laplacian, b, rtol: 1e-8);    // also Gmres, Bicgstab, Minres, Lsqr, Lsmr, …
-var lu = SparseLinalg.Splu(a);  lu.Solve(b);
+var lu = SparseLinalg.Splu(a);  lu.Solve(b);         // multifrontal LU with threshold pivoting
+var chol = SparseLinalg.Cholesky(spd);  chol.Solve(b);  chol.LogDeterminant();
 var eig = SparseLinalg.Eigsh(laplacian, k: 6, sigma: 0);   // shift-invert
 SparseLinalg.ExpmMultiply(a, v);
 
@@ -270,10 +301,13 @@ format and every solver works through `ILinearOperator`, so a matrix-free operat
 same solvers. Two SciPy differences: `*` between sparse matrices is the matrix product
 (element-wise is `Multiply`), and CSR↔CSC transpose is O(1).
 
-**Slower than SciPy, honestly:** `Splu` is left-looking Gilbert–Peierls without supernodes —
-about 13× slower than SuperLU on a 10k Poisson matrix — and `Eigsh` uses full
-reorthogonalisation, about 4.5× slower than ARPACK. `Svds` goes through AᵀA, so singular values
-below √ε·σmax are inaccurate. COLAMD is approximated by minimum degree on AᵀA.
+`Splu` is a multifrontal LU with threshold partial pivoting and delayed pivots (the MUMPS
+approach), blocked dense front kernels and an AMD ordering with aggressive absorption — about
+2× faster than SuperLU with less fill (Poisson 300²: 212 ms against 435 ms). `Cholesky` is the
+supernodal SPD factorisation SciPy does not have, and shift-invert `Eigsh` uses it when it can.
+`Eigsh` is thick-restart Lanczos with ARPACK's restart rule — level with ARPACK — and `Eigs`
+implicitly restarted Arnoldi, within ~1.3× of it. `Svds` goes through AᵀA, so singular values
+below √ε·σmax are inaccurate. COLAMD itself is not ported; its ordering option uses AMD.
 
 ## Spatial algorithms
 
@@ -285,18 +319,25 @@ var (dist, idx) = tree.Query(queries, k: 5);           // batch queries use ever
 tree.QueryBallPoint(x, r: 0.1);  tree.QueryPairs(0.05);
 
 Distance.Cdist(a, b, DistanceMetric.Cosine);  Distance.Pdist(x);  Distance.Squareform(y);
-var tri = new Delaunay(points2d);  tri.FindSimplex(q);
-var hull = new ConvexHull(points);  hull.Volume;     // 2-D and 3-D
-var vor = new Voronoi(points2d);   vor.FinitePolygons(box);
+var tri = new Delaunay(points);  tri.FindSimplex(q);     // any dimension
+var hull = new ConvexHull(points);  hull.Volume;          // any dimension up to 12
+var vor = new Voronoi(points);   vor.RidgeVertexLists;    // 2-D polygons via FinitePolygons(box)
+new HalfspaceIntersection(halfspaces, interiorPoint);  new SphericalVoronoi(onSphere).CalculateAreas();
+var periodic = new KDTree(points, boxsize: [1.0, 1.0, 1.0]);   // wrap-around boundaries
 
 var r = Rotation.FromEuler("xyz", [90, 0, 45], degrees: true);
-r.AsQuat();  r.Apply(vectors);  r.Inv();  Rotation.AlignVectors(a, b);
-new Slerp(times, rotations).Evaluate(0.5);
+r.AsQuat();  r.Apply(vectors);  r.Inv();  Rotation.AlignVectors(a, b);  Rotation.CreateGroup("O");
+new Slerp(times, rotations).Evaluate(0.5);  new RotationSpline(times, rotations).Evaluate(t, order: 1);
 ```
 
-Delaunay uses exact predicates, so lattices and cocircular points triangulate correctly; it is
-2-D only (so is Voronoi; hulls are 2-D and 3-D). KD-tree ties break by (distance, index), and
-triangle numbering differs from Qhull's, which is arbitrary anyway.
+Delaunay and the hulls use exact predicates, so lattices and cospherical points triangulate
+correctly; 2-D keeps a dedicated Bowyer–Watson, higher dimensions use an N-d quickhull on the
+lifted points. Delaunay in 3-D is slightly faster than SciPy's Qhull and `FindSimplex` much
+faster (Z-curve-ordered walks in parallel); 4-D and above are 2–3× behind Qhull. Differences:
+inputs that are flat only up to rounding still get a (very thin) triangulation where Qhull throws,
+degenerate inputs triangulate differently (validly), simplex numbering differs from Qhull's, and
+KD-tree ties break by (distance, index). The KD-tree builds into flat arrays and beats SciPy's on
+build and on build + query.
 
 ## Clustering
 
@@ -310,7 +351,9 @@ Cluster.KMeans2(data, 3, minit: KMeansInit.PlusPlus);
 ```
 
 `Dendrogram` returns SciPy's coordinate dictionary (`Icoord`, `Dcoord`, `ColorList`, …) for
-plotting. `OptimalLeafOrdering` finds the true optimum — SciPy's misses it on some inputs, so
+plotting; `Leaders`, `IsIsomorphic`, the MATLAB linkage conversions and `ClusterDisjointSet` are
+there too. Linkage uses a specialised Lance–Williams update per method and is faster than SciPy
+for Ward while staying bit-identical to its matrix. `OptimalLeafOrdering` finds the true optimum — SciPy's misses it on some inputs, so
 the two can differ there, and SciNet's is never worse.
 
 ![Ward dendrogram of Iris](screenshots/scinet_dendrogram.png)
@@ -332,8 +375,8 @@ odd prime) with SIMD butterflies, chooses Bluestein only when it is cheaper, and
 transforms at half length. It runs **2.3–28× faster than GraviNum's FFT** (28× at n = 1000, where
 GraviNum takes the Bluestein detour). Against `scipy.fft` (pocketfft in C++) it is mixed: the real
 transform of 2²⁰ points is 1.5× faster, a single 65,536-point complex transform and the DCT-II are
-1.2× and 1.7× slower, and batched transforms along an axis win through parallelism. Not
-implemented: `fht`, `hfft2`/`hfftn`.
+1.2× and 1.7× slower, and batched transforms along an axis win through parallelism. `Fht`/`Ifht` (FFTLog, with
+`Fhtoffset`) and the n-D Hermitian transforms complete the module.
 
 ## Signal processing
 
@@ -379,8 +422,10 @@ Signal.PeakWidths(x, peaks.Peaks, relHeight: 0.5);  Signal.ArgRelMax(x, order: 3
 `Widths`, `LeftIps`, `PlateauSizes`, …), null when the condition was not requested. Welch and STFT
 batch segments through cached real-FFT plans and run segments in parallel — Welch on 10⁷ samples
 takes 66 ms against SciPy's 671 ms. Spectral and convolution functions take real input
-(`Resample`, `Czt` and `ZoomFft` also take complex). Not implemented: `ShortTimeFFT` as a class,
-the `residue` family, custom detrend callbacks.
+(`Resample`, `Czt` and `ZoomFft` also take complex). `ShortTimeFft` is SciPy's class (all FFT
+modes, scaling, borders, dual windows, cross-spectrograms; real windows), the `residue` family
+(`Residue`, `Residuez`, `Invres`, `Invresz`) is there, and Welch/CSD/spectrogram/STFT accept a
+custom detrend callback.
 
 ![Welch PSD with find_peaks](screenshots/scinet_welch.png)
 
@@ -399,20 +444,27 @@ Stats.Binom(20, 0.3).Pmf(6);  Stats.Poisson(4).Ppf(0.99);
 var mvn = Stats.MultivariateNormal([0, 0], cov);  mvn.Cdf([0, 0]);  mvn.LogPdf(x);
 ```
 
-61 continuous families (everything common plus non-central t/χ²/F, truncated normal and
-exponential, generalised extreme value and Pareto, skew-normal, Johnson SU/SB, studentized range,
-the Kolmogorov–Smirnov distributions, …), 17 discrete families, and `MultivariateNormal` (with a
-Genz quasi-Monte-Carlo CDF), `MultivariateT`, `Dirichlet`, `Multinomial`, `Wishart`,
-`InvWishart`, `OrthoGroup` and `SpecialOrthoGroup`. Location and scale are handled exactly as in
+Every family in `scipy.stats` 1.17.1: all 109 continuous ones (including `levy_stable` through
+Nolan's integrals, Landau, the non-central t/χ²/F, studentized range and the Kolmogorov–Smirnov
+laws) and all 21 discrete ones (including Fisher's and Wallenius' non-central hypergeometrics and
+Poisson–binomial), plus `RvHistogram` and `RvDiscrete` for user-defined laws. Multivariate:
+`MultivariateNormal` (with a Genz quasi-Monte-Carlo CDF and SciPy's `Covariance` classes),
+`MultivariateT`, `Dirichlet`, `DirichletMultinomial`, `Multinomial`, `MultivariateHypergeom`,
+`Wishart`, `InvWishart`, `MatrixNormal`, `MatrixT`, `VonMisesFisher`, `NormalInverseGamma`,
+`OrthoGroup`, `SpecialOrthoGroup`, `UnitaryGroup`, `RandomTable` and `RandomCorrelation`. Location and scale are handled exactly as in
 SciPy; every distribution implements `IUnivariateDistribution`, which is what the hypothesis
 tests accept. Tails are computed through `Sf`/`LogSf` formulations, never `1 - Cdf`.
 
 Fitting uses closed-form maximum likelihood where SciPy has one and SciPy's penalised
-Nelder–Mead otherwise; no fit in the test suite ends at a worse likelihood than SciPy's.
+Nelder–Mead otherwise; no fit in the test suite ends at a worse likelihood than SciPy's. A fit
+that ends on invalid parameters throws `FitError`, as SciPy's does.
 
 **SciPy itself is not always the reference.** In the far tails SciPy 1.17.1's quantiles for
 pearson3, f, truncnorm, halfnorm, weibull_max, foldnorm and genlogistic are wrong in the 4th–5th
-digit (or return ±inf); those cases are pinned against 40-digit mpmath instead. Weak spots in
+digit (or return ±inf); `invweibull(0.8)` reports a mean of −4.9 (it is +∞); `betanbinom`'s
+entropy is 1.897 (it is 3.002, SciPy's sum does not converge); its frozen `levy_stable` at α = 1
+drops a location shift its own direct call applies. Those cases are pinned against closed forms
+or high-precision mpmath instead. Weak spots in
 SciNet: the non-central t far upper tail, `MultivariateNormal.Cdf` (~3e-5, like SciPy's
 randomised method), and `StudentizedRange` (nested quadrature, ~1 ms per CDF value).
 
@@ -432,12 +484,32 @@ Stats.Quantile(a, 0.9);  Stats.BinnedStatistic(x, values, "mean", bins: 10);  St
 Stats.Bootstrap([a], s => s[0].Average(), method: "BCa");  Stats.PermutationTest([a, b], statistic);
 ```
 
+Also: Box–Cox and Yeo–Johnson (transforms, `normmax`, log-likelihoods, normality plots),
+circular statistics (`Circmean`, `Circvar`, `Circstd`, `DirectionalStats`), `MedianTest`,
+`QuantileTest`, `BwsTest`, `GoodnessOfFit` (Monte Carlo with fitted parameters), `PpccMax`,
+`Mvsdist`, `MultiscaleGraphcorr` (MGC), `SobolIndices` (with a BCa bootstrap), and
+`WassersteinDistanceNd`.
+
 P-values follow SciPy's methods, including the exact distributions (Mann–Whitney, Wilcoxon,
 Kendall, two-sample KS) and the `Alternative` options; results agree with SciPy to roughly
 1e-10–1e-12. Two places where SciNet is deliberately *more* exact: Ansari–Bradley (SciPy's exact
 frequencies are float32) and Dunnett/bivariate box probabilities (SciPy integrates them
 randomly). `Bootstrap`, `PermutationTest` and `MonteCarloTest` take a `parallel` flag that gives
 results identical to the serial run.
+
+### Censored data and survival
+
+```csharp
+var times = CensoredData.RightCensored(observed, censored);   // also left- and interval-censored
+var km = Stats.Ecdf(times);                                    // Kaplan–Meier
+km.Sf.Evaluate(12.0);  km.Sf.ConfidenceInterval(0.95, "log-log");
+Stats.Logrank(groupA, groupB);
+var weibull = Stats.WeibullMin(c: 1.5).FitTo(times);           // maximum likelihood on the censored likelihood
+```
+
+Kaplan–Meier bands are NaN at the first and last steps, exactly as SciPy's (log 1 = 0 at the
+start, n = d at the end). Censored fits always go through the numerical fit, even for families
+with a closed form, as in SciPy.
 
 ### Kernel density estimation and quasi-Monte Carlo
 
@@ -455,8 +527,9 @@ The exact KDE runs in parallel and is about 30× faster than SciPy's (10k data p
 at 100k points: 1.1–1.5 s against 39.8 s). Unscrambled Sobol and Halton reproduce SciPy's points
 bit for bit; Sobol is computed directly from the point index (Gray code), so fast-forwarding is
 free and parallel draws are identical to serial ones. Sobol supports 4096 dimensions (SciPy's
-table goes to 21201). Not implemented: `median_test`, circular statistics, Box–Cox /
-Yeo–Johnson, `weibull_min` for `Anderson`.
+table goes to 21201). Not implemented: SciPy's newer random-variable framework
+(`make_distribution`, `Normal`, `Mixture`, …) and its method objects (`BootstrapMethod`, …) —
+the classic `rv_continuous`-style API is what SciNet mirrors.
 
 ## Image processing
 
@@ -504,7 +577,20 @@ Values: `MatArray` (keeps its MATLAB class), `MatLogical`, `MatChar`, `MatSparse
 `MatStruct` (a dictionary), `MatCell`, and `MatUnsupported` for function handles and classdef
 objects. Files SciNet writes in every format were read back by SciPy 1.17.1 and matched exactly.
 
-Refused with a clear message: MATLAB v7.3 and NetCDF-4 (both are HDF5), CDF-5, sparse ARFF.
+**HDF5, MATLAB v7.3 and NetCDF-4** are read through a managed, read-only HDF5 reader
+(`Hdf5File`): superblocks 0–3, every chunk index, deflate/shuffle/fletcher32, compact and dense
+links and attributes, references, compound and variable-length types. `MatFile.Load` reads v7.3
+into the same `MatValue` types as v5, and `NetCdfFile.Open` reads NetCDF-4 including groups and
+the extra integer types. Decompression runs chunks in parallel: a 50 MB gzip-chunked dataset reads
+in 48 ms against h5py's 170 ms. Writing either format is not supported.
+
+```csharp
+using var h5 = Hdf5File.Open("data.h5");
+var ds = h5.Root.Dataset("group/values");  NdArray values = ds.Read();  ds.ReadSlice([0, 0], [10, 10]);
+```
+
+Refused with a clear message: HDF5 filters other than deflate/shuffle/fletcher32, virtual and
+external datasets, CDF-5, sparse ARFF.
 int64/uint64 values above 2⁵³ lose precision when loaded as doubles. Harwell–Boeing goes beyond
 SciPy (which reads RUA only): symmetric, skew, pattern, integer and rectangular storage.
 
@@ -519,48 +605,48 @@ report is [benchmarks/comparison/comparison-report.md](../benchmarks/comparison/
 
 | Operation | SciNet | SciPy | |
 |---|---:|---:|---|
-| `solve_ivp` Lorenz 0..100, RK45, rtol 1e-9 | 5.57 ms | 1,004 ms | **SciNet 180×** |
-| `solve_ivp` Van der Pol μ=1000, BDF | 1.10 ms | 130 ms | **SciNet 119×** |
-| `minimize` BFGS, Rosenbrock-100 with gradient | 28.6 ms | 317 ms | **SciNet 11×** |
-| `welch`, 10⁷ samples, nperseg 4096 | 66 ms | 671 ms | **SciNet 10×** |
-| `quad` of log(x)/√x on [0, 1] | 9 µs | 83 µs | **SciNet 9.3×** |
-| `erf` over 10⁶ values | 10.1 ms | 47.6 ms | **SciNet 4.7×** |
-| `RegularGridInterpolator` linear, 10⁶ points in 3-D | 120 ms | 506 ms | **SciNet 4.2×** |
-| `gaussian_filter` σ=3, 2048² | 52 ms | 208 ms | **SciNet 4.0×** |
-| `cdist` 2000×2000 in 64-D | 27.5 ms | 106 ms | **SciNet 3.8×** |
-| `Delaunay`, 100k points | 192 ms | 585 ms | **SciNet 3.1×** |
-| `median_filter` 5×5, 1024² | 131 ms | 388 ms | **SciNet 3.0×** |
-| `CubicSpline`, evaluate 10⁶ points | 40.9 ms | 71.6 ms | **SciNet 1.8×** |
-| conjugate gradient, 2-D Poisson 200² | 148 ms | 257 ms | **SciNet 1.7×** |
-| real FFT, 2²⁰ points | 21.9 ms | 31.8 ms | **SciNet 1.5×** |
-| `fftconvolve` 10⁶ × 10⁴ | 70 ms | 88 ms | **SciNet 1.3×** |
-| `find_peaks` with prominence, 10⁶ samples | 43 ms | 55 ms | **SciNet 1.3×** |
-| `lfilter` Butterworth 4, 10⁶ samples | 11.1 ms | 10.1 ms | parity |
-| `sosfiltfilt` Butterworth 8, 10⁶ samples | 21.8 ms | 24.6 ms | parity |
-| complex FFT, 65,536 points | 2.29 ms | 1.98 ms | SciPy 1.2× |
-| `linear_sum_assignment` 500×500 | 17.2 ms | 13.2 ms | SciPy 1.3× |
-| KD-tree build + 5-NN query, 100k in 3-D | 133 ms | 102 ms | SciPy 1.3× |
-| `linkage` Ward, 2000 points | 103 ms | 75 ms | SciPy 1.4× |
-| DCT-II, 65,536 points | 0.98 ms | 0.59 ms | SciPy 1.7× |
+| `solve_ivp` Lorenz 0..100, RK45, rtol 1e-9 | 5.47 ms | 1,004 ms | **SciNet 184×** |
+| `solve_ivp` Van der Pol μ=1000, BDF | 0.97 ms | 130 ms | **SciNet 135×** |
+| `minimize` BFGS, Rosenbrock-100 with gradient | 22.8 ms | 317 ms | **SciNet 14×** |
+| `welch`, 10⁷ samples, nperseg 4096 | 65 ms | 671 ms | **SciNet 10×** |
+| `quad` of log(x)/√x on [0, 1] | 8.5 µs | 83 µs | **SciNet 9.8×** |
+| `RegularGridInterpolator` linear, 10⁶ points in 3-D | 110 ms | 506 ms | **SciNet 4.6×** |
+| `erf` over 10⁶ values | 10.6 ms | 47.6 ms | **SciNet 4.5×** |
+| `cdist` 2000×2000 in 64-D | 25.7 ms | 106 ms | **SciNet 4.1×** |
+| `gaussian_filter` σ=3, 2048² | 55 ms | 208 ms | **SciNet 3.8×** |
+| `Delaunay`, 100k points | 159 ms | 585 ms | **SciNet 3.7×** |
+| `CubicSpline`, evaluate 10⁶ points | 19.6 ms | 71.6 ms | **SciNet 3.7×** |
+| `median_filter` 5×5, 1024² | 122 ms | 388 ms | **SciNet 3.2×** |
+| `splu` factor + solve, 2-D Poisson 100² | 16.4 ms | 37.2 ms | **SciNet 2.3×** |
+| conjugate gradient, 2-D Poisson 200² | 136 ms | 257 ms | **SciNet 1.9×** |
+| `linkage` Ward, 2000 points | 44.6 ms | 75.1 ms | **SciNet 1.7×** |
+| `find_peaks` with prominence, 10⁶ samples | 37 ms | 55 ms | **SciNet 1.5×** |
+| real FFT, 2²⁰ points | 23.1 ms | 31.8 ms | **SciNet 1.4×** |
+| KD-tree build + 5-NN query, 100k in 3-D | 77 ms | 102 ms | **SciNet 1.3×** |
+| `expm`, 200×200 | 6.4 ms | 8.2 ms | **SciNet 1.3×** |
+| `sosfiltfilt` Butterworth 8, 10⁶ samples | 19.1 ms | 24.6 ms | **SciNet 1.3×** |
+| `fftconvolve` 10⁶ × 10⁴ | 65 ms | 88 ms | **SciNet 1.3×** |
+| complex FFT, 65,536 points | 2.02 ms | 1.98 ms | parity |
+| `linear_sum_assignment` 500×500 | 14.5 ms | 13.2 ms | parity |
+| `lfilter` Butterworth 4, 10⁶ samples | 14.4 ms | 10.1 ms | SciPy 1.4× |
+| DCT-II, 65,536 points | 0.93 ms | 0.59 ms | SciPy 1.6× |
 | `curve_fit`, 10,000 points | 5.6 ms | 3.3 ms | SciPy 1.7× |
-| `expm`, 200×200 | 29.8 ms | 8.2 ms | SciPy 3.6× |
-| `splu` factor + solve, 2-D Poisson 100² | 273 ms | 37 ms | SciPy 7.4× |
 
-**Tally: SciNet faster on 16, SciPy faster on 8, parity on 2.**
+**Tally: SciNet faster on 21, SciPy faster on 3, parity on 2.** (SciNet 1.2.0 measured 16, 8
+and 2; the change is the supernodal sparse LU, the dense-kernel rewrite behind `expm`, the flat
+KD-tree and the specialised linkage updates.)
 
 The pattern is consistent. SciNet wins big wherever SciPy calls back into Python for every
 function evaluation — ODEs, quadrature, minimisers — because a .NET delegate costs nanoseconds and
 a Python call microseconds. It wins moderately on kernels it parallelises (filters, distances,
-interpolation, spectral estimation). It loses where SciPy hands the work to mature compiled
-libraries — LAPACK for dense matrix functions, SuperLU, its C++ assignment solver and KD-tree —
-and on `curve_fit`, where SciPy's model is one vectorised NumPy call and the least-squares core
-is MINPACK. Larger sizes than these shift some rows: at n = 400 `expm` reaches parity, and
-pocketfft's lead on single complex transforms narrows as they become memory-bound.
+interpolation, spectral estimation, sparse factorisation). The three places SciPy still leads are
+`curve_fit` (SciPy's model is one vectorised NumPy call and the least-squares core is MINPACK), a
+single recursive `lfilter`, and pocketfft's DCT.
 
-Larger cases measured during development (single runs, same machine, so rougher): KDE of
-10k points evaluated at 100k is about 30× faster than SciPy's `gaussian_kde`, `spearmanr` on 10⁶
-about 3×, `norm.ppf` on 10⁶ about 7×; on the slow side `Eigsh` is about 4.5× behind ARPACK and
-Schur/Eig at n = 400 about 4.5× behind LAPACK.
+Larger cases measured during development (single runs, same machine, so rougher): KDE of 10k
+points evaluated at 100k is about 30× faster than SciPy's `gaussian_kde`, `spearmanr` on 10⁶ about
+3×, `norm.ppf` on 10⁶ about 7×, `Eigsh` on a 10k Laplacian level with ARPACK, `Splu` on Poisson
+300² about 2× faster than SuperLU, and Schur/Eig at n = 400 about 1.5–1.7× behind LAPACK.
 
 ---
 

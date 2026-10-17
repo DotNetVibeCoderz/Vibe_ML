@@ -3,7 +3,8 @@ using Gravicode.Science.GraviNum;
 namespace Gravicode.Science.SciNet.Spatial;
 
 /// <summary>
-/// 2-D Voronoi diagram, built as the dual of <see cref="Delaunay"/> (scipy.spatial.Voronoi).
+/// Voronoi diagram in any dimension ≥ 2, built as the dual of <see cref="Delaunay"/>
+/// (scipy.spatial.Voronoi).
 /// </summary>
 /// <remarks>
 /// <para>Voronoi vertices are circumcentres of Delaunay triangles. Adjacent triangles whose
@@ -16,24 +17,45 @@ namespace Gravicode.Science.SciNet.Spatial;
 /// that a duplicate point shares the region of the point it duplicates), and each region lists
 /// its vertices counter-clockwise with -1 first when the region is unbounded. Compare with
 /// scipy through coordinates and point pairs, not through indices.</para>
+/// <para><b>3-D and above.</b> Vertices are circumcentres of the Delaunay simplices, merged
+/// across faces whose d + 2 points are exactly cospherical (exact lifted predicate). A ridge is
+/// reported for a Delaunay edge (i, j) when it has at least d entries counting -1 — Qhull's own
+/// rule, which drops the diagonals of cospherical cells (all their simplices merge into one
+/// vertex) exactly as scipy does. In 3-D a ridge's vertices are listed cyclically around the
+/// edge, with -1 first for an unbounded ridge, the finite chain starting next to the opening;
+/// above 3-D they are ascending. Regions list their vertices ascending, -1 first when
+/// unbounded (scipy's order there is Qhull's, not meaningful). <see cref="RidgeVertices"/> is
+/// a 2-column array and so 2-D only; use <see cref="RidgeVertexLists"/> in any dimension.
+/// <see cref="FinitePolygons"/> is 2-D only.</para>
 /// </remarks>
 public sealed class Voronoi
 {
     private readonly double[] _p;
     private readonly double[] _v;
     private readonly int[] _triVertex;
+    private readonly int _d;
+    private readonly int[,]? _ridgeVertices;
 
-    /// <summary>The input points, shape (n, 2).</summary>
-    public NdArray Points => new((double[])_p.Clone(), _p.Length / 2, 2);
+    /// <summary>The input points, shape (n, d).</summary>
+    public NdArray Points => new((double[])_p.Clone(), _p.Length / _d, _d);
 
-    /// <summary>Voronoi vertices, shape (nvertices, 2).</summary>
-    public NdArray Vertices => new((double[])_v.Clone(), _v.Length / 2, 2);
+    /// <summary>Dimension of the points.</summary>
+    public int NDim => _d;
+
+    /// <summary>Voronoi vertices, shape (nvertices, d).</summary>
+    public NdArray Vertices => new((double[])_v.Clone(), _v.Length / _d, _d);
 
     /// <summary>Pairs of input points separated by each ridge, [nridges, 2].</summary>
     public int[,] RidgePoints { get; }
 
-    /// <summary>Voronoi vertices of each ridge, [nridges, 2]; -1 marks the vertex at infinity.</summary>
-    public int[,] RidgeVertices { get; }
+    /// <summary>Voronoi vertices of each ridge, [nridges, 2]; -1 marks the vertex at infinity.
+    /// 2-D only (a ridge has more vertices above 2-D): use <see cref="RidgeVertexLists"/>.</summary>
+    public int[,] RidgeVertices => _ridgeVertices ?? throw new InvalidOperationException(
+        $"RidgeVertices is a 2-column array and only describes 2-D diagrams; this one is {_d}-D, use RidgeVertexLists.");
+
+    /// <summary>Voronoi vertices of each ridge, in any dimension (scipy's <c>ridge_vertices</c>);
+    /// -1 marks the vertex at infinity.</summary>
+    public int[][] RidgeVertexLists { get; }
 
     /// <summary>Each region's vertices, counter-clockwise; -1 (listed first) when unbounded.</summary>
     public int[][] Regions { get; }
@@ -44,7 +66,7 @@ public sealed class Voronoi
     /// <summary>The underlying triangulation.</summary>
     public Delaunay Triangulation { get; }
 
-    /// <summary>Builds the diagram of the rows of <paramref name="points"/>, shape (n, 2).</summary>
+    /// <summary>Builds the diagram of the rows of <paramref name="points"/>, shape (n, d).</summary>
     public Voronoi(NdArray points) : this(new Delaunay(points)) { }
 
     /// <summary>Builds the diagram of a rectangular array of points.</summary>
@@ -54,6 +76,18 @@ public sealed class Voronoi
     {
         Triangulation = tri;
         _p = tri.PointBuffer;
+        _d = tri.NDim;
+        if (_d != 2)
+        {
+            (_v, _triVertex, var ndRp, var ndRv, var ndRegions) = BuildNd(tri);
+            RidgePoints = ndRp;
+            RidgeVertexLists = ndRv;
+            Regions = ndRegions;
+            PointRegion = new int[tri.NPoints];
+            for (var i = 0; i < tri.NPoints; i++) PointRegion[i] = i;
+            for (var r = 0; r < tri.Coplanar.GetLength(0); r++) PointRegion[tri.Coplanar[r, 0]] = tri.Coplanar[r, 2];
+            return;
+        }
         var t = tri.TriangleBuffer;
         var nb = tri.NeighborBuffer;
         var ns = tri.NSimplex;
@@ -109,11 +143,13 @@ public sealed class Voronoi
                 rv.Add((Math.Min(_triVertex[s], _triVertex[o]), Math.Max(_triVertex[s], _triVertex[o])));
             }
         RidgePoints = new int[rp.Count, 2];
-        RidgeVertices = new int[rv.Count, 2];
+        _ridgeVertices = new int[rv.Count, 2];
+        RidgeVertexLists = new int[rv.Count][];
         for (var i = 0; i < rp.Count; i++)
         {
             RidgePoints[i, 0] = rp[i].Item1; RidgePoints[i, 1] = rp[i].Item2;
-            RidgeVertices[i, 0] = rv[i].Item1; RidgeVertices[i, 1] = rv[i].Item2;
+            _ridgeVertices[i, 0] = rv[i].Item1; _ridgeVertices[i, 1] = rv[i].Item2;
+            RidgeVertexLists[i] = [rv[i].Item1, rv[i].Item2];
         }
 
         // Regions: walk the fan of triangles around each vertex counter-clockwise.
@@ -153,6 +189,227 @@ public sealed class Voronoi
         for (var r = 0; r < tri.Coplanar.GetLength(0); r++) PointRegion[tri.Coplanar[r, 0]] = tri.Coplanar[r, 2];
     }
 
+    // ================================================================== N-d
+
+    private static (double[] V, int[] TriVertex, int[,] RidgePoints, int[][] RidgeVertices, int[][] Regions) BuildNd(Delaunay tri)
+    {
+        var p = tri.PointBuffer;
+        var t = tri.TriangleBuffer;
+        var nb = tri.NeighborBuffer;
+        var d = tri.NDim; var m = d + 1;
+        var ns = tri.NSimplex;
+        var n = tri.NPoints;
+
+        // Union simplices across faces whose d + 2 points are exactly cospherical.
+        var parent = new int[ns];
+        for (var i = 0; i < ns; i++) parent[i] = i;
+        int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+        for (var s = 0; s < ns; s++)
+            for (var k = 0; k < m; k++)
+            {
+                var o = nb[m * s + k];
+                if (o < s) continue;
+                var opp = 0;
+                while (nb[m * o + opp] != s) opp++;
+                var q = t[m * o + opp];
+                if (SpatialPredicates.OrientNd(p, d, true, null, t.AsSpan(m * s, m), p.AsSpan(q * d, d), 0) == 0)
+                {
+                    int ra = Find(s), rb = Find(o);
+                    if (ra != rb) parent[Math.Max(ra, rb)] = Math.Min(ra, rb);
+                }
+            }
+        var triVertex = new int[ns];
+        var groupVertex = new int[ns];
+        Array.Fill(groupVertex, -1);
+        var verts = new List<double>();
+        for (var s = 0; s < ns; s++)
+        {
+            var r = Find(s);
+            if (groupVertex[r] < 0)
+            {
+                groupVertex[r] = verts.Count / d;
+                verts.AddRange(CircumcentreNd(p, d, t.AsSpan(m * r, m)));
+            }
+            triVertex[s] = groupVertex[r];
+        }
+        var v = verts.ToArray();
+
+        // Simplices around every Delaunay edge, and which points lie on the hull.
+        var edgeSimplices = new Dictionary<(int, int), List<int>>();
+        var onHull = new bool[n];
+        for (var s = 0; s < ns; s++)
+        {
+            for (var a = 0; a < m; a++)
+                for (var b = a + 1; b < m; b++)
+                {
+                    var key = (Math.Min(t[m * s + a], t[m * s + b]), Math.Max(t[m * s + a], t[m * s + b]));
+                    if (!edgeSimplices.TryGetValue(key, out var list)) edgeSimplices[key] = list = [];
+                    list.Add(s);
+                }
+            for (var k = 0; k < m; k++)
+            {
+                if (nb[m * s + k] >= 0) continue;
+                var facet = new int[d];
+                var w = 0;
+                for (var j = 0; j < m; j++) if (j != k) facet[w++] = t[m * s + j];
+                foreach (var f in facet) onHull[f] = true;
+            }
+        }
+
+        var ridgePoints = new List<(int, int)>();
+        var ridgeVerts = new List<int[]>();
+        foreach (var (edge, simplices) in edgeSimplices)
+        {
+            var groups = new SortedSet<int>();
+            foreach (var s in simplices) groups.Add(triVertex[s]);
+            // Unbounded iff the edge lies on the hull: some simplex around it has no neighbour
+            // across a face that contains the edge.
+            var unbounded = false;
+            foreach (var s in simplices)
+                for (var k = 0; k < m && !unbounded; k++)
+                    if (nb[m * s + k] < 0 && t[m * s + k] != edge.Item1 && t[m * s + k] != edge.Item2) unbounded = true;
+            // Qhull's rule: a ridge needs at least d vertices, counting the one at infinity.
+            if (groups.Count + (unbounded ? 1 : 0) < d) continue;
+            int[] list;
+            if (d == 3) list = OrderAroundEdge(t, nb, triVertex, edge, simplices[0], unbounded);
+            else
+            {
+                list = new int[groups.Count + (unbounded ? 1 : 0)];
+                var w = 0;
+                if (unbounded) list[w++] = -1;
+                foreach (var g in groups) list[w++] = g;
+            }
+            ridgePoints.Add(edge);
+            ridgeVerts.Add(list);
+        }
+        var rp = new int[ridgePoints.Count, 2];
+        for (var i = 0; i < ridgePoints.Count; i++) { rp[i, 0] = ridgePoints[i].Item1; rp[i, 1] = ridgePoints[i].Item2; }
+
+        var regionSets = new SortedSet<int>?[n];
+        for (var s = 0; s < ns; s++)
+            for (var k = 0; k < m; k++) (regionSets[t[m * s + k]] ??= []).Add(triVertex[s]);
+        var regions = new int[n][];
+        for (var i = 0; i < n; i++)
+        {
+            if (regionSets[i] is not { } set) { regions[i] = []; continue; }
+            var r = new List<int>();
+            if (onHull[i]) r.Add(-1);
+            r.AddRange(set);
+            regions[i] = [.. r];
+        }
+        return (v, triVertex, rp, [.. ridgeVerts], regions);
+    }
+
+    /// <summary>Circumcentre of a d-simplex: solves 2(v_i − v₀)·c' = |v_i − v₀|² for c' = c − v₀.</summary>
+    internal static double[] CircumcentreNd(double[] p, int d, ReadOnlySpan<int> s)
+    {
+        var a = new double[d, d + 1];
+        for (var i = 0; i < d; i++)
+        {
+            double rhs = 0;
+            for (var j = 0; j < d; j++)
+            {
+                var e = p[s[i + 1] * d + j] - p[s[0] * d + j];
+                a[i, j] = 2 * e;
+                rhs += e * e;
+            }
+            a[i, d] = rhs;
+        }
+        for (var c = 0; c < d; c++)
+        {
+            var piv = c;
+            for (var r = c + 1; r < d; r++) if (Math.Abs(a[r, c]) > Math.Abs(a[piv, c])) piv = r;
+            if (piv != c) for (var j = 0; j <= d; j++) (a[c, j], a[piv, j]) = (a[piv, j], a[c, j]);
+            for (var r = c + 1; r < d; r++)
+            {
+                var f = a[r, c] / a[c, c];
+                if (f == 0) continue;
+                for (var j = c; j <= d; j++) a[r, j] -= f * a[c, j];
+            }
+        }
+        var x = new double[d];
+        for (var i = d - 1; i >= 0; i--)
+        {
+            var sum = a[i, d];
+            for (var j = i + 1; j < d; j++) sum -= a[i, j] * x[j];
+            x[i] = sum / a[i, i];
+        }
+        for (var i = 0; i < d; i++) x[i] += p[s[0] * d + i];
+        return x;
+    }
+
+    /// <summary>
+    /// A 3-D ridge's vertices in cyclic order: the tetrahedra around Delaunay edge (a, b) are
+    /// walked through their shared faces, as Qhull orders them — purely combinatorial, so no
+    /// angle is ever compared (the edge need not even cross its ridge). An unbounded ridge is an
+    /// open chain, walked from one hull end to the other, with -1 first.
+    /// </summary>
+    private static int[] OrderAroundEdge(int[] t, int[] nb, int[] triVertex, (int A, int B) edge, int start, bool unbounded)
+    {
+        // Across the face opposite `drop` stays on the edge; the vertex of the next tetrahedron
+        // that is neither a, b nor the kept one is the next to drop.
+        List<int> Walk(int s0, int drop)
+        {
+            var seq = new List<int> { s0 };
+            var s = s0;
+            while (true)
+            {
+                var k = 0;
+                while (t[4 * s + k] != drop) k++;
+                var keep = -1;
+                for (var j = 0; j < 4; j++)
+                {
+                    var x = t[4 * s + j];
+                    if (x != edge.A && x != edge.B && x != drop) keep = x;
+                }
+                var next = nb[4 * s + k];
+                if (next < 0 || next == s0) return seq;
+                seq.Add(next);
+                drop = keep;
+                s = next;
+            }
+        }
+        int other1 = -1, other2 = -1;
+        for (var j = 0; j < 4; j++)
+        {
+            var x = t[4 * start + j];
+            if (x == edge.A || x == edge.B) continue;
+            if (other1 < 0) other1 = x; else other2 = x;
+        }
+        List<int> chain;
+        if (!unbounded) chain = Walk(start, other1);
+        else
+        {
+            // Walk to one end, then back across the whole chain from there.
+            var toEnd = Walk(start, other1);
+            var end = toEnd[^1];
+            var free = -1;
+            for (var k = 0; k < 4; k++)
+            {
+                var x = t[4 * end + k];
+                if (x != edge.A && x != edge.B && nb[4 * end + k] < 0) { free = x; break; }
+            }
+            // At the end, the face opposite `free` is a hull face; walk away from it.
+            var keepAtEnd = -1;
+            for (var k = 0; k < 4; k++)
+            {
+                var x = t[4 * end + k];
+                if (x != edge.A && x != edge.B && x != free) keepAtEnd = x;
+            }
+            chain = Walk(end, keepAtEnd);
+        }
+        var result = new List<int>();
+        if (unbounded) result.Add(-1);
+        foreach (var s in chain)
+        {
+            var g = triVertex[s];
+            if (result.Count == 0 || result[^1] != g) result.Add(g);
+        }
+        // Merged (cospherical) runs can wrap around the start of a closed cycle.
+        if (!unbounded && result.Count > 1 && result[0] == result[^1]) result.RemoveAt(result.Count - 1);
+        return [.. result];
+    }
+
     private static int Slot(int[] t, int s, int v)
     {
         for (var k = 0; k < 3; k++) if (t[3 * s + k] == v) return k;
@@ -178,6 +435,7 @@ public sealed class Voronoi
     /// </summary>
     public NdArray[] FinitePolygons(double xmin, double xmax, double ymin, double ymax)
     {
+        if (_d != 2) throw new InvalidOperationException("FinitePolygons is for 2-D diagrams.");
         if (!(xmax > xmin && ymax > ymin)) throw new ArgumentException("The box must have positive width and height.");
         var tri = Triangulation;
         var t = tri.TriangleBuffer; var nb = tri.NeighborBuffer;

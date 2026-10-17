@@ -242,7 +242,12 @@ internal static unsafe class SparseKernels
         return bounds.ToArray();
     }
 
-    /// <summary><c>y = Aᵀ x</c> for a compressed-row structure: a scatter, so serial.</summary>
+    /// <summary>
+    /// <c>y = Aᵀ x</c> for a compressed-row structure: a scatter, so serial. A parallel version with
+    /// per-thread buffers and a column-wise reduction was measured and lost at every size (0.55–0.89×
+    /// from 450k to 1.8M non-zeros): clearing and summing the buffers costs more memory traffic
+    /// than the scatter it splits.
+    /// </summary>
     internal static void SpMVTransposed(in CompressedArrays a, ReadOnlySpan<double> x, Span<double> y)
     {
         y.Clear();

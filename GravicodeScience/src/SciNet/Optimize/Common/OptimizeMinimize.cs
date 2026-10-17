@@ -190,7 +190,9 @@ public static partial class Optimize
         if (bounds is not null)
         {
             if (bounds.Length != n) throw new ArgumentException($"Bounds have {bounds.Length} entries but x0 has {n}.");
-            bounds.Clip(x);
+            // TrustConstr's interior-point method starts from an infeasible x0 as SciPy does (its slacks
+            // absorb the violation); every other bounded method needs x0 inside the box.
+            if (m != MinimizeMethod.TrustConstr) bounds.Clip(x);
         }
 
         // SciPy removes variables fixed by lb == ub for the methods whose finite differences would

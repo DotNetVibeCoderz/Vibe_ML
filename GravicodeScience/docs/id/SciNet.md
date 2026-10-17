@@ -85,7 +85,14 @@ sepakat, tes memakai mpmath, dan di beberapa tempat SciNet-lah yang lebih akurat
 x = 1e5, `Ndtr` dan `OwensT` jauh di ekor, `LambertW` dekat titik cabang, bobot Legendre orde
 tinggi, `Hyp2f1` saat c − a − b bilangan bulat, di mana SciPy mengembalikan NaN). Titik lemahnya,
 sekitar 1e-13 sampai 1e-12: `Smirnov` untuk n besar, ekor beta tak lengkap di bawah 1e-280, nilai
-Bessel tepat di akarnya. `Hyp2f1` mencakup z riil ≤ 1. Belum diimplementasikan: Struve, `Hyperu`.
+Bessel tepat di akarnya. `Hyp2f1` mencakup z riil ≤ 1.
+
+Juga tersedia: Struve H/L, `Hyperu`, fungsi Kelvin, fungsi Bessel tergeneralisasi Wright, `Agm`,
+trigonometri berargumen derajat, dan invers cdflib yang diekspos SciPy — `Gdtrix`/`Gdtria`/`Gdtrib`,
+`Stdtridf`, `Bdtrik`, `Pdtrik`, `Nbdtrik`, serta `Chndtr`, `Nctdtr`, `Ncfdtr` non-sentral beserta
+inversnya. Invers-invers ini dipecahkan sampai presisi penuh dan mengembalikan NaN bila tidak ada
+nilai parameter yang mencapai probabilitasnya (SciPy mengembalikan batas pencariannya, misalnya
+−1e100). Belum diimplementasikan: fungsi Mathieu.
 
 ## Konstanta fisika
 
@@ -131,19 +138,37 @@ var (rows, cols) = Optimize.LinearSumAssignment(cost);
 // global
 Optimize.DifferentialEvolution(f, bounds, seed: 7);
 Optimize.DualAnnealing(f, bounds);  Optimize.BasinHopping(f, x0);  Optimize.Direct(f, bounds);  Optimize.Brute(f, ranges);
+Optimize.Shgo(f, bounds, n: 64, iters: 3, samplingMethod: ShgoSamplingMethod.Sobol);   // semua minimum lokal di Xl/Funl
+
+// interior-point / SQP dengan kendala umum
+Optimize.Minimize(f, x0, MinimizeMethod.TrustConstr, bounds: bounds,
+    constraints: [new LinearConstraint(A, lb, ub), new NonlinearConstraint(g, lb2, ub2)]);
+
+// assignment dan regresi isotonik
+Optimize.QuadraticAssignment(flow, distance);  Optimize.IsotonicRegression(y);
 ```
 
-Metode lokal: Nelder–Mead, Powell, CG, BFGS, Newton-CG, L-BFGS-B, TNC, SLSQP, COBYLA, dogleg,
-trust-ncg, trust-exact, trust-krylov. Akar: bisect, brentq, brenth, ridder, TOMS 748, Newton /
+Metode lokal: Nelder–Mead, Powell, CG, BFGS, Newton-CG, L-BFGS-B, TNC, SLSQP, COBYLA,
+trust-constr, dogleg, trust-ncg, trust-exact, trust-krylov. Antarmuka fungsional lama juga ada
+(`Fmin`, `FminBfgs`, `FminLBfgsB`, `FminTnc`, `FminSlsqp`, `Leastsq`, `Brent`, `Fminbound`,
+`Broyden1`, `NewtonKrylov`, …), dengan objek hasil alih-alih tuple. Akar: bisect, brentq, brenth, ridder, TOMS 748, Newton /
 secant / Halley, titik tetap; untuk sistem persamaan hybr, lm, Broyden 1/2, Anderson, linear
 mixing, Broyden diagonal, excitingmixing, Newton–Krylov, DF-SANE. Kuadrat terkecil: TRF, dogbox,
 dan Levenberg–Marquardt dengan lima fungsi loss robust.
 
-**Bukan port, sehingga jumlah iterasinya berbeda (solusinya tetap dites):** TNC (truncated Newton
-terproyeksi), COBYLA (gaya Powell, bukan PRIMA), SLSQP (QP Goldfarb–Idnani, bukan LSQ milik
-Kraft), Newton–Krylov (GMRES, bukan LGMRES), DIRECT. Belum diimplementasikan: `trust-constr`,
-SHGO, quadratic assignment. `Linprog` tidak punya presolve; metode interior-point-nya membangun
-ulang A·D·Aᵀ secara dense dan lambat pada masalah besar — simplex adalah bawaannya.
+`trust-constr` adalah algoritma SciPy — SQP Byrd–Omojokun untuk kendala persamaan, dibungkus
+metode barrier untuk pertidaksamaan dan batas — dan menempuh jalur yang sama dengan SciPy:
+masalah yang hanya berkendala persamaan atau hanya berbatas memakai iterasi SciPy sampai ~1e-12.
+TNC adalah port baris per baris dari `tnc.c` milik Nash (Rosenbrock berbatas: 39 evaluasi, sama
+dengan SciPy). SHGO mereproduksi sampling dan kumpulan minimizer SciPy secara persis dengan
+refinement simplisial penuh; dengan sampling Sobol/Halton triangulasinya milik SciNet sendiri,
+sehingga kumpulannya bisa berbeda walau minimum terbaiknya sama.
+
+**Bukan port, sehingga jumlah iterasinya berbeda (solusinya tetap dites):** COBYLA (gaya Powell,
+bukan PRIMA), SLSQP (QP Goldfarb–Idnani, bukan LSQ milik Kraft), Newton–Krylov (GMRES, bukan
+LGMRES), DIRECT. `trust-constr` hanya dense. `Linprog` tidak punya presolve; metode
+interior-point-nya membangun ulang A·D·Aᵀ secara dense dan lambat pada masalah besar — simplex
+adalah bawaannya.
 
 ## Integrasi dan ODE
 
@@ -220,7 +245,8 @@ Juga: `PPoly`, `BPoly`, `BSpline` (turunan, antiturunan, integral, matriks desai
 Metode cubic dan quintic `RegularGridInterpolator` diselesaikan secara eksak; solver iteratif SciPy
 berhenti di 1e-6, jadi SciPy sendiri hanya seakurat itu di sana. Batasan: tidak ada fitting FITPACK
 periodik, `Bisplrep` memerlukan knot yang diberikan, `RectBivariateSpline` hanya interpolasi
-(s = 0), interpolasi linear tersebar dan Clough–Tocher hanya 2-D (triangulasinya 2-D).
+(s = 0), dan Clough–Tocher hanya 2-D (seperti di SciPy). Interpolasi linear tersebar bekerja di
+dimensi berapa pun.
 `BarycentricInterpolator.AddXi` sengaja **tidak** menyamai SciPy 1.17.1, yang punya bug tanda di
 sana.
 
@@ -238,9 +264,14 @@ Linalg.Toeplitz(c);  Linalg.Hilbert(5);  Linalg.InvHilbertExact(5);  Linalg.Comp
 ```
 
 SciNet menambahkan apa yang dimiliki `scipy.linalg` di luar `numpy.linalg`, dengan memakai ulang
-LU, QR, Cholesky, SVD, dan eigensolver simetris milik GraviNum di bawahnya. `Expm` adalah
-scaling-and-squaring Al-Mohy–Higham dengan pemilihan derajat Padé; `ExpmFrechet` memberikan
-turunan Fréchet-nya.
+QR, SVD, dan eigensolver simetris milik GraviNum di bawahnya, serta perkalian matriks paralel
+ter-pack, LU blok rekursif, dan solve segitiga berblok miliknya sendiri untuk kernel dense.
+`Expm` adalah scaling-and-squaring Al-Mohy–Higham dengan pemilihan derajat Padé — setara atau
+lebih cepat dari SciPy mulai n = 200; `ExpmFrechet` memberikan turunan Fréchet-nya. Sapuan QR
+Francis di balik `Schur`/`Eig` menerapkan reflektornya secara tertunda dan paralel; bila
+`NativeLapack` milik GraviNum menemukan LAPACK saat runtime, `Schur`, `Eig`, dan `Eigvals` beralih
+ke `dgees`/`dgeev` (solve di `expm` tetap managed: `dgesv` OpenBLAS bawaan SciPy terukur 10× lebih
+lambat).
 
 `Differentiate.Derivative(f, x)` adalah `scipy.differentiate.derivative` — beda pusat adaptif
 dengan ekstrapolasi Richardson dan taksiran galat yang jujur — ditambah `Jacobian`, `Gradient`,
@@ -248,9 +279,10 @@ dan `Hessian`.
 
 **Pendekatan yang perlu diketahui:** `FractionalMatrixPower` adalah `exp(t·log A)`, bukan
 Higham–Lin; solver Riccati memakai fungsi tanda matriks / structured doubling, bukan QZ seperti
-SciPy (solusi penstabilnya unik, sehingga hasilnya sesuai sampai ~1e-11). Belum
-diimplementasikan: pengurutan ulang Schur, `Eig(a, b)` tergeneralisasi lewat QZ, vektor eigen
-kiri.
+SciPy (solusi penstabilnya unik, sehingga hasilnya sesuai sampai ~1e-11). Schur managed belum
+memakai QR multishift atau aggressive early deflation, dan itulah sisa jaraknya dari LAPACK
+(~1,5× di n = 200). Belum diimplementasikan: pengurutan ulang Schur, `Eig(a, b)` tergeneralisasi
+lewat QZ, vektor eigen kiri.
 
 ## Matriks sparse, solver, dan graf
 
@@ -261,7 +293,8 @@ var d = SparseMatrices.Diags([lower, main, upper], [-1, 0, 1]);
 var laplacian = SparseMatrices.Kronsum(d, d);          // CsrMatrix
 var y = laplacian * x;                                  // SpMV;  sparse * sparse adalah perkalian matriks
 var cg = SparseLinalg.Cg(laplacian, b, rtol: 1e-8);    // juga Gmres, Bicgstab, Minres, Lsqr, Lsmr, …
-var lu = SparseLinalg.Splu(a);  lu.Solve(b);
+var lu = SparseLinalg.Splu(a);  lu.Solve(b);         // LU multifrontal dengan threshold pivoting
+var chol = SparseLinalg.Cholesky(spd);  chol.Solve(b);  chol.LogDeterminant();
 var eig = SparseLinalg.Eigsh(laplacian, k: 6, sigma: 0);   // shift-invert
 SparseLinalg.ExpmMultiply(a, v);
 
@@ -277,10 +310,14 @@ sehingga operator tanpa matriks bisa dipasang ke solver yang sama. Dua perbedaan
 `*` antara dua matriks sparse adalah perkalian matriks (elemen demi elemen memakai `Multiply`),
 dan transpose CSR↔CSC bernilai O(1).
 
-**Lebih lambat dari SciPy, terus terang:** `Splu` adalah Gilbert–Peierls left-looking tanpa
-supernode — sekitar 13× lebih lambat dari SuperLU pada matriks Poisson 10k — dan `Eigsh` memakai
-reortogonalisasi penuh, sekitar 4,5× lebih lambat dari ARPACK. `Svds` bekerja lewat AᵀA, sehingga
-nilai singular di bawah √ε·σmax tidak akurat. COLAMD didekati dengan minimum degree pada AᵀA.
+`Splu` adalah LU multifrontal dengan threshold partial pivoting dan pivot tertunda (pendekatan
+MUMPS), kernel front dense berblok, dan pengurutan AMD dengan aggressive absorption — sekitar 2×
+lebih cepat dari SuperLU dengan fill yang lebih sedikit (Poisson 300²: 212 ms dibanding 435 ms).
+`Cholesky` adalah faktorisasi SPD supernodal yang tidak dimiliki SciPy, dan `Eigsh` shift-invert
+memakainya bila memungkinkan. `Eigsh` adalah Lanczos thick-restart dengan aturan restart ARPACK —
+setara ARPACK — dan `Eigs` Arnoldi implicit-restart, dalam ~1,3× dari ARPACK. `Svds` bekerja lewat
+AᵀA, sehingga nilai singular di bawah √ε·σmax tidak akurat. COLAMD sendiri tidak di-port; opsi
+pengurutannya memakai AMD.
 
 ## Algoritma spasial
 
@@ -292,19 +329,26 @@ var (dist, idx) = tree.Query(queries, k: 5);           // kueri batch memakai se
 tree.QueryBallPoint(x, r: 0.1);  tree.QueryPairs(0.05);
 
 Distance.Cdist(a, b, DistanceMetric.Cosine);  Distance.Pdist(x);  Distance.Squareform(y);
-var tri = new Delaunay(points2d);  tri.FindSimplex(q);
-var hull = new ConvexHull(points);  hull.Volume;     // 2-D dan 3-D
-var vor = new Voronoi(points2d);   vor.FinitePolygons(box);
+var tri = new Delaunay(points);  tri.FindSimplex(q);     // dimensi berapa pun
+var hull = new ConvexHull(points);  hull.Volume;          // dimensi berapa pun hingga 12
+var vor = new Voronoi(points);   vor.RidgeVertexLists;    // poligon 2-D lewat FinitePolygons(box)
+new HalfspaceIntersection(halfspaces, interiorPoint);  new SphericalVoronoi(onSphere).CalculateAreas();
+var periodic = new KDTree(points, boxsize: [1.0, 1.0, 1.0]);   // batas yang membungkus
 
 var r = Rotation.FromEuler("xyz", [90, 0, 45], degrees: true);
-r.AsQuat();  r.Apply(vectors);  r.Inv();  Rotation.AlignVectors(a, b);
-new Slerp(times, rotations).Evaluate(0.5);
+r.AsQuat();  r.Apply(vectors);  r.Inv();  Rotation.AlignVectors(a, b);  Rotation.CreateGroup("O");
+new Slerp(times, rotations).Evaluate(0.5);  new RotationSpline(times, rotations).Evaluate(t, order: 1);
 ```
 
-Delaunay memakai predikat eksak, sehingga kisi dan titik-titik sekonsiklik tertriangulasi dengan
-benar; Delaunay hanya 2-D (begitu pula Voronoi; hull mendukung 2-D dan 3-D). Nilai kembar di
-KD-tree diputuskan berdasarkan (jarak, indeks), dan penomoran segitiga berbeda dari Qhull, yang
-memang sembarang.
+Delaunay dan hull memakai predikat eksak, sehingga kisi dan titik-titik sesferis tertriangulasi
+dengan benar; 2-D tetap memakai Bowyer–Watson khusus, dimensi yang lebih tinggi memakai quickhull
+N-d pada titik yang diangkat ke paraboloid. Delaunay 3-D sedikit lebih cepat dari Qhull milik
+SciPy dan `FindSimplex` jauh lebih cepat (penelusuran berurutan kurva-Z secara paralel); 4-D ke
+atas 2–3× di belakang Qhull. Perbedaan: input yang datar hanya sampai batas pembulatan tetap
+mendapat triangulasi (sangat tipis) di mana Qhull melempar galat, input degenerat ditriangulasi
+secara berbeda (tetapi sah), penomoran simpleks berbeda dari Qhull, dan nilai kembar di KD-tree
+diputuskan berdasarkan (jarak, indeks). KD-tree dibangun ke dalam array datar dan mengalahkan
+SciPy baik pada build maupun build + kueri.
 
 ## Clustering
 
@@ -318,7 +362,9 @@ Cluster.KMeans2(data, 3, minit: KMeansInit.PlusPlus);
 ```
 
 `Dendrogram` mengembalikan kamus koordinat milik SciPy (`Icoord`, `Dcoord`, `ColorList`, …)
-untuk digambar. `OptimalLeafOrdering` menemukan optimum yang sebenarnya — milik SciPy melesetkannya
+untuk digambar; `Leaders`, `IsIsomorphic`, konversi linkage MATLAB, dan `ClusterDisjointSet` juga
+tersedia. Linkage memakai pembaruan Lance–Williams yang dikhususkan per metode dan lebih cepat dari
+SciPy untuk Ward, sambil tetap bit-identik dengan matriksnya. `OptimalLeafOrdering` menemukan optimum yang sebenarnya — milik SciPy melesetkannya
 pada sebagian input, sehingga keduanya bisa berbeda di sana, dan hasil SciNet tidak pernah lebih
 buruk.
 
@@ -342,8 +388,8 @@ dan transformasi riil dihitung dengan panjang setengah. Mesin ini **2,3–28× l
 GraviNum** (28× di n = 1000, tempat GraviNum harus memutar lewat Bluestein). Terhadap `scipy.fft`
 (pocketfft dalam C++) hasilnya campuran: transformasi riil 2²⁰ titik 1,5× lebih cepat,
 transformasi kompleks tunggal 65.536 titik dan DCT-II masing-masing 1,2× dan 1,7× lebih lambat,
-dan transformasi batch sepanjang suatu sumbu menang lewat paralelisme. Belum diimplementasikan:
-`fht`, `hfft2`/`hfftn`.
+dan transformasi batch sepanjang suatu sumbu menang lewat paralelisme. `Fht`/`Ifht` (FFTLog,
+dengan `Fhtoffset`) dan transformasi Hermitian n-D melengkapi modul ini.
 
 ## Pemrosesan sinyal
 
@@ -391,8 +437,10 @@ Signal.PeakWidths(x, peaks.Peaks, relHeight: 0.5);  Signal.ArgRelMax(x, order: 3
 kondisinya tidak diminta. Welch dan STFT memproses segmen secara batch lewat plan FFT riil yang
 di-cache dan menjalankan segmen secara paralel — Welch atas 10⁷ sampel memakan 66 ms, dibanding
 671 ms di SciPy. Fungsi spektral dan konvolusi menerima input riil (`Resample`, `Czt`, dan
-`ZoomFft` juga menerima kompleks). Belum diimplementasikan: `ShortTimeFFT` sebagai kelas,
-keluarga `residue`, callback detrend kustom.
+`ZoomFft` juga menerima kompleks). `ShortTimeFft` adalah kelas milik SciPy (semua mode FFT,
+penskalaan, batas, window dual, cross-spectrogram; window riil), keluarga `residue` (`Residue`,
+`Residuez`, `Invres`, `Invresz`) tersedia, dan Welch/CSD/spectrogram/STFT menerima callback
+detrend kustom.
 
 ![PSD Welch dengan find_peaks](../screenshots/scinet_welch.png)
 
@@ -411,21 +459,29 @@ Stats.Binom(20, 0.3).Pmf(6);  Stats.Poisson(4).Ppf(0.99);
 var mvn = Stats.MultivariateNormal([0, 0], cov);  mvn.Cdf([0, 0]);  mvn.LogPdf(x);
 ```
 
-61 keluarga kontinu (semua yang umum ditambah t/χ²/F non-sentral, normal dan eksponensial
-terpotong, generalised extreme value dan Pareto, skew-normal, Johnson SU/SB, studentized range,
-distribusi Kolmogorov–Smirnov, …), 17 keluarga diskret, serta `MultivariateNormal` (dengan CDF
-quasi-Monte-Carlo Genz), `MultivariateT`, `Dirichlet`, `Multinomial`, `Wishart`, `InvWishart`,
-`OrthoGroup`, dan `SpecialOrthoGroup`. Lokasi dan skala ditangani persis seperti di SciPy; setiap
+Semua keluarga di `scipy.stats` 1.17.1: ke-109 keluarga kontinu (termasuk `levy_stable` lewat
+integral Nolan, Landau, t/χ²/F non-sentral, studentized range, dan hukum Kolmogorov–Smirnov) dan
+ke-21 keluarga diskret (termasuk hipergeometrik non-sentral Fisher dan Wallenius serta
+Poisson–binomial), ditambah `RvHistogram` dan `RvDiscrete` untuk hukum buatan pengguna.
+Multivariat: `MultivariateNormal` (dengan CDF quasi-Monte-Carlo Genz dan kelas `Covariance` milik
+SciPy), `MultivariateT`, `Dirichlet`, `DirichletMultinomial`, `Multinomial`,
+`MultivariateHypergeom`, `Wishart`, `InvWishart`, `MatrixNormal`, `MatrixT`, `VonMisesFisher`,
+`NormalInverseGamma`, `OrthoGroup`, `SpecialOrthoGroup`, `UnitaryGroup`, `RandomTable`, dan
+`RandomCorrelation`. Lokasi dan skala ditangani persis seperti di SciPy; setiap
 distribusi mengimplementasikan `IUnivariateDistribution`, yang diterima oleh uji-uji hipotesis.
 Ekor dihitung lewat formulasi `Sf`/`LogSf`, tidak pernah `1 - Cdf`.
 
 Fitting memakai maximum likelihood bentuk tertutup bila SciPy punya, dan Nelder–Mead berpenalti
 milik SciPy untuk selebihnya; tidak ada fit di suite tes yang berakhir pada likelihood lebih buruk
-daripada fit SciPy.
+daripada fit SciPy. Fit yang berakhir pada parameter tidak sah melempar `FitError`, seperti di
+SciPy.
 
 **SciPy sendiri tidak selalu menjadi rujukan.** Di ekor jauh, kuantil SciPy 1.17.1 untuk pearson3,
 f, truncnorm, halfnorm, weibull_max, foldnorm, dan genlogistic salah di digit ke-4–5 (atau
-mengembalikan ±inf); kasus-kasus itu dipatok pada mpmath 40 digit. Titik lemah SciNet: ekor atas
+mengembalikan ±inf); `invweibull(0.8)` melaporkan rata-rata −4,9 (seharusnya +∞); entropi
+`betanbinom` 1,897 (seharusnya 3,002, karena jumlahan SciPy tidak konvergen); `levy_stable` frozen
+di α = 1 menghilangkan pergeseran lokasi yang diterapkan oleh pemanggilan langsungnya sendiri.
+Kasus-kasus itu dipatok pada bentuk tertutup atau mpmath presisi tinggi. Titik lemah SciNet: ekor atas
 jauh t non-sentral, `MultivariateNormal.Cdf` (~3e-5, seperti metode acak milik SciPy), dan
 `StudentizedRange` (kuadratur bersarang, ~1 ms per nilai CDF).
 
@@ -445,12 +501,32 @@ Stats.Quantile(a, 0.9);  Stats.BinnedStatistic(x, values, "mean", bins: 10);  St
 Stats.Bootstrap([a], s => s[0].Average(), method: "BCa");  Stats.PermutationTest([a, b], statistic);
 ```
 
+Juga tersedia: Box–Cox dan Yeo–Johnson (transformasi, `normmax`, log-likelihood, plot
+normalitas), statistik sirkular (`Circmean`, `Circvar`, `Circstd`, `DirectionalStats`),
+`MedianTest`, `QuantileTest`, `BwsTest`, `GoodnessOfFit` (Monte Carlo dengan parameter hasil fit),
+`PpccMax`, `Mvsdist`, `MultiscaleGraphcorr` (MGC), `SobolIndices` (dengan bootstrap BCa), dan
+`WassersteinDistanceNd`.
+
 Nilai-p mengikuti metode SciPy, termasuk distribusi eksaknya (Mann–Whitney, Wilcoxon, Kendall, KS
 dua sampel) dan opsi `Alternative`; hasilnya sesuai dengan SciPy sampai sekitar 1e-10–1e-12. Dua
 tempat di mana SciNet sengaja *lebih* eksak: Ansari–Bradley (frekuensi eksak SciPy berupa
 float32) serta probabilitas kotak Dunnett/bivariat (SciPy mengintegrasikannya secara acak).
 `Bootstrap`, `PermutationTest`, dan `MonteCarloTest` menerima flag `parallel` yang memberi hasil
 identik dengan versi serialnya.
+
+### Data tersensor dan analisis survival
+
+```csharp
+var times = CensoredData.RightCensored(observed, censored);   // juga tersensor kiri dan interval
+var km = Stats.Ecdf(times);                                    // Kaplan–Meier
+km.Sf.Evaluate(12.0);  km.Sf.ConfidenceInterval(0.95, "log-log");
+Stats.Logrank(groupA, groupB);
+var weibull = Stats.WeibullMin(c: 1.5).FitTo(times);           // maximum likelihood pada likelihood tersensor
+```
+
+Pita Kaplan–Meier bernilai NaN pada langkah pertama dan terakhir, persis seperti SciPy (log 1 = 0
+di awal, n = d di akhir). Fit data tersensor selalu lewat fit numerik, bahkan untuk keluarga yang
+punya bentuk tertutup, seperti di SciPy.
 
 ### Estimasi densitas kernel dan quasi-Monte Carlo
 
@@ -468,8 +544,10 @@ KDE eksak berjalan paralel dan sekitar 30× lebih cepat dari milik SciPy (10 rib
 dievaluasi di 100 ribu titik: 1,1–1,5 detik dibanding 39,8 detik). Sobol dan Halton tanpa
 scrambling mereproduksi titik-titik SciPy bit demi bit; Sobol dihitung langsung dari indeks titik
 (kode Gray), sehingga fast-forward gratis dan pengambilan paralel identik dengan serial. Sobol
-mendukung 4096 dimensi (tabel SciPy sampai 21201). Belum diimplementasikan: `median_test`,
-statistik sirkular, Box–Cox / Yeo–Johnson, `weibull_min` untuk `Anderson`.
+mendukung 4096 dimensi (tabel SciPy sampai 21201). Belum diimplementasikan: kerangka
+random-variable SciPy yang lebih baru (`make_distribution`, `Normal`, `Mixture`, …) dan objek
+metodenya (`BootstrapMethod`, …) — yang dicerminkan SciNet adalah API klasik bergaya
+`rv_continuous`.
 
 ## Pemrosesan citra
 
@@ -518,7 +596,20 @@ Market sama cepat atau lebih cepat. Jenis nilai: `MatArray` (mempertahankan kela
 dan `MatUnsupported` untuk function handle dan objek classdef. Berkas yang ditulis SciNet dalam
 semua format dibaca kembali oleh SciPy 1.17.1 dan cocok persis.
 
-Ditolak dengan pesan yang jelas: MATLAB v7.3 dan NetCDF-4 (keduanya HDF5), CDF-5, ARFF sparse.
+**HDF5, MATLAB v7.3, dan NetCDF-4** dibaca lewat pembaca HDF5 managed yang hanya-baca
+(`Hdf5File`): superblock 0–3, semua indeks chunk, deflate/shuffle/fletcher32, link dan atribut
+compact maupun dense, referensi, tipe compound dan variable-length. `MatFile.Load` membaca v7.3
+ke tipe `MatValue` yang sama dengan v5, dan `NetCdfFile.Open` membaca NetCDF-4 termasuk group dan
+tipe integer tambahannya. Dekompresi chunk berjalan paralel: dataset 50 MB yang di-chunk dengan
+gzip terbaca dalam 48 ms dibanding 170 ms di h5py. Menulis kedua format itu belum didukung.
+
+```csharp
+using var h5 = Hdf5File.Open("data.h5");
+var ds = h5.Root.Dataset("group/values");  NdArray values = ds.Read();  ds.ReadSlice([0, 0], [10, 10]);
+```
+
+Ditolak dengan pesan yang jelas: filter HDF5 selain deflate/shuffle/fletcher32, dataset virtual
+dan eksternal, CDF-5, ARFF sparse.
 Nilai int64/uint64 di atas 2⁵³ kehilangan presisi saat dimuat sebagai double. Harwell–Boeing
 melampaui SciPy (yang hanya membaca RUA): penyimpanan simetris, skew, pattern, integer, dan
 persegi panjang.
@@ -535,50 +626,49 @@ Lorenz terukur 19 ms, bukan 5,6 ms dalam keadaan stabil. Laporan lengkapnya ada 
 
 | Operasi | SciNet | SciPy | |
 |---|---:|---:|---|
-| `solve_ivp` Lorenz 0..100, RK45, rtol 1e-9 | 5,57 ms | 1.004 ms | **SciNet 180×** |
-| `solve_ivp` Van der Pol μ=1000, BDF | 1,10 ms | 130 ms | **SciNet 119×** |
-| `minimize` BFGS, Rosenbrock-100 dengan gradien | 28,6 ms | 317 ms | **SciNet 11×** |
-| `welch`, 10⁷ sampel, nperseg 4096 | 66 ms | 671 ms | **SciNet 10×** |
-| `quad` dari log(x)/√x di [0, 1] | 9 µs | 83 µs | **SciNet 9,3×** |
-| `erf` atas 10⁶ nilai | 10,1 ms | 47,6 ms | **SciNet 4,7×** |
-| `RegularGridInterpolator` linear, 10⁶ titik 3-D | 120 ms | 506 ms | **SciNet 4,2×** |
-| `gaussian_filter` σ=3, 2048² | 52 ms | 208 ms | **SciNet 4,0×** |
-| `cdist` 2000×2000 dalam 64-D | 27,5 ms | 106 ms | **SciNet 3,8×** |
-| `Delaunay`, 100 ribu titik | 192 ms | 585 ms | **SciNet 3,1×** |
-| `median_filter` 5×5, 1024² | 131 ms | 388 ms | **SciNet 3,0×** |
-| `CubicSpline`, evaluasi 10⁶ titik | 40,9 ms | 71,6 ms | **SciNet 1,8×** |
-| conjugate gradient, Poisson 2-D 200² | 148 ms | 257 ms | **SciNet 1,7×** |
-| FFT riil, 2²⁰ titik | 21,9 ms | 31,8 ms | **SciNet 1,5×** |
-| `fftconvolve` 10⁶ × 10⁴ | 70 ms | 88 ms | **SciNet 1,3×** |
-| `find_peaks` dengan prominence, 10⁶ sampel | 43 ms | 55 ms | **SciNet 1,3×** |
-| `lfilter` Butterworth 4, 10⁶ sampel | 11,1 ms | 10,1 ms | setara |
-| `sosfiltfilt` Butterworth 8, 10⁶ sampel | 21,8 ms | 24,6 ms | setara |
-| FFT kompleks, 65.536 titik | 2,29 ms | 1,98 ms | SciPy 1,2× |
-| `linear_sum_assignment` 500×500 | 17,2 ms | 13,2 ms | SciPy 1,3× |
-| KD-tree build + kueri 5-NN, 100 ribu titik 3-D | 133 ms | 102 ms | SciPy 1,3× |
-| `linkage` Ward, 2000 titik | 103 ms | 75 ms | SciPy 1,4× |
-| DCT-II, 65.536 titik | 0,98 ms | 0,59 ms | SciPy 1,7× |
+| `solve_ivp` Lorenz 0..100, RK45, rtol 1e-9 | 5,47 ms | 1.004 ms | **SciNet 184×** |
+| `solve_ivp` Van der Pol μ=1000, BDF | 0,97 ms | 130 ms | **SciNet 135×** |
+| `minimize` BFGS, Rosenbrock-100 dengan gradien | 22,8 ms | 317 ms | **SciNet 14×** |
+| `welch`, 10⁷ sampel, nperseg 4096 | 65 ms | 671 ms | **SciNet 10×** |
+| `quad` dari log(x)/√x di [0, 1] | 8,5 µs | 83 µs | **SciNet 9,8×** |
+| `RegularGridInterpolator` linear, 10⁶ titik 3-D | 110 ms | 506 ms | **SciNet 4,6×** |
+| `erf` atas 10⁶ nilai | 10,6 ms | 47,6 ms | **SciNet 4,5×** |
+| `cdist` 2000×2000 dalam 64-D | 25,7 ms | 106 ms | **SciNet 4,1×** |
+| `gaussian_filter` σ=3, 2048² | 55 ms | 208 ms | **SciNet 3,8×** |
+| `Delaunay`, 100 ribu titik | 159 ms | 585 ms | **SciNet 3,7×** |
+| `CubicSpline`, evaluasi 10⁶ titik | 19,6 ms | 71,6 ms | **SciNet 3,7×** |
+| `median_filter` 5×5, 1024² | 122 ms | 388 ms | **SciNet 3,2×** |
+| `splu` faktorisasi + solve, Poisson 2-D 100² | 16,4 ms | 37,2 ms | **SciNet 2,3×** |
+| conjugate gradient, Poisson 2-D 200² | 136 ms | 257 ms | **SciNet 1,9×** |
+| `linkage` Ward, 2000 titik | 44,6 ms | 75,1 ms | **SciNet 1,7×** |
+| `find_peaks` dengan prominence, 10⁶ sampel | 37 ms | 55 ms | **SciNet 1,5×** |
+| FFT riil, 2²⁰ titik | 23,1 ms | 31,8 ms | **SciNet 1,4×** |
+| KD-tree build + kueri 5-NN, 100 ribu titik 3-D | 77 ms | 102 ms | **SciNet 1,3×** |
+| `expm`, 200×200 | 6,4 ms | 8,2 ms | **SciNet 1,3×** |
+| `sosfiltfilt` Butterworth 8, 10⁶ sampel | 19,1 ms | 24,6 ms | **SciNet 1,3×** |
+| `fftconvolve` 10⁶ × 10⁴ | 65 ms | 88 ms | **SciNet 1,3×** |
+| FFT kompleks, 65.536 titik | 2,02 ms | 1,98 ms | setara |
+| `linear_sum_assignment` 500×500 | 14,5 ms | 13,2 ms | setara |
+| `lfilter` Butterworth 4, 10⁶ sampel | 14,4 ms | 10,1 ms | SciPy 1,4× |
+| DCT-II, 65.536 titik | 0,93 ms | 0,59 ms | SciPy 1,6× |
 | `curve_fit`, 10.000 titik | 5,6 ms | 3,3 ms | SciPy 1,7× |
-| `expm`, 200×200 | 29,8 ms | 8,2 ms | SciPy 3,6× |
-| `splu` faktorisasi + solve, Poisson 2-D 100² | 273 ms | 37 ms | SciPy 7,4× |
 
-**Rekap: SciNet lebih cepat di 16, SciPy lebih cepat di 8, setara di 2.**
+**Rekap: SciNet lebih cepat di 21, SciPy lebih cepat di 3, setara di 2.** (SciNet 1.2.0 terukur
+16, 8, dan 2; perubahannya adalah sparse LU supernodal, penulisan ulang kernel dense di balik
+`expm`, KD-tree datar, dan pembaruan linkage yang dikhususkan.)
 
 Polanya konsisten. SciNet menang telak di mana pun SciPy memanggil balik ke Python untuk setiap
 evaluasi fungsi — ODE, kuadratur, minimizer — karena delegate .NET berbiaya nanodetik sedangkan
 panggilan Python mikrodetik. SciNet menang sedang pada kernel yang diparalelkannya (filter,
-jarak, interpolasi, estimasi spektral). SciNet kalah di mana SciPy menyerahkan pekerjaannya ke
-pustaka terkompilasi yang matang — LAPACK untuk fungsi matriks dense, SuperLU, solver assignment
-dan KD-tree C++ miliknya — serta pada `curve_fit`, di mana model SciPy adalah satu panggilan NumPy
-tervektorisasi dan inti kuadrat terkecilnya adalah MINPACK. Ukuran yang lebih besar menggeser
-sebagian baris: di n = 400 `expm` mencapai kesetaraan, dan keunggulan pocketfft pada transformasi
-kompleks tunggal menyempit begitu transformasinya terbatas oleh memori.
+jarak, interpolasi, estimasi spektral, faktorisasi sparse). Tiga tempat SciPy masih unggul adalah
+`curve_fit` (model SciPy adalah satu panggilan NumPy tervektorisasi dan inti kuadrat terkecilnya
+MINPACK), satu `lfilter` rekursif, dan DCT milik pocketfft.
 
 Kasus yang lebih besar yang diukur selama pengembangan (sekali jalan, mesin yang sama, jadi lebih
 kasar): KDE 10 ribu titik yang dievaluasi di 100 ribu titik sekitar 30× lebih cepat dari
-`gaussian_kde` SciPy, `spearmanr` atas 10⁶ sekitar 3×, `norm.ppf` atas 10⁶ sekitar 7×; di sisi
-lambat, `Eigsh` sekitar 4,5× di belakang ARPACK dan Schur/Eig di n = 400 sekitar 4,5× di belakang
-LAPACK.
+`gaussian_kde` SciPy, `spearmanr` atas 10⁶ sekitar 3×, `norm.ppf` atas 10⁶ sekitar 7×, `Eigsh`
+pada Laplacian 10k setara ARPACK, `Splu` pada Poisson 300² sekitar 2× lebih cepat dari SuperLU,
+dan Schur/Eig di n = 400 sekitar 1,5–1,7× di belakang LAPACK.
 
 ---
 
