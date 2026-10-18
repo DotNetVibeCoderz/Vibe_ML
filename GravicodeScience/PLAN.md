@@ -722,7 +722,7 @@ These are not versioned; they run alongside everything above.
 
 ---
 
-## SciNet — 1.3.0 closed the 1.2.0 list — ✅ done
+## SciNet — 1.3.0 closed the 1.2.0 list, 1.4.0 the 1.3.0 list — ✅ done
 
 All five items from 1.2.0 are done: a multifrontal sparse LU (now 2× faster than SuperLU) and
 supernodal Cholesky; thick-restart Lanczos level with ARPACK; the dense kernels behind

@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v1.3.0 · **Target framework**: .NET 10 · **Tests**: 3,257 passing, 0 failing
+**Release**: v1.4.0 · **Target framework**: .NET 10 · **Tests**: 4,081 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -237,6 +237,13 @@ remains the better baseline on a small dataset.
 - [x] **1.3.0** N-d Delaunay, convex hull and linear scattered interpolation; 3-D Voronoi,
   `HalfspaceIntersection`, `SphericalVoronoi`, `RotationSpline`, periodic KD-tree
 - [x] **1.3.0** A managed HDF5 reader, so MATLAB v7.3 and NetCDF-4 now load
+- [x] **1.4.0** Multishift QR with aggressive early deflation and blocked Hessenberg: Schur faster
+  than SciPy at n = 200-800; `lfilter` ahead of SciPy (orders 4 and 8 register-resident),
+  `curve_fit` within 1.2x; GraviNum's `LinAlg.Dot` on the packed FMA kernel
+- [x] **1.4.0** Writing HDF5, MATLAB v7.3 and NetCDF-4, cross-checked against h5py and netCDF-C
+- [x] **1.4.0** scipy.stats' random-variable framework (`Normal`, `MakeDistribution`, `Mixture`,
+  transforms), `PermutationMethod`/`MonteCarloMethod`/`BootstrapMethod`, Mathieu functions,
+  N-d `Rotation` arrays and `RigidTransform`
 - [x] `Cluster`, `Sparse` (formats, iterative and direct solvers, eigensolvers, csgraph),
   `Spatial` (KD-tree, distances, hulls, Delaunay, Voronoi, rotations), `IO` (MATLAB, Matrix Market,
   Harwell–Boeing, NetCDF, WAV, ARFF, Fortran, IDL)
@@ -338,7 +345,10 @@ Each is now covered by a regression test.
 suite, bilingual docs and a NuGet icon for every package; the suite grew from 1,059 to 2,699.
 **1.3.0** closed every gap 1.2.0 listed: sparse LU, Lanczos and dense kernels now match or beat
 SciPy, and the missing optimisers, distributions, geometry and HDF5 formats are in. The suite is
-3,257. SciNet now leads SciPy on 21 of 26 measured workloads.
+3,257. SciNet now leads SciPy on 21 of 26 measured workloads. **1.4.0** closed the 1.3.0 list:
+multishift QR for Schur/Eig, `lfilter`/`curve_fit`, HDF5 writing, the new random-variable framework,
+Mathieu functions and `RigidTransform`; the suite is 4,081. Breaking change: `Rotation.Count` is the
+total number of rotations now that rotations have an N-d `Shape`.
 
 See [PLAN.md](PLAN.md). **v0.4 is complete**, and **five of six v0.5 items are done**: Arrow
 interchange, out-of-core dataframes, sparse training paths, the pretrained-weight loader, and the
