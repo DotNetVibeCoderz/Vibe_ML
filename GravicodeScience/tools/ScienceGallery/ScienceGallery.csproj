@@ -18,10 +18,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The Visual.Net wrapper projects live under this folder; their obj/ holds generated .cs
-         files that must not be compiled into the gallery as well. -->
-    <Compile Remove="VisualNet\**" />
-    <None Remove="VisualNet\**" />
     <AvaloniaResource Include="Assets\**" />
     <AvaloniaResource Include="Themes\**" />
     <!-- The code panel shows each showcase's own source file, so what you read is what ran. -->
@@ -35,6 +31,10 @@
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.AvaloniaEdit" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- Charts, from nuget.org. They depend on Gravicode.Science.GraviNum/Frame/Learn as packages;
+         the project references below carry the same package ids, so the local build satisfies them. -->
+    <PackageReference Include="Gravicode.Matplotlib.Net" />
+    <PackageReference Include="Gravicode.Seaborn.Net" />
   </ItemGroup>
 
   <ItemGroup>
@@ -45,9 +45,6 @@
     <ProjectReference Include="..\..\src\GraviGraph\GraviGraph.csproj" />
     <ProjectReference Include="..\..\src\GraviProb\GraviProb.csproj" />
     <ProjectReference Include="..\..\src\SciNet\SciNet.csproj" />
-    <!-- Charts. See VisualNet\VisualNet.props for where the Visual.Net sources come from. -->
-    <ProjectReference Include="VisualNet\Matplotlib.Net\Matplotlib.Net.csproj" />
-    <ProjectReference Include="VisualNet\Seaborn.Net\Seaborn.Net.csproj" />
   </ItemGroup>
 
 </Project>

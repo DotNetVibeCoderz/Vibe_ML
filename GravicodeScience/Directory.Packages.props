@@ -16,6 +16,11 @@
 
     <!-- Visualization hooks used by samples and notebooks -->
     <PackageVersion Include="ScottPlot" Version="5.1.59" />
+    <!-- Visual.Net (DotNetVibeCoderz/Vibe_Charting), used by the Science Gallery. SkiaSharp 4 comes
+         in transitively and is deliberately not pinned here: transitive pinning would move the
+         ScottPlot samples off SkiaSharp 3. -->
+    <PackageVersion Include="Gravicode.Matplotlib.Net" Version="1.1.0" />
+    <PackageVersion Include="Gravicode.Seaborn.Net" Version="1.1.0" />
 
     <!-- Avalonia core. Kept next to Avalonia.Desktop so the versions cannot drift apart. -->
     <PackageVersion Include="Avalonia" Version="12.1.1" />

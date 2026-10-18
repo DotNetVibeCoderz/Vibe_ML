@@ -115,7 +115,6 @@ tools/ScienceGallery/
   ViewModels/    filtering, running, results
   Views/         the window
   Themes/        tokens (light and dark) and control styles
-  VisualNet/     wrapper projects that compile Visual.Net from its own repository
   Assets/Fonts/  Bricolage Grotesque and JetBrains Mono (SIL Open Font Licence)
 ```
 
@@ -149,25 +148,15 @@ public sealed class MyUseCase : Showcase
 The file is shown to users as the example to copy, so write it as teaching code: self-contained,
 deterministic (seeded), commented where the reasoning is not obvious, and fast (well under 2 s).
 
-### Visual.Net comes from its own repository
+### Visual.Net comes from NuGet
 
-Visual.Net is not on NuGet and carries an older snapshot of GraviNum/GraviFrame/GraviLearn under the
-same assembly names. The projects in `VisualNet/` therefore compile only its chart libraries
-(Visual.Net.Core, Matplotlib.Net, Seaborn.Net) from a checkout of
-[Vibe_Charting](https://github.com/DotNetVibeCoderz/Vibe_Charting) and link them to this repository's
-Gravicode.Science projects — one copy of each library, and no code copied between repositories.
-The sources are found through the `VISUALNET_ROOT` environment variable, or a `Vibe_Charting` checkout
-next to the `Vibe_ML` one:
-
-```
-VibeCoding/
-  Vibe_ML/GravicodeScience/...
-  Vibe_Charting/Visual.Net/src/...
-```
-
-CI checks out `Visual.Net/src` sparsely and sets `VISUALNET_ROOT`. Visual.Net renders with SkiaSharp
-4, which is referenced only by these wrapper projects so that central transitive pinning does not move
-the ScottPlot samples off SkiaSharp 3.
+The charts use the `Gravicode.Matplotlib.Net` and `Gravicode.Seaborn.Net` packages (Visual.Net 1.1.0,
+built from [Vibe_Charting](https://github.com/DotNetVibeCoderz/Vibe_Charting)). They depend on
+`Gravicode.Science.GraviNum`, `GraviFrame` and `GraviLearn`; the gallery references those libraries
+as projects with the same package ids, so NuGet resolves them to the local build and there is one
+copy of each. Visual.Net renders with SkiaSharp 4, which arrives transitively and is deliberately
+not pinned in `Directory.Packages.props` — transitive pinning would move the ScottPlot samples off
+SkiaSharp 3.
 
 ### Command-line modes
 

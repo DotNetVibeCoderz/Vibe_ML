@@ -119,7 +119,6 @@ tools/ScienceGallery/
   ViewModels/    penyaringan, menjalankan, hasil
   Views/         jendela
   Themes/        token (terang dan gelap) dan gaya kontrol
-  VisualNet/     proyek pembungkus yang mengompilasi Visual.Net dari repositorinya sendiri
   Assets/Fonts/  Bricolage Grotesque dan JetBrains Mono (SIL Open Font Licence)
 ```
 
@@ -154,25 +153,15 @@ Berkas itu ditampilkan kepada pengguna sebagai contoh untuk disalin, jadi tulis 
 pengajaran: mandiri, deterministik (ber-seed), diberi komentar di bagian yang alasannya tidak
 jelas, dan cepat (jauh di bawah 2 detik).
 
-### Visual.Net berasal dari repositorinya sendiri
+### Visual.Net berasal dari NuGet
 
-Visual.Net belum ada di NuGet dan membawa salinan GraviNum/GraviFrame/GraviLearn yang lebih lama
-dengan nama assembly yang sama. Karena itu proyek di `VisualNet/` hanya mengompilasi library chart-nya
-(Visual.Net.Core, Matplotlib.Net, Seaborn.Net) dari checkout
-[Vibe_Charting](https://github.com/DotNetVibeCoderz/Vibe_Charting) dan menautkannya ke proyek
-Gravicode.Science di repositori ini — satu salinan untuk tiap library, dan tidak ada kode yang
-disalin antar repositori. Sumbernya ditemukan lewat variabel lingkungan `VISUALNET_ROOT`, atau checkout
-`Vibe_Charting` di sebelah checkout `Vibe_ML`:
-
-```
-VibeCoding/
-  Vibe_ML/GravicodeScience/...
-  Vibe_Charting/Visual.Net/src/...
-```
-
-CI meng-checkout `Visual.Net/src` secara sparse dan mengisi `VISUALNET_ROOT`. Visual.Net merender
-dengan SkiaSharp 4, yang hanya direferensikan oleh proyek pembungkus ini supaya pinning transitif
-terpusat tidak memindahkan sample ScottPlot dari SkiaSharp 3.
+Chart memakai paket `Gravicode.Matplotlib.Net` dan `Gravicode.Seaborn.Net` (Visual.Net 1.1.0, dibangun
+dari [Vibe_Charting](https://github.com/DotNetVibeCoderz/Vibe_Charting)). Paket itu bergantung pada
+`Gravicode.Science.GraviNum`, `GraviFrame` dan `GraviLearn`; gallery mereferensikan library tersebut
+sebagai proyek dengan package id yang sama, sehingga NuGet memakai build lokal dan hanya ada satu
+salinan untuk tiap library. Visual.Net merender dengan SkiaSharp 4, yang datang secara transitif dan
+sengaja tidak di-pin di `Directory.Packages.props` — pinning transitif akan memindahkan sample
+ScottPlot dari SkiaSharp 3.
 
 ### Mode baris perintah
 

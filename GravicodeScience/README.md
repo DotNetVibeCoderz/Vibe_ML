@@ -99,9 +99,8 @@ libraries it needs, in the same emission-line colours as the NuGet icons.
 
 [![One use case: counting touching cells](docs/screenshots/gallery-detail-2.png)](docs/ScienceGallery.md)
 
-The charts come from Visual.Net, compiled from its own repository: clone
-[Vibe_Charting](https://github.com/DotNetVibeCoderz/Vibe_Charting) next to Vibe_ML, or set
-`VISUALNET_ROOT`. Details in [ScienceGallery.md](docs/ScienceGallery.md).
+The charts come from the Visual.Net packages on NuGet (`Gravicode.Matplotlib.Net`,
+`Gravicode.Seaborn.Net`). Details in [ScienceGallery.md](docs/ScienceGallery.md).
 
 ## ScienceAppGen
 

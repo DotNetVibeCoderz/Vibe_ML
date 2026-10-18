@@ -21,10 +21,12 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
 
 - **`Compute.AutomaticGpuDispatch` is off by default and should stay that way** unless benchmarked.
   Everything is float64; on integrated GPUs the ILGPU path measured 5–8× *slower* than the CPU.
-- **`LinAlg.Dot` uses unsafe four-row register blocking, plus a `k` slice.** The tile of C lives in
-  registers across the slice; slicing `k` is what keeps the strided walk through B in cache.
-  Register accumulation *without* the slice is slower at 1024+. Column panelling (blocking `j`) was
-  measured and is worse at every size — don't re-try it.
+- **`LinAlg.Dot` is the packed kernel (`PackedMatMul.Gemm`) from a 16-cube up**; the unsafe
+  four-row register-blocked kernel with a `k` slice (`MatMulKernel.Blocked`) is now only for tiny
+  products (< 2048 multiply-adds), `m == 1`, `n` exactly one vector wide, and no-SIMD hardware.
+  `n == 1` goes to the mat-vec path. In the blocked kernel, slicing `k` is what keeps the strided
+  walk through B in cache; column panelling (blocking `j`) was measured and is worse at every size
+  — don't re-try it. `LinAlg.MatMul(a, b, MatMulKernel.X)` pins a path for tests and benchmarks.
 - **Element-wise parallel paths pin and pass pointers, never `ToArray()`.** A `Span<T>` cannot be
   captured by a lambda; copying to satisfy that cost three extra passes over memory and made `Add`
   3× slower than it needed to be. `Unary` is parallel too — it wasn't, and that was free money.
@@ -95,9 +97,29 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
   means not positive definite and is turned into the same exception the managed path throws.
 - **Benchmark numbers depend on whether a BLAS is installed.** Published figures are the managed
   path. Always say which configuration a number came from; `docs/benchmarks.md` reports both.
-- **`PackedMatMul` must stay parallel.** The first version was single-threaded and lost everywhere;
-  packing was never the problem. Its threshold (8M multiply-adds) is measured — below it packing
-  costs more than it saves.
+- **`PackedMatMul` must stay parallel, and must split columns as well as rows.** The first version
+  was single-threaded and lost everywhere. The second split only 128-row blocks, so a 200-cube ran
+  on two threads, had no FMA, and needed an 8M multiply-add threshold to break even — which left
+  every 100-400 product on the unpacked kernel (200-cube 4.7 ms). The current one (SciNet's
+  `LinalgGemm`, moved here: 4x8 FMA tile, `Mc` 64, rows first then column chunks until 2x cores
+  have work, parallel B pack) wins from a 16-cube: 1.4x at 32-128, 2.2-2.9x at 200-400, 1.7x at
+  1024 against the old dispatch. Packing at 12-cubes and below loses; parallel ties serial at
+  64-cube and wins from 80 (`ParallelThreshold` = 64^3).
+- **Six-row tiles were measured and lost where it matters**: 6x8 vs 4x8 in one process was
+  0.89-0.97x at 32-200 and 1.03-1.11x at 256+. Medium sizes are the reason the kernel exists.
+- **The packed kernel reads operands through their strides**, so `a.T`, slices and reversed views
+  are packed in place rather than `AsContiguous()`-copied first. The packers pick the loop order
+  by which stride is 1 — keep both branches.
+- **The parallel packed kernel is bit-identical to the serial one** (a test asserts it): threads
+  only divide C, never k. Different *paths* (blocked vs packed vs BLAS) round differently, since
+  only packed uses FMA; nothing in the other libraries' pinned numerics moved.
+- **A `k <= 16` "blocked wins" rule appeared in one run and reversed in the next** — noise on this
+  shared, throttling machine. Re-run any dispatch rule at least twice before encoding it.
+- **`benchmarks/comparison` warms up with only 2 calls and takes the median of 7** — its matmul
+  rows are mostly tier-0 code, which is why the committed file has a 256-cube (12.1 ms) slower
+  than a 512-cube (11.2 ms). Its numbers are also cross-run. Use an in-process A/B for kernels.
+- **Small parallel rules must be work-based, not row-based.** The blocked kernel's old `m >= 64`
+  rule and MatVec's sent a 150x4x4 product to the thread pool, 2-5x slower than inline.
 - **Benchmark warm-up must exceed ~30 calls.** Tiered JIT recompiles a hot method around there, and
   two warm-up iterations produced a 192-cube measuring 8× slower than a 224-cube. Any new kernel
   measurement needs a real warm-up loop.
@@ -301,8 +323,9 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
 - **Warm up by time, not only by count.** Forty short calls can all land inside the tier-0
   call-counting delay; `Vector<T>` span code then ran 30x slower than optimised (1.3 us vs 46 ns).
   Warm up for 1-2 s before timing a microsecond kernel.
-- **GraviNum `LinAlg.Dot` below its 8M multiply-add packing threshold is slow** (a 200-cube took
-  4.7 ms, a 400-cube 3.4 ms). SciNet's dense kernels use their own `LinalgGemm` (0.3 ms).
+- **SciNet's `LinalgGemm` now forwards to GraviNum's `PackedMatMul.Gemm`.** It was SciNet's own
+  copy because `LinAlg.Dot` was slow below 8M multiply-adds; the kernel moved into GraviNum, and the
+  two measured bit-identical and within noise (0.93-1.07x, 32-1024), so the duplicate went.
 - **Native is not automatically faster.** SciPy's bundled OpenBLAS `dgesv` was 10x slower than the
   managed recursive LU, so `expm`'s solve stays managed; Schur/Eig route to `dgees`/`dgeev` only
   because they measured faster. Measure each routine before routing it to LAPACK.
@@ -356,30 +379,25 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
 `Showcases/<Domain>/`, found by reflection, and its source file is embedded so the code panel shows
 exactly what ran.
 
-- **Visual.Net is compiled from the Vibe_Charting repository, not copied.** The wrapper projects in
-  `tools/ScienceGallery/VisualNet/` compile its `src/` (found via `VISUALNET_ROOT`, or a
-  `Vibe_Charting` checkout next to `Vibe_ML`) and link it to *this* repository's GraviNum/Frame/Learn,
-  because Visual.Net carries an older snapshot of them under the same assembly names. CI checks out
-  `Visual.Net/src` sparsely; building the solution without it fails with a message saying where to
-  clone it.
-- **Each wrapper project needs its own folder.** Three csproj files in one folder share one
-  `obj/project.assets.json`, and the last restore silently wins (Matplotlib.Net then "cannot find"
-  SkiaSharp).
-- **SkiaSharp 4 is referenced only by the wrappers, with central management off there.** Pinning it
-  in `Directory.Packages.props` would, through transitive pinning, move the ScottPlot samples off
-  SkiaSharp 3. Avalonia 12.1.1 runs fine on SkiaSharp 4.
-- **The gallery project must `Compile Remove="VisualNet\**"`** - the wrappers live under it, and their
-  `obj/` holds generated `.cs` files the gallery would otherwise compile a second time.
+- **Visual.Net comes from NuGet** (`Gravicode.Matplotlib.Net`/`Gravicode.Seaborn.Net`). Its packages
+  depend on `Gravicode.Science.GraviNum/Frame/Learn`; the gallery's project references carry those
+  same package ids, so NuGet resolves them to the local build. It used to be compiled from a
+  Vibe_Charting checkout by wrapper projects, because Visual.Net 1.0 vendored older copies of those
+  libraries under the same assembly names; 1.1.0 consumes them as packages instead.
+- **SkiaSharp 4 arrives transitively and is not pinned in `Directory.Packages.props`.** Pinning it
+  would, through transitive pinning, move the ScottPlot samples off SkiaSharp 3. Avalonia 12.1.1
+  runs fine on SkiaSharp 4.
 - **A namespace called `Visual` (from Visual.Net.Core) hides `Avalonia.Visual`** in gallery code;
   write `Avalonia.Visual` in full.
 - **Screenshots render the window content at a fixed 1440×900** (`--capture`), because a laptop
   clamps the real window and the first layout pass then disagrees with the bitmap. Rendering
   content rather than the window loses the window background, so the root grid carries `AppGround`.
 - **`--run-all` is the gallery's test suite**: CI runs every use case headless on Linux and Windows.
-- **Matplotlib.Net quirks found while writing use cases** (report upstream rather than work around
-  in the library): `LegendLocation.OutsideBottom` overlaps the x label, log axes need explicit
-  limits, rotated tick labels draw into the plot, and `AddColorbar()` takes the most recent mapped
-  artist (add it before an overlaid contour).
+- **Matplotlib.Net quirks found while writing use cases were fixed upstream in Visual.Net 1.1.0**
+  (`OutsideBottom` legend vs x label, log-axis limits, rotated tick labels, `AddColorbar()` picking
+  the latest mapped artist). Fix chart bugs in Vibe_Charting, not with workarounds here.
+- **On Linux, Visual.Net 1.0 drew charts with no text** - its NoDependencies SkiaSharp has no
+  fontconfig. 1.1.0 bundles DejaVu Sans as a fallback; don't pin the gallery below 1.1.0.
 
 ## Packaging and CI
 
