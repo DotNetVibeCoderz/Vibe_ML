@@ -15,27 +15,54 @@ namespace Gravicode.Science.SciNet.Spatial;
 /// with the reflection correction, and the exact minimal rotation for a single vector pair.</para>
 /// <para>Small-angle Taylor branches for rotation vectors match scipy's thresholds (1e-3 rad) so
 /// round trips agree to the last bits.</para>
-/// <para>A <see cref="Single"/> rotation returns shapes without the leading stack axis
-/// ((4), (3, 3), (3)), as scipy does; a stack of n returns (n, 4), (n, 3, 3), (n, 3).</para>
+/// <para>Rotations form an array of any <see cref="Shape"/>, as in scipy 1.17: a <see cref="Single"/>
+/// rotation has shape () and returns (4), (3, 3), (3); an array of shape (n, m) returns
+/// (n, m, 4), (n, m, 3, 3), (n, m, 3). Composition, <see cref="Apply(NdArray, bool)"/> and
+/// <see cref="ApproxEqual"/> broadcast like numpy; indexing, slicing and <see cref="Concatenate"/>
+/// work along the first axis; <see cref="Mean"/> reduces over chosen axes. <see cref="Magnitude"/>
+/// and <see cref="ApproxEqual"/> return their values flattened in C order (see <see cref="Shape"/>).</para>
 /// <para><see cref="Reduce"/>, <see cref="CreateGroup"/> and <see cref="RotationSpline"/> live
-/// in RotationExtras.cs. Not implemented: infinite weights in <see cref="AlignVectors"/>, and
-/// scipy 1.17's N-d rotation arrays (<c>shape</c> beyond one stack axis).</para>
+/// in RotationExtras.cs. Not implemented: infinite weights in <see cref="AlignVectors"/>.</para>
 /// </remarks>
 public sealed partial class Rotation
 {
     private readonly double[] _q;
+    private readonly int[] _shape;
 
-    /// <summary>True for a single rotation (not a stack of one).</summary>
-    public bool Single { get; }
+    /// <summary>True for a single rotation (shape (), not a stack of one).</summary>
+    public bool Single => _shape.Length == 0;
 
-    /// <summary>Number of rotations (1 for a single rotation).</summary>
+    /// <summary>Total number of rotations (1 for a single rotation; the product of <see cref="Shape"/>).</summary>
     public int Count => _q.Length / 4;
 
-    private Rotation(double[] quats, bool single)
+    /// <summary>The array shape of the rotations (scipy's <c>shape</c>): () for a single rotation.</summary>
+    public int[] Shape => (int[])_shape.Clone();
+
+    /// <summary>The length of the first axis (scipy's <c>len</c>); a single rotation has none.</summary>
+    public int Length => Single ? throw new InvalidOperationException("Single rotation has no len.") : _shape[0];
+
+    private Rotation(double[] quats, bool single) : this(quats, single ? [] : [quats.Length / 4]) { }
+
+    private Rotation(double[] quats, int[] shape)
     {
         _q = quats;
-        Single = single;
+        _shape = shape;
     }
+
+    internal static int Product(int[] shape)
+    {
+        var n = 1;
+        foreach (var d in shape) n *= d;
+        return n;
+    }
+
+    private static NdArray Shaped(double[] data, int[] lead, params int[] trailing) => new(data, [.. lead, .. trailing]);
+
+    /// <summary>The unit quaternions, scalar-last, flattened in C order (internal: no copy).</summary>
+    internal double[] RawQuats => _q;
+
+    /// <summary>A rotation array from raw unit quaternions (no normalisation).</summary>
+    internal static Rotation FromRawQuats(double[] quats, int[] shape) => new(quats, shape);
 
     // ================================================================== construction
 
@@ -50,20 +77,20 @@ public sealed partial class Rotation
         return q;
     }
 
-    private static double[] Rows(NdArray a, int width, out bool single, string name)
+    private static double[] Rows(NdArray a, int width, out int[] lead, string name)
     {
         ArgumentNullException.ThrowIfNull(a, name);
-        if (a.Rank == 1)
-        {
-            if (a.Shape[0] != width) throw new ArgumentException($"Expected `{name}` to have shape ({width},) or (N, {width}).", name);
-            single = true;
-        }
-        else if (a.Rank == 2)
-        {
-            if (a.Shape[1] != width) throw new ArgumentException($"Expected `{name}` to have shape ({width},) or (N, {width}).", name);
-            single = false;
-        }
-        else throw new ArgumentException($"Expected `{name}` to have shape ({width},) or (N, {width}).", name);
+        if (a.Rank < 1 || a.Shape[^1] != width)
+            throw new ArgumentException($"Expected `{name}` to have shape (..., {width}).", name);
+        lead = a.Shape[..^1].ToArray();
+        return a.AsContiguous().ToArray();
+    }
+
+    private static double[] Rows2(NdArray a, int width, string name)
+    {
+        ArgumentNullException.ThrowIfNull(a, name);
+        if (!(a.Rank is 1 or 2) || a.Shape[^1] != width)
+            throw new ArgumentException($"Expected `{name}` to have shape ({width},) or (N, {width}).", name);
         return a.AsContiguous().ToArray();
     }
 
@@ -74,7 +101,7 @@ public sealed partial class Rotation
         return FromQuat(new NdArray((double[])quat.Clone(), quat.Length), scalarFirst);
     }
 
-    /// <summary>From quaternions of shape (4) or (n, 4); each is normalised.</summary>
+    /// <summary>From quaternions of shape (..., 4); each is normalised.</summary>
     public static Rotation FromQuat(NdArray quat, bool scalarFirst = false)
     {
         var q = Rows(quat, 4, out var single, nameof(quat));
@@ -84,16 +111,15 @@ public sealed partial class Rotation
     }
 
     /// <summary>
-    /// From rotation matrices, shape (3, 3) or (n, 3, 3). A matrix that is not orthogonal (to
+    /// From rotation matrices, shape (..., 3, 3). A matrix that is not orthogonal (to
     /// 1e-12) is replaced by its nearest rotation U Vᵀ; a non-positive determinant throws.
     /// </summary>
     public static Rotation FromMatrix(NdArray matrix, bool assumeValid = false)
     {
         ArgumentNullException.ThrowIfNull(matrix);
-        bool single;
-        if (matrix.Rank == 2 && matrix.Shape[0] == 3 && matrix.Shape[1] == 3) single = true;
-        else if (matrix.Rank == 3 && matrix.Shape[1] == 3 && matrix.Shape[2] == 3) single = false;
-        else throw new ArgumentException("Expected `matrix` to have shape (3, 3) or (N, 3, 3).", nameof(matrix));
+        if (matrix.Rank < 2 || matrix.Shape[^1] != 3 || matrix.Shape[^2] != 3)
+            throw new ArgumentException("Expected `matrix` to have shape (..., 3, 3).", nameof(matrix));
+        var single = matrix.Shape[..^2].ToArray();
         var m = matrix.AsContiguous().ToArray();
         var n = m.Length / 9;
         var q = new double[4 * n];
@@ -147,7 +173,7 @@ public sealed partial class Rotation
         for (var k = 0; k < 4; k++) q[k] /= n;
     }
 
-    /// <summary>From rotation vectors (axis × angle), shape (3) or (n, 3).</summary>
+    /// <summary>From rotation vectors (axis × angle), shape (..., 3).</summary>
     public static Rotation FromRotvec(NdArray rotvec, bool degrees = false)
     {
         var v = Rows(rotvec, 3, out var single, nameof(rotvec));
@@ -178,7 +204,7 @@ public sealed partial class Rotation
         q[0] = x * scale; q[1] = y * scale; q[2] = z * scale; q[3] = Math.Cos(angle / 2);
     }
 
-    /// <summary>From modified Rodrigues parameters, shape (3) or (n, 3).</summary>
+    /// <summary>From modified Rodrigues parameters, shape (..., 3).</summary>
     public static Rotation FromMrp(NdArray mrp)
     {
         var v = Rows(mrp, 3, out var single, nameof(mrp));
@@ -217,14 +243,15 @@ public sealed partial class Rotation
         return FromEulerCore(seq, angles, true, degrees);
     }
 
-    /// <summary>From Euler angles for a stack: <paramref name="angles"/> has shape (n, len(seq)).</summary>
+    /// <summary>From Euler angles for an array of rotations: <paramref name="angles"/> has shape (..., len(seq)).</summary>
     public static Rotation FromEuler(string seq, NdArray angles, bool degrees = false)
     {
         ArgumentNullException.ThrowIfNull(angles);
         if (angles.Rank == 1) return FromEulerCore(seq, angles.ToArray(), true, degrees);
-        if (angles.Rank != 2 || angles.Shape[1] != seq.Length)
+        if (angles.Shape[^1] != seq.Length)
             throw new ArgumentException("Expected last dimension of `angles` to match number of sequence axes specified.");
-        return FromEulerCore(seq, angles.AsContiguous().ToArray(), false, degrees);
+        var r = FromEulerCore(seq, angles.AsContiguous().ToArray(), false, degrees);
+        return new Rotation(r._q, angles.Shape[..^1].ToArray());
     }
 
     private static Rotation FromEulerCore(string seq, double[] angles, bool single, bool degrees)
@@ -281,6 +308,20 @@ public sealed partial class Rotation
         return new Rotation(q.ToArray(), true);
     }
 
+    /// <summary>From Davenport angles for an array of rotations: <paramref name="angles"/> has shape (..., k).</summary>
+    public static Rotation FromDavenport(NdArray axes, string order, NdArray angles, bool degrees = false)
+    {
+        ArgumentNullException.ThrowIfNull(angles);
+        if (angles.Rank == 1) return FromDavenport(axes, order, angles.ToArray(), degrees);
+        var k = angles.Shape[^1];
+        var flat = angles.AsContiguous().ToArray();
+        var n = flat.Length / k;
+        var q = new double[4 * n];
+        for (var i = 0; i < n; i++)
+            FromDavenport(axes, order, flat[(i * k)..((i + 1) * k)], degrees)._q.CopyTo(q, 4 * i);
+        return new Rotation(q, angles.Shape[..^1].ToArray());
+    }
+
     private static double[] NormalisedAxes(NdArray axes, int? required)
     {
         if (axes.Rank != 2 || axes.Shape[1] != 3) throw new ArgumentException("Axes must be vectors of length 3.");
@@ -299,34 +340,55 @@ public sealed partial class Rotation
     }
 
     /// <summary>The identity rotation (single), or a stack of <paramref name="num"/> identities.</summary>
-    public static Rotation Identity(int? num = null)
+    public static Rotation Identity(int? num = null) => Identity(num is { } n ? [n] : []);
+
+    /// <summary>An array of identity rotations of the given shape (scipy's <c>identity(shape=...)</c>).</summary>
+    public static Rotation Identity(int[] shape)
     {
-        var n = num ?? 1;
+        ArgumentNullException.ThrowIfNull(shape);
+        var n = Product(shape);
         var q = new double[4 * n];
         for (var i = 0; i < n; i++) q[4 * i + 3] = 1;
-        return new Rotation(q, num is null);
+        return new Rotation(q, (int[])shape.Clone());
     }
 
     /// <summary>
     /// Uniformly distributed random rotations (normalised 4-D Gaussian samples). Seeded through
     /// GraviRandom, so the draws differ from numpy's for the same seed.
     /// </summary>
-    public static Rotation Random(int? num = null, int seed = 0)
+    public static Rotation Random(int? num = null, int seed = 0) => Random(num is { } n ? [n] : [], seed);
+
+    /// <summary>An array of uniformly distributed random rotations of the given shape.</summary>
+    public static Rotation Random(int[] shape, int seed = 0)
     {
+        ArgumentNullException.ThrowIfNull(shape);
         var rng = new GraviRandom(seed);
-        var n = num ?? 1;
-        var q = new double[4 * n];
+        var q = new double[4 * Product(shape)];
         for (var i = 0; i < q.Length; i++) q[i] = rng.Normal();
-        return new Rotation(Normalise(q), num is null);
+        return new Rotation(Normalise(q), (int[])shape.Clone());
     }
 
-    /// <summary>Joins rotations (single or stacks) into one stack.</summary>
+    /// <summary>
+    /// Joins rotations along the first axis. A single rotation counts as an array of one; all
+    /// inputs must agree in every axis after the first.
+    /// </summary>
     public static Rotation Concatenate(IEnumerable<Rotation> rotations)
     {
         ArgumentNullException.ThrowIfNull(rotations);
         var all = new List<double>();
-        foreach (var r in rotations) all.AddRange(r._q);
-        return new Rotation([.. all], false);
+        int[]? trailing = null;
+        var length = 0;
+        foreach (var r in rotations)
+        {
+            var shape = r.Single ? [1] : r._shape;
+            var t = shape[1..];
+            if (trailing is null) trailing = t;
+            else if (!t.SequenceEqual(trailing))
+                throw new ArgumentException("All rotations must have the same shape after the first axis to be concatenated.");
+            length += shape[0];
+            all.AddRange(r._q);
+        }
+        return new Rotation([.. all], [length, .. trailing ?? []]);
     }
 
     /// <summary>
@@ -339,8 +401,8 @@ public sealed partial class Rotation
     /// returned (with a deliberate π flip when they are antiparallel).</remarks>
     public static (Rotation Rotation, double Rssd) AlignVectors(NdArray a, NdArray b, double[]? weights = null)
     {
-        var av = Rows(a, 3, out _, nameof(a));
-        var bv = Rows(b, 3, out _, nameof(b));
+        var av = Rows2(a, 3, nameof(a));
+        var bv = Rows2(b, 3, nameof(b));
         if (av.Length != bv.Length) throw new ArgumentException("Expected inputs `a` and `b` to have same shapes.");
         var n = av.Length / 3;
         var w = weights ?? Enumerable.Repeat(1.0, n).ToArray();
@@ -426,7 +488,7 @@ public sealed partial class Rotation
     // ================================================================== conversion
 
     /// <summary>
-    /// Quaternions, shape (4) for a single rotation or (n, 4). <paramref name="canonical"/> picks
+    /// Quaternions, shape (..., 4) — just (4) for a single rotation. <paramref name="canonical"/> picks
     /// the sign with w &gt; 0 (ties broken on x, then y, then z), as scipy.
     /// </summary>
     public NdArray AsQuat(bool canonical = false, bool scalarFirst = false)
@@ -437,7 +499,7 @@ public sealed partial class Rotation
             if (canonical && NeedsFlip(q.AsSpan(i, 4))) for (var k = 0; k < 4; k++) q[i + k] = -q[i + k];
             if (scalarFirst) (q[i], q[i + 1], q[i + 2], q[i + 3]) = (q[i + 3], q[i], q[i + 1], q[i + 2]);
         }
-        return Single ? new NdArray(q, 4) : new NdArray(q, Count, 4);
+        return Shaped(q, _shape, 4);
     }
 
     private static bool NeedsFlip(ReadOnlySpan<double> q)
@@ -453,7 +515,7 @@ public sealed partial class Rotation
     {
         var m = new double[9 * Count];
         for (var i = 0; i < Count; i++) QuatToMatrix(_q.AsSpan(4 * i, 4), m.AsSpan(9 * i, 9));
-        return Single ? new NdArray(m, 3, 3) : new NdArray(m, Count, 3, 3);
+        return Shaped(m, _shape, 3, 3);
     }
 
     private static void QuatToMatrix(ReadOnlySpan<double> q, Span<double> m)
@@ -487,7 +549,7 @@ public sealed partial class Rotation
             if (degrees) scale *= 180 / Math.PI;
             for (var k = 0; k < 3; k++) r[3 * i + k] = scale * q[k];
         }
-        return Single ? new NdArray(r, 3) : new NdArray(r, Count, 3);
+        return Shaped(r, _shape, 3);
     }
 
     /// <summary>Modified Rodrigues parameters of the shorter rotation (norm ≤ 1), shape (3) or (n, 3).</summary>
@@ -500,7 +562,7 @@ public sealed partial class Rotation
             var den = 1 + sign * _q[4 * i + 3];
             for (var k = 0; k < 3; k++) r[3 * i + k] = sign * _q[4 * i + k] / den;
         }
-        return Single ? new NdArray(r, 3) : new NdArray(r, Count, 3);
+        return Shaped(r, _shape, 3);
     }
 
     /// <summary>Euler angles for a 3-axis sequence, each in [-π, π) (second in [0, π] or [-π/2, π/2]).</summary>
@@ -530,7 +592,7 @@ public sealed partial class Rotation
             gimbalLock |= GetAngles(extrinsic, symmetric, sign, Math.PI / 2, a, b, c, d, r.AsSpan(3 * n, 3));
         }
         if (degrees) for (var t = 0; t < r.Length; t++) r[t] *= 180 / Math.PI;
-        return Single ? new NdArray(r, 3) : new NdArray(r, Count, 3);
+        return Shaped(r, _shape, 3);
     }
 
     /// <summary>Bernardes and Bewley (2022), transcribed from scipy's _get_angles; returns true at a singularity.</summary>
@@ -607,7 +669,7 @@ public sealed partial class Rotation
             if (correct) dst[1] = -dst[1];
         }
         if (degrees) for (var t = 0; t < r.Length; t++) r[t] *= 180 / Math.PI;
-        return Single ? new NdArray(r, 3) : new NdArray(r, Count, 3);
+        return Shaped(r, _shape, 3);
     }
 
     private static double[] Cross(double[] u, double[] v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
@@ -628,18 +690,59 @@ public sealed partial class Rotation
         r[0] = x; r[1] = y; r[2] = z; r[3] = w;
     }
 
-    /// <summary>Composition: <c>(p * q).Apply(v) == p.Apply(q.Apply(v))</c>. Stacks must have
-    /// equal length or one of them a single rotation (or a stack of one).</summary>
+    /// <summary>Composition: <c>(p * q).Apply(v) == p.Apply(q.Apply(v))</c>. The shapes broadcast
+    /// like numpy arrays (a single rotation combines with every rotation of the other).</summary>
     public static Rotation operator *(Rotation p, Rotation q)
     {
         ArgumentNullException.ThrowIfNull(p); ArgumentNullException.ThrowIfNull(q);
-        if (p.Count != q.Count && p.Count != 1 && q.Count != 1)
-            throw new ArgumentException($"Expected equal number of rotations in both or a single rotation in either object, got {p.Count} rotations in first and {q.Count} rotations in second object.");
-        var n = Math.Max(p.Count, q.Count);
-        var r = new double[4 * n];
+        var shape = Broadcast(p._shape, q._shape, "rotations");
+        var pi = BroadcastIndex(p._shape, shape);
+        var qi = BroadcastIndex(q._shape, shape);
+        var r = new double[4 * pi.Length];
+        for (var i = 0; i < pi.Length; i++)
+            Compose(p._q.AsSpan(4 * pi[i], 4), q._q.AsSpan(4 * qi[i], 4), r.AsSpan(4 * i, 4));
+        return new Rotation(r, shape);
+    }
+
+    /// <summary>numpy broadcasting of two shapes.</summary>
+    internal static int[] Broadcast(int[] a, int[] b, string what)
+    {
+        var n = Math.Max(a.Length, b.Length);
+        var r = new int[n];
         for (var i = 0; i < n; i++)
-            Compose(p._q.AsSpan(4 * (p.Count == 1 ? 0 : i), 4), q._q.AsSpan(4 * (q.Count == 1 ? 0 : i), 4), r.AsSpan(4 * i, 4));
-        return new Rotation(r, p.Single && q.Single);
+        {
+            var da = i < n - a.Length ? 1 : a[i - (n - a.Length)];
+            var db = i < n - b.Length ? 1 : b[i - (n - b.Length)];
+            if (da != db && da != 1 && db != 1)
+                throw new ArgumentException($"Cannot broadcast {what} of shape ({string.Join(", ", a)}) and ({string.Join(", ", b)}).");
+            r[i] = da == 1 ? db : da;
+        }
+        return r;
+    }
+
+    /// <summary>For each element of an array of shape <paramref name="target"/> (C order), the flat
+    /// index of the element of the broadcast operand of shape <paramref name="source"/>.</summary>
+    internal static int[] BroadcastIndex(int[] source, int[] target)
+    {
+        var total = Product(target);
+        var result = new int[total];
+        var offset = target.Length - source.Length;
+        var strides = new int[source.Length];
+        var s = 1;
+        for (var i = source.Length - 1; i >= 0; i--) { strides[i] = source[i] == 1 ? 0 : s; s *= source[i]; }
+        var idx = new int[target.Length];
+        for (var flat = 0; flat < total; flat++)
+        {
+            var src = 0;
+            for (var k = 0; k < source.Length; k++) src += idx[k + offset] * strides[k];
+            result[flat] = src;
+            for (var k = target.Length - 1; k >= 0; k--)
+            {
+                if (++idx[k] < target[k]) break;
+                idx[k] = 0;
+            }
+        }
+        return result;
     }
 
     /// <summary>The inverse rotation(s).</summary>
@@ -647,21 +750,21 @@ public sealed partial class Rotation
     {
         var q = (double[])_q.Clone();
         for (var i = 0; i < q.Length; i += 4) { q[i] = -q[i]; q[i + 1] = -q[i + 1]; q[i + 2] = -q[i + 2]; }
-        return new Rotation(q, Single);
+        return new Rotation(q, _shape);
     }
 
     /// <summary>Rotation composed with itself <paramref name="n"/> times (fractional allowed), via the rotation vector.</summary>
     public Rotation Pow(double n)
     {
-        if (n == 0) return Single ? Identity() : Identity(Count);
+        if (n == 0) return Identity(_shape);
         if (n == -1) return Inv();
-        if (n == 1) return new Rotation((double[])_q.Clone(), Single);
+        if (n == 1) return new Rotation((double[])_q.Clone(), _shape);
         var rv = AsRotvec().AsContiguous().ToArray();
         for (var i = 0; i < rv.Length; i++) rv[i] *= n;
-        return FromRotvec(Single ? new NdArray(rv, 3) : new NdArray(rv, Count, 3));
+        return FromRotvec(Shaped(rv, _shape, 3));
     }
 
-    /// <summary>Rotation angle(s) in [0, π].</summary>
+    /// <summary>Rotation angle(s) in [0, π], flattened in C order for an array of rotations.</summary>
     public double[] Magnitude()
     {
         var m = new double[Count];
@@ -674,7 +777,8 @@ public sealed partial class Rotation
     }
 
     /// <summary>Whether each rotation is within <paramref name="atol"/> (radians unless
-    /// <paramref name="degrees"/>) of the other, measured by the angle of other·this⁻¹.</summary>
+    /// <paramref name="degrees"/>) of the other, measured by the angle of other·this⁻¹. The shapes
+    /// broadcast; the result is flattened in C order.</summary>
     public bool[] ApproxEqual(Rotation other, double atol = 1e-8, bool degrees = false)
     {
         var tol = degrees ? atol * Math.PI / 180 : atol;
@@ -685,7 +789,10 @@ public sealed partial class Rotation
     /// The rotation minimising the weighted sum of squared chordal distances (Markley et al.
     /// 2007): the dominant eigenvector of Σ wᵢ qᵢ qᵢᵀ. Insensitive to quaternion sign.
     /// </summary>
-    public Rotation Mean(double[]? weights = null)
+    /// <param name="weights">One non-negative weight per rotation, flattened in C order (default all 1).</param>
+    /// <param name="axis">The axes to average over (negative counts from the end); null averages
+    /// over all of them and returns a single rotation, as scipy 1.17's <c>axis=None</c>.</param>
+    public Rotation Mean(double[]? weights = null, int[]? axis = null)
     {
         if (Count == 0) throw new ArgumentException("Mean of an empty rotation set is undefined.");
         if (weights is not null)
@@ -693,8 +800,51 @@ public sealed partial class Rotation
             if (weights.Length != Count) throw new ArgumentException("Expected `weights` to have one value per rotation.");
             if (weights.Any(w => w < 0)) throw new ArgumentException("`weights` must be non-negative.");
         }
+        var (outShape, groups) = ReductionGroups(_shape, axis);
+        var result = new double[4 * groups.Length];
+        for (var g = 0; g < groups.Length; g++)
+            MeanQuat(groups[g], weights).CopyTo(result, 4 * g);
+        return new Rotation(result, outShape);
+    }
+
+    /// <summary>
+    /// For a reduction over <paramref name="axis"/> (null: all) of an array of the given shape, the
+    /// shape left over and, for each of its elements in C order, the flat indices reduced into it.
+    /// </summary>
+    internal static (int[] Shape, int[][] Groups) ReductionGroups(int[] shape, int[]? axis)
+    {
+        var rank = shape.Length;
+        var reduce = new bool[rank];
+        if (axis is null) Array.Fill(reduce, true);
+        else
+            foreach (var a0 in axis)
+            {
+                if (a0 < -rank || a0 >= rank) throw new ArgumentException($"axis {a0} is out of bounds for shape ({string.Join(", ", shape)}).");
+                reduce[(a0 + rank) % rank] = true;
+            }
+        var outShape = Enumerable.Range(0, rank).Where(i => !reduce[i]).Select(i => shape[i]).ToArray();
+        var groups = new List<int>[Product(outShape)];
+        for (var g = 0; g < groups.Length; g++) groups[g] = [];
+        var idx = new int[rank];
+        var total = Product(shape);
+        for (var flat = 0; flat < total; flat++)
+        {
+            var g = 0;
+            for (var i = 0; i < rank; i++) if (!reduce[i]) g = g * shape[i] + idx[i];
+            groups[g].Add(flat);
+            for (var k = rank - 1; k >= 0; k--)
+            {
+                if (++idx[k] < shape[k]) break;
+                idx[k] = 0;
+            }
+        }
+        return (outShape, groups.Select(l => l.ToArray()).ToArray());
+    }
+
+    private double[] MeanQuat(int[] members, double[]? weights)
+    {
         var k = new double[16];
-        for (var i = 0; i < Count; i++)
+        foreach (var i in members)
         {
             var w = weights?[i] ?? 1.0;
             for (var r = 0; r < 4; r++)
@@ -707,22 +857,33 @@ public sealed partial class Rotation
         for (var i = 1; i < 4; i++) if (vals[i] > vals[best]) best = i;
         var q = new double[4];
         for (var r = 0; r < 4; r++) q[r] = vecs[4 * r + best];
-        return new Rotation(Normalise(q), true);
+        return Normalise(q);
     }
 
     /// <summary>
-    /// Rotates vectors: shape (3) or (m, 3). A single rotation rotates every vector; a stack of
-    /// n rotates one vector n ways, or n vectors pairwise.
+    /// Rotates vectors of shape (..., 3). The rotation shape and the vectors' leading shape
+    /// broadcast: a single rotation rotates every vector, a stack of n rotates one vector n ways
+    /// or n vectors pairwise, and so on for higher dimensions.
     /// </summary>
     public NdArray Apply(NdArray vectors, bool inverse = false)
     {
-        var v = Rows(vectors, 3, out var singleVec, nameof(vectors));
-        var m = v.Length / 3;
-        if (Count != 1 && m != 1 && Count != m)
-            throw new ArgumentException($"Expected equal numbers of rotations and vectors, or a single rotation, or a single vector, got {Count} rotations and {m} vectors.");
-        var r = ApplyCore(v, inverse);
-        var n = r.Length / 3;
-        return Single && singleVec ? new NdArray(r, 3) : new NdArray(r, n, 3);
+        var v = Rows(vectors, 3, out var lead, nameof(vectors));
+        var shape = Broadcast(_shape, lead, "rotations and vectors");
+        var ri = BroadcastIndex(_shape, shape);
+        var vi = BroadcastIndex(lead, shape);
+        var r = new double[3 * ri.Length];
+        Span<double> mat = stackalloc double[9];
+        var last = -1;
+        for (var i = 0; i < ri.Length; i++)
+        {
+            if (ri[i] != last) { QuatToMatrix(_q.AsSpan(4 * ri[i], 4), mat); last = ri[i]; }
+            double x = v[3 * vi[i]], y = v[3 * vi[i] + 1], z = v[3 * vi[i] + 2];
+            for (var k = 0; k < 3; k++)
+                r[3 * i + k] = inverse
+                    ? mat[k] * x + mat[3 + k] * y + mat[6 + k] * z
+                    : mat[3 * k] * x + mat[3 * k + 1] * y + mat[3 * k + 2] * z;
+        }
+        return Shaped(r, shape, 3);
     }
 
     /// <summary>Rotates one vector.</summary>
@@ -754,36 +915,64 @@ public sealed partial class Rotation
         return r;
     }
 
-    /// <summary>The i-th rotation of a stack (negative counts from the end), as a single rotation.</summary>
+    private int BlockSize => Single ? 1 : Product(_shape[1..]);
+
+    /// <summary>
+    /// The i-th element along the first axis (negative counts from the end): a single rotation
+    /// for a 1-D array, an array of shape <c>Shape[1..]</c> otherwise. Setting it overwrites those
+    /// rotations (scipy's <c>__setitem__</c>); the value must have shape <c>Shape[1..]</c>.
+    /// </summary>
     public Rotation this[int index]
     {
         get
         {
-            if (Single) throw new InvalidOperationException("Single rotation is not subscriptable.");
-            if (index < 0) index += Count;
-            if (index < 0 || index >= Count) throw new IndexOutOfRangeException($"Index {index} is out of range for {Count} rotations.");
-            return new Rotation(_q[(4 * index)..(4 * index + 4)], true);
+            var (start, block) = Block(index);
+            return new Rotation(_q[(4 * start)..(4 * (start + block))], _shape[1..]);
+        }
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            var (start, block) = Block(index);
+            if (!value._shape.SequenceEqual(_shape[1..])) throw new ArgumentException("The assigned rotation must have the shape of one element of the first axis.");
+            Array.Copy(value._q, 0, _q, 4 * start, 4 * block);
         }
     }
 
-    /// <summary>A sub-stack.</summary>
+    private (int Start, int Block) Block(int index)
+    {
+        if (Single) throw new InvalidOperationException("Single rotation is not subscriptable.");
+        var len = _shape[0];
+        if (index < 0) index += len;
+        if (index < 0 || index >= len) throw new IndexOutOfRangeException($"Index {index} is out of range for {len} rotations.");
+        var block = BlockSize;
+        return (index * block, block);
+    }
+
+    /// <summary>A slice along the first axis.</summary>
     public Rotation this[Range range]
     {
         get
         {
             if (Single) throw new InvalidOperationException("Single rotation is not subscriptable.");
-            var (off, len) = range.GetOffsetAndLength(Count);
-            return new Rotation(_q[(4 * off)..(4 * (off + len))], false);
+            var (off, len) = range.GetOffsetAndLength(_shape[0]);
+            var block = BlockSize;
+            return new Rotation(_q[(4 * off * block)..(4 * (off + len) * block)], [len, .. _shape[1..]]);
         }
     }
 
-    /// <summary>The rotations at the given indices, as a stack.</summary>
+    /// <summary>The elements at the given indices along the first axis.</summary>
     public Rotation Take(int[] indices)
     {
         ArgumentNullException.ThrowIfNull(indices);
-        var q = new double[4 * indices.Length];
-        for (var i = 0; i < indices.Length; i++) Array.Copy(_q, 4 * indices[i], q, 4 * i, 4);
-        return new Rotation(q, false);
+        if (Single) throw new InvalidOperationException("Single rotation is not subscriptable.");
+        var block = BlockSize;
+        var q = new double[4 * block * indices.Length];
+        for (var i = 0; i < indices.Length; i++)
+        {
+            var (start, _) = Block(indices[i]);
+            Array.Copy(_q, 4 * start, q, 4 * block * i, 4 * block);
+        }
+        return new Rotation(q, [indices.Length, .. _shape[1..]]);
     }
 
     private static double[] Mul3(double[] a, double[] b)
@@ -799,7 +988,7 @@ public sealed partial class Rotation
         => r[0] * (r[4] * r[8] - r[5] * r[7]) - r[1] * (r[3] * r[8] - r[5] * r[6]) + r[2] * (r[3] * r[7] - r[4] * r[6]);
 
     /// <inheritdoc />
-    public override string ToString() => Single ? $"Rotation(quat=[{string.Join(", ", _q.Select(x => x.ToString("G6")))}])" : $"Rotation[{Count}]";
+    public override string ToString() => Single ? $"Rotation(quat=[{string.Join(", ", _q.Select(x => x.ToString("G6")))}])" : $"Rotation[{string.Join(", ", _shape)}]";
 }
 
 /// <summary>

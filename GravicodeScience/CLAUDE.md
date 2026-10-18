@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 v0.1.0 is implemented and complete against `requirements.md`, and a seventh library, **SciNet**
-(SciPy for .NET), has been added beside the original six: 28 projects, **3,314 tests passing**
-(2,216 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
+(SciPy for .NET), has been added beside the original six: 28 projects, **4,081 tests passing**
+(2,983 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
 suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -337,6 +337,25 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
   also every 4th-order band design). The general `Df2tLoop` stores and reloads each state per
   sample: order 4 went 9.4 -> 5.3 ms on 1M samples, order 8 12.5 -> 6.8. The expression per state
   is unchanged, so each is bit-identical to `Df2tLoop`, which a test asserts.
+- **Schur/Eig run LAPACK's multishift QR with aggressive early deflation** (`LinalgMultishiftQr.cs`,
+  1-based like the Fortran: offset the pointer so `h[i*ldh + j]` is `H(i,j)`; a Fortran column
+  operation is then stride `ldh`). The double-shift kernel stays as the tests' reference. Crossovers
+  differ by output: with Schur vectors from n = 85, eigenvalues only from 300, because the old
+  kernel then touches only the active block. Bulge reflectors are always accumulated and applied
+  as products - LAPACK's below-14-shifts per-reflector path walks three columns of every row-major
+  row and measured 1.2-1.3x slower.
+- **The SciPy reference for Schur eigenvalues is unbalanced `schur`, not `eigvals`.** `eigvals`
+  balances first, and on ill-conditioned eigenvalues (Frank 12) the two differ by ~5e-8.
+- **SciPy's Mathieu functions are wrong for q >= 5000** (`mathieu_b(5, 20000)` = +28258, truly
+  -37464.7) and lose 6 digits at m = 15, q = 1000. The tests pin a 40-digit mpmath reference built
+  from the definitions and checked by the Wronskian. Fix the sign of ce/se at pi/2, not at 0: at
+  large q, ce_m(0) is exponentially small and its sign is noise.
+- **Random-variable moments: never derive one kind from another that was cached from quadrature** -
+  the result then depends on call order and loses ~7 digits. Transforms that override log functions
+  must report them as formulas, or dispatch integrates across an interior singularity. The mode is
+  found by golden section; Brent's parabolic steps stall at a density jump.
+- **`Rotation.Count` is the total number of rotations** now that rotations have an N-d `Shape`;
+  `Magnitude()`/`ApproxEqual()` return C-order flattened values.
 - **Native is not automatically faster.** SciPy's bundled OpenBLAS `dgesv` was 10x slower than the
   managed recursive LU, so `expm`'s solve stays managed; Schur/Eig route to `dgees`/`dgeev` only
   because they measured faster. Measure each routine before routing it to LAPACK.

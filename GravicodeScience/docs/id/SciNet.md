@@ -92,7 +92,15 @@ trigonometri berargumen derajat, dan invers cdflib yang diekspos SciPy — `Gdtr
 `Stdtridf`, `Bdtrik`, `Pdtrik`, `Nbdtrik`, serta `Chndtr`, `Nctdtr`, `Ncfdtr` non-sentral beserta
 inversnya. Invers-invers ini dipecahkan sampai presisi penuh dan mengembalikan NaN bila tidak ada
 nilai parameter yang mencapai probabilitasnya (SciPy mengembalikan batas pencariannya, misalnya
-−1e100). Belum diimplementasikan: fungsi Mathieu.
+−1e100).
+
+Fungsi Mathieu (`MathieuA`, `MathieuB`, `MathieuCem`, `MathieuSem`, `MathieuModCem1/2`,
+`MathieuModSem1/2`) mengikuti konvensi SciPy (x dalam derajat, turunan per radian, ∫ce² = π)
+tetapi bukan kode Zhang–Jin-nya: nilai karakteristik adalah nilai eigen matriks rekurensi lewat
+bisection Sturm, dan fungsi radialnya deret hasil kali Bessel. Semuanya dipatok terhadap rujukan
+40 digit yang dibangun di mpmath dari definisinya (serta Wronskian 2/π), bukan terhadap SciPy —
+nilai karakteristik SciPy meleset 3–175% untuk q ≥ 5000 (`mathieu_b(5, 20000)` memberi +28258;
+nilai sebenarnya −37464,7) dan ce/se-nya kehilangan enam digit pada m = 15, q = 1000.
 
 ## Konstanta fisika
 
@@ -268,11 +276,20 @@ QR, SVD, eigensolver simetris, dan perkalian matriks paralel ter-pack milik Grav
 (`PackedMatMul.Gemm`, yang awalnya ditulis di sini) di bawahnya, serta LU blok rekursif dan solve
 segitiga berblok miliknya sendiri untuk kernel dense.
 `Expm` adalah scaling-and-squaring Al-Mohy–Higham dengan pemilihan derajat Padé — setara atau
-lebih cepat dari SciPy mulai n = 200; `ExpmFrechet` memberikan turunan Fréchet-nya. Sapuan QR
-Francis di balik `Schur`/`Eig` menerapkan reflektornya secara tertunda dan paralel; bila
-`NativeLapack` milik GraviNum menemukan LAPACK saat runtime, `Schur`, `Eig`, dan `Eigvals` beralih
-ke `dgees`/`dgeev` (solve di `expm` tetap managed: `dgesv` OpenBLAS bawaan SciPy terukur 10× lebih
-lambat).
+lebih cepat dari SciPy mulai n = 200; `ExpmFrechet` memberikan turunan Fréchet-nya. Mulai orde 85,
+`Schur`/`Eig` adalah algoritma LAPACK dalam kode managed: reduksi Hessenberg berblok
+(`dgehrd`/`dlahr2`, Q dibentuk mundur seperti `dorghr`) dan QR multishift small-bulge dengan
+aggressive early deflation milik `dhseqr` (`dlaqr0`/`dlaqr3`/`dlaqr5`, `dlahqr`, `dtrexc`), dengan
+reflektor bulge diakumulasi dan diterapkan sebagai perkalian matriks. Di bawahnya, sapuan Francis
+double-shift (tertunda, paralel) sama cepat atau lebih cepat. Diukur dalam satu proses terhadap
+SciPy 1.17.1 pada jendela waktu yang sama, `schur` beserta vektor Schur memakan 32 ms dibanding
+39 ms SciPy di n = 200, 140 dibanding 181 di 400, dan 760 dibanding 790 di 800 — 1,6–2,6× lebih
+cepat dari kernel double-shift. Reduksi Hessenberg saja (dengan Q) 5 ms dibanding 17–22 ms SciPy
+di n = 200 dan 160 dibanding 203 di 800. Karena itu LAPACK yang ditemukan `NativeLapack` milik
+GraviNum saat runtime kini hanya dipakai di tempat yang terukur lebih cepat: `dgees` untuk bentuk
+Schur di orde 64–84, `dgeev` untuk `Eig` di bawah 85 dan mulai 550, tidak pernah untuk
+`Hessenberg` atau nilai eigen saja (solve di `expm` juga tetap managed: `dgesv` OpenBLAS bawaan
+SciPy terukur 10× lebih lambat).
 
 `Differentiate.Derivative(f, x)` adalah `scipy.differentiate.derivative` — beda pusat adaptif
 dengan ekstrapolasi Richardson dan taksiran galat yang jujur — ditambah `Jacobian`, `Gradient`,
@@ -280,10 +297,9 @@ dan `Hessian`.
 
 **Pendekatan yang perlu diketahui:** `FractionalMatrixPower` adalah `exp(t·log A)`, bukan
 Higham–Lin; solver Riccati memakai fungsi tanda matriks / structured doubling, bukan QZ seperti
-SciPy (solusi penstabilnya unik, sehingga hasilnya sesuai sampai ~1e-11). Schur managed belum
-memakai QR multishift atau aggressive early deflation, dan itulah sisa jaraknya dari LAPACK
-(~1,5× di n = 200). Belum diimplementasikan: pengurutan ulang Schur, `Eig(a, b)` tergeneralisasi
-lewat QZ, vektor eigen kiri.
+SciPy (solusi penstabilnya unik, sehingga hasilnya sesuai sampai ~1e-11). Belum
+diimplementasikan: pengurutan ulang Schur publik (`dtrexc` internal milik AED tidak dibuka),
+`Eig(a, b)` tergeneralisasi lewat QZ, vektor eigen kiri.
 
 ## Matriks sparse, solver, dan graf
 
@@ -339,7 +355,17 @@ var periodic = new KDTree(points, boxsize: [1.0, 1.0, 1.0]);   // batas yang mem
 var r = Rotation.FromEuler("xyz", [90, 0, 45], degrees: true);
 r.AsQuat();  r.Apply(vectors);  r.Inv();  Rotation.AlignVectors(a, b);  Rotation.CreateGroup("O");
 new Slerp(times, rotations).Evaluate(0.5);  new RotationSpline(times, rotations).Evaluate(t, order: 1);
+var grid = Rotation.FromQuat(quats);                      // quats (2, 3, 4): Shape-nya (2, 3)
+(grid * grid[0]).Apply(vectors);  grid.Mean(axis: [1]);  // broadcasting numpy, seperti SciPy 1.17
+var tf = RigidTransform.FromComponents(translation, r);   // SE(3): rotasi, lalu translasi
+(tf * tf.Inv()).AsMatrix();  tf.AsExpCoords();  tf.AsDualQuat();  tf.Pow(0.5);  tf.Apply(points);
 ```
+
+Rotasi dan transformasi kaku adalah array berbentuk apa pun, seperti di SciPy 1.17: komposisi dan
+`Apply` melakukan broadcasting, pengindeksan bekerja sepanjang sumbu pertama, dan `Mean`
+mereduksi sumbu yang dipilih. `RigidTransform` mengikuti algoritma SciPy (re-ortonormalisasi
+lewat kuaternion setelah setiap komposisi, eksponensial dan logaritma SE(3) bentuk tertutup dengan
+cabang Taylor di bawah 1e-3) dan cocok dengannya sampai ~1e-15.
 
 Delaunay dan hull memakai predikat eksak, sehingga kisi dan titik-titik sesferis tertriangulasi
 dengan benar; 2-D tetap memakai Bowyer–Watson khusus, dimensi yang lebih tinggi memakai quickhull
@@ -513,7 +539,11 @@ dua sampel) dan opsi `Alternative`; hasilnya sesuai dengan SciPy sampai sekitar 
 tempat di mana SciNet sengaja *lebih* eksak: Ansari–Bradley (frekuensi eksak SciPy berupa
 float32) serta probabilitas kotak Dunnett/bivariat (SciPy mengintegrasikannya secara acak).
 `Bootstrap`, `PermutationTest`, dan `MonteCarloTest` menerima flag `parallel` yang memberi hasil
-identik dengan versi serialnya.
+identik dengan versi serialnya. Objek metode SciPy `PermutationMethod`, `MonteCarloMethod`, dan
+`BootstrapMethod` diterima di tempat SciPy 1.17 menerimanya: `Pearsonr` (beserta interval bootstrap
+dari hasilnya), `Spearmanrho`, `TtestInd`, `MannWhitneyU`, `Wilcoxon`, `Chatterjeexi`, `BwsTest`,
+`AndersonKsamp`, `Anderson` (Monte Carlo), dan `Chi2Contingency`; `FisherExact` untuk tabel r×c
+belum.
 
 ### Data tersensor dan analisis survival
 
@@ -545,10 +575,37 @@ KDE eksak berjalan paralel dan sekitar 30× lebih cepat dari milik SciPy (10 rib
 dievaluasi di 100 ribu titik: 1,1–1,5 detik dibanding 39,8 detik). Sobol dan Halton tanpa
 scrambling mereproduksi titik-titik SciPy bit demi bit; Sobol dihitung langsung dari indeks titik
 (kode Gray), sehingga fast-forward gratis dan pengambilan paralel identik dengan serial. Sobol
-mendukung 4096 dimensi (tabel SciPy sampai 21201). Belum diimplementasikan: kerangka
-random-variable SciPy yang lebih baru (`make_distribution`, `Normal`, `Mixture`, …) dan objek
-metodenya (`BootstrapMethod`, …) — yang dicerminkan SciNet adalah API klasik bergaya
-`rv_continuous`.
+mendukung 4096 dimensi (tabel SciPy sampai 21201).
+
+### Kerangka random-variable
+
+```csharp
+var x = new Normal(mu: 1.0, sigma: 2.0);
+x.Cdf(0.5);  x.Ccdf(9.0);  x.Icdf(1e-300);  x.ILogCcdf(-700);  x.Cdf(-1.0, 2.0);   // P(-1 <= X <= 2)
+x.Moment(4, MomentKind.Central);  x.Kurtosis();  x.Entropy();  x.Sample([1000], rng);
+var y = Stats.Truncate(3.0 * new Logistic() + 1.0, lb: 0.0);        // aritmetika menggeser dan menskala
+var g = Stats.MakeDistribution(Stats.Gamma(2.5));                    // rv_continuous beku apa pun
+var o = Stats.OrderStatistic(new Uniform(0, 1), r: 2, n: 6);   o.Mean();
+var m = new Mixture([new Normal(-1, 0.5), new Normal(2, 1)], [0.3, 0.7]);
+x.Cdf(0.5, RandomVariableMethod.Quadrature);                         // override method= ala scipy
+```
+
+Kerangka SciPy yang lebih baru (`ContinuousDistribution` → `ContinuousRandomVariable`, `Normal`,
+`Uniform`, `Logistic`, `Binomial`, `make_distribution`, `truncate`, `order_statistic`, `abs`/`exp`/
+`log`, pangkat dan kebalikan, `Mixture`) berdampingan dengan API klasik `rv_continuous`. Setiap
+fungsi memilih metodenya seperti SciPy — rumus, lalu log/exp dari rumus log, lalu komplemen dengan
+fall-back aman SciPy, lalu kuadratur, inversi, atau optimisasi — dan momen mencoba cache, rumus,
+transformasi, normalisasi, dan kuadratur dalam urutan SciPy. Parameternya skalar (satu distribusi
+per objek) dan parameter tidak sah melempar galat. Perbedaan yang disengaja: transformasi
+terpotong, monoton, dan terlipat melaporkan apa yang mereka override sebagai rumus, sehingga CDF-nya
+eksak di tempat SciPy mengintegrasikan densitas (`P(-1 <= Z^3 <= 2)` = 0,7375; SciPy memberi
+0,6931); kuadratur atas seluruh support dipecah di median, dan transformasi antarjenis momen
+melewati momen hasil kuadratur, sehingga hasil tidak bergantung pada urutan pemanggilan; pemotongan
+jauh di ekor diinversi lewat fungsi survival (SciPy hanya menyisakan sembilan digit di sana). Juga
+berbeda dari SciPy: `Binomial.Cdf(2.5)` adalah P(X ≤ 2), dan modus dari densitas yang tak terbatas
+di salah satu ujung adalah ujung itu (SciPy mengembalikan NaN). Setiap kasus dipatok terhadap
+SciPy 1.17.1 atau, bila SciPy keliru, terhadap mpmath dan bentuk tertutup
+(`gen_random_variables.py`).
 
 ## Pemrosesan citra
 
@@ -702,7 +759,7 @@ Kasus yang lebih besar yang diukur selama pengembangan (sekali jalan, mesin yang
 kasar): KDE 10 ribu titik yang dievaluasi di 100 ribu titik sekitar 30× lebih cepat dari
 `gaussian_kde` SciPy, `spearmanr` atas 10⁶ sekitar 3×, `norm.ppf` atas 10⁶ sekitar 7×, `Eigsh`
 pada Laplacian 10k setara ARPACK, `Splu` pada Poisson 300² sekitar 2× lebih cepat dari SuperLU,
-dan Schur/Eig di n = 400 sekitar 1,5–1,7× di belakang LAPACK.
+dan Schur di n = 400 sekitar 1,3× lebih cepat dari SciPy (QR multishift, lihat Aljabar linear).
 
 ---
 

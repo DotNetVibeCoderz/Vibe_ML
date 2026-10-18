@@ -100,7 +100,7 @@ public sealed record KstestResult : SignificanceResult
     public int StatisticSign { get; }
 }
 
-/// <summary>Result of <see cref="Stats.Anderson"/> (scipy's <c>AndersonResult</c>).</summary>
+/// <summary>Result of <see cref="Stats.Anderson(double[], string)"/> (scipy's <c>AndersonResult</c>).</summary>
 /// <param name="Statistic">The Anderson–Darling statistic A².</param>
 /// <param name="CriticalValues">Critical values at <paramref name="SignificanceLevel"/>.</param>
 /// <param name="SignificanceLevel">Significance levels in percent, matching the critical values (for
@@ -145,13 +145,13 @@ public sealed record AndersonResult(double Statistic, double[] CriticalValues, d
     }
 }
 
-/// <summary>Result of <see cref="Stats.AndersonKsamp"/> (scipy's <c>Anderson_ksampResult</c>).</summary>
+/// <summary>Result of <see cref="Stats.AndersonKsamp(double[][], string)"/> (scipy's <c>Anderson_ksampResult</c>).</summary>
 /// <param name="Statistic">The normalised k-sample statistic.</param>
 /// <param name="CriticalValues">Critical values at 25%, 10%, 5%, 2.5%, 1%, 0.5%, 0.1%.</param>
 /// <param name="Pvalue">Approximate p-value, floored at 0.001 and capped at 0.25 as scipy.</param>
 public sealed record AndersonKsampResult(double Statistic, double[] CriticalValues, double Pvalue);
 
-/// <summary>Result of <see cref="Stats.Chi2Contingency"/> (scipy's <c>Chi2ContingencyResult</c>).</summary>
+/// <summary>Result of <see cref="Stats.Chi2Contingency(GraviNum.NdArray, bool, double?)"/> (scipy's <c>Chi2ContingencyResult</c>).</summary>
 /// <param name="Statistic">The test statistic.</param>
 /// <param name="Pvalue">The p-value.</param>
 /// <param name="Dof">Degrees of freedom.</param>
@@ -206,7 +206,7 @@ public sealed record TheilslopesResult(double Slope, double Intercept, double Lo
 /// <param name="Intercept">Intercept.</param>
 public sealed record SiegelslopesResult(double Slope, double Intercept);
 
-/// <summary>Result of <see cref="Stats.Pearsonr"/> (scipy's <c>PearsonRResult</c>).</summary>
+/// <summary>Result of <see cref="Stats.Pearsonr(double[], double[], Alternative)"/> (scipy's <c>PearsonRResult</c>).</summary>
 public sealed record PearsonRResult : SignificanceResult
 {
     internal PearsonRResult(double r, double p, int n, Alternative alternative) : base(r, p)
@@ -220,6 +220,25 @@ public sealed record PearsonRResult : SignificanceResult
 
     /// <summary>The alternative of the test.</summary>
     public Alternative Alternative { get; }
+
+    // The data, kept for a bootstrap confidence interval (scipy keeps them on the result too).
+    internal double[]? X { get; init; }
+    internal double[]? Y { get; init; }
+
+    /// <summary>
+    /// Bootstrap confidence interval for ρ (scipy's <c>confidence_interval(method=BootstrapMethod())</c>):
+    /// pairs are resampled together and the interval is clipped to [−1, 1]. A null
+    /// <paramref name="method"/> gives the Fisher-transformation interval.
+    /// </summary>
+    public ConfidenceInterval ConfidenceInterval(double confidenceLevel, BootstrapMethod? method)
+    {
+        if (method is null) return ConfidenceInterval(confidenceLevel);
+        if (X is null || Y is null) throw new InvalidOperationException("This result does not carry the data needed for a bootstrap interval.");
+        var res = Stats.Bootstrap([X, Y], d => Stats.PearsonCoefficient(d[0], d[1]), method.NResamples, confidenceLevel, method.Method,
+            paired: true, alternative: Alternative, seed: method.Seed, parallel: method.Parallel);
+        var ci = res.ConfidenceInterval;
+        return new(Math.Clamp(ci.Low, -1.0, 1.0), Math.Clamp(ci.High, -1.0, 1.0));
+    }
 
     /// <summary>Confidence interval for ρ by the Fisher transformation, scipy's default method.</summary>
     public ConfidenceInterval ConfidenceInterval(double confidenceLevel = 0.95)

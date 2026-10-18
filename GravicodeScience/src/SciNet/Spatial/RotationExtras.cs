@@ -17,7 +17,7 @@ public sealed partial class Rotation
     /// as in scipy.</remarks>
     public (Rotation Reduced, int[]? LeftIndices, int[]? RightIndices) Reduce(Rotation? left = null, Rotation? right = null)
     {
-        if (left is null && right is null) return (new Rotation((double[])_q.Clone(), Single), null, null);
+        if (left is null && right is null) return (new Rotation((double[])_q.Clone(), _shape), null, null);
         var lq = left?._q ?? [0, 0, 0, 1];
         var rq = right?._q ?? [0, 0, 0, 1];
         int nl = lq.Length / 4, nr = rq.Length / 4;
@@ -44,7 +44,7 @@ public sealed partial class Rotation
             Compose(lp, rq.AsSpan(4 * ri[i], 4), q);
             q.CopyTo(outQ.AsSpan(4 * i, 4));
         }
-        return (new Rotation(outQ, Single), left is null ? null : li, right is null ? null : ri);
+        return (new Rotation(outQ, _shape), left is null ? null : li, right is null ? null : ri);
     }
 
     /// <summary>
@@ -165,7 +165,7 @@ public sealed class RotationSpline
     public RotationSpline(double[] times, Rotation rotations)
     {
         ArgumentNullException.ThrowIfNull(times); ArgumentNullException.ThrowIfNull(rotations);
-        if (rotations.Single) throw new ArgumentException("`rotations` must be a sequence of rotations.");
+        if (rotations.Single || rotations.Shape.Length != 1) throw new ArgumentException("`rotations` must be a one-dimensional sequence of rotations.");
         if (rotations.Count == 1) throw new ArgumentException("`rotations` must contain at least 2 rotations.");
         if (times.Length != rotations.Count)
             throw new ArgumentException($"Expected number of rotations to be equal to number of timestamps given, got {rotations.Count} rotations and {times.Length} timestamps.");

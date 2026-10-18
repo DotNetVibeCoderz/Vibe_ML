@@ -90,8 +90,15 @@ Also: Struve H/L, `Hyperu`, the Kelvin functions, Wright's generalised Bessel fu
 degree-argument trigonometry, and the cdflib inverses SciPy exposes — `Gdtrix`/`Gdtria`/`Gdtrib`,
 `Stdtridf`, `Bdtrik`, `Pdtrik`, `Nbdtrik`, and the non-central `Chndtr`, `Nctdtr`, `Ncfdtr` with
 their inverses. The inverses solve to full precision and return NaN where no parameter reaches
-the probability (SciPy returns its search limit, such as −1e100). Not implemented: Mathieu
-functions.
+the probability (SciPy returns its search limit, such as −1e100).
+
+Mathieu functions (`MathieuA`, `MathieuB`, `MathieuCem`, `MathieuSem`, `MathieuModCem1/2`,
+`MathieuModSem1/2`) follow SciPy's conventions (x in degrees, derivatives per radian, ∫ce² = π)
+but not its Zhang–Jin code: the characteristic values are Sturm-bisection eigenvalues of the
+recurrence matrices and the radial functions Bessel-product series. They are pinned against a
+40-digit reference built in mpmath from the definitions (and the Wronskian 2/π), not against
+SciPy — whose characteristic values are 3–175% wrong for q ≥ 5000 (`mathieu_b(5, 20000)` is
++28258; the value is −37464.7) and whose ce/se lose six digits at m = 15, q = 1000.
 
 ## Physical constants
 
@@ -262,10 +269,19 @@ symmetric eigensolver underneath — and GraviNum's packed parallel matrix produ
 (`PackedMatMul.Gemm`, which began life here) — with recursive blocked LU and blocked triangular
 solves for the dense kernels. `Expm` is Al-Mohy–Higham
 scaling-and-squaring with Padé degree selection — at or below SciPy's time from n = 200 up;
-`ExpmFrechet` gives its Fréchet derivative. The Francis QR sweeps behind `Schur`/`Eig` apply their
-reflectors deferred and in parallel; when GraviNum's `NativeLapack` finds a LAPACK at run time,
-`Schur`, `Eig` and `Eigvals` go to `dgees`/`dgeev` instead (`expm`'s solve stays managed: SciPy's
-bundled OpenBLAS `dgesv` measured 10× slower than it).
+`ExpmFrechet` gives its Fréchet derivative. From order 85, `Schur`/`Eig` are LAPACK's
+algorithm in managed code: a blocked Hessenberg reduction (`dgehrd`/`dlahr2`, Q formed backwards as
+`dorghr` does) and the small-bulge multishift QR with aggressive early deflation of `dhseqr`
+(`dlaqr0`/`dlaqr3`/`dlaqr5`, `dlahqr`, `dtrexc`), with bulge reflectors accumulated and applied as
+matrix products. Below that, the Francis double-shift sweeps (deferred, parallel) are as fast or
+faster. Measured in one process against SciPy 1.17.1 in the same time window, `schur` with Schur
+vectors takes 32 ms against SciPy's 39 at n = 200, 140 against 181 at 400 and 760 against 790 at
+800 — 1.6–2.6× faster than the double-shift kernel. The Hessenberg reduction alone (with Q) is
+5 ms against SciPy's 17–22 at n = 200 and 160 against 203 at 800. Because of that, a LAPACK found
+at run time by GraviNum's `NativeLapack` is now used only where it measured faster: `dgees` for
+the Schur form at orders 64–84, `dgeev` for `Eig` below 85 and from 550, never for `Hessenberg`
+or eigenvalues alone (`expm`'s solve stays managed too: SciPy's bundled OpenBLAS `dgesv`
+measured 10× slower than it).
 
 `Differentiate.Derivative(f, x)` is `scipy.differentiate.derivative` — adaptive central
 differences with Richardson extrapolation and an honest error estimate — plus `Jacobian`,
@@ -273,9 +289,9 @@ differences with Richardson extrapolation and an honest error estimate — plus 
 
 **Approximations to know:** `FractionalMatrixPower` is `exp(t·log A)`, not Higham–Lin; Riccati
 solvers use the matrix sign function / structured doubling rather than SciPy's QZ (the
-stabilising solution is unique, so they agree to ~1e-11). The managed Schur has no multishift
-QR or aggressive early deflation, which is the remaining gap to LAPACK (~1.5× at n = 200).
-Not implemented: Schur reordering, generalised `Eig(a, b)` via QZ, left eigenvectors.
+stabilising solution is unique, so they agree to ~1e-11). Not implemented: public Schur
+reordering (the AED's internal `dtrexc` is not exposed), generalised `Eig(a, b)` via QZ, left
+eigenvectors.
 
 ## Sparse matrices, solvers and graphs
 
@@ -329,7 +345,17 @@ var periodic = new KDTree(points, boxsize: [1.0, 1.0, 1.0]);   // wrap-around bo
 var r = Rotation.FromEuler("xyz", [90, 0, 45], degrees: true);
 r.AsQuat();  r.Apply(vectors);  r.Inv();  Rotation.AlignVectors(a, b);  Rotation.CreateGroup("O");
 new Slerp(times, rotations).Evaluate(0.5);  new RotationSpline(times, rotations).Evaluate(t, order: 1);
+var grid = Rotation.FromQuat(quats);                      // quats (2, 3, 4): Shape is (2, 3)
+(grid * grid[0]).Apply(vectors);  grid.Mean(axis: [1]);  // numpy broadcasting, as SciPy 1.17
+var tf = RigidTransform.FromComponents(translation, r);   // SE(3): rotate, then translate
+(tf * tf.Inv()).AsMatrix();  tf.AsExpCoords();  tf.AsDualQuat();  tf.Pow(0.5);  tf.Apply(points);
 ```
+
+Rotations and rigid transforms are arrays of any shape, as in SciPy 1.17: composition and
+`Apply` broadcast, indexing works along the first axis, and `Mean` reduces over chosen axes.
+`RigidTransform` follows SciPy's algorithms (quaternion re-orthonormalisation after every
+composition, the closed-form SE(3) exponential and logarithm with Taylor branches below 1e-3)
+and matches it to ~1e-15.
 
 Delaunay and the hulls use exact predicates, so lattices and cospherical points triangulate
 correctly; 2-D keeps a dedicated Bowyer–Watson, higher dimensions use an N-d quickhull on the
@@ -496,7 +522,11 @@ Kendall, two-sample KS) and the `Alternative` options; results agree with SciPy 
 1e-10–1e-12. Two places where SciNet is deliberately *more* exact: Ansari–Bradley (SciPy's exact
 frequencies are float32) and Dunnett/bivariate box probabilities (SciPy integrates them
 randomly). `Bootstrap`, `PermutationTest` and `MonteCarloTest` take a `parallel` flag that gives
-results identical to the serial run.
+results identical to the serial run. SciPy's method objects `PermutationMethod`,
+`MonteCarloMethod` and `BootstrapMethod` are accepted where SciPy 1.17 accepts them: `Pearsonr`
+(and a bootstrap interval from its result), `Spearmanrho`, `TtestInd`, `MannWhitneyU`, `Wilcoxon`,
+`Chatterjeexi`, `BwsTest`, `AndersonKsamp`, `Anderson` (Monte Carlo) and `Chi2Contingency`; not
+yet `FisherExact` for r×c tables.
 
 ### Censored data and survival
 
@@ -528,9 +558,36 @@ The exact KDE runs in parallel and is about 30× faster than SciPy's (10k data p
 at 100k points: 1.1–1.5 s against 39.8 s). Unscrambled Sobol and Halton reproduce SciPy's points
 bit for bit; Sobol is computed directly from the point index (Gray code), so fast-forwarding is
 free and parallel draws are identical to serial ones. Sobol supports 4096 dimensions (SciPy's
-table goes to 21201). Not implemented: SciPy's newer random-variable framework
-(`make_distribution`, `Normal`, `Mixture`, …) and its method objects (`BootstrapMethod`, …) —
-the classic `rv_continuous`-style API is what SciNet mirrors.
+table goes to 21201).
+
+### The random-variable framework
+
+```csharp
+var x = new Normal(mu: 1.0, sigma: 2.0);
+x.Cdf(0.5);  x.Ccdf(9.0);  x.Icdf(1e-300);  x.ILogCcdf(-700);  x.Cdf(-1.0, 2.0);   // P(-1 <= X <= 2)
+x.Moment(4, MomentKind.Central);  x.Kurtosis();  x.Entropy();  x.Sample([1000], rng);
+var y = Stats.Truncate(3.0 * new Logistic() + 1.0, lb: 0.0);        // arithmetic shifts and scales
+var g = Stats.MakeDistribution(Stats.Gamma(2.5));                    // any frozen rv_continuous
+var o = Stats.OrderStatistic(new Uniform(0, 1), r: 2, n: 6);   o.Mean();
+var m = new Mixture([new Normal(-1, 0.5), new Normal(2, 1)], [0.3, 0.7]);
+x.Cdf(0.5, RandomVariableMethod.Quadrature);                         // scipy's method= override
+```
+
+SciPy's newer framework (`ContinuousDistribution` → `ContinuousRandomVariable`, `Normal`,
+`Uniform`, `Logistic`, `Binomial`, `make_distribution`, `truncate`, `order_statistic`, `abs`/`exp`/
+`log`, powers and reciprocals, `Mixture`) sits beside the classic `rv_continuous` API. Each
+function picks its method as SciPy does — formula, then log/exp of the log formula, then the
+complement with SciPy's safe fall-back, then quadrature, inversion or optimisation — and the
+moments try cache, formula, transform, normalisation and quadrature in SciPy's order. Parameters
+are scalars (one distribution per object) and invalid ones throw. Deliberate differences: the
+truncated, monotonic and folded transforms report what they override as formulas, so their CDFs
+are exact where SciPy integrates the density (`P(-1 <= Z^3 <= 2)` is 0.7375; SciPy says 0.6931);
+whole-support quadratures split at the median, and transforms between moment kinds skip moments
+that came from quadrature, so answers do not depend on call order; truncation deep in a tail
+inverts through the survival function (SciPy keeps nine digits there). Also not like SciPy:
+`Binomial.Cdf(2.5)` is P(X ≤ 2), and the mode of a density that is unbounded at an end is that
+end (SciPy returns NaN). Every case is pinned against SciPy 1.17.1 or, where SciPy is wrong,
+mpmath and closed forms (`gen_random_variables.py`).
 
 ## Image processing
 
@@ -679,7 +736,7 @@ single recursive `lfilter`, and pocketfft's DCT.
 Larger cases measured during development (single runs, same machine, so rougher): KDE of 10k
 points evaluated at 100k is about 30× faster than SciPy's `gaussian_kde`, `spearmanr` on 10⁶ about
 3×, `norm.ppf` on 10⁶ about 7×, `Eigsh` on a 10k Laplacian level with ARPACK, `Splu` on Poisson
-300² about 2× faster than SuperLU, and Schur/Eig at n = 400 about 1.5–1.7× behind LAPACK.
+300² about 2× faster than SuperLU, and Schur at n = 400 about 1.3× faster than SciPy (multishift QR, see Linear algebra).
 
 ---
 

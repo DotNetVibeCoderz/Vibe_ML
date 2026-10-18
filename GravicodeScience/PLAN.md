@@ -740,17 +740,27 @@ What is still open, in order of value:
    allocating per evaluation. Still ~1.2× behind; about 2 ms of it is the benchmark model's scalar
    `Math.Exp` against numpy's vectorised exp, not the solver. In-process A/B numbers - the full
    comparison table has not been regenerated yet.
-2. **Multishift QR with aggressive early deflation** for Schur/Eig (~1.5× behind LAPACK at n = 200),
-   and a blocked Hessenberg reduction.
+2. ~~**Multishift QR with aggressive early deflation**~~ — ✅ done, with a blocked Hessenberg
+   reduction: managed ports of dhseqr/dlaqr0/dlaqr3/dlaqr5/dlahqr/dtrexc and dgehrd/dlahr2/dorghr.
+   Schur with vectors uses it from n = 85, eigenvalues only from 300. Schur 32 ms vs SciPy's 39 at
+   n = 200, 140 vs 181 at 400, 760 vs 790 at 800 (1.6-2.6× the old kernel); Hessenberg+Q 3-4×
+   faster than SciPy at 200. Native LAPACK is now routed only where it measured faster (dgees at
+   64-84, dgeev below 85 and from 550). Open: managed `Eig`'s complex back-substitution (loses to
+   dgeev from ~550) and a public Schur reordering (`dtrexc` exists internally).
 3. ~~**Writing HDF5** (MATLAB v7.3, NetCDF-4)~~ — ✅ done: `Hdf5Writer` (groups, datasets,
    attributes, object references, variable-length strings, deflate/extendible as a single chunk),
    `MatFile.Save(format: "7.3")` in MATLAB's layout, `NetCdfFile.Create(version: 4)`. h5py/HDF5 2.0
    and netCDF-C 4.10 read *and modify* the output (`tools/verify/hdf5_interop.py`). Still open:
    NetCDF-4 groups and user-defined types, attributes over 64 KiB (dense storage), multi-chunk
    datasets, and a check in MATLAB itself.
-4. **SciPy's new random-variable framework** (`make_distribution`, `Normal`, `Mixture`) and the
-   method objects (`BootstrapMethod`, …); Mathieu functions; N-d rotation arrays and
-   `RigidTransform`.
+4. ~~**SciPy's new random-variable framework, method objects, Mathieu, `RigidTransform`**~~ — ✅
+   done: `ContinuousRandomVariable`/`DiscreteRandomVariable`, `Normal`, `Uniform`, `Logistic`,
+   `Binomial`, `MakeDistribution`, truncate/order statistic/abs/exp/log, arithmetic and `Mixture`,
+   with SciPy's method dispatch; `PermutationMethod`/`MonteCarloMethod`/`BootstrapMethod` in
+   pearsonr, spearmanrho, ttest_ind, mannwhitneyu, wilcoxon, chatterjeexi, bws_test,
+   anderson_ksamp, anderson and chi2_contingency; Mathieu functions pinned to a 40-digit mpmath
+   reference (SciPy is wrong for q ≥ 5000); N-d `Rotation` arrays and `RigidTransform`. Open:
+   parameter broadcasting (parameters are scalar), `fisher_exact` for r×c tables, `Batch`.
 5. ~~**GraviNum's `LinAlg.Dot` below its packing threshold**~~ — ✅ done: SciNet's packed FMA
    kernel moved into GraviNum (`PackedMatMul.Gemm`) and `LinAlg.Dot` uses it from a 16-cube up
    (200-cube 0.81 -> 0.27 ms); SciNet's `LinalgGemm` forwards to it.

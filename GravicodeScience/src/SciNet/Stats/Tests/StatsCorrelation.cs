@@ -37,7 +37,7 @@ public static partial class Stats
                 _ => 2 * Special.BetaInc(ab, ab, Math.Clamp((1 - Math.Abs(r)) / 2, 0, 1)),
             };
         }
-        return new PearsonRResult(r, p, n, alternative);
+        return new PearsonRResult(r, p, n, alternative) { X = x, Y = y };
     }
 
     /// <summary>Point-biserial correlation (Pearson's r with a dichotomous x), scipy's <c>pointbiserialr</c>.</summary>
@@ -47,7 +47,7 @@ public static partial class Stats
         return new SignificanceResult(r.Statistic, r.Pvalue);
     }
 
-    private static double PearsonCoefficient(double[] x, double[] y)
+    internal static double PearsonCoefficient(double[] x, double[] y)
     {
         var n = x.Length;
         if (x.All(v => v == x[0]) || y.All(v => v == y[0])) return double.NaN;
