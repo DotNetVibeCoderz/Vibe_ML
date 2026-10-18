@@ -35,6 +35,11 @@
          the project references below carry the same package ids, so the local build satisfies them. -->
     <PackageReference Include="Gravicode.Matplotlib.Net" />
     <PackageReference Include="Gravicode.Seaborn.Net" />
+    <!-- Avalonia 12.1.1 brings SkiaSharp.NativeAssets.Linux 3.119, whose libSkiaSharp.so wins over
+         Visual.Net's 4.151 NoDependencies build and fails SkiaSharp 4's version check on Linux
+         (every chart threw TypeInitializationException in SKImageInfo). Raised here only, by
+         override, so central transitive pinning leaves the ScottPlot samples on SkiaSharp 3. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" VersionOverride="4.151.1" />
   </ItemGroup>
 
   <ItemGroup>

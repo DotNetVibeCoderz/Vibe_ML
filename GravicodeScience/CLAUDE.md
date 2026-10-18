@@ -387,6 +387,11 @@ exactly what ran.
 - **SkiaSharp 4 arrives transitively and is not pinned in `Directory.Packages.props`.** Pinning it
   would, through transitive pinning, move the ScottPlot samples off SkiaSharp 3. Avalonia 12.1.1
   runs fine on SkiaSharp 4.
+- **But the Linux native asset must be raised by hand** (`VersionOverride` in the gallery csproj).
+  Avalonia brings `SkiaSharp.NativeAssets.Linux` 3.119, its `libSkiaSharp.so` wins in the output,
+  and managed SkiaSharp 4 then throws `TypeInitializationException` in `SKImageInfo` - on Linux
+  only, so Windows builds and `--run-all` pass while CI fails all 45 use cases. Windows and macOS
+  native assets already resolve to 4.x.
 - **A namespace called `Visual` (from Visual.Net.Core) hides `Avalonia.Visual`** in gallery code;
   write `Avalonia.Visual` in full.
 - **Screenshots render the window content at a fixed 1440×900** (`--capture`), because a laptop
