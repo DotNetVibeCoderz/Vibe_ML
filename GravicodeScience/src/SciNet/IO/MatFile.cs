@@ -11,13 +11,15 @@ public sealed record MatVariableInfo(string Name, int[] Shape, string ClassName)
 /// <summary>
 /// MATLAB MAT files — <c>scipy.io.loadmat</c>, <c>savemat</c>, <c>whosmat</c>. Reads level 4,
 /// level 5 (MATLAB v4, v6, v7: compressed or not, either byte order) and v7.3 (HDF5) with every
-/// array class; writes level 5 (optionally compressed) and level 4.
+/// array class; writes level 5 (optionally compressed), level 4 and v7.3.
 /// </summary>
 /// <remarks>
 /// <para>MATLAB v7.3 files are HDF5 containers behind a MAT header; they are read with SciNet's
 /// own managed <see cref="Hdf5File"/> reader into the same <see cref="MatValue"/> model, so a
 /// variable loads identically whichever format it was saved in (SciPy itself cannot read v7.3).
-/// Writing v7.3 is not supported.</para>
+/// <c>format: "7.3"</c> writes them with SciNet's <see cref="Hdf5Writer"/> in MATLAB's layout (see
+/// <see cref="Save(string, IReadOnlyDictionary{string, object?}, bool, string, string)"/>); SciPy
+/// cannot write v7.3 either.</para>
 /// <para>Arrays come back row-major with MATLAB's shape (<c>A(2,3)</c> is <c>array[1, 2]</c>).
 /// The conversion from MATLAB's column-major storage is a cache-blocked transpose — for a large
 /// 2-D double it is fused with the read, so no intermediate copy is made.</para>
@@ -146,9 +148,16 @@ public static class MatFile
     /// <summary>Saves variables to a MAT file (<c>scipy.io.savemat</c>).</summary>
     /// <param name="path">Destination path (overwritten).</param>
     /// <param name="variables">Name → value; values are converted with <see cref="MatValue.FromObject"/>.</param>
-    /// <param name="doCompression">Compress each variable with zlib (level 5 only), as MATLAB v7 does by default.</param>
-    /// <param name="format"><c>"5"</c> (MATLAB 5 and later; the default) or <c>"4"</c>.</param>
+    /// <param name="doCompression">Compress each variable with zlib, as MATLAB v7 does by default (level 5; for v7.3, deflate on datasets of 4 KiB or more).</param>
+    /// <param name="format"><c>"5"</c> (MATLAB 5 and later; the default), <c>"4"</c>, or <c>"7.3"</c> (HDF5-based, MATLAB's <c>-v7.3</c>; needed for variables over 2 GB).</param>
     /// <param name="onedAs"><c>"row"</c> (default) writes 1-D data as 1 x N, <c>"column"</c> as N x 1.</param>
+    /// <remarks>
+    /// A v7.3 file is written in the layout MATLAB uses: a 512-byte user block with the MAT header,
+    /// a <c>MATLAB_class</c> attribute on every variable, column-major data, cells and struct-array
+    /// elements as object references into <c>/#refs#</c>. Every class the loader returns can be
+    /// written, except function handles and classdef objects (<see cref="MatUnsupported"/>).
+    /// Variables load back in the order they were saved.
+    /// </remarks>
     public static void Save(string path, IReadOnlyDictionary<string, object?> variables, bool doCompression = false, string format = "5", string onedAs = "row")
     {
         using var f = File.Create(path);
@@ -158,8 +167,8 @@ public static class MatFile
     /// <summary>Saves variables to a stream.</summary>
     /// <param name="stream">Destination stream.</param>
     /// <param name="variables">Name → value.</param>
-    /// <param name="doCompression">Compress each variable with zlib (level 5 only).</param>
-    /// <param name="format"><c>"5"</c> or <c>"4"</c>.</param>
+    /// <param name="doCompression">Compress each variable with zlib (level 5) or deflate large datasets (v7.3).</param>
+    /// <param name="format"><c>"5"</c>, <c>"4"</c> or <c>"7.3"</c>.</param>
     /// <param name="onedAs"><c>"row"</c> or <c>"column"</c>.</param>
     public static void Save(Stream stream, IReadOnlyDictionary<string, object?> variables, bool doCompression = false, string format = "5", string onedAs = "row")
     {
@@ -177,8 +186,8 @@ public static class MatFile
     /// <summary>Saves already-built MAT values (round-trips what <see cref="Load(string, IEnumerable{string}?, bool, bool)"/> returned).</summary>
     /// <param name="path">Destination path.</param>
     /// <param name="variables">Name → value.</param>
-    /// <param name="doCompression">Compress each variable (level 5 only).</param>
-    /// <param name="format"><c>"5"</c> or <c>"4"</c>.</param>
+    /// <param name="doCompression">Compress each variable (level 5) or deflate large datasets (v7.3).</param>
+    /// <param name="format"><c>"5"</c>, <c>"4"</c> or <c>"7.3"</c>.</param>
     public static void Save(string path, IReadOnlyDictionary<string, MatValue> variables, bool doCompression = false, string format = "5")
     {
         using var f = File.Create(path);
@@ -197,9 +206,10 @@ public static class MatFile
                 MatV4.Write(stream, vars);
                 break;
             case "7.3":
-                throw new NotSupportedException("Writing MATLAB v7.3 (HDF5) files is not supported (SciNet reads them); use format \"5\" with doCompression for MATLAB v7 files.");
+                MatV73Writer.Write(stream, vars, doCompression);
+                break;
             default:
-                throw new ArgumentException("format must be \"5\" or \"4\".", nameof(format));
+                throw new ArgumentException("format must be \"5\", \"4\" or \"7.3\".", nameof(format));
         }
     }
 

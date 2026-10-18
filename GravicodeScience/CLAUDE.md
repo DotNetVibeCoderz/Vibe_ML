@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 v0.1.0 is implemented and complete against `requirements.md`, and a seventh library, **SciNet**
-(SciPy for .NET), has been added beside the original six: 28 projects, **3,257 tests passing**
-(2,198 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
+(SciPy for .NET), has been added beside the original six: 28 projects, **3,314 tests passing**
+(2,216 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
 suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -115,9 +115,10 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
   only packed uses FMA; nothing in the other libraries' pinned numerics moved.
 - **A `k <= 16` "blocked wins" rule appeared in one run and reversed in the next** — noise on this
   shared, throttling machine. Re-run any dispatch rule at least twice before encoding it.
-- **`benchmarks/comparison` warms up with only 2 calls and takes the median of 7** — its matmul
-  rows are mostly tier-0 code, which is why the committed file has a 256-cube (12.1 ms) slower
-  than a 512-cube (11.2 ms). Its numbers are also cross-run. Use an in-process A/B for kernels.
+- **`benchmarks/comparison` warms the .NET side for at least 1 s as well as its call count.** With
+  only the count (2 calls for the GraviNum rows) its matmul rows were tier-0 code, which is why an
+  older results file had a 256-cube (12.1 ms) slower than a 512-cube (11.2 ms). Its numbers are
+  still cross-run against Python; use an in-process A/B for kernel decisions.
 - **Small parallel rules must be work-based, not row-based.** The blocked kernel's old `m >= 64`
   rule and MatVec's sent a 150x4x4 product to the thread pool, 2-5x slower than inline.
 - **Benchmark warm-up must exceed ~30 calls.** Tiered JIT recompiles a hot method around there, and
@@ -326,6 +327,16 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
 - **SciNet's `LinalgGemm` now forwards to GraviNum's `PackedMatMul.Gemm`.** It was SciNet's own
   copy because `LinAlg.Dot` was slow below 8M multiply-adds; the kernel moved into GraviNum, and the
   two measured bit-identical and within noise (0.93-1.07x, 32-1024), so the duplicate went.
+- **The MINPACK port's O(m) loops run on column spans (`FMat.Col`), in MINPACK's order.** Through
+  the 1-based indexer, `Qrfac` on 10000x3 took 448 us; `Lm`'s locals are captured by its local
+  functions, so hot loops reading `m`/`fvec` through the closure did not enregister either. Keep the
+  operation order - the nfev pins against SciPy depend on it. `Lm` evaluates into reused buffers;
+  `CurveFit`'s Lm path reuses one residual buffer because MINPACK copies it before the next call,
+  but never the model's own array: a model may return a cached one.
+- **`lfilter` keeps the delay states in registers for n = 2, 3, 5 and 9** (orders 1, 2, 4, 8; 8 is
+  also every 4th-order band design). The general `Df2tLoop` stores and reloads each state per
+  sample: order 4 went 9.4 -> 5.3 ms on 1M samples, order 8 12.5 -> 6.8. The expression per state
+  is unchanged, so each is bit-identical to `Df2tLoop`, which a test asserts.
 - **Native is not automatically faster.** SciPy's bundled OpenBLAS `dgesv` was 10x slower than the
   managed recursive LU, so `expm`'s solve stays managed; Schur/Eig route to `dgees`/`dgeev` only
   because they measured faster. Measure each routine before routing it to LAPACK.
@@ -352,6 +363,25 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
   relative error at 1e-45), nor is `nsum`'s default on power-law tails. Use closed forms, finite
   intervals or Euler-Maclaurin. And never place a quadrature break point a few ulps from an
   endpoint - the degenerate sub-interval cost Landau's CDF 1e-4.
+- **`Hdf5Writer` is judged by `tools/verify/hdf5_interop.py`, not the unit tests.** The tests
+  read back with SciNet's own reader, which shares the writer's reading of the spec. The script's
+  strongest check is HDF5/netCDF-C *modifying* the file in place (attributes going dense, a
+  resize, appended records) - a read-only open forgives layouts that a rewrite does not.
+- **HDF5 address quirks the reader never needed:** with a user block the superblock's base address
+  is the user block size and every address is relative to it, *except* end-of-file, which is the
+  absolute file length. A v1 B-tree node is read at its full 2K capacity (K = 32 for chunks), so a
+  one-chunk node is still ~3 KiB on disk. A global heap collection must be at least 4 KiB (HDF5
+  reads that much before the size field), and the free-space object's size counts its own header.
+- **`"\x89HDF\r\n\x1a\n"u8` is not the HDF5 signature** - in a C# string `\x89` is U+0089, which
+  UTF-8 makes two bytes. Spell signature bytes out.
+- **String padding is load-bearing.** `H5DSis_scale` rejects a `CLASS` that is not NUL-terminated,
+  and netCDF's `CLASS`/`NAME` include the NUL in their size while MATLAB's `MATLAB_class` does not.
+  netCDF's dimension-only `NAME` is "...not a netCDF variable." (with the period) plus `%10d`.
+- **netCDF's 64-bit default fills are not doubles** (`NC_FILL_UINT64` = 2^64-2). The NetCDF-4
+  writer puts the exact value only at positions that were never set; matching by value rewrote a
+  real element that rounds to the same double.
+- **An empty variable-length string is a null heap ID** on disk (that is what HDF5 writes), so
+  SciNet's reader returns null for it; h5py returns ''.
 
 ### ScienceAppGen specifics
 

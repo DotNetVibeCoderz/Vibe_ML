@@ -733,16 +733,27 @@ family is in.
 
 What is still open, in order of value:
 
-1. **`curve_fit` and `lfilter`** — the last two workloads where SciPy leads (1.7× and 1.4×).
+1. ~~**`curve_fit` and `lfilter`**~~ — ✅ `lfilter` now leads: register-resident kernels for orders
+   4 and 8 took 1M samples from 9.4 to 5.3 ms and 12.5 to 6.8 ms (SciPy 11-13 ms on the same
+   machine); the published 1.4× deficit was partly a cross-run artefact. `curve_fit` went 6.3 to
+   ~4.3 ms (SciPy 3.6-3.8 ms) once the MINPACK port's O(m) loops ran on column spans and stopped
+   allocating per evaluation. Still ~1.2× behind; about 2 ms of it is the benchmark model's scalar
+   `Math.Exp` against numpy's vectorised exp, not the solver. In-process A/B numbers - the full
+   comparison table has not been regenerated yet.
 2. **Multishift QR with aggressive early deflation** for Schur/Eig (~1.5× behind LAPACK at n = 200),
    and a blocked Hessenberg reduction.
-3. **Writing HDF5** (MATLAB v7.3, NetCDF-4) — reading is done.
+3. ~~**Writing HDF5** (MATLAB v7.3, NetCDF-4)~~ — ✅ done: `Hdf5Writer` (groups, datasets,
+   attributes, object references, variable-length strings, deflate/extendible as a single chunk),
+   `MatFile.Save(format: "7.3")` in MATLAB's layout, `NetCdfFile.Create(version: 4)`. h5py/HDF5 2.0
+   and netCDF-C 4.10 read *and modify* the output (`tools/verify/hdf5_interop.py`). Still open:
+   NetCDF-4 groups and user-defined types, attributes over 64 KiB (dense storage), multi-chunk
+   datasets, and a check in MATLAB itself.
 4. **SciPy's new random-variable framework** (`make_distribution`, `Normal`, `Mixture`) and the
    method objects (`BootstrapMethod`, …); Mathieu functions; N-d rotation arrays and
    `RigidTransform`.
-5. **GraviNum's `LinAlg.Dot` below its packing threshold** is slower than SciNet's own GEMM (a
-   200-cube took 4.7 ms against 0.3 ms); folding SciNet's kernel back into GraviNum would speed up
-   every library.
+5. ~~**GraviNum's `LinAlg.Dot` below its packing threshold**~~ — ✅ done: SciNet's packed FMA
+   kernel moved into GraviNum (`PackedMatMul.Gemm`) and `LinAlg.Dot` uses it from a 16-cube up
+   (200-cube 0.81 -> 0.27 ms); SciNet's `LinalgGemm` forwards to it.
 
 ## Non-goals
 

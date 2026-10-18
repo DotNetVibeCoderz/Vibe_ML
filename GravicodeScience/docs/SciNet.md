@@ -578,20 +578,52 @@ Values: `MatArray` (keeps its MATLAB class), `MatLogical`, `MatChar`, `MatSparse
 `MatStruct` (a dictionary), `MatCell`, and `MatUnsupported` for function handles and classdef
 objects. Files SciNet writes in every format were read back by SciPy 1.17.1 and matched exactly.
 
-**HDF5, MATLAB v7.3 and NetCDF-4** are read through a managed, read-only HDF5 reader
-(`Hdf5File`): superblocks 0–3, every chunk index, deflate/shuffle/fletcher32, compact and dense
-links and attributes, references, compound and variable-length types. `MatFile.Load` reads v7.3
-into the same `MatValue` types as v5, and `NetCdfFile.Open` reads NetCDF-4 including groups and
-the extra integer types. Decompression runs chunks in parallel: a 50 MB gzip-chunked dataset reads
-in 48 ms against h5py's 170 ms. Writing either format is not supported.
+**HDF5, MATLAB v7.3 and NetCDF-4** are read through a managed HDF5 reader (`Hdf5File`):
+superblocks 0–3, every chunk index, deflate/shuffle/fletcher32, compact and dense links and
+attributes, references, compound and variable-length types. `MatFile.Load` reads v7.3 into the
+same `MatValue` types as v5, and `NetCdfFile.Open` reads NetCDF-4 including groups and the extra
+integer types. Decompression runs chunks in parallel: a 50 MB gzip-chunked dataset reads in 48 ms
+against h5py's 170 ms.
+
+All three are also **written**, by a managed `Hdf5Writer` (SciPy writes none of them):
 
 ```csharp
 using var h5 = Hdf5File.Open("data.h5");
 var ds = h5.Root.Dataset("group/values");  NdArray values = ds.Read();  ds.ReadSlice([0, 0], [10, 10]);
+
+var w = new Hdf5Writer();                                  // h5py-compatible types and layout
+var g = w.Root.CreateGroup("run1");
+var x = g.CreateDataset("x", values, compressionLevel: 4); // deflate; or maxShape: [-1, 10] to stay extendible
+g.CreateDataset("labels", new[] { "a", "b" });             // variable-length UTF-8, as h5py writes str
+g.SetAttribute("source", x);                               // object reference
+w.Save("out.h5");
+
+MatFile.Save("big.mat", vars, format: "7.3");              // MATLAB -v7.3: HDF5 behind the MAT header
+
+using var nc = NetCdfFile.Create(version: 4);              // NetCDF-4, with the unsigned/64-bit/string types
+nc.CreateDimension("time", null);  nc.CreateVariable("t", NetCdfType.Double, "time").SetData(times);
+nc.Save("out.nc");
 ```
 
+The writer uses HDF5 1.8's format (superblock 2, version 2 object headers, links kept in the
+object header) and tracks creation order, so members and attributes read back in the order they
+were added. Element types follow the .NET data: every numeric type, `bool` and `Complex` as h5py
+stores them, strings variable-length or fixed, object references; data is contiguous, or one
+deflated/extendible chunk. v7.3 files use MATLAB's layout — `MATLAB_class` on every variable,
+column-major data, cells and struct arrays as references into `#refs#`, empty arrays as their
+dimensions with `MATLAB_empty`, sparse as `data`/`ir`/`jc` — and every class the loader returns
+can be written back (function handles and classdef objects cannot). NetCDF-4 dimensions become
+HDF5 dimension scales the way netCDF-C makes them (`DIMENSION_LIST`, `REFERENCE_LIST`,
+`_Netcdf4Dimid`). `tools/verify/hdf5_interop.py` checks the output with h5py 3.16 (HDF5 2.0.0) and
+netCDF4-python 1.7.5 (netCDF-C 4.10.1): both read every value, and HDF5 and netCDF-C then
+*modify* the files in place, which SciNet reads back. Not written: NetCDF-4 groups and
+user-defined types, attributes over 64 KiB (no dense storage), multi-chunk datasets; files have
+not been opened in MATLAB itself, only checked against its documented layout and against real
+MATLAB files SciNet reads.
+
 Refused with a clear message: HDF5 filters other than deflate/shuffle/fletcher32, virtual and
-external datasets, CDF-5, sparse ARFF.
+external datasets, CDF-5, sparse ARFF. An empty variable-length string reads back as null: HDF5
+stores it as a null heap ID, which is also how it stores a missing one.
 int64/uint64 values above 2⁵³ lose precision when loaded as doubles. Harwell–Boeing goes beyond
 SciPy (which reads RUA only): symmetric, skew, pattern, integer and rectangular storage.
 

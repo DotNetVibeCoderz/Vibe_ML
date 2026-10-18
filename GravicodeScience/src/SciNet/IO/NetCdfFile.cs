@@ -36,8 +36,8 @@ public enum NetCdfType
 
 /// <summary>
 /// NetCDF classic (CDF-1) and 64-bit-offset (CDF-2) files — <c>scipy.io.netcdf_file</c>, without
-/// memory mapping: variables are read lazily from the stream on first access and cached — and,
-/// read-only, NetCDF-4 files (which are HDF5 files; SciPy does not read them).
+/// memory mapping: variables are read lazily from the stream on first access and cached — and
+/// NetCDF-4 files (which are HDF5 files; SciPy neither reads nor writes them).
 /// </summary>
 /// <remarks>
 /// <para>Open an existing file with <see cref="Open(string, bool)"/>; build a new one with
@@ -50,7 +50,15 @@ public enum NetCdfType
 /// in <see cref="Groups"/> as nested <see cref="NetCdfFile"/> objects (a variable may use its
 /// ancestors' dimensions), and <see cref="MaskAndScale"/> applies as for classic files. The
 /// NetCDF-4 types (unsigned, 64-bit, string) are read; variables of user-defined types (compound,
-/// enum, vlen, opaque) are left out of <see cref="Variables"/>. Writing NetCDF-4 is not supported.</para>
+/// enum, vlen, opaque) are left out of <see cref="Variables"/>.</para>
+/// <para><see cref="Create"/> with version 4 builds a NetCDF-4 file (the <c>NETCDF4</c> data model,
+/// root group only), written with SciNet's <see cref="Hdf5Writer"/> the way netCDF-C lays one out:
+/// each dimension is an HDF5 dimension scale (<c>CLASS</c>, <c>NAME</c>, <c>_Netcdf4Dimid</c>,
+/// <c>REFERENCE_LIST</c>) — the coordinate variable itself when there is one — and every other
+/// variable lists its dimensions in <c>DIMENSION_LIST</c>. Record variables are chunked with an
+/// unlimited first dimension; the NetCDF-4 types (unsigned, 64-bit, <see cref="NetCdfType.String"/>
+/// via <see cref="NetCdfVariable.SetStrings"/>) are available. A file opened for reading cannot be
+/// re-saved as NetCDF-4.</para>
 /// <para>Attribute values are <see cref="string"/> for text and, for numbers, a scalar
 /// (<see cref="sbyte"/>, <see cref="short"/>, <see cref="int"/>, <see cref="float"/>,
 /// <see cref="double"/>) when there is one value or an array of that type otherwise — SciPy's
@@ -70,11 +78,13 @@ public sealed class NetCdfFile : IDisposable
 
     private NetCdfFile(int version, bool maskAndScale, Stream? stream, bool ownsStream)
     {
-        if (version is not (1 or 2)) throw new ArgumentException("Version must be 1 (classic) or 2 (64-bit offset).", nameof(version));
+        if (version is not (1 or 2) && !(version == 4 && stream is null))
+            throw new ArgumentException("Version must be 1 (classic), 2 (64-bit offset) or, for a new file, 4 (NetCDF-4).", nameof(version));
         Version = version;
         MaskAndScale = maskAndScale;
         _stream = stream;
         _ownsStream = ownsStream;
+        if (version == 4) _dataModel = "NETCDF4";
     }
 
     /// <summary>NetCDF-4 (HDF5-based) file opened for reading; a group of one shares the root's stream.</summary>
@@ -138,7 +148,7 @@ public sealed class NetCdfFile : IDisposable
     }
 
     /// <summary>Starts a new, empty dataset to be written with <see cref="Save(string)"/>.</summary>
-    /// <param name="version">1 (classic, offsets below 2 GiB) or 2 (64-bit offsets).</param>
+    /// <param name="version">1 (classic, offsets below 2 GiB), 2 (64-bit offsets) or 4 (NetCDF-4, HDF5-based).</param>
     /// <param name="maskAndScale">See <see cref="MaskAndScale"/>.</param>
     public static NetCdfFile Create(int version = 1, bool maskAndScale = false) => new(version, maskAndScale, null, false);
 
@@ -194,6 +204,8 @@ public sealed class NetCdfFile : IDisposable
         EnsureWritable();
         ValidateName(name);
         if (_vars.ContainsKey(name)) throw new ArgumentException($"Variable '{name}' already exists.");
+        if (!Enum.IsDefined(type)) throw new ArgumentException($"Unknown NetCDF type {(int)type}.", nameof(type));
+        if (Version != 4 && type > NetCdfType.Double) throw new ArgumentException($"{type} is a NetCDF-4 type; create the file with version 4 to use it.", nameof(type));
         for (var i = 0; i < dimensions.Length; i++)
         {
             if (!_dims.TryGetValue(dimensions[i], out var len)) throw new ArgumentException($"Unknown dimension '{dimensions[i]}'.");
@@ -399,6 +411,10 @@ public sealed class NetCdfFile : IDisposable
         NetCdfType.Short => 2,
         NetCdfType.Int or NetCdfType.Float => 4,
         NetCdfType.Double => 8,
+        NetCdfType.UByte => 1,
+        NetCdfType.UShort => 2,
+        NetCdfType.UInt => 4,
+        NetCdfType.Int64 or NetCdfType.UInt64 => 8,
         _ => throw new InvalidDataException($"Unknown NetCDF type {(int)t}."),
     };
 
@@ -453,7 +469,12 @@ public sealed class NetCdfFile : IDisposable
     /// <summary>Writes the dataset to a stream.</summary>
     public void Save(Stream output)
     {
-        if (Version == 4) throw new NotSupportedException("Writing NetCDF-4 (HDF5) files is not supported; copy the variables into a file made with NetCdfFile.Create to save them as classic NetCDF.");
+        if (Version == 4)
+        {
+            if (ReadMode) throw new NotSupportedException("Re-saving a NetCDF-4 file opened for reading is not supported; copy the variables into a file made with NetCdfFile.Create(version: 4).");
+            NetCdf4Writer.Write(this, output);
+            return;
+        }
         var numrecs = _stream is null ? RecordCount : _numRecs;
         var vars = _vars.Values.ToList();
         // Pass 1: the header's size does not depend on the begin offsets, so measure it with zeros.
@@ -642,17 +663,25 @@ public sealed class NetCdfFile : IDisposable
                 case NetCdfType.Short: BinaryPrimitives.WriteInt16BigEndian(b.AsSpan(2 * i), (short)CheckInt(v, x, short.MinValue, short.MaxValue)); break;
                 case NetCdfType.Int: BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(4 * i), (int)CheckInt(v, x, int.MinValue, int.MaxValue)); break;
                 case NetCdfType.Float: BinaryPrimitives.WriteSingleBigEndian(b.AsSpan(4 * i), (float)x); break;
+                case NetCdfType.UByte: b[i] = (byte)CheckInt(v, x, 0, 255); break;
+                case NetCdfType.UShort: BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(2 * i), (ushort)CheckInt(v, x, 0, ushort.MaxValue)); break;
+                case NetCdfType.UInt: BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(4 * i), (uint)CheckInt(v, x, 0, uint.MaxValue)); break;
+                case NetCdfType.Int64: BinaryPrimitives.WriteInt64BigEndian(b.AsSpan(8 * i), (long)CheckInt(v, x, long.MinValue, Int64Max)); break;
+                case NetCdfType.UInt64: BinaryPrimitives.WriteUInt64BigEndian(b.AsSpan(8 * i), (ulong)CheckInt(v, x, 0, UInt64Max)); break;
                 default: BinaryPrimitives.WriteDoubleBigEndian(b.AsSpan(8 * i), x); break;
             }
         }
         return b;
     }
 
-    private static long CheckInt(NetCdfVariable v, double x, long min, long max)
+    // The largest doubles below 2^63 and 2^64: (double)long.MaxValue rounds up to 2^63, which does not fit.
+    internal static readonly double Int64Max = Math.BitDecrement(9223372036854775808.0), UInt64Max = Math.BitDecrement(18446744073709551616.0);
+
+    internal static double CheckInt(NetCdfVariable v, double x, double min, double max)
     {
         if (x != Math.Floor(x) || x < min || x > max)
             throw new ArgumentException($"Value {x.ToString(CultureInfo.InvariantCulture)} of variable '{v.Name}' does not fit NetCDF type {v.Type}.");
-        return (long)x;
+        return x;
     }
 }
 
@@ -690,6 +719,8 @@ public sealed class NetCdfVariable
 
     internal NdArray? PendingData { get; private set; }
 
+    internal string[]? PendingStrings { get; private set; }
+
     /// <summary>The HDF5 dataset behind a NetCDF-4 variable.</summary>
     internal Hdf5Dataset? H5 { get; init; }
 
@@ -703,6 +734,7 @@ public sealed class NetCdfVariable
     /// </summary>
     public NdArray GetData()
     {
+        if (Type == NetCdfType.String) throw new InvalidOperationException($"Variable '{Name}' holds strings; use GetStrings().");
         var raw = Raw();
         if (!_file.MaskAndScale) return raw;
         var src = raw.AsContiguous().AsSpan();
@@ -759,6 +791,7 @@ public sealed class NetCdfVariable
     public void SetData(NdArray data)
     {
         if (_file.ReadMode) throw new InvalidOperationException("Variables of a file opened for reading cannot be modified; copy them into a file made with NetCdfFile.Create.");
+        if (Type == NetCdfType.String) throw new InvalidOperationException($"Variable '{Name}' holds strings; use SetStrings().");
         var expected = _file.ShapeOf(Dimensions, IsRecord ? (data.Rank > 0 ? data.Shape[0] : 0) : 0);
         var got = data.Shape.ToArray();
         var scalarOk = expected.Length == 0 && data.Size == 1;
@@ -770,7 +803,7 @@ public sealed class NetCdfVariable
             var missing = MissingValue() ?? FillValue;
             var scale = AttributeDouble("scale_factor") ?? 1.0;
             var offset = AttributeDouble("add_offset") ?? 0.0;
-            var integer = Type is NetCdfType.Byte or NetCdfType.Short or NetCdfType.Int or NetCdfType.Char;
+            var integer = Type is not (NetCdfType.Float or NetCdfType.Double);
             for (var i = 0; i < values.Length; i++)
             {
                 if (double.IsNaN(values[i])) { values[i] = missing; continue; }
@@ -799,7 +832,12 @@ public sealed class NetCdfVariable
     /// </summary>
     public string[] GetStrings()
     {
-        if (Type == NetCdfType.String) return H5!.ReadStrings().Select(x => x ?? "").ToArray();
+        if (Type == NetCdfType.String)
+        {
+            if (H5 is { } h) return h.ReadStrings().Select(x => x ?? "").ToArray();
+            var count = MatLayout.Product(Shape);
+            return Enumerable.Range(0, count).Select(i => PendingStrings is { } p && i < p.Length ? p[i] : "").ToArray();
+        }
         if (Type != NetCdfType.Char) throw new InvalidOperationException($"Variable '{Name}' is {Type}, not Char.");
         var raw = Raw().AsContiguous().AsSpan();
         var shape = Shape;
@@ -815,10 +853,24 @@ public sealed class NetCdfVariable
         return r;
     }
 
-    /// <summary>Sets a character variable from strings (one per row of its last dimension), NUL-padded.</summary>
+    /// <summary>
+    /// Sets a character variable from strings (one per row of its last dimension), NUL-padded; or a
+    /// <see cref="NetCdfType.String"/> variable (NetCDF-4) from one string per element, row-major.
+    /// </summary>
     public void SetStrings(IReadOnlyList<string> rows)
     {
-        if (Type != NetCdfType.Char) throw new InvalidOperationException($"Variable '{Name}' is {Type}, not Char.");
+        if (Type == NetCdfType.String)
+        {
+            if (_file.ReadMode) throw new InvalidOperationException("Variables of a file opened for reading cannot be modified.");
+            var rest = MatLayout.Product(_file.ShapeOf(Dimensions.Skip(IsRecord ? 1 : 0).ToList(), 0));
+            if (IsRecord && (rest == 0 || rows.Count % rest != 0)) throw new ArgumentException($"Variable '{Name}' needs a multiple of {rest} strings (one record each), got {rows.Count}.");
+            var shape = _file.ShapeOf(Dimensions, IsRecord ? rows.Count / rest : 0);
+            if (MatLayout.Product(shape) != rows.Count) throw new ArgumentException($"Variable '{Name}' needs {MatLayout.Product(shape)} strings, got {rows.Count}.");
+            PendingStrings = rows.Select(r => r ?? "").ToArray();
+            PendingData = new NdArray(new double[rows.Count], shape.Length == 0 ? [1] : shape); // carries the shape (and record count)
+            return;
+        }
+        if (Type != NetCdfType.Char) throw new InvalidOperationException($"Variable '{Name}' is {Type}, not Char or String.");
         if (Dimensions.Count == 0) throw new InvalidOperationException("A scalar char variable holds one character.");
         var len = _file.Dimensions[Dimensions[^1]] ?? throw new InvalidOperationException("The string length dimension cannot be unlimited.");
         var lead = _file.ShapeOf(Dimensions, IsRecord ? rows.Count : 0)[..^1];
@@ -861,6 +913,11 @@ public sealed class NetCdfVariable
         NetCdfType.Short => -32767,
         NetCdfType.Int => -2147483647,
         NetCdfType.Float => 9.9692099683868690e+36f,
+        NetCdfType.UByte => 255,
+        NetCdfType.UShort => 65535,
+        NetCdfType.UInt => 4294967295,
+        NetCdfType.Int64 => -9223372036854775806, // NC_FILL_INT64 (as a double, -2^63; the writer substitutes the exact value)
+        NetCdfType.UInt64 => 18446744073709549568, // NC_FILL_UINT64 is 2^64 - 2, which no double holds; the writer substitutes it
         _ => 9.9692099683868690e+36,
     };
 

@@ -597,20 +597,53 @@ Market sama cepat atau lebih cepat. Jenis nilai: `MatArray` (mempertahankan kela
 dan `MatUnsupported` untuk function handle dan objek classdef. Berkas yang ditulis SciNet dalam
 semua format dibaca kembali oleh SciPy 1.17.1 dan cocok persis.
 
-**HDF5, MATLAB v7.3, dan NetCDF-4** dibaca lewat pembaca HDF5 managed yang hanya-baca
-(`Hdf5File`): superblock 0–3, semua indeks chunk, deflate/shuffle/fletcher32, link dan atribut
-compact maupun dense, referensi, tipe compound dan variable-length. `MatFile.Load` membaca v7.3
-ke tipe `MatValue` yang sama dengan v5, dan `NetCdfFile.Open` membaca NetCDF-4 termasuk group dan
-tipe integer tambahannya. Dekompresi chunk berjalan paralel: dataset 50 MB yang di-chunk dengan
-gzip terbaca dalam 48 ms dibanding 170 ms di h5py. Menulis kedua format itu belum didukung.
+**HDF5, MATLAB v7.3, dan NetCDF-4** dibaca lewat pembaca HDF5 managed (`Hdf5File`): superblock
+0–3, semua indeks chunk, deflate/shuffle/fletcher32, link dan atribut compact maupun dense,
+referensi, tipe compound dan variable-length. `MatFile.Load` membaca v7.3 ke tipe `MatValue` yang
+sama dengan v5, dan `NetCdfFile.Open` membaca NetCDF-4 termasuk group dan tipe integer
+tambahannya. Dekompresi chunk berjalan paralel: dataset 50 MB yang di-chunk dengan gzip terbaca
+dalam 48 ms dibanding 170 ms di h5py.
+
+Ketiganya juga **ditulis**, oleh `Hdf5Writer` yang managed (SciPy tidak menulis satu pun):
 
 ```csharp
 using var h5 = Hdf5File.Open("data.h5");
 var ds = h5.Root.Dataset("group/values");  NdArray values = ds.Read();  ds.ReadSlice([0, 0], [10, 10]);
+
+var w = new Hdf5Writer();                                  // tipe dan tata letak yang kompatibel dengan h5py
+var g = w.Root.CreateGroup("run1");
+var x = g.CreateDataset("x", values, compressionLevel: 4); // deflate; atau maxShape: [-1, 10] agar tetap bisa diperpanjang
+g.CreateDataset("labels", new[] { "a", "b" });             // UTF-8 variable-length, seperti h5py menulis str
+g.SetAttribute("source", x);                               // referensi objek
+w.Save("out.h5");
+
+MatFile.Save("big.mat", vars, format: "7.3");              // MATLAB -v7.3: HDF5 di balik header MAT
+
+using var nc = NetCdfFile.Create(version: 4);              // NetCDF-4, dengan tipe unsigned/64-bit/string
+nc.CreateDimension("time", null);  nc.CreateVariable("t", NetCdfType.Double, "time").SetData(times);
+nc.Save("out.nc");
 ```
 
+Penulis memakai format HDF5 1.8 (superblock 2, object header versi 2, link disimpan di dalam
+object header) dan mencatat urutan pembuatan, sehingga anggota dan atribut terbaca kembali dalam
+urutan saat ditambahkan. Tipe elemen mengikuti data .NET: semua tipe numerik, `bool` dan `Complex`
+seperti cara h5py menyimpannya, string variable-length atau fixed, referensi objek; data disimpan
+contiguous, atau sebagai satu chunk yang di-deflate/bisa diperpanjang. Berkas v7.3 memakai tata
+letak MATLAB — `MATLAB_class` pada setiap variabel, data column-major, cell dan struct array
+sebagai referensi ke `#refs#`, array kosong sebagai dimensinya dengan `MATLAB_empty`, sparse
+sebagai `data`/`ir`/`jc` — dan setiap kelas yang dihasilkan loader bisa ditulis kembali (kecuali
+function handle dan objek classdef). Dimensi NetCDF-4 menjadi dimension scale HDF5 seperti yang
+dibuat netCDF-C (`DIMENSION_LIST`, `REFERENCE_LIST`, `_Netcdf4Dimid`).
+`tools/verify/hdf5_interop.py` memeriksa keluarannya dengan h5py 3.16 (HDF5 2.0.0) dan
+netCDF4-python 1.7.5 (netCDF-C 4.10.1): keduanya membaca setiap nilai, lalu HDF5 dan netCDF-C
+*mengubah* berkas itu di tempat, dan SciNet membacanya kembali. Belum ditulis: group dan tipe
+buatan pengguna NetCDF-4, atribut di atas 64 KiB (tanpa penyimpanan dense), dataset dengan banyak
+chunk; berkas belum pernah dibuka di MATLAB sendiri, hanya diperiksa terhadap tata letak yang
+didokumentasikan MATLAB dan berkas MATLAB asli yang dibaca SciNet.
+
 Ditolak dengan pesan yang jelas: filter HDF5 selain deflate/shuffle/fletcher32, dataset virtual
-dan eksternal, CDF-5, ARFF sparse.
+dan eksternal, CDF-5, ARFF sparse. String variable-length yang kosong terbaca kembali sebagai null:
+HDF5 menyimpannya sebagai heap ID null, sama seperti string yang tidak ada.
 Nilai int64/uint64 di atas 2⁵³ kehilangan presisi saat dimuat sebagai double. Harwell–Boeing
 melampaui SciPy (yang hanya membaca RUA): penyimpanan simetris, skew, pattern, integer, dan
 persegi panjang.

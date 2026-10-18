@@ -100,6 +100,30 @@ jobs:
       - name: Compile every notebook cell
         run: python tools/verify/notebook_cells.py
 
+  hdf5:
+    name: HDF5 / MATLAB v7.3 / NetCDF-4 interop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: GravicodeScience/global.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # SciNet's own tests read the writer's files back with SciNet's reader, which shares its
+      # author's reading of the format. This is the job where the reference HDF5 library (via h5py
+      # and netCDF-C) opens, modifies and rewrites them - a wrong checksum or message layout that a
+      # self round trip cannot see fails here.
+      - name: Install h5py and netCDF4
+        run: pip install h5py netCDF4 numpy
+
+      - name: Cross-check against h5py and netCDF-C
+        run: python tools/verify/hdf5_interop.py
+
   pack:
     name: pack
     runs-on: ubuntu-latest

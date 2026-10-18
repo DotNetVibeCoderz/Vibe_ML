@@ -44,7 +44,7 @@ public sealed record Hdf5Filter(int Id, string Name, IReadOnlyList<uint> ClientD
 /// and object references.</para>
 /// <para>Not covered, each with a <see cref="NotSupportedException"/> naming it: other filters
 /// (szip, zstd, blosc, lz4, n-bit, scale-offset), virtual and external datasets, region references,
-/// shared-message (SOHM) heaps, external links. Checksums are not verified. Writing is out of scope.
+/// shared-message (SOHM) heaps, external links. Checksums are not verified. Files are written with <see cref="Hdf5Writer"/>.
 /// A single read is limited to 2 GiB.</para>
 /// <para>Datasets come back row-major in HDF5's own dimension order (C order, as h5py shows them).
 /// The underlying stream must stay open while the file is in use; reads are thread-safe.</para>

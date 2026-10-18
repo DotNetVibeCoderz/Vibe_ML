@@ -214,7 +214,7 @@ internal static class MatV5Writer
     /// Narrows doubles to an integer class, refusing values that would not survive: a silent
     /// wrap-around or truncation writes a plausible file with the wrong numbers.
     /// </summary>
-    private static T[] Convert<T>(double[] v, double min, double max, Func<double, T> cast, bool upperExclusive = false)
+    internal static T[] Convert<T>(double[] v, double min, double max, Func<double, T> cast, bool upperExclusive = false)
     {
         var r = new T[v.Length];
         for (var i = 0; i < v.Length; i++)
