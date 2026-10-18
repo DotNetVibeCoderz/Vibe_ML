@@ -264,8 +264,9 @@ Linalg.Toeplitz(c);  Linalg.Hilbert(5);  Linalg.InvHilbertExact(5);  Linalg.Comp
 ```
 
 SciNet menambahkan apa yang dimiliki `scipy.linalg` di luar `numpy.linalg`, dengan memakai ulang
-QR, SVD, dan eigensolver simetris milik GraviNum di bawahnya, serta perkalian matriks paralel
-ter-pack, LU blok rekursif, dan solve segitiga berblok miliknya sendiri untuk kernel dense.
+QR, SVD, eigensolver simetris, dan perkalian matriks paralel ter-pack milik GraviNum
+(`PackedMatMul.Gemm`, yang awalnya ditulis di sini) di bawahnya, serta LU blok rekursif dan solve
+segitiga berblok miliknya sendiri untuk kernel dense.
 `Expm` adalah scaling-and-squaring Al-Mohy–Higham dengan pemilihan derajat Padé — setara atau
 lebih cepat dari SciPy mulai n = 200; `ExpmFrechet` memberikan turunan Fréchet-nya. Sapuan QR
 Francis di balik `Schur`/`Eig` menerapkan reflektornya secara tertunda dan paralel; bila

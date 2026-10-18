@@ -223,19 +223,61 @@ dan diubah menjadi exception yang sama dengan yang dilempar rutin terkelola.
 
 ### Kernel packed, bila tidak ada BLAS
 
-`LinAlg.Dot` mengemas kedua operand ke buffer kontigu per petak di atas kira-kira delapan juta
-multiply-add. Penyalinannya berbiaya satu lintasan dan terbayar berkali-kali, karena panel yang
-sudah dikemas lalu dibaca oleh setiap blok baris alih-alih diambil ulang secara strided dari memori
-utama.
+Tanpa BLAS native, `LinAlg.Dot` menjalankan kernel packed bergaya Goto/BLIS (`PackedMatMul.Gemm`)
+di semua ukuran kecuali yang sangat kecil. Satu irisan B sedalam `Kc` dikemas sekali menjadi panel
+selebar delapan kolom; setiap tugas paralel mengemas blok A-nya sendiri (64 baris) menjadi panel
+empat baris dan menjalankan petak register FMA 4×8 atas bagian kolomnya. Tugas dibagi per baris
+lebih dulu, lalu juga per kolom bila blok baris tidak cukup untuk menyibukkan semua core — itulah
+yang dibutuhkan kubus 200.
 
-| Ukuran | Sederhana | Packed | |
-|---:|---:|---:|---|
-| 256 | 1,45 ms | 0,88 ms | 1,65× |
-| 1024 | 83,9 ms | 42,7 ms | 1,96× |
-| 2048 | 759 ms | 365 ms | **2,08×** |
+Dispatch-nya, setiap aturan diukur dengan kedua kandidat bergantian dalam satu proses:
 
-Di bawah ambang ia kalah — packing adalah biaya tetap — sehingga ambangnya disetel konservatif di
-atas wilayah yang berisik. `PackedMatMul.Enabled = false` memaksa kernel sederhana.
+| Bentuk | Kernel | Alasan |
+|---|---|---|
+| kurang dari 2.048 multiply-add | blocked (tanpa packing, 4 baris × 1 vektor) | packing adalah biaya tetap; kalah di kubus 12, menang mulai 16 |
+| `n == 1` | matriks-vektor | 500×500×1: 0,043 ms dibanding 0,065 blocked, 0,25 packed |
+| `m == 1` | blocked | petak empat baris akan berisi tiga baris nol (1×500×500: 0,12 vs 0,21 ms) |
+| `n` tepat selebar satu vektor | blocked | tanpa ekor skalar untuk blocked, petak setengah kosong untuk packed (500×500×4: 0,085 vs 0,13 ms) |
+| selain itu | packed; paralel mulai 64³ multiply-add | paralel seri di kubus 64 dan menang mulai 80 |
+
+Lama dibanding baru, Release, jalur managed (tanpa BLAS), laptop AVX2 4-core, keduanya dijalankan
+bergantian dalam satu proses dengan pemanasan 2 detik, terbaik dari banyak percobaan:
+
+| Perkalian | Sebelum | Sesudah | |
+|---|---:|---:|---:|
+| 32³ | 0,0060 ms | 0,0043 ms | 1,39× |
+| 64³ | 0,030 ms | 0,025 ms | 1,17× |
+| 128³ | 0,123 ms | 0,095 ms | 1,30× |
+| 200³ | 0,81 ms | 0,27 ms | **3,01×** |
+| 256³ | 1,40 ms | 0,59 ms | 2,37× |
+| 400³ | 3,86 ms | 2,19 ms | 1,76× |
+| 512³ | 7,93 ms | 4,36 ms | 1,82× |
+| 1024³ | 65,3 ms | 34,1 ms | 1,92× |
+| 2000×100 · 100×50 | 0,84 ms | 0,35 ms | 2,43× |
+| 64×1024 · 1024×64 | 0,56 ms | 0,28 ms | 1,97× |
+| 1×500 · 500×500 | 0,144 ms | 0,133 ms | 1,09× (kernel sama: derau) |
+| 500×500 · 500×1 | 0,091 ms | 0,050 ms | 1,82× |
+| view 500×500ᵀ · vektor | 1,55 ms | 0,25 ms | 6,3× |
+
+Kernel lama lambat bukan karena packing itu lambat: ia tidak memakai FMA, membagi kerja hanya
+menjadi blok 128 baris (sehingga kubus 200 berjalan di dua thread), dan karenanya butuh delapan juta
+multiply-add sebelum packing terbayar — semua perkalian 100–400 tertinggal di kernel tanpa packing.
+Mesin ini mengalami throttling, jadi bandingkan rasio, bukan waktu absolut antar-run.
+
+Operand dibaca lewat stride-nya, sehingga `a.T`, slice, dan view terbalik dikemas langsung alih-alih
+disalin ke penyimpanan kontigu terlebih dulu; itulah seluruh keuntungan baris terakhir. `Einsum`
+mengirim setiap ejaan perkalian matriks dua operand (`"ij,jk->ik"`, `"ji,kj->ki"`, ...) dengan cara
+yang sama, sebagai view transpos.
+
+Kernel paralel **identik bit demi bit dengan kernel serial** — thread membagi C, tidak pernah k —
+sehingga hasil perkalian deterministik dari run ke run berapa pun jumlah core-nya. Jalur yang berbeda
+memang membulatkan secara berbeda (hanya kernel packed yang memakai fused multiply-add).
+`LinAlg.MatMul(a, b, MatMulKernel.X)` mengunci satu jalur; `PackedMatMul.Enabled = false` kembali ke
+kernel blocked. Petak enam baris sudah dicoba dan tidak dipakai: 0,89–0,97× di 32–200, 1,03–1,11×
+mulai 256.
+
+Kernel dense SciNet (LU berblok, solve segitiga, `Expm`) memakai `PackedMatMul.Gemm` yang sama lewat
+bentuk leading-dimension dan `alpha`/`beta`-nya; kernel ini berawal sebagai salinan milik SciNet.
 
 > Mengukur ini memberi pelajaran yang layak diulang: satu run awal menunjukkan kubus 192 memakan
 > waktu *delapan kali lebih lama* daripada kubus 224 — mustahil secara fisik. Penyebabnya tiered

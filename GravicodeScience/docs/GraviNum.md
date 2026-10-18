@@ -221,18 +221,59 @@ into the same exception the managed routine throws.
 
 ### A packed kernel, when there is no BLAS
 
-`LinAlg.Dot` packs both operands into tile-contiguous buffers above roughly eight million
-multiply-adds. The copy costs one pass and is repaid many times, because the packed panel is then
-read by every row block instead of being re-strided out of main memory.
+With no native BLAS, `LinAlg.Dot` runs a Goto/BLIS-style packed kernel (`PackedMatMul.Gemm`) at
+every size above a tiny one. A `Kc`-deep slice of B is packed once into panels eight columns wide;
+each parallel task packs its own 64-row block of A into four-row panels and runs a 4×8 FMA register
+tile over its share of the columns. Tasks split rows first and columns too when there are not
+enough row blocks to occupy every core — which is what a 200-cube needs.
 
-| Size | Simple | Packed | |
-|---:|---:|---:|---|
-| 256 | 1.45 ms | 0.88 ms | 1.65× |
-| 1024 | 83.9 ms | 42.7 ms | 1.96× |
-| 2048 | 759 ms | 365 ms | **2.08×** |
+The dispatch, every rule measured with both candidates alternating in one process:
 
-Below the threshold it loses — packing is a fixed cost — so the threshold is set conservatively
-above the noisy region. `PackedMatMul.Enabled = false` forces the simple kernel.
+| Shape | Kernel | Why |
+|---|---|---|
+| fewer than 2,048 multiply-adds | blocked (unpacked, 4 rows × 1 vector) | packing is a fixed cost; it loses at a 12-cube and wins from 16 |
+| `n == 1` | matrix-vector | 500×500×1: 0.043 ms against 0.065 blocked, 0.25 packed |
+| `m == 1` | blocked | a four-row tile would be three rows of zeros (1×500×500: 0.12 vs 0.21 ms) |
+| `n` exactly one vector wide | blocked | no scalar tail for blocked, half-empty tile for packed (500×500×4: 0.085 vs 0.13 ms) |
+| everything else | packed; parallel from 64³ multiply-adds | parallel ties serial at a 64-cube and wins from 80 |
+
+Old against new, Release, managed path (no BLAS), 4-core AVX2 laptop, both run alternately in one
+process with 2 s of warm-up, best of many:
+
+| Product | Before | After | |
+|---|---:|---:|---:|
+| 32³ | 0.0060 ms | 0.0043 ms | 1.39× |
+| 64³ | 0.030 ms | 0.025 ms | 1.17× |
+| 128³ | 0.123 ms | 0.095 ms | 1.30× |
+| 200³ | 0.81 ms | 0.27 ms | **3.01×** |
+| 256³ | 1.40 ms | 0.59 ms | 2.37× |
+| 400³ | 3.86 ms | 2.19 ms | 1.76× |
+| 512³ | 7.93 ms | 4.36 ms | 1.82× |
+| 1024³ | 65.3 ms | 34.1 ms | 1.92× |
+| 2000×100 · 100×50 | 0.84 ms | 0.35 ms | 2.43× |
+| 64×1024 · 1024×64 | 0.56 ms | 0.28 ms | 1.97× |
+| 1×500 · 500×500 | 0.144 ms | 0.133 ms | 1.09× (same kernel: noise) |
+| 500×500 · 500×1 | 0.091 ms | 0.050 ms | 1.82× |
+| 500×500ᵀ view · vector | 1.55 ms | 0.25 ms | 6.3× |
+
+The old kernel was not slow because packing is slow: it had no FMA, split work only into 128-row
+blocks (so a 200-cube ran on two threads), and so needed eight million multiply-adds before
+packing paid — leaving every 100–400 product on the unpacked kernel. The machine throttles, so
+compare ratios, not absolute times across runs.
+
+Operands are read through their strides, so `a.T`, slices and reversed views are packed in place
+instead of being copied to contiguous storage first; that is the whole of the last row's gain.
+`Einsum` sends every spelling of a two-operand matrix product (`"ij,jk->ik"`, `"ji,kj->ki"`, ...)
+the same way, as transposed views.
+
+The parallel kernel is **bit-identical to the serial one** — threads divide C, never k — so a
+product is deterministic run to run whatever the core count. The paths do round differently from
+each other (only the packed kernel fuses multiply and add). `LinAlg.MatMul(a, b, MatMulKernel.X)`
+pins a path; `PackedMatMul.Enabled = false` falls back to the blocked kernel. A six-row tile was
+tried and kept out: 0.89–0.97× at 32–200, 1.03–1.11× from 256 up.
+
+SciNet's dense kernels (blocked LU, triangular solves, `Expm`) use the same `PackedMatMul.Gemm`
+through its leading-dimension, `alpha`/`beta` form; it began as SciNet's own copy.
 
 > Measuring this taught a lesson worth repeating: an early run showed a 192-cube taking *eight
 > times longer* than a 224-cube, which is physically impossible. The cause was tiered JIT — the

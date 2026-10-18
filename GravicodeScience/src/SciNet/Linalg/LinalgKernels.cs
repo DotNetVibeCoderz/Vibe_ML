@@ -56,7 +56,7 @@ internal static class LinalgKernels
         return r;
     }
 
-    /// <summary>Matrix product through SciNet's packed kernel (or native BLAS when GraviNum finds one).</summary>
+    /// <summary>Matrix product through GraviNum's <c>LinAlg.Dot</c> (packed kernel, or native BLAS when one is found).</summary>
     public static NdArray Mul(NdArray a, NdArray b) => LinalgGemm.Mul(a, b);
 
     public static double[] Mul(double[] a, double[] b, int m, int k, int n)

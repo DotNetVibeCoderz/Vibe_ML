@@ -6,15 +6,19 @@ namespace Gravicode.Science.GraviNum;
 /// Dense linear algebra: products, solves, inverses and norms.
 /// </summary>
 /// <remarks>
-/// <see cref="Dot"/> is the hot path of the whole ecosystem, so it is written as an <c>i-k-j</c>
-/// loop over row-major storage: the innermost loop is a contiguous <c>y += a * x</c> that the
-/// JIT turns into <see cref="Vector{T}"/> FMA work, and rows are handed to the thread pool once
-/// the matrix is big enough to amortise it. Decompositions live in <see cref="Decomposition"/>.
+/// <see cref="Dot"/> is the hot path of the whole ecosystem. A matrix product goes to a native BLAS
+/// when one is installed and the product is large enough, otherwise to the packed FMA kernel in
+/// <see cref="PackedMatMul"/> from a 16-cube up, and to an unpacked register-blocked kernel for
+/// tiny and one-row products; see <see cref="PackedMatMul.ShouldUse"/> for the measured rules.
+/// Decompositions live in <see cref="Decomposition"/>.
 /// </remarks>
 public static class LinAlg
 {
     /// <summary>Rows above which matrix products are parallelised.</summary>
     public const int ParallelRowThreshold = 64;
+
+    /// <summary>Multiply-adds below which a matrix-vector product stays on one thread.</summary>
+    private const long MatVecParallelWork = 32 * 1024;
 
     /// <summary>
     /// Matrix product. Accepts matrix·matrix, matrix·vector, vector·matrix and vector·vector
@@ -33,6 +37,10 @@ public static class LinAlg
         {
             if (a.Shape[1] != b.Size)
                 throw new InvalidOperationException($"Cannot multiply ({Shapes.Describe(a.Shape)}) by a vector of length {b.Size}.");
+            // A strided matrix goes through the packed kernel, which reads views in place,
+            // rather than being copied to contiguous storage for the row-dot-product loop.
+            if (!a.IsContiguous && PackedMatMul.Enabled && System.Numerics.Vector.IsHardwareAccelerated)
+                return MatMul(a, b.Reshape(b.Size, 1), MatMulKernel.Packed).Reshape(a.Shape[0]);
             return MatVec(a, b);
         }
 
@@ -109,7 +117,8 @@ public static class LinAlg
         var result = NdArray.Zeros(m);
         var dst = result.Buffer;
 
-        if (m >= ParallelRowThreshold)
+        // Rows and work both: 150 rows of four elements measured 5x slower on the thread pool.
+        if (m >= ParallelRowThreshold && (long)m * k >= MatVecParallelWork)
         {
             Parallel.For(0, m, i => dst[i] = InnerSpan(src.AsSpan(srcOffset + i * k, k), vec));
         }
@@ -120,38 +129,81 @@ public static class LinAlg
         return result;
     }
 
-    private static NdArray MatMul(NdArray a, NdArray b)
+    private static NdArray MatMul(NdArray a, NdArray b) => MatMul(a, b, MatMulKernel.Auto);
+
+    /// <summary>
+    /// Matrix product of two rank 2 arrays through a chosen kernel. <see cref="MatMulKernel.Auto"/>
+    /// is what <see cref="Dot"/> does; the others exist so tests and benchmarks can pin a path.
+    /// </summary>
+    public static NdArray MatMul(NdArray a, NdArray b, MatMulKernel kernel)
     {
+        if (a.Rank != 2 || b.Rank != 2 || a.Shape[1] != b.Shape[0])
+            throw new InvalidOperationException(
+                $"Shapes ({Shapes.Describe(a.Shape)}) and ({Shapes.Describe(b.Shape)}) are not aligned for a matrix product.");
+
         var m = a.Shape[0];
         var k = a.Shape[1];
         var n = b.Shape[1];
 
-        var ac = a.AsContiguous();
-        var bc = b.AsContiguous();
-        var av = ac.Buffer;
-        var bv = bc.Buffer;
-        var aOff = ac.Offset;
-        var bOff = bc.Offset;
+        if (kernel == MatMulKernel.Reference) return PackedMatMul.Reference(a, b);
 
         var result = NdArray.Zeros(m, n);
+        if (m == 0 || n == 0 || k == 0) return result;
         var cv = result.Buffer;
 
-        // Hand off to a native BLAS when the machine has one and the product is big enough to
-        // repay the call. The managed kernel below stays as the reference the tests check against.
-        if (Compute.NativeBlas.ShouldUse(m, n, k) && aOff == 0 && bOff == 0 && cv.Length == (long)m * n)
+        if (kernel == MatMulKernel.Auto)
         {
-            Compute.NativeBlas.Multiply(av, bv, cv, m, n, k);
+            // Hand off to a native BLAS when the machine has one and the product is big enough to
+            // repay the call. The managed kernels below stay as the reference the tests check.
+            if (Compute.NativeBlas.ShouldUse(m, n, k))
+            {
+                var an = a.AsContiguous();
+                var bn = b.AsContiguous();
+                if (an.Offset == 0 && bn.Offset == 0 && an.Buffer.Length == m * k && bn.Buffer.Length == k * n)
+                {
+                    Compute.NativeBlas.Multiply(an.Buffer, bn.Buffer, cv, m, n, k);
+                    return result;
+                }
+            }
+
+            // One column is a matrix-vector product, and the row-dot-product kernel beats both
+            // matrix kernels at it (each would pad the column out to a full tile or vector).
+            // A non-contiguous matrix (a transposed view, say) would be copied first, and that
+            // copy cost 1.9 ms at 500x500 against 0.25 ms for the packed kernel reading it in place.
+            if (n == 1 && a.IsContiguous) return MatVec(a, b.AsContiguous().Reshape(k)).Reshape(m, 1);
+
+            kernel = PackedMatMul.ShouldUse(m, n, k) ? MatMulKernel.Packed : MatMulKernel.Blocked;
+        }
+
+        if (kernel is MatMulKernel.Packed or MatMulKernel.PackedSerial)
+        {
+            // The packed kernel reads both operands through their strides, so a transposed or
+            // sliced view goes in as it is: packing is the copy AsContiguous would have made.
+            unsafe
+            {
+                fixed (double* pa = a.Buffer, pb = b.Buffer, pc = cv)
+                {
+                    PackedMatMul.Gemm(m, n, k, 1.0,
+                        pa + a.Offset, a.Strides[0], a.Strides[1],
+                        pb + b.Offset, b.Strides[0], b.Strides[1],
+                        1.0, pc, n, allowParallel: kernel == MatMulKernel.Packed);
+                }
+            }
             return result;
         }
 
-        // No native library: pack the operands and use the blocked kernel, which is worth its
-        // copying cost once the product is large enough that cache misses dominate.
-        if (PackedMatMul.ShouldUse(m, n, k))
-        {
-            PackedMatMul.Multiply(av, aOff, bv, bOff, cv, m, n, k);
-            return result;
-        }
+        var ac = a.AsContiguous();
+        var bc = b.AsContiguous();
+        MultiplyBlocked(ac.Buffer, ac.Offset, bc.Buffer, bc.Offset, cv, m, n, k);
+        return result;
+    }
 
+    /// <summary>
+    /// The unpacked kernel: <c>C += A B</c> for contiguous row-major operands. Used for tiny
+    /// products, where packing cannot pay for itself, and on hardware without SIMD.
+    /// </summary>
+    private static void MultiplyBlocked(double[] av, int aOff, double[] bv, int bOff, double[] cv, int m, int n, int k)
+    {
         // A 4-row by one-vector tile of C is held in registers across a slice of k, then added
         // into memory once per slice. Two separate problems drive that shape, and fixing either
         // one alone makes things worse:
@@ -253,8 +305,10 @@ public static class LinAlg
             }
         }
 
+        // Parallel by work, not by row count: the old "m >= 64" rule sent a 150x4x4 product to the
+        // thread pool and made it twice as slow as running it inline.
         var blocks = (m + 3) / 4;
-        var parallel = m >= ParallelRowThreshold || (long)m * n * k > 1_000_000;
+        var parallel = blocks > 1 && (long)m * n * k >= PackedMatMul.ParallelThreshold;
 
         for (var p0 = 0; p0 < k; p0 += slice)
         {
@@ -266,8 +320,6 @@ public static class LinAlg
             else
                 for (var block = 0; block < blocks; block++) ComputeRowBlock(block, start, pn);
         }
-
-        return result;
     }
 
     /// <summary>
@@ -511,4 +563,23 @@ public static class LinAlg
         if (a.Rank != 2 || a.Shape[0] != a.Shape[1])
             throw new ArgumentException($"{caller} requires a square matrix, got ({Shapes.Describe(a.Shape)}).");
     }
+}
+
+/// <summary>Which kernel <see cref="LinAlg.MatMul(NdArray, NdArray, MatMulKernel)"/> uses.</summary>
+public enum MatMulKernel
+{
+    /// <summary>What <see cref="LinAlg.Dot"/> does: native BLAS if present and worth it, else by size.</summary>
+    Auto,
+
+    /// <summary>The unpacked four-row register kernel; the choice for tiny products.</summary>
+    Blocked,
+
+    /// <summary>The packed micro-kernel, on one thread.</summary>
+    PackedSerial,
+
+    /// <summary>The packed micro-kernel, parallel above <see cref="PackedMatMul.ParallelThreshold"/>.</summary>
+    Packed,
+
+    /// <summary>A plain scalar triple loop through the indexer: slow, and the yardstick.</summary>
+    Reference,
 }

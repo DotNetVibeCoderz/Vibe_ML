@@ -138,9 +138,12 @@ public class NativeBlasTests
     }
 
     [Fact]
-    public void SmallProductsSkipThePackedKernelToo()
+    public void OnlyTinyProductsSkipThePackedKernel()
     {
-        Assert.False(PackedMatMul.ShouldUse(64, 64, 64));
+        // The packed kernel used to start at eight million multiply-adds; since it gained FMA and a
+        // row-and-column parallel split it wins from a 16-cube up (see PackedMatMul.ShouldUse).
+        Assert.False(PackedMatMul.ShouldUse(8, 8, 8));
+        Assert.True(PackedMatMul.ShouldUse(64, 64, 64));
         Assert.True(PackedMatMul.ShouldUse(512, 512, 512));
     }
 

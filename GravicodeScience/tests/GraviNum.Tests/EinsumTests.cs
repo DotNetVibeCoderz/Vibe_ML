@@ -27,6 +27,43 @@ public class EinsumTests
         Assert.True(UFunc.AllClose(actual, expected, 1e-12));
     }
 
+    [Theory]
+    [InlineData("ij,jk->ik")]
+    [InlineData("ji,jk->ik")]
+    [InlineData("ij,kj->ik")]
+    [InlineData("ji,kj->ik")]
+    [InlineData("ij,jk->ki")]
+    [InlineData("ji,jk->ki")]
+    [InlineData("ij,kj->ki")]
+    [InlineData("ji,kj->ki")]
+    [InlineData("ab,bc")]
+    public void EverySpellingOfAMatrixProductMatchesATripleLoop(string subscripts)
+    {
+        // These go through LinAlg.Dot with transposed views rather than the loop evaluator, so
+        // each is checked against the definition written out here, not against Dot itself.
+        const int m = 37, k = 41, n = 29;
+        var rng = new GraviRandom(subscripts.GetHashCode() & 0xffff);
+        var parts = subscripts.Split("->")[0].Split(',');
+        var summed = parts[0].First(parts[1].Contains);
+        var a = parts[0][1] == summed ? rng.StandardNormal(m, k) : rng.StandardNormal(k, m);
+        var b = parts[1][0] == summed ? rng.StandardNormal(k, n) : rng.StandardNormal(n, k);
+        var at = a.Shape[0] == m ? a : a.T;     // (m, k)
+        var bt = b.Shape[0] == k ? b : b.T;     // (k, n)
+        var outputTransposed = subscripts.EndsWith("->ki");
+
+        var actual = Einsum.Evaluate(subscripts, a, b);
+
+        Assert.Equal(outputTransposed ? new[] { n, m } : new[] { m, n }, actual.Shape.ToArray());
+        for (var i = 0; i < m; i++)
+            for (var j = 0; j < n; j++)
+            {
+                var s = 0.0;
+                for (var p = 0; p < k; p++) s += at[i, p] * bt[p, j];
+                var got = outputTransposed ? actual[j, i] : actual[i, j];
+                Assert.True(Math.Abs(s - got) < 1e-12, $"{subscripts}: [{i},{j}] {got} vs {s}");
+            }
+    }
+
     [Fact]
     public void ContractingOverTheFirstAxisIsATransposedProduct()
     {

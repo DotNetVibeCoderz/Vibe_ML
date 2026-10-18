@@ -258,8 +258,9 @@ Linalg.Toeplitz(c);  Linalg.Hilbert(5);  Linalg.InvHilbertExact(5);  Linalg.Comp
 ```
 
 SciNet adds what `scipy.linalg` has beyond `numpy.linalg`, reusing GraviNum's QR, SVD and
-symmetric eigensolver underneath, with its own packed parallel matrix product, recursive blocked
-LU and blocked triangular solves for the dense kernels. `Expm` is Al-Mohy–Higham
+symmetric eigensolver underneath — and GraviNum's packed parallel matrix product
+(`PackedMatMul.Gemm`, which began life here) — with recursive blocked LU and blocked triangular
+solves for the dense kernels. `Expm` is Al-Mohy–Higham
 scaling-and-squaring with Padé degree selection — at or below SciPy's time from n = 200 up;
 `ExpmFrechet` gives its Fréchet derivative. The Francis QR sweeps behind `Schur`/`Eig` apply their
 reflectors deferred and in parallel; when GraviNum's `NativeLapack` finds a LAPACK at run time,

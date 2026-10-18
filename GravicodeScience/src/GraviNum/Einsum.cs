@@ -40,6 +40,8 @@ public static class Einsum
         var (inputs, output) = Parse(subscripts, operands);
         var extent = MeasureAxes(inputs, operands);
 
+        if (TryMatrixProduct(inputs, output, operands) is { } product) return product;
+
         // Letters kept in the output are the loop nest we build a result for; the rest are summed.
         var kept = output.ToCharArray();
         var summed = extent.Keys.Where(c => !output.Contains(c)).ToArray();
@@ -77,6 +79,37 @@ public static class Einsum
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Recognises a plain matrix product in any of its transposed spellings — <c>"ij,jk->ik"</c>,
+    /// <c>"ji,jk->ik"</c>, <c>"ij,kj->ki"</c> and so on — and hands it to <see cref="LinAlg.Dot"/>
+    /// with transposed views, which the packed kernel reads in place.
+    /// </summary>
+    /// <remarks>
+    /// The loop evaluator below does dictionary lookups and an indexer read for every one of the
+    /// m·n·k terms, with no SIMD and one thread — the wrong tool for the subscript string that is
+    /// by far the most common.
+    /// </remarks>
+    private static NdArray? TryMatrixProduct(string[] inputs, string output, NdArray[] operands)
+    {
+        if (operands.Length != 2 || output.Length != 2) return null;
+        string a = inputs[0], b = inputs[1];
+        if (a.Length != 2 || b.Length != 2 || a[0] == a[1] || b[0] == b[1] || output[0] == output[1]) return null;
+
+        var shared = a.Where(b.Contains).ToArray();
+        if (shared.Length != 1) return null;
+        var sum = shared[0];
+        if (output.Contains(sum)) return null;
+
+        var freeA = a[0] == sum ? a[1] : a[0];
+        var freeB = b[0] == sum ? b[1] : b[0];
+        if (!output.Contains(freeA) || !output.Contains(freeB)) return null;
+
+        var left = a[1] == sum ? operands[0] : operands[0].T;   // (freeA, sum)
+        var right = b[0] == sum ? operands[1] : operands[1].T;  // (sum, freeB)
+        var c = LinAlg.Dot(left, right);
+        return output[0] == freeA ? c : c.T.Copy();
     }
 
     /// <summary>
