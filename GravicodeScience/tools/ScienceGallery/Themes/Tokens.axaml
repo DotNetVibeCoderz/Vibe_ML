@@ -1,0 +1,110 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--
+    Gravicode Science Gallery design tokens.
+
+    The gallery is a spectroscope for the libraries. Its housing - the sidebar - is the deep ink of
+    the SciNet icon; the bench it looks at is a cool lab-paper grey, not cream. The only saturated
+    colours anywhere are the seven library emission lines, and they always mean a library: on a
+    card, in the sidebar filter, in a chart series that stands for one. Interactive chrome stays ink
+    so it never competes with them.
+
+    Type: Bricolage Grotesque, condensed and heavy, for titles only; Inter for reading;
+    JetBrains Mono for code and for every number the app reports.
+  -->
+
+  <FontFamily x:Key="DisplayFont">avares://ScienceGallery/Assets/Fonts#Bricolage Grotesque</FontFamily>
+  <FontFamily x:Key="MonoFont">avares://ScienceGallery/Assets/Fonts#JetBrains Mono</FontFamily>
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <!-- ============================================================ LIGHT (default) -->
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="AppGround" Color="#EEF1F4" />
+      <SolidColorBrush x:Key="SidebarGround" Color="#16132E" />
+      <SolidColorBrush x:Key="SidebarHover" Color="#221F40" />
+      <SolidColorBrush x:Key="SidebarSelected" Color="#2D2952" />
+      <SolidColorBrush x:Key="SidebarText" Color="#E9E7F6" />
+      <SolidColorBrush x:Key="SidebarMuted" Color="#9C99B8" />
+      <SolidColorBrush x:Key="SidebarRule" Color="#2C2950" />
+
+      <SolidColorBrush x:Key="CardGround" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="CardBorder" Color="#DCE2E9" />
+      <SolidColorBrush x:Key="CardBorderHover" Color="#9AA6B5" />
+      <SolidColorBrush x:Key="WellGround" Color="#F6F8FA" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="#16132E" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="#3A4152" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#677184" />
+      <SolidColorBrush x:Key="RuleBrush" Color="#DCE2E9" />
+
+      <SolidColorBrush x:Key="InkButton" Color="#16132E" />
+      <SolidColorBrush x:Key="InkButtonHover" Color="#2D2952" />
+      <SolidColorBrush x:Key="InkButtonText" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="FocusBrush" Color="#1B95BC" />
+      <SolidColorBrush x:Key="ErrorBrush" Color="#B3272C" />
+
+      <SolidColorBrush x:Key="StripGround" Color="#16132E" />
+      <SolidColorBrush x:Key="StripUnlit" Color="#46426E" />
+
+      <SolidColorBrush x:Key="EditorGround" Color="#FBFCFD" />
+      <SolidColorBrush x:Key="EditorGutter" Color="#9AA3B0" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#C9E3EE" />
+
+      <Color x:Key="CodeComment">#5F7183</Color>
+      <Color x:Key="CodeKeyword">#5A45B8</Color>
+      <Color x:Key="CodeType">#0E6E8C</Color>
+      <Color x:Key="CodeMethod">#7E610F</Color>
+      <Color x:Key="CodeString">#1E7A45</Color>
+      <Color x:Key="CodeNumber">#A6520B</Color>
+      <Color x:Key="CodeMeta">#B3272C</Color>
+      <Color x:Key="CodePunctuation">#47535F</Color>
+    </ResourceDictionary>
+
+    <!-- ============================================================ DARK -->
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="AppGround" Color="#100F1D" />
+      <SolidColorBrush x:Key="SidebarGround" Color="#0A0914" />
+      <SolidColorBrush x:Key="SidebarHover" Color="#18162C" />
+      <SolidColorBrush x:Key="SidebarSelected" Color="#24213F" />
+      <SolidColorBrush x:Key="SidebarText" Color="#E9E7F6" />
+      <SolidColorBrush x:Key="SidebarMuted" Color="#8E8BAA" />
+      <SolidColorBrush x:Key="SidebarRule" Color="#201E38" />
+
+      <SolidColorBrush x:Key="CardGround" Color="#1A1830" />
+      <SolidColorBrush x:Key="CardBorder" Color="#2B2948" />
+      <SolidColorBrush x:Key="CardBorderHover" Color="#57547E" />
+      <SolidColorBrush x:Key="WellGround" Color="#15132A" />
+
+      <SolidColorBrush x:Key="TextHighBrush" Color="#EEECF8" />
+      <SolidColorBrush x:Key="TextBaseBrush" Color="#C6C4D8" />
+      <SolidColorBrush x:Key="TextMutedBrush" Color="#8E8BA6" />
+      <SolidColorBrush x:Key="RuleBrush" Color="#2B2948" />
+
+      <SolidColorBrush x:Key="InkButton" Color="#E9E7F6" />
+      <SolidColorBrush x:Key="InkButtonHover" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="InkButtonText" Color="#16132E" />
+      <SolidColorBrush x:Key="FocusBrush" Color="#4CC0E3" />
+      <SolidColorBrush x:Key="ErrorBrush" Color="#EC7378" />
+
+      <SolidColorBrush x:Key="StripGround" Color="#07060F" />
+      <SolidColorBrush x:Key="StripUnlit" Color="#36335A" />
+
+      <SolidColorBrush x:Key="EditorGround" Color="#13112A" />
+      <SolidColorBrush x:Key="EditorGutter" Color="#6E6B8C" />
+      <SolidColorBrush x:Key="EditorSelection" Color="#2F4F66" />
+
+      <Color x:Key="CodeComment">#7C8EA1</Color>
+      <Color x:Key="CodeKeyword">#A9A3F0</Color>
+      <Color x:Key="CodeType">#62BEDC</Color>
+      <Color x:Key="CodeMethod">#E6D06A</Color>
+      <Color x:Key="CodeString">#74C99A</Color>
+      <Color x:Key="CodeNumber">#EBA05C</Color>
+      <Color x:Key="CodeMeta">#EC7378</Color>
+      <Color x:Key="CodePunctuation">#A3A0BE</Color>
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+
+</ResourceDictionary>

@@ -1,0 +1,226 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="using:ScienceGallery.Controls"
+        xmlns:v="using:ScienceGallery.Views"
+        xmlns:ae="using:AvaloniaEdit"
+        x:Class="ScienceGallery.Views.MainWindow"
+        Title="Gravicode Science Gallery"
+        Width="1440" Height="900" MinWidth="1080" MinHeight="640"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource AppGround}">
+
+  <Window.Resources>
+    <v:HexBrushConverter x:Key="HexBrush" />
+  </Window.Resources>
+
+  <Grid ColumnDefinitions="272,*" Background="{DynamicResource AppGround}">
+
+    <!-- ======================================================== sidebar: the instrument -->
+    <Border Grid.Column="0" Classes="sidebar" Background="{DynamicResource SidebarGround}">
+      <DockPanel Margin="20,26,20,18">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="4,0,4,22">
+          <c:SpectrumStrip Height="12" Margin="0,0,0,14"
+                           Ground="{DynamicResource StripGround}" Unlit="{DynamicResource StripUnlit}"
+                           Libraries="{Binding AllLibraries, RelativeSource={RelativeSource AncestorType=v:MainWindow}}" />
+          <TextBlock Text="Gravicode" FontFamily="{StaticResource DisplayFont}" FontWeight="SemiBold" FontSize="17"
+                     Classes="sideMuted" />
+          <TextBlock Text="Science Gallery" FontFamily="{StaticResource DisplayFont}" FontWeight="ExtraBold" FontSize="27" />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="4,12,4,0">
+          <ToggleSwitch x:Name="ThemeSwitch" OnContent="Dark theme" OffContent="Light theme"
+                        Foreground="{DynamicResource SidebarText}" IsCheckedChanged="OnThemeToggled" />
+          <TextBlock Classes="sideMuted" FontSize="11" TextWrapping="Wrap"
+                     Text="Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil" />
+        </StackPanel>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="6">
+            <TextBlock Classes="sideHeading" Text="DOMAINS" Margin="4,0,0,2" />
+            <ListBox Classes="sideList" ItemsSource="{Binding Domains}" SelectedItem="{Binding SelectedDomain}">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="{Binding Name}" FontSize="14" />
+                    <TextBlock Grid.Column="1" Classes="sideMuted" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                               Text="{Binding CountText}" VerticalAlignment="Center" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <Border Height="1" Background="{DynamicResource SidebarRule}" Margin="4,14,4,12" />
+
+            <TextBlock Classes="sideHeading" Text="LIBRARIES" Margin="4,0,0,0" />
+            <TextBlock Classes="sideMuted" FontSize="12" TextWrapping="Wrap" Margin="4,0,4,4"
+                       Text="Pick one or more to see the use cases that use all of them." />
+            <ItemsControl ItemsSource="{Binding Libraries}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <ToggleButton Classes="libToggle" IsChecked="{Binding IsChecked}" Margin="0,1">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <Border Width="4" Height="22" CornerRadius="2" Margin="0,0,11,0"
+                              Background="{Binding Info.Hex, Converter={StaticResource HexBrush}}"
+                              BorderBrush="{DynamicResource SidebarMuted}" BorderThickness="0" />
+                      <StackPanel Grid.Column="1" Spacing="0">
+                        <TextBlock Text="{Binding Info.Name}" FontSize="13.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource SidebarText}" />
+                        <TextBlock Text="{Binding Analogue}" FontSize="11.5" Foreground="{DynamicResource SidebarMuted}" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="2" Text="{Binding Count}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                 Foreground="{DynamicResource SidebarMuted}" VerticalAlignment="Center" />
+                    </Grid>
+                  </ToggleButton>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- ======================================================== browse -->
+    <ScrollViewer Grid.Column="1" x:Name="BrowseScroll" IsVisible="{Binding IsBrowsing}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="44,36,44,40" Spacing="22">
+
+        <StackPanel Spacing="10" MaxWidth="860" HorizontalAlignment="Left">
+          <TextBlock Classes="display" FontSize="40" LineHeight="44" TextWrapping="Wrap"
+                     Text="See it run, then take the code." />
+          <TextBlock FontSize="15.5" LineHeight="24" TextWrapping="Wrap" Foreground="{DynamicResource TextBaseBrush}">
+            <Run Text="{Binding TotalCount}" />
+            <Run Text="real-world use cases for the seven Gravicode.Science libraries. Opening one runs it on this machine, draws its chart with Visual.Net, and shows the exact source it ran." />
+          </TextBlock>
+        </StackPanel>
+
+        <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+          <TextBox Classes="search" Text="{Binding SearchText}" MaxWidth="560" HorizontalAlignment="Left"
+                   PlaceholderText="Search use cases: grading, ODE, sensor, invoice, Kalman…" />
+          <TextBlock Grid.Column="1" Classes="eyebrow" VerticalAlignment="Center" Text="{Binding ResultsCaption}" />
+        </Grid>
+
+        <ItemsControl x:Name="Cards" ItemsSource="{Binding Visible}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid x:Name="CardGrid" Columns="3" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Button Classes="showcaseCard" Margin="0,0,16,16" MinHeight="196"
+                      Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=v:MainWindow}}"
+                      CommandParameter="{Binding}">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,14,0,0">
+                    <c:SpectrumStrip Height="16" Libraries="{Binding Libraries}"
+                                     Ground="{DynamicResource StripGround}" Unlit="{DynamicResource StripUnlit}" />
+                    <TextBlock Classes="eyebrow" Text="{Binding LibraryNames}" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <StackPanel Spacing="7">
+                    <TextBlock Classes="eyebrow" Text="{Binding DomainName}" />
+                    <TextBlock Classes="title" Text="{Binding Title}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontSize="13.5" LineHeight="20"
+                               Foreground="{DynamicResource TextMutedBrush}" />
+                  </StackPanel>
+                </DockPanel>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Classes="card" Padding="28" IsVisible="{Binding IsEmpty}" HorizontalAlignment="Left">
+          <StackPanel Spacing="12">
+            <TextBlock Classes="title" Text="No use case matches these filters." />
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}"
+                       Text="Library filters only show use cases that use every selected library. Remove one, or clear them all." />
+            <Button Classes="ink" Content="Clear filters" Command="{Binding ClearFiltersCommand}" HorizontalAlignment="Left" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- ======================================================== one use case -->
+    <ScrollViewer Grid.Column="1" x:Name="DetailScroll" IsVisible="{Binding IsDetailOpen}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="44,26,44,40" Spacing="18" DataContext="{Binding Detail}">
+
+        <Button Classes="quiet" Content="← All use cases" HorizontalAlignment="Left"
+                Command="{Binding DataContext.CloseCommand, RelativeSource={RelativeSource AncestorType=v:MainWindow}}" />
+
+        <StackPanel Spacing="10" MaxWidth="900" HorizontalAlignment="Left">
+          <TextBlock Classes="eyebrow" Text="{Binding DomainName}" />
+          <TextBlock Classes="display" Text="{Binding Title}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="14" Margin="0,4,0,2">
+            <c:SpectrumStrip Width="300" Height="26" Libraries="{Binding Libraries}"
+                             Ground="{DynamicResource StripGround}" Unlit="{DynamicResource StripUnlit}" />
+            <TextBlock Classes="eyebrow" VerticalAlignment="Center" Text="{Binding LibraryLine}" TextWrapping="Wrap" MaxWidth="560" />
+          </StackPanel>
+          <TextBlock Text="{Binding Scenario}" TextWrapping="Wrap" FontSize="15" LineHeight="23" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <Button Classes="ink" Content="Run again" Command="{Binding RunCommand}" />
+          <Button Classes="quiet" Content="Copy code" Click="OnCopyCode" />
+          <Button Classes="quiet" Content="Save chart as PNG" Click="OnSaveChart" IsEnabled="{Binding HasChart}" />
+          <TextBlock Classes="eyebrow" VerticalAlignment="Center" Margin="6,0,0,0" Text="{Binding Status}" />
+          <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsRunning}" />
+          <TextBlock x:Name="CopyNotice" Classes="eyebrow" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Border Classes="card" Padding="16" IsVisible="{Binding HasError}" BorderBrush="{DynamicResource ErrorBrush}">
+          <TextBlock Text="{Binding Error}" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"
+                     FontFamily="{StaticResource MonoFont}" FontSize="13" />
+        </Border>
+
+        <Grid ColumnDefinitions="11*,9*" x:Name="DetailColumns">
+          <Border Grid.Column="0" Classes="card" Padding="20" Margin="0,0,10,0" VerticalAlignment="Top">
+            <StackPanel Spacing="16">
+              <TextBlock Classes="eyebrow" Text="RESULT" />
+              <Image Source="{Binding Chart}" Stretch="Uniform" MaxHeight="520" IsVisible="{Binding HasChart}" />
+              <ItemsControl ItemsSource="{Binding Metrics}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Background="{DynamicResource WellGround}" CornerRadius="8" Padding="14,10" Margin="0,0,10,10" MinWidth="150" MaxWidth="320">
+                      <StackPanel Spacing="3">
+                        <TextBlock Classes="eyebrow" Text="{Binding Label}" TextWrapping="Wrap" />
+                        <TextBlock Classes="metricValue" Text="{Binding Value}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Note}" IsVisible="{Binding HasNote}" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextMutedBrush}" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ItemsControl ItemsSource="{Binding Lines}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="13.5" LineHeight="21" Margin="0,0,0,4" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
+          <Border Grid.Column="1" Classes="card" Padding="0" Margin="10,0,0,0" VerticalAlignment="Top" ClipToBounds="True">
+            <DockPanel>
+              <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,16,20,10">
+                <TextBlock Classes="eyebrow" Text="CODE" />
+                <TextBlock Grid.Column="1" Classes="eyebrow" Text="{Binding SourceName}" />
+              </Grid>
+              <Border Height="1" DockPanel.Dock="Top" Background="{DynamicResource RuleBrush}" />
+              <ae:TextEditor x:Name="CodeView" Height="700" IsReadOnly="True" ShowLineNumbers="True"
+                             FontFamily="{StaticResource MonoFont}" FontSize="12.5" Padding="8,10"
+                             Background="{DynamicResource EditorGround}" LineNumbersForeground="{DynamicResource EditorGutter}"
+                             HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" />
+            </DockPanel>
+          </Border>
+        </Grid>
+      </StackPanel>
+    </ScrollViewer>
+
+  </Grid>
+</Window>

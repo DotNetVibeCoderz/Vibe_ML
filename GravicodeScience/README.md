@@ -75,10 +75,33 @@ notebooks/    seven .NET Interactive notebooks with charts
 benchmarks/   seven BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
 tests/        3,257 tests
-tools/        ScienceAppGen — an IDE that builds apps from a prompt; the icon generator
+tools/        ScienceAppGen (an IDE that builds apps from a prompt), Science Gallery
+              (45 runnable use cases), the icon generator
 assets/       NuGet package icons
 docs/         English, with Bahasa Indonesia in docs/id/
 ```
+
+## Gravicode Science Gallery
+
+[![Gravicode Science Gallery](docs/screenshots/gallery-home.png)](docs/ScienceGallery.md)
+
+A desktop app with **45 real-world use cases** across education, science and research, office
+work, industry, health, finance, utilities and games. Opening one runs it on your machine, draws its
+chart with [Visual.Net](https://github.com/DotNetVibeCoderz/Vibe_Charting/tree/main/Visual.Net), and
+shows the exact source file it ran — copy it and you have working code.
+
+```bash
+dotnet run --project tools/ScienceGallery
+```
+
+Filter by domain or by the libraries a use case uses; each card's spectrum strip lights the
+libraries it needs, in the same emission-line colours as the NuGet icons.
+
+[![One use case: counting touching cells](docs/screenshots/gallery-detail-2.png)](docs/ScienceGallery.md)
+
+The charts come from Visual.Net, compiled from its own repository: clone
+[Vibe_Charting](https://github.com/DotNetVibeCoderz/Vibe_Charting) next to Vibe_ML, or set
+`VISUALNET_ROOT`. Details in [ScienceGallery.md](docs/ScienceGallery.md).
 
 ## ScienceAppGen
 
@@ -225,6 +248,7 @@ failure rather than as a plausible-looking number:
 | ScienceAppGen | [ScienceAppGen.md](docs/ScienceAppGen.md) | [id/ScienceAppGen.md](docs/id/ScienceAppGen.md) |
 | Publishing and CI | [publishing.md](docs/publishing.md) | [id/publishing.md](docs/id/publishing.md) |
 | SciNet (SciPy for .NET) | [SciNet.md](docs/SciNet.md) | [id/SciNet.md](docs/id/SciNet.md) |
+| Science Gallery | [ScienceGallery.md](docs/ScienceGallery.md) | [id/ScienceGallery.md](docs/id/ScienceGallery.md) |
 | Package icons | [assets/icons/README.md](assets/icons/README.md) | |
 
 Per-library guides sit alongside them in [`docs/`](docs) and [`docs/id/`](docs/id).

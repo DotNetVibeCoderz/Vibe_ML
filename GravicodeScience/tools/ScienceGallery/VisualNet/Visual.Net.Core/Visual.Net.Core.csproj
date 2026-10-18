@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\VisualNet.props" />
+
+  <PropertyGroup>
+    <RootNamespace>Visual.Net.Core</RootNamespace>
+    <AssemblyName>Visual.Net.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(VisualNetSrc)\Visual.Net.Core\**\*.cs" Exclude="$(VisualNetSrc)\Visual.Net.Core\obj\**;$(VisualNetSrc)\Visual.Net.Core\bin\**" />
+    <ProjectReference Include="..\..\..\..\src\GraviNum\GraviNum.csproj" />
+    <ProjectReference Include="..\..\..\..\src\GraviFrame\GraviFrame.csproj" />
+    <ProjectReference Include="..\..\..\..\src\GraviLearn\GraviLearn.csproj" />
+  </ItemGroup>
+
+</Project>

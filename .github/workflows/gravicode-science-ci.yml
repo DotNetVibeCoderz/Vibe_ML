@@ -31,6 +31,7 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   # Restores are the slow part of a cold runner and they are identical across jobs.
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  VISUALNET_ROOT: ${{ github.workspace }}/external/Vibe_Charting/Visual.Net
 
 jobs:
   build:
@@ -44,6 +45,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # The Science Gallery draws its charts with Visual.Net, which lives in the Vibe_Charting
+      # repository and is compiled from source (tools/ScienceGallery/VisualNet). Only its src/ is
+      # needed; VISUALNET_ROOT tells the wrapper projects where it is.
+      - name: Check out Visual.Net
+        uses: actions/checkout@v4
+        with:
+          repository: DotNetVibeCoderz/Vibe_Charting
+          path: external/Vibe_Charting
+          sparse-checkout: Visual.Net/src
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -67,6 +78,10 @@ jobs:
 
       - name: Test
         run: dotnet test Gravicode.Science.sln -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+
+      # Every example the gallery shows must actually run, on both platforms.
+      - name: Run every Science Gallery use case
+        run: dotnet tools/ScienceGallery/bin/Release/net10.0/ScienceGallery.dll --run-all
 
       - name: Upload test results
         if: always()
@@ -102,6 +117,16 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v4
+
+      # The Science Gallery draws its charts with Visual.Net, which lives in the Vibe_Charting
+      # repository and is compiled from source (tools/ScienceGallery/VisualNet). Only its src/ is
+      # needed; VISUALNET_ROOT tells the wrapper projects where it is.
+      - name: Check out Visual.Net
+        uses: actions/checkout@v4
+        with:
+          repository: DotNetVibeCoderz/Vibe_Charting
+          path: external/Vibe_Charting
+          sparse-checkout: Visual.Net/src
 
       - uses: actions/setup-dotnet@v4
         with:

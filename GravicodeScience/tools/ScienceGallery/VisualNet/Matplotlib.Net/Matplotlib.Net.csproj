@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\VisualNet.props" />
+
+  <PropertyGroup>
+    <RootNamespace>Matplotlib.Net</RootNamespace>
+    <AssemblyName>Matplotlib.Net</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(VisualNetSrc)\Matplotlib.Net\**\*.cs" Exclude="$(VisualNetSrc)\Matplotlib.Net\obj\**;$(VisualNetSrc)\Matplotlib.Net\bin\**" />
+    <ProjectReference Include="..\Visual.Net.Core\Visual.Net.Core.csproj" />
+    <PackageReference Include="SkiaSharp" Version="4.151.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.151.1" />
+  </ItemGroup>
+
+</Project>

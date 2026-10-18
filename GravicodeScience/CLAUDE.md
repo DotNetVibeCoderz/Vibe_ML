@@ -349,6 +349,38 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
 - The AvaloniaEdit package is `Avalonia.AvaloniaEdit` but the **assembly** is `AvaloniaEdit`, so the
   style include is `avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml`.
 
+### Science Gallery specifics
+
+`tools/ScienceGallery` is an Avalonia app of 45 runnable use cases; see
+[docs/ScienceGallery.md](docs/ScienceGallery.md). Each use case is one `Showcase` subclass in
+`Showcases/<Domain>/`, found by reflection, and its source file is embedded so the code panel shows
+exactly what ran.
+
+- **Visual.Net is compiled from the Vibe_Charting repository, not copied.** The wrapper projects in
+  `tools/ScienceGallery/VisualNet/` compile its `src/` (found via `VISUALNET_ROOT`, or a
+  `Vibe_Charting` checkout next to `Vibe_ML`) and link it to *this* repository's GraviNum/Frame/Learn,
+  because Visual.Net carries an older snapshot of them under the same assembly names. CI checks out
+  `Visual.Net/src` sparsely; building the solution without it fails with a message saying where to
+  clone it.
+- **Each wrapper project needs its own folder.** Three csproj files in one folder share one
+  `obj/project.assets.json`, and the last restore silently wins (Matplotlib.Net then "cannot find"
+  SkiaSharp).
+- **SkiaSharp 4 is referenced only by the wrappers, with central management off there.** Pinning it
+  in `Directory.Packages.props` would, through transitive pinning, move the ScottPlot samples off
+  SkiaSharp 3. Avalonia 12.1.1 runs fine on SkiaSharp 4.
+- **The gallery project must `Compile Remove="VisualNet\**"`** - the wrappers live under it, and their
+  `obj/` holds generated `.cs` files the gallery would otherwise compile a second time.
+- **A namespace called `Visual` (from Visual.Net.Core) hides `Avalonia.Visual`** in gallery code;
+  write `Avalonia.Visual` in full.
+- **Screenshots render the window content at a fixed 1440×900** (`--capture`), because a laptop
+  clamps the real window and the first layout pass then disagrees with the bitmap. Rendering
+  content rather than the window loses the window background, so the root grid carries `AppGround`.
+- **`--run-all` is the gallery's test suite**: CI runs every use case headless on Linux and Windows.
+- **Matplotlib.Net quirks found while writing use cases** (report upstream rather than work around
+  in the library): `LegendLocation.OutsideBottom` overlaps the x label, log axes need explicit
+  limits, rotated tick labels draw into the plot, and `AddColorbar()` takes the most recent mapped
+  artist (add it before an overlaid contour).
+
 ## Packaging and CI
 
 The seven libraries under `src/` pack as `Gravicode.Science.*`; everything else is

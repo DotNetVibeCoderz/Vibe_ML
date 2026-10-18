@@ -34,6 +34,7 @@ defaults:
     working-directory: GravicodeScience
 
 env:
+  VISUALNET_ROOT: ${{ github.workspace }}/external/Vibe_Charting/Visual.Net
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
@@ -46,6 +47,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # The Science Gallery draws its charts with Visual.Net, which lives in the Vibe_Charting
+      # repository and is compiled from source (tools/ScienceGallery/VisualNet). Only its src/ is
+      # needed; VISUALNET_ROOT tells the wrapper projects where it is.
+      - name: Check out Visual.Net
+        uses: actions/checkout@v4
+        with:
+          repository: DotNetVibeCoderz/Vibe_Charting
+          path: external/Vibe_Charting
+          sparse-checkout: Visual.Net/src
 
       - uses: actions/setup-dotnet@v4
         with:
