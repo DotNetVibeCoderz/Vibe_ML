@@ -23,6 +23,13 @@ namespace Gravicode.Science.SciNet;
 /// zeroing every subdiagonal outside a complex block, the second with LAPACK's <c>dlanv2</c>
 /// standardisation (equal diagonal, off-diagonals of opposite sign).
 /// </para>
+/// <para>
+/// From order <see cref="MultishiftFrom"/> <see cref="RealSchur"/> takes the LAPACK route instead
+/// — blocked Hessenberg (<see cref="LinalgHessenbergBlocked"/>) and multishift QR with aggressive
+/// early deflation (<see cref="LinalgMultishiftQr"/>) — and ends in the same <see cref="Clean"/>.
+/// The double-shift path stays as <see cref="RealSchurDoubleShift"/>: the tests check the
+/// multishift one against it, and below 85 it is as fast or faster.
+/// </para>
 /// </remarks>
 internal static class LinalgSchurKernel
 {
@@ -120,7 +127,18 @@ internal static class LinalgSchurKernel
         var wi = new double[n];
         if (n == 0) return (wr, wi);
 
-        if (LinalgNativeLapack.ShouldUse(n))
+        if (n >= (z is null ? MultishiftEigvalsFrom : MultishiftFrom))
+        {
+            // Measured faster than OpenBLAS dgees from here up (with Z: 29 against 36 ms at
+            // n = 200, 644 against 671 at 800), so a native LAPACK is not used for these orders.
+            RealSchurMultishift(t, z, n, wr, wi);
+            return (wr, wi);
+        }
+
+        // Native dgees only for the full Schur form at orders 64–84. Eigenvalues alone never go
+        // native: dgees with jobvs = 'N' measured slower than the active-block hqr2 at every order
+        // tried (1.25 against 1.0 ms at 64, 7.2 against 3.7 at 100, 35 against 24 at 200).
+        if (z is not null && LinalgNativeLapack.ShouldUse(n))
         {
             // dgees: same standardised 2×2 blocks (dlanv2), same eigenvalue order convention.
             var info = LinalgNativeLapack.Gees(t, n, z, wr, wi);
@@ -128,10 +146,72 @@ internal static class LinalgSchurKernel
             return (wr, wi);
         }
 
+        RealSchurDoubleShift(t, z, n, wr, wi);
+        return (wr, wi);
+    }
+
+    /// <summary>
+    /// Order from which <see cref="RealSchur"/> uses the multishift path (blocked Hessenberg, then
+    /// LAPACK's <c>dhseqr</c>/<c>dlaqr0</c>: small-bulge multishift QR with aggressive early
+    /// deflation) instead of the unblocked Hessenberg reduction and the hqr2 iteration. Measured
+    /// twice, in one process, alternating: level at 75–80, faster from 85 (4.4 against 4.8 ms) and
+    /// 1.1x at 100, 1.6x at 200, 2x at 400, 2.6x at 800. Below LAPACK's own switch (75)
+    /// <c>dhseqr</c> uses <c>dlahqr</c>, which measured level with hqr2, and forcing the
+    /// multishift code lower measured slower (1.1–3.8x at n = 20–74).
+    /// </summary>
+    internal const int MultishiftFrom = 85;
+
+    /// <summary>
+    /// The same switch when only eigenvalues are wanted (no Z, LAPACK's <c>wantt = false</c>).
+    /// There hqr2 updates only the active block and has far less to do, so the multishift path
+    /// pays off later: slower at 100 (4.3–4.8 against 3.5–4.1 ms), level at 200–250, faster from
+    /// 300 (59–63 against 71 ms) and 1.5x at 800, in two in-process runs.
+    /// </summary>
+    internal const int MultishiftEigvalsFrom = 300;
+
+    /// <summary>
+    /// The original managed path, kept as the reference the tests check the multishift path
+    /// against: unblocked Householder Hessenberg, EISPACK hqr2 double-shift QR, then
+    /// <see cref="Clean"/>.
+    /// </summary>
+    internal static void RealSchurDoubleShift(double[] t, double[]? z, int n, double[] wr, double[] wi)
+    {
         Hessenberg(t, z, n);
         Francis(t, z, n, wr, wi, wantT: z is not null);
         Clean(t, z, n, wr, wi);
-        return (wr, wi);
+    }
+
+    /// <summary>
+    /// Blocked Hessenberg reduction (<see cref="LinalgHessenbergBlocked"/>) followed by LAPACK's
+    /// <c>dhseqr</c> (<see cref="LinalgMultishiftQr"/>), then the same <see cref="Clean"/> as the
+    /// double-shift path, so the output conventions are identical.
+    /// </summary>
+    internal static unsafe void RealSchurMultishift(double[] t, double[]? z, int n, double[] wr, double[] wi)
+    {
+        HessenbergAuto(t, z, n);
+        int info;
+        fixed (double* pt = t, pz = z, pr = wr, pi = wi)
+            info = LinalgMultishiftQr.Hseqr(z is not null, z is not null, n, pt, n, pr, pi, pz, n);
+        if (info != 0) throw new LinalgException("Schur: the QR iteration did not converge.");
+        Clean(t, z, n, wr, wi);
+    }
+
+    /// <summary>
+    /// Order from which <see cref="HessenbergAuto"/> uses <see cref="LinalgHessenbergBlocked"/>.
+    /// Below 64 columns that is still the unblocked <c>dgehd2</c>, but Q is formed backwards
+    /// (<c>dorghr</c>) rather than accumulated forwards, which measured faster from n = 6.
+    /// </summary>
+    internal const int BlockedHessenbergFrom = 8;
+
+    /// <summary>
+    /// Hessenberg reduction by whichever managed kernel is faster at this order: the blocked one
+    /// (<see cref="LinalgHessenbergBlocked.Reduce"/>) from <see cref="BlockedHessenbergFrom"/> up,
+    /// the unblocked <see cref="Hessenberg"/> below.
+    /// </summary>
+    public static void HessenbergAuto(double[] h, double[]? q, int n)
+    {
+        if (n >= BlockedHessenbergFrom) LinalgHessenbergBlocked.Reduce(h, q, n);
+        else Hessenberg(h, q, n);
     }
 
     /// <summary>Rows × reflectors below which a deferred update is applied on one thread.</summary>

@@ -355,14 +355,10 @@ public static partial class Linalg
         var h = a.ToArray();
         LinalgKernels.RequireFinite(h, nameof(Hessenberg));
         var q = calcQ ? new double[n * n] : null;
-        // Native only from 200 rows: below that the managed reduction measured faster than
-        // OpenBLAS's dgehrd + dorghr (1.8 ms against 3.7 ms at n = 100).
-        if (n >= 200 && LinalgNativeLapack.ShouldUse(n))
-        {
-            var info = LinalgNativeLapack.Hessenberg(h, n, q);
-            if (info != 0) throw new LinalgException($"Hessenberg: LAPACK dgehrd/dorghr failed (info = {info}).");
-        }
-        else LinalgSchurKernel.Hessenberg(h, q, n);
+        // Always managed: the blocked reduction measured faster than OpenBLAS's dgehrd + dorghr
+        // at every order tried from 100 up (4.3 ms against 14.9 at n = 200, 118 against 165 at
+        // 800), and the native path used to be taken only from 200.
+        LinalgSchurKernel.HessenbergAuto(h, q, n);
         return new HessenbergResult(new NdArray(h, n, n), q is null ? null : new NdArray(q, n, n));
     }
 
@@ -370,10 +366,11 @@ public static partial class Linalg
     /// Real Schur decomposition <c>A = Z T Zᵀ</c>, scipy's <c>schur(a, output='real')</c>.
     /// </summary>
     /// <remarks>
-    /// Householder Hessenberg reduction, then the Francis implicit double-shift QR iteration
-    /// (EISPACK <c>hqr2</c>) accumulating Z, then each 2×2 block standardised as LAPACK's
-    /// <c>dlanv2</c> does, so T matches scipy's up to the signs of Schur vectors. No eigenvalue
-    /// reordering (scipy's <c>sort=</c>) is provided.
+    /// Householder Hessenberg reduction (blocked, as LAPACK <c>dgehrd</c>), then from order 85 the
+    /// small-bulge multishift QR with aggressive early deflation of LAPACK's <c>dhseqr</c>/<c>dlaqr0</c>
+    /// and below it the Francis double-shift iteration (EISPACK <c>hqr2</c>), accumulating Z; each
+    /// 2×2 block is standardised as LAPACK's <c>dlanv2</c> does. No eigenvalue reordering
+    /// (scipy's <c>sort=</c>) is provided.
     /// </remarks>
     /// <exception cref="LinalgException">The QR iteration failed to converge.</exception>
     public static SchurResult Schur(NdArray a)
@@ -417,6 +414,9 @@ public static partial class Linalg
         return w;
     }
 
+    /// <summary>Order from which <see cref="Eig"/> prefers a native <c>dgeev</c> again (see there).</summary>
+    internal const int EigNativeFrom = 550;
+
     /// <summary>
     /// Eigenvalues and right eigenvectors of a general real matrix, scipy's <c>eig</c>.
     /// </summary>
@@ -433,7 +433,11 @@ public static partial class Linalg
         var n = a.Shape[0];
         var t = a.ToArray();
         LinalgKernels.RequireFinite(t, nameof(Eig));
-        if (LinalgNativeLapack.ShouldUse(n)) return EigNative(t, n);
+        // Native dgeev only where it measured faster: below the multishift switch, and from
+        // EigNativeFrom up, where the managed complex back-substitution starts to cost more than
+        // the faster managed Schur form saves (500: 257 ms managed vs 272 native; 600: 474 vs 449).
+        if (LinalgNativeLapack.ShouldUse(n) && (n < LinalgSchurKernel.MultishiftFrom || n >= EigNativeFrom))
+            return EigNative(t, n);
         var scale = LinalgSchurKernel.Balance(t, n);
         var z = new double[n * n];
         var (re, im) = LinalgSchurKernel.RealSchur(t, z, n);
