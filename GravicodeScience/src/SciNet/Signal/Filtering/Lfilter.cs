@@ -72,6 +72,49 @@ public static partial class Signal
             z[0] = z0; z[1] = z1;
             return;
         }
+        if (n == 5)
+        {
+            // Fourth order (a 2nd-order band or 4th-order low/high pass): the states stay in
+            // registers. The general loop stores and reloads every state through memory each sample.
+            double b0 = bn[0], b1 = bn[1], b2 = bn[2], b3 = bn[3], b4 = bn[4];
+            double a1 = an[1], a2 = an[2], a3 = an[3], a4 = an[4];
+            double z0 = z[0], z1 = z[1], z2 = z[2], z3 = z[3];
+            for (var i = 0; i < x.Length; i++)
+            {
+                var xi = x[i];
+                var yi = z0 + b0 * xi;
+                z0 = z1 + xi * b1 - yi * a1;
+                z1 = z2 + xi * b2 - yi * a2;
+                z2 = z3 + xi * b3 - yi * a3;
+                z3 = xi * b4 - yi * a4;
+                y[i] = yi;
+            }
+            z[0] = z0; z[1] = z1; z[2] = z2; z[3] = z3;
+            return;
+        }
+        if (n == 9)
+        {
+            // Eighth order - also what every 4th-order band-pass or band-stop design produces.
+            double b0 = bn[0], b1 = bn[1], b2 = bn[2], b3 = bn[3], b4 = bn[4], b5 = bn[5], b6 = bn[6], b7 = bn[7], b8 = bn[8];
+            double a1 = an[1], a2 = an[2], a3 = an[3], a4 = an[4], a5 = an[5], a6 = an[6], a7 = an[7], a8 = an[8];
+            double z0 = z[0], z1 = z[1], z2 = z[2], z3 = z[3], z4 = z[4], z5 = z[5], z6 = z[6], z7 = z[7];
+            for (var i = 0; i < x.Length; i++)
+            {
+                var xi = x[i];
+                var yi = z0 + b0 * xi;
+                z0 = z1 + xi * b1 - yi * a1;
+                z1 = z2 + xi * b2 - yi * a2;
+                z2 = z3 + xi * b3 - yi * a3;
+                z3 = z4 + xi * b4 - yi * a4;
+                z4 = z5 + xi * b5 - yi * a5;
+                z5 = z6 + xi * b6 - yi * a6;
+                z6 = z7 + xi * b7 - yi * a7;
+                z7 = xi * b8 - yi * a8;
+                y[i] = yi;
+            }
+            z[0] = z0; z[1] = z1; z[2] = z2; z[3] = z3; z[4] = z4; z[5] = z5; z[6] = z6; z[7] = z7;
+            return;
+        }
         Df2tLoop(bn, an, x, y, z);
     }
 

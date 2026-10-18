@@ -261,5 +261,30 @@ public class SignalFilteringTests
                 SignalAssert.Close(zr, zf, 1e-12, 1e-14, $"fir state {taps}/{len}");
             }
         }
+        // IIR orders with register-resident kernels (1, 2, 4, 8) and their neighbours that take
+        // the general loop. Same expression per state, so bit-identical, including the final state
+        // and in-place use. a[0] != 1 checks that normalisation happens before either path.
+        foreach (var order in new[] { 1, 2, 3, 4, 5, 8, 9 })
+        {
+            var (b, a) = Signal.Butter(order, 0.2);
+            a = a.Select(v => 2.5 * v).ToArray();
+            b = b.Select(v => 2.5 * v).ToArray();
+            var n = Math.Max(a.Length, b.Length);
+            var bn = new double[n]; var an = new double[n];
+            for (var i = 0; i < b.Length; i++) bn[i] = b[i] / a[0];
+            for (var i = 0; i < a.Length; i++) an[i] = a[i] / a[0];
+            var zi = Enumerable.Range(0, n - 1).Select(i => 0.05 * (i + 1)).ToArray();
+            var zf = zi.ToArray();
+            var zr = zi.ToArray();
+            var yf = new double[x.Length];
+            var yr = new double[x.Length];
+            Signal.Lfilter(b, a, x, yf, zf);
+            Signal.Df2tLoop(bn, an, x, yr, zr);
+            SignalAssert.Close(yr, yf, 0, 0, $"iir order {order}");
+            SignalAssert.Close(zr, zf, 0, 0, $"iir state order {order}");
+            var inPlace = x.ToArray();
+            Signal.Lfilter(b, a, inPlace, inPlace, zi.ToArray());
+            SignalAssert.Close(yr, inPlace, 0, 0, $"iir in place order {order}");
+        }
     }
 }

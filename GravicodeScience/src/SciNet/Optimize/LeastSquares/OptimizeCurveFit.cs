@@ -155,8 +155,11 @@ public static partial class Optimize
         {
             var y = model(xcopy, p);
             if (y.Length != m) throw new ArgumentException($"The model returned {y.Length} values for {m} observations.");
+            // A fresh array, never the model's own: a model may legitimately return a cached buffer.
             var r = new double[m];
-            for (var i = 0; i < m; i++) r[i] = transform is null ? y[i] - ydata[i] : transform[i] * (y[i] - ydata[i]);
+            ReadOnlySpan<double> ys = y, yd = ydata;
+            if (transform is null) for (var i = 0; i < r.Length; i++) r[i] = ys[i] - yd[i];
+            else { ReadOnlySpan<double> t = transform; for (var i = 0; i < r.Length; i++) r[i] = t[i] * (ys[i] - yd[i]); }
             return r;
         }
         Func<double[], NdArray>? rjac = null;
@@ -173,7 +176,19 @@ public static partial class Optimize
         if (meth == LeastSquaresMethod.Lm)
         {
             if (m != 1 && n > m) throw new ArgumentException($"The number of func parameters={n} must not exceed the number of data points={m}");
-            var r = MinpackLm(new MinpackLmProblem { Fun = Residuals, Jac = rjac, X0 = (double[])p0.Clone(), MaxFev = maxNfev ?? 0 });
+            // MINPACK copies each residual vector into its own storage before the next call, so the
+            // Lm path can reuse one buffer instead of allocating per evaluation.
+            var buffer = new double[m];
+            double[] ResidualsInto(double[] p)
+            {
+                var y = model(xcopy, p);
+                if (y.Length != m) throw new ArgumentException($"The model returned {y.Length} values for {m} observations.");
+                ReadOnlySpan<double> ys = y, yd = ydata;
+                if (transform is null) for (var i = 0; i < buffer.Length; i++) buffer[i] = ys[i] - yd[i];
+                else { ReadOnlySpan<double> t = transform; for (var i = 0; i < buffer.Length; i++) buffer[i] = t[i] * (ys[i] - yd[i]); }
+                return buffer;
+            }
+            var r = MinpackLm(new MinpackLmProblem { Fun = ResidualsInto, Jac = rjac, X0 = (double[])p0.Clone(), MaxFev = maxNfev ?? 0 });
             if (r.Status is < 1 or > 4) throw new InvalidOperationException("Optimal parameters not found: " + r.Message);
             popt = r.X; fvec = r.FunVector!; pcov = r.HessInv; nfev = r.Nfev; status = r.Status; msg = r.Message;
         }

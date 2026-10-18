@@ -25,17 +25,24 @@ internal static class OptimizeMinpack
         public readonly double[] A = new double[Math.Max(1, rows * cols)];
         public readonly int Rows = rows, Cols = cols;
         public ref double this[int i, int j] => ref A[(i - 1) + (j - 1) * Rows];
+
+        /// <summary>Rows <paramref name="r0"/>..<paramref name="r1"/> of column <paramref name="j"/>, 1-based - contiguous in column-major storage.</summary>
+        public Span<double> Col(int j, int r0, int r1) => A.AsSpan((r0 - 1) + (j - 1) * Rows, r1 - r0 + 1);
     }
 
     /// <summary>Euclidean norm of v[off+1 .. off+n] with MINPACK's overflow/underflow guards.</summary>
-    public static double Enorm(int n, double[] v, int off = 0)
+    public static double Enorm(int n, double[] v, int off = 0) => Enorm(v.AsSpan(off + 1, n));
+
+    /// <summary>MINPACK's guarded Euclidean norm of a span, in element order.</summary>
+    public static double Enorm(ReadOnlySpan<double> v)
     {
         const double rdwarf = 3.834e-20, rgiant = 1.304e19;
         double s1 = 0, s2 = 0, s3 = 0, x1max = 0, x3max = 0;
+        var n = v.Length;
         var agiant = rgiant / n;
-        for (var i = 1; i <= n; i++)
+        for (var i = 0; i < n; i++)
         {
-            var xabs = Math.Abs(v[off + i]);
+            var xabs = Math.Abs(v[i]);
             if (xabs > rdwarf && xabs < agiant) s2 += xabs * xabs;
             else if (xabs <= rdwarf)
             {
@@ -55,12 +62,7 @@ internal static class OptimizeMinpack
     }
 
     /// <summary>Column j of a as a 1-based vector view helper: Enorm over rows r0..m of column j.</summary>
-    private static double EnormCol(FMat a, int j, int r0, int m)
-    {
-        var tmp = new double[m - r0 + 2];
-        for (var i = r0; i <= m; i++) tmp[i - r0 + 1] = a[i, j];
-        return Enorm(m - r0 + 1, tmp);
-    }
+    private static double EnormCol(FMat a, int j, int r0, int m) => Enorm(a.Col(j, r0, m));
 
     public static void Qrfac(int m, int n, FMat a, bool pivot, int[] ipvt, double[] rdiag, double[] acnorm, double[] wa)
     {
@@ -80,7 +82,8 @@ internal static class OptimizeMinpack
                 for (var k = j; k <= n; k++) if (rdiag[k] > rdiag[kmax]) kmax = k;
                 if (kmax != j)
                 {
-                    for (var i = 1; i <= m; i++) (a[i, j], a[i, kmax]) = (a[i, kmax], a[i, j]);
+                    var cj = a.Col(j, 1, m); var ck = a.Col(kmax, 1, m);
+                    for (var i = 0; i < cj.Length; i++) (cj[i], ck[i]) = (ck[i], cj[i]);
                     rdiag[kmax] = rdiag[j];
                     wa[kmax] = wa[j];
                     (ipvt[j], ipvt[kmax]) = (ipvt[kmax], ipvt[j]);
@@ -90,14 +93,18 @@ internal static class OptimizeMinpack
             if (ajnorm != 0)
             {
                 if (a[j, j] < 0) ajnorm = -ajnorm;
-                for (var i = j; i <= m; i++) a[i, j] /= ajnorm;
-                a[j, j] += 1;
+                // The O(m) loops run on column spans; the operation order is MINPACK's, so the
+                // factorisation (and every iteration count pinned against SciPy) is unchanged.
+                var vj = a.Col(j, j, m);
+                for (var i = 0; i < vj.Length; i++) vj[i] /= ajnorm;
+                vj[0] += 1;
                 for (var k = j + 1; k <= n; k++)
                 {
+                    var vk = a.Col(k, j, m);
                     double sum = 0;
-                    for (var i = j; i <= m; i++) sum += a[i, j] * a[i, k];
-                    var temp = sum / a[j, j];
-                    for (var i = j; i <= m; i++) a[i, k] -= temp * a[i, j];
+                    for (var i = 0; i < vj.Length; i++) sum += vj[i] * vk[i];
+                    var temp = sum / vj[0];
+                    for (var i = 0; i < vj.Length; i++) vk[i] -= temp * vj[i];
                     if (pivot && rdiag[k] != 0)
                     {
                         temp = a[j, k] / rdiag[k];
@@ -282,18 +289,22 @@ internal static class OptimizeMinpack
         var x = new double[n + 1];
         for (var i = 1; i <= n; i++) x[i] = p.X0[i - 1];
         var nfev = 0; var njev = 0;
-        double[] F(double[] x1)
+        // Evaluates into a caller-owned 1-based buffer. On a large m the per-call copies were cold
+        // 80 KB allocations that cost more than the model itself; the buffers are now reused.
+        void F(double[] x1, double[] dest)
         {
             nfev++;
             var xs = new double[n];
             Array.Copy(x1, 1, xs, 0, n);
             var v = p.Fun(xs);
-            var r = new double[v.Length + 1];
-            Array.Copy(v, 0, r, 1, v.Length);
-            return r;
+            if (v.Length != dest.Length - 1) throw new ArgumentException($"The function returned {v.Length} values; expected {dest.Length - 1}.");
+            Array.Copy(v, 0, dest, 1, v.Length);
         }
-        var fvec = F(x);
-        var m = fvec.Length - 1;
+        var f0 = p.Fun(p.X0.ToArray());
+        nfev++;
+        var m = f0.Length;
+        var fvec = new double[m + 1];
+        Array.Copy(f0, 0, fvec, 1, m);
         if (n > m) throw new ArgumentException($"Improper input: func input vector length N={n} must not exceed func output vector length M={m}.");
         var maxfev = p.MaxFev > 0 ? p.MaxFev : (p.Jac is null ? 200 * (n + 1) : 100 * (n + 1));
         var mode = p.Diag is null ? 1 : 2;
@@ -303,6 +314,7 @@ internal static class OptimizeMinpack
         double ftol = p.Ftol, xtol = p.Xtol, gtol = p.Gtol, factor = p.Factor;
         var info = 0;
         var fjac = new FMat(m, n);
+        var fwork = new double[m + 1];
         var ipvt = new int[n + 1];
         var iter = 1;
         if (ftol < 0 || xtol < 0 || gtol < 0 || factor <= 0 || (mode == 2 && diag.Skip(1).Any(d => d <= 0)))
@@ -324,7 +336,11 @@ internal static class OptimizeMinpack
                 var jm = p.Jac(xs);
                 if (jm.Rank != 2 || jm.Shape[0] != m || jm.Shape[1] != n) throw new ArgumentException($"The Jacobian must have shape ({m}, {n}).");
                 var js = jm.AsContiguous().ToArray();
-                for (var i = 1; i <= m; i++) for (var j = 1; j <= n; j++) fjac[i, j] = js[(i - 1) * n + (j - 1)];
+                for (var j = 1; j <= n; j++)
+                {
+                    var col = fjac.Col(j, 1, m);
+                    for (var i = 0; i < m; i++) col[i] = js[i * n + (j - 1)];
+                }
             }
             else
             {
@@ -336,9 +352,12 @@ internal static class OptimizeMinpack
                     var h = eps * Math.Abs(temp);
                     if (h == 0) h = eps;
                     x[j] = temp + h;
-                    var wa = F(x);
+                    F(x, fwork);
+                    var wa = fwork.AsSpan(1, m);
                     x[j] = temp;
-                    for (var i = 1; i <= m; i++) fjac[i, j] = (wa[i] - fvec[i]) / h;
+                    var col = fjac.Col(j, 1, m);
+                    var fv0 = fvec.AsSpan(1, m);
+                    for (var i = 0; i < m; i++) col[i] = (wa[i] - fv0[i]) / h;
                 }
             }
             Qrfac(m, n, fjac, true, ipvt, wa1, wa2, wa3);
@@ -350,15 +369,17 @@ internal static class OptimizeMinpack
                 delta = factor * xnorm;
                 if (delta == 0) delta = factor;
             }
-            for (var i = 1; i <= m; i++) wa4[i] = fvec[i];
+            Array.Copy(fvec, 1, wa4, 1, m);
             for (var j = 1; j <= n; j++)
             {
                 if (fjac[j, j] != 0)
                 {
+                    var col = fjac.Col(j, j, m);
+                    var w = wa4.AsSpan(j, m - j + 1);
                     double sum = 0;
-                    for (var i = j; i <= m; i++) sum += fjac[i, j] * wa4[i];
-                    var temp = -sum / fjac[j, j];
-                    for (var i = j; i <= m; i++) wa4[i] += fjac[i, j] * temp;
+                    for (var i = 0; i < col.Length; i++) sum += col[i] * w[i];
+                    var temp = -sum / col[0];
+                    for (var i = 0; i < col.Length; i++) w[i] += col[i] * temp;
                 }
                 fjac[j, j] = wa1[j];
                 qtf[j] = wa4[j];
@@ -383,8 +404,7 @@ internal static class OptimizeMinpack
                 for (var j = 1; j <= n; j++) { wa1[j] = -wa1[j]; wa2[j] = x[j] + wa1[j]; wa3[j] = diag[j] * wa1[j]; }
                 var pnorm = Enorm(n, wa3);
                 if (iter == 1) delta = Math.Min(delta, pnorm);
-                var fnew = F(wa2);
-                Array.Copy(fnew, wa4, m + 1);
+                F(wa2, wa4);
                 var fnorm1 = Enorm(m, wa4);
                 double actred = -1;
                 if (0.1 * fnorm1 < fnorm) { var q = fnorm1 / fnorm; actred = 1 - q * q; }

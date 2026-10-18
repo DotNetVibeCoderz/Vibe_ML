@@ -379,7 +379,13 @@ static double U(int i, int salt)
 
 void Measure(string id, string library, string operation, Action action, int repeats = 7, int warmup = 2)
 {
-    for (var i = 0; i < warmup; i++) action();
+    // At least `warmup` calls AND at least a second. With a count alone, the GraviNum rows (2
+    // calls) were mostly timing tier-0 code: the committed results had a 256-cube matmul slower
+    // than a 512-cube. Tiered JIT recompiles a hot method after ~30 calls plus a background delay,
+    // and microsecond kernels can finish forty calls inside the call-counting window, so the
+    // floor is time. Python needs no JIT warm-up, so its side keeps the plain count.
+    var warm = Stopwatch.StartNew();
+    for (var i = 0; i < warmup || warm.ElapsedMilliseconds < 1000; i++) action();
 
     var timings = new double[repeats];
     for (var i = 0; i < repeats; i++)
