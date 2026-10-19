@@ -188,6 +188,14 @@ public sealed class AnthropicChatCompletionService : IChatCompletionService
             request["temperature"] = Convert.ToDouble(temperature);
         }
 
+        // A per-request limit (the converter asks for more than a chat reply needs) wins over the
+        // one the service was built with.
+        if (settings?.ExtensionData?.TryGetValue("max_tokens", out var maxTokens) == true
+            && maxTokens is not null)
+        {
+            request["max_tokens"] = Convert.ToInt32(maxTokens);
+        }
+
         return request;
     }
 }

@@ -31,8 +31,19 @@ public partial class App : Application
                 : ThemeVariant.Dark;
 
             var shell = new ShellViewModel(Configuration, Logs, settings);
-            desktop.MainWindow = new MainWindow { DataContext = shell };
-            desktop.ShutdownRequested += (_, _) => shell.PersistLayout();
+            var window = new MainWindow { DataContext = shell };
+            desktop.MainWindow = window;
+
+            var args = desktop.Args ?? [];
+            if (Services.Conversion.ConverterScreenshot.IsRequested(args))
+            {
+                // A capture must not rewrite the user's layout or last project in app.config.
+                window.Opened += async (_, _) => await Services.Conversion.ConverterScreenshot.RunAsync(args, window, shell, desktop);
+            }
+            else
+            {
+                desktop.ShutdownRequested += (_, _) => shell.PersistLayout();
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

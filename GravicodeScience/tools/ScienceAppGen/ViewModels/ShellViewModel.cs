@@ -24,6 +24,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Explorer = new ExplorerViewModel(Projects);
         Editor = new EditorViewModel(settings);
         Chat = new ChatViewModel(Assistant, Projects, logs, settings);
+        Converter = new ConverterViewModel(settings, () => Chat.SelectedModel, logs);
 
         Explorer.FileOpenRequested += path => Editor.OpenFile(path);
         Projects.ProjectChanged += _ =>
@@ -73,6 +74,23 @@ public sealed partial class ShellViewModel : ObservableObject
 
     /// <summary>Right panel.</summary>
     public ChatViewModel Chat { get; }
+
+    /// <summary>The Python to C# page.</summary>
+    public ConverterViewModel Converter { get; }
+
+    /// <summary>True while the Python to C# page replaces the workspace.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWorkspaceVisible))]
+    private bool _isConverterOpen;
+
+    /// <summary>Inverse of <see cref="IsConverterOpen"/>, for bindings.</summary>
+    public bool IsWorkspaceVisible => !IsConverterOpen;
+
+    partial void OnIsConverterOpenChanged(bool value)
+    {
+        if (value) Converter.RefreshModel();
+        StatusMessage = value ? "Python to C#" : "Ready";
+    }
 
     /// <summary>Window title, including the open project.</summary>
     public string Title => Projects.HasProject

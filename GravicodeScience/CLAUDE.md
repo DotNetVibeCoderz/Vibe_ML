@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 v0.1.0 is implemented and complete against `requirements.md`, and a seventh library, **SciNet**
-(SciPy for .NET), has been added beside the original six: 28 projects, **4,081 tests passing**
-(2,983 of them SciNet's), seven samples that run end to end, seven notebooks, seven benchmark
+(SciPy for .NET), has been added beside the original six: 28 projects, **4,128 tests passing**
+(2,983 of them SciNet's, 47 ScienceAppGen's), seven samples that run end to end, seven notebooks, seven benchmark
 suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -420,6 +420,43 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
   the theme dictionaries and are set explicitly in `EditorView.ApplyTheme`.
 - The AvaloniaEdit package is `Avalonia.AvaloniaEdit` but the **assembly** is `AvaloniaEdit`, so the
   style include is `avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml`.
+
+**Python to C# converter** (`Services/Conversion/`, page `Views/ConverterView`, tests in
+`tests/ScienceAppGen.Tests`). Every rule below was found by running it against a real model on
+`Samples/Python/`; `--prompt` prints exactly what the model will see.
+
+- **The LLM translates; everything deterministic is the converter's job.** Names (`ConversionPlan`),
+  the `using` block (`LibraryMap.UsingsFor` + `ConversionSupport.NormalizeUsings`) and the csproj are
+  decided in code. Left to the model, namespaces were guessed (`Visual.Net.Matplotlib`,
+  `using Stats;`) and three repair rounds went in circles on them.
+- **The API reference is reflected from the assemblies, filtered by what the file calls**
+  (`ApiReferenceBuilder`): scipy call chains are followed through return types, and a method's
+  parameter types come with their enum values and implicit conversions. Hand-written overviews are
+  kept short and every claim in them was checked against the real assembly - `Fit` is static on
+  the distribution type, `Plot` takes `double[]`, `Color.Parse("tab:blue")` works.
+- **The Gravicode data libraries are project-wide, not per module.** `features.py` never imported
+  pandas but received a DataFrame; without GraviFrame in its usings and reference the model wrote
+  `public class DataFrame`, which shadowed the real type in every file. `FindShadowedLibraryTypes`
+  now reports such stubs as `CONV001` and sends the file back even when the build passes.
+- **pandas `dayofweek` counts Monday as 0; .NET's `DayOfWeek` counts Sunday as 0.** A converted
+  weekend test is silently wrong unless converted (`((int)d.DayOfWeek + 6) % 7`); it is in the
+  curated GraviFrame reference with the other pandas idioms (`ReadCsv` already infers ISO dates;
+  `WithColumn(name, i => ...)` takes a row index).
+- **A program that builds can still be wrong**: a column read as `mean` that GraviFrame names
+  `sales`. With `RunAfterBuild`, an unhandled exception is parsed from the stack trace onto the
+  converted file and line (throw site and first caller) and repaired like a compiler error.
+- **Windows build output ends lines in `\r`**, which stopped the error regex stripping the
+  `[x.csproj]` suffix; `ParseBuildErrors` removes `\r` first.
+- **Diagnose from the transcript, not by guessing.** Every prompt, reply and build log of a run is
+  kept in `<output>/.conversion/`; each fix above came from reading what the model was actually
+  sent and what it answered, round by round.
+- **`--capture-converter <src> <dir> --convert` is the end-to-end test of the page**: it drives
+  the real view model, model, build and run, then renders 1600x1000 PNGs. Its `--convert` must not
+  trigger the headless `--convert` command - `ConvertCommand.IsRequested` checks for that.
+- **ScienceAppGen is a WinExe**, so the headless command attaches to the parent console; output
+  piped through another process is only visible when that process captures it.
+- **Testing with a real key: never print the key file.** Load it in a wrapper that passes
+  `SCIENCEAPPGEN_APIKEY`/`SCIENCEAPPGEN_ENDPOINT` only through the child's environment.
 
 ### Science Gallery specifics
 

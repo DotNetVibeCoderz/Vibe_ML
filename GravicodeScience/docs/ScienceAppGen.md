@@ -62,6 +62,7 @@ The same file in the light theme:
 | `Ctrl+B` / `Ctrl+L` | Toggle chat / logs |
 | `F6` / `F5` | Build / run |
 | `Ctrl+,` | Settings |
+| `Ctrl+Shift+P` / `Esc` | Python to C# / back to the editor |
 | `Ctrl+Enter` | Send chat message |
 
 ---
@@ -227,6 +228,87 @@ training data.
 
 ---
 
+## Python to C#
+
+![The converter after a run: every module compiles, the program's own output in the activity feed](screenshots/scienceappgen-convert-done.png)
+
+**Convert → Python to C#…** (or `Ctrl+Shift+P`, or the toolbar button) opens a page that converts a
+Python script, a Jupyter notebook, or a whole project folder into a C# project on Gravicode.Science
+and Visual.Net. The LLM does the translation; the converter does everything around it that an LLM
+does badly on its own.
+
+| Python | Becomes | NuGet package |
+|---|---|---|
+| numpy | GraviNum | `Gravicode.Science.GraviNum` |
+| pandas | GraviFrame | `Gravicode.Science.GraviFrame` |
+| scikit-learn | GraviLearn | `Gravicode.Science.GraviLearn` |
+| scipy | SciNet | `Gravicode.Science.SciNet` |
+| networkx, PyG, DGL | GraviGraph | `Gravicode.Science.GraviGraph` |
+| PyMC, Stan, ArviZ | GraviProb | `Gravicode.Science.GraviProb` |
+| transformers, NLTK, tokenizers | GraviText | `Gravicode.Science.GraviText` |
+| matplotlib | Matplotlib.Net | `Gravicode.Matplotlib.Net` |
+| seaborn | Seaborn.Net | `Gravicode.Seaborn.Net` |
+| plotly | Plotly.Net | `Gravicode.Plotly.Net` |
+| the standard library | the .NET base class library | — |
+
+Converted projects reference the **published NuGet packages**, not this repository, so they build
+anywhere. Packages with no counterpart (PyTorch, TensorFlow) are flagged before anything is sent; the
+model ports those calls by hand and marks them `// TODO(convert):`.
+
+### What happens when you press Convert
+
+1. **Scan and plan — free.** Choosing a file or folder reads the imports and plans the conversion:
+   which module becomes which C# file and class, in what order, and which package becomes what.
+   Virtual environments, caches, `setup.py` and the like are skipped; data files (CSV, JSON, xlsx…)
+   are copied alongside so relative paths keep working. Nothing reaches the model yet.
+2. **Names are fixed before the model sees anything.** `data_loader.py` becomes `DataLoader.cs`,
+   `load_sales` becomes `DataLoader.LoadSales`, and every prompt carries the same table. Letting
+   the model choose names per file is what breaks multi-file conversions.
+3. **Dependencies first, in parallel where possible.** Each module's prompt carries the *actual*
+   public signatures of the files already converted, so a caller is written against what its
+   callee really got.
+4. **An exact API reference.** Each prompt carries the curated Gravicode references plus the real
+   signatures of the SciNet and Visual.Net members the file uses, **read by reflection from the
+   assemblies** — `signal.butter` brings `Butter(int n, CriticalFrequencies wn, FilterType btype …)`,
+   the values of `FilterType`, and the fact that `CriticalFrequencies` converts from `[0.5, 15.0]`.
+5. **Usings are decided, not guessed.** The converter writes the `using` block itself, removes
+   namespaces that do not exist, and trims the unused ones once the project builds.
+6. **Build, then repair.** Compiler errors go back to the model file by file, with the numbered
+   source, for up to the chosen number of rounds. A file that declares its own `DataFrame` or
+   `Figure` stub is sent back even though it compiles.
+7. **Run, then repair again.** The Python original runs, so the C# must too: an unhandled exception
+   is traced to the converted file and line and sent back like a compiler error.
+
+Every prompt, reply and build log is kept in `.conversion/` in the output folder, and
+`CONVERSION.md` summarises the run: files, packages, repair rounds, and the TODO notes to review.
+**Open in workspace** opens the result in the editor.
+
+### From the command line
+
+The same converter runs without the window — the API key comes from `app.config` or
+`SCIENCEAPPGEN_APIKEY`, never from the command line:
+
+```bash
+ScienceAppGen --convert path/to/project --run
+ScienceAppGen --convert notebook.ipynb --out ../Converted --rounds 4
+ScienceAppGen --convert script.py --plan        # the plan only, no model calls
+ScienceAppGen --convert script.py --prompt      # the exact prompts, no model calls
+```
+
+### What to expect
+
+- **Deterministic results match.** Row counts, group means, filter outputs and anything computed
+  from the data come out the same as in Python.
+- **Random results do not.** Seeds carry over but generators differ, so a train/test split, a
+  forest or simulated noise gives different — equally valid — numbers.
+- **Library gaps become TODOs.** Where a call has no equivalent, the model writes it by hand and
+  says so; `CONVERSION.md` lists every such note.
+- **Two sample projects** in `tools/ScienceAppGen/Samples/Python/` show the range: a single-file
+  signal analysis (numpy, scipy, matplotlib) and a five-module sales forecast (pandas,
+  scikit-learn, matplotlib, a CSV file).
+
+---
+
 ## Verified end to end
 
 `tools/ScienceAppGen` has been run against a live Azure OpenAI endpoint. The test does not check
@@ -291,12 +373,19 @@ tools/ScienceAppGen/
     TemplateService.cs            the ten templates
     AssistantService.cs           Semantic Kernel wiring, streaming, tool surfacing
     AnthropicChatCompletionService.cs   Claude, since SK has no connector
+    LlmFactory.cs                 provider wiring shared by Jack and the converter
+    Conversion/                   the Python to C# converter: scanner, import analysis,
+                                  planner, library map, reflected API reference, prompts,
+                                  build-and-repair loop, --convert and --capture-converter
     LogService.cs                 the shared log sink
   Plugins/                        the 16 kernel functions
-  ViewModels/                     shell, explorer, editor, chat
+  ViewModels/                     shell, explorer, editor, chat, converter
   Views/                          AXAML + code-behind
   Themes/Tokens.axaml             colour, type and spacing tokens
   Themes/Controls.axaml           control styles
+  Samples/Python/                 sample Python projects for the converter
+tests/ScienceAppGen.Tests/        the converter's deterministic parts, and the build-repair-run
+                                  loop driven by a scripted model
 ```
 
 Two implementation notes worth knowing before editing:

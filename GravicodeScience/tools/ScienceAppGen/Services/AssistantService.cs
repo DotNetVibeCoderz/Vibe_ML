@@ -1,9 +1,6 @@
 using System.Runtime.CompilerServices;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.Connectors.AzureOpenAI;
-using Microsoft.SemanticKernel.Connectors.OpenAI;
 using ScienceAppGen.Models;
 using ScienceAppGen.Plugins;
 
@@ -59,43 +56,7 @@ public sealed class AssistantService(
         var signature = $"{settings.Provider}|{settings.Model}|{settings.Endpoint}|{settings.ApiKey.Length}";
         if (_kernel is not null && signature == _signature) return;
 
-        var builder = Kernel.CreateBuilder();
-
-        switch (settings.Provider)
-        {
-            case LlmProvider.AzureOpenAI:
-                builder.AddAzureOpenAIChatCompletion(
-                    deploymentName: settings.Model,
-                    endpoint: settings.Endpoint,
-                    apiKey: settings.ApiKey);
-                break;
-
-            case LlmProvider.OpenAI:
-                if (string.IsNullOrWhiteSpace(settings.Endpoint))
-                    builder.AddOpenAIChatCompletion(settings.Model, settings.ApiKey);
-                else
-                    builder.AddOpenAIChatCompletion(settings.Model, new Uri(settings.Endpoint), settings.ApiKey);
-                break;
-
-            case LlmProvider.Google:
-                builder.AddGoogleAIGeminiChatCompletion(settings.Model, settings.ApiKey);
-                break;
-
-            case LlmProvider.Ollama:
-                builder.AddOllamaChatCompletion(settings.Model, new Uri(settings.Endpoint));
-                break;
-
-            case LlmProvider.Anthropic:
-                // No official Semantic Kernel connector exists for Anthropic, so this is our own.
-                builder.Services.AddSingleton<IChatCompletionService>(
-                    new AnthropicChatCompletionService(
-                        settings.ApiKey, settings.Model, settings.Endpoint,
-                        settings.MaxTokens, TimeSpan.FromSeconds(settings.TimeoutSeconds)));
-                break;
-
-            default:
-                throw new NotSupportedException($"Provider {settings.Provider} is not supported.");
-        }
+        var builder = LlmFactory.AddChatCompletion(Kernel.CreateBuilder(), settings);
 
         var kernel = builder.Build();
 
@@ -244,77 +205,11 @@ public sealed class AssistantService(
         History.Add(new ChatMessageContent(AuthorRole.User, items));
     }
 
-    /// <summary>
-    /// True for the reasoning-model families, which changed the request contract.
-    /// </summary>
-    /// <remarks>
-    /// o1, o3, o4 and gpt-5 reject <c>max_tokens</c> outright - "Unsupported parameter:
-    /// 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead" - and
-    /// most of them accept only the default temperature. Semantic Kernel 1.79 still maps
-    /// <c>MaxTokens</c> to the legacy field, so the newer name is injected through
-    /// <c>ExtraBody</c> and the legacy one is left unset.
-    /// </remarks>
-    internal static bool UsesCompletionTokenLimit(string model)
-    {
-        var name = model.ToLowerInvariant();
-        return name.StartsWith("o1", StringComparison.Ordinal)
-               || name.StartsWith("o3", StringComparison.Ordinal)
-               || name.StartsWith("o4", StringComparison.Ordinal)
-               || name.StartsWith("gpt-5", StringComparison.Ordinal);
-    }
+    /// <summary>True for the reasoning-model families; see <see cref="LlmFactory.UsesCompletionTokenLimit"/>.</summary>
+    internal static bool UsesCompletionTokenLimit(string model) => LlmFactory.UsesCompletionTokenLimit(model);
 
-    private PromptExecutionSettings BuildExecutionSettings(AppSettings settings)
-    {
-        var reasoning = UsesCompletionTokenLimit(settings.Model);
-
-        switch (settings.Provider)
-        {
-            case LlmProvider.AzureOpenAI:
-            {
-                var openAi = new AzureOpenAIPromptExecutionSettings
-                {
-                    FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
-                };
-                ApplyLimits(openAi, settings, reasoning);
-                return openAi;
-            }
-
-            case LlmProvider.OpenAI:
-            {
-                var openAi = new OpenAIPromptExecutionSettings
-                {
-                    FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
-                };
-                ApplyLimits(openAi, settings, reasoning);
-                return openAi;
-            }
-
-            default:
-                // Google and Ollama read temperature from extension data; so does the custom
-                // Anthropic service.
-                return new PromptExecutionSettings
-                {
-                    ExtensionData = new Dictionary<string, object> { ["temperature"] = settings.Temperature },
-                    FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
-                };
-        }
-    }
-
-    private static void ApplyLimits(OpenAIPromptExecutionSettings target, AppSettings settings, bool reasoning)
-    {
-        if (reasoning)
-        {
-            target.ExtraBody = new Dictionary<string, object?>
-            {
-                ["max_completion_tokens"] = settings.MaxTokens,
-            };
-            // Temperature is left at the service default: these models reject anything else.
-            return;
-        }
-
-        target.Temperature = settings.Temperature;
-        target.MaxTokens = settings.MaxTokens;
-    }
+    private static PromptExecutionSettings BuildExecutionSettings(AppSettings settings)
+        => LlmFactory.CreateExecutionSettings(settings, functionCalling: true);
 
     /// <summary>Pulls function names out of a streaming chunk's metadata, whatever shape it takes.</summary>
     private static IEnumerable<string> ExtractToolNames(StreamingChatMessageContent? chunk)

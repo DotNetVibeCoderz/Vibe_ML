@@ -64,6 +64,7 @@ melewati AAA. Berkas yang sama dengan tema terang:
 | `Ctrl+B` / `Ctrl+L` | Tampil/sembunyikan chat / log |
 | `F6` / `F5` | Build / jalankan |
 | `Ctrl+,` | Pengaturan |
+| `Ctrl+Shift+P` / `Esc` | Python ke C# / kembali ke editor |
 | `Ctrl+Enter` | Kirim pesan chat |
 
 ---
@@ -232,6 +233,90 @@ ada dalam data latih.
 
 ---
 
+## Python ke C#
+
+![Konverter setelah berjalan: setiap modul ter-compile, output program tampil di umpan aktivitas](../screenshots/scienceappgen-convert-done.png)
+
+**Convert → Python to C#…** (atau `Ctrl+Shift+P`, atau tombol di toolbar) membuka halaman yang
+mengonversi skrip Python, notebook Jupyter, atau satu folder proyek utuh menjadi proyek C# di atas
+Gravicode.Science dan Visual.Net. LLM yang menerjemahkan; konverter mengurus semua hal di sekitarnya
+yang tidak bisa dikerjakan LLM dengan baik sendirian.
+
+| Python | Menjadi | Paket NuGet |
+|---|---|---|
+| numpy | GraviNum | `Gravicode.Science.GraviNum` |
+| pandas | GraviFrame | `Gravicode.Science.GraviFrame` |
+| scikit-learn | GraviLearn | `Gravicode.Science.GraviLearn` |
+| scipy | SciNet | `Gravicode.Science.SciNet` |
+| networkx, PyG, DGL | GraviGraph | `Gravicode.Science.GraviGraph` |
+| PyMC, Stan, ArviZ | GraviProb | `Gravicode.Science.GraviProb` |
+| transformers, NLTK, tokenizers | GraviText | `Gravicode.Science.GraviText` |
+| matplotlib | Matplotlib.Net | `Gravicode.Matplotlib.Net` |
+| seaborn | Seaborn.Net | `Gravicode.Seaborn.Net` |
+| plotly | Plotly.Net | `Gravicode.Plotly.Net` |
+| pustaka standar | base class library .NET | — |
+
+Proyek hasil konversi mereferensikan **paket NuGet yang sudah terbit**, bukan repositori ini,
+sehingga bisa di-build di mana saja. Paket yang tidak punya padanan (PyTorch, TensorFlow) ditandai
+sebelum apa pun dikirim; model memporting pemanggilan itu secara manual dan menandainya
+`// TODO(convert):`.
+
+### Yang terjadi saat Convert ditekan
+
+1. **Pindai dan rencanakan — gratis.** Memilih file atau folder membaca import dan merencanakan
+   konversi: modul mana menjadi file dan kelas C# apa, dengan urutan apa, dan paket mana menjadi
+   apa. Virtual environment, cache, `setup.py` dan sejenisnya dilewati; file data (CSV, JSON,
+   xlsx…) ikut disalin sehingga path relatif tetap berfungsi. Belum ada yang dikirim ke model.
+2. **Nama ditetapkan sebelum model melihat apa pun.** `data_loader.py` menjadi `DataLoader.cs`,
+   `load_sales` menjadi `DataLoader.LoadSales`, dan setiap prompt membawa tabel yang sama.
+   Membiarkan model memilih nama per file adalah penyebab konversi multi-file rusak.
+3. **Dependensi lebih dulu, paralel bila bisa.** Prompt tiap modul membawa signature publik yang
+   *benar-benar* dihasilkan untuk file yang sudah dikonversi, sehingga pemanggil ditulis terhadap
+   apa yang memang didapat oleh yang dipanggil.
+4. **Rujukan API yang tepat.** Setiap prompt membawa rujukan Gravicode yang dikurasi, ditambah
+   signature asli anggota SciNet dan Visual.Net yang dipakai file itu, **dibaca lewat reflection
+   dari assembly-nya** — `signal.butter` membawa `Butter(int n, CriticalFrequencies wn, FilterType
+   btype …)`, nilai-nilai `FilterType`, dan fakta bahwa `CriticalFrequencies` bisa dibuat dari
+   `[0.5, 15.0]`.
+5. **Using ditetapkan, bukan ditebak.** Konverter menulis blok `using` sendiri, membuang namespace
+   yang tidak ada, dan merapikan yang tidak terpakai setelah proyek berhasil di-build.
+6. **Build, lalu perbaiki.** Error compiler dikembalikan ke model per file, bersama sumber yang
+   bernomor baris, sampai sejumlah putaran yang dipilih. File yang mendeklarasikan stub `DataFrame`
+   atau `Figure` sendiri juga dikembalikan meskipun ter-compile.
+7. **Jalankan, lalu perbaiki lagi.** Program Python aslinya berjalan, jadi versi C#-nya juga harus:
+   exception yang tidak tertangani dilacak ke file dan baris hasil konversi lalu dikembalikan
+   seperti error compiler.
+
+Setiap prompt, balasan, dan log build disimpan di `.conversion/` dalam folder output, dan
+`CONVERSION.md` merangkum hasilnya: file, paket, putaran perbaikan, serta catatan TODO yang perlu
+ditinjau. **Open in workspace** membuka hasilnya di editor.
+
+### Dari baris perintah
+
+Konverter yang sama bisa berjalan tanpa jendela — API key diambil dari `app.config` atau
+`SCIENCEAPPGEN_APIKEY`, tidak pernah dari baris perintah:
+
+```bash
+ScienceAppGen --convert path/ke/proyek --run
+ScienceAppGen --convert notebook.ipynb --out ../Converted --rounds 4
+ScienceAppGen --convert script.py --plan        # rencana saja, tanpa panggilan model
+ScienceAppGen --convert script.py --prompt      # prompt persisnya, tanpa panggilan model
+```
+
+### Yang bisa diharapkan
+
+- **Hasil deterministik sama persis.** Jumlah baris, rata-rata per grup, hasil filter, dan apa pun
+  yang dihitung dari data keluar sama dengan Python.
+- **Hasil acak tidak sama.** Seed ikut terbawa tetapi generatornya berbeda, sehingga pembagian
+  train/test, random forest, atau noise simulasi memberi angka yang berbeda — sama-sama valid.
+- **Celah library menjadi TODO.** Bila suatu pemanggilan tidak punya padanan, model menuliskannya
+  secara manual dan menyebutkannya; `CONVERSION.md` mencantumkan setiap catatan itu.
+- **Dua contoh proyek** di `tools/ScienceAppGen/Samples/Python/` menunjukkan cakupannya: analisis
+  sinyal satu file (numpy, scipy, matplotlib) dan prakiraan penjualan lima modul (pandas,
+  scikit-learn, matplotlib, satu file CSV).
+
+---
+
 ## Terverifikasi ujung ke ujung
 
 `tools/ScienceAppGen` telah dijalankan terhadap endpoint Azure OpenAI sungguhan. Pengujiannya tidak
@@ -296,12 +381,19 @@ tools/ScienceAppGen/
     TemplateService.cs            sepuluh template
     AssistantService.cs           perkabelan Semantic Kernel, streaming, penampilan tool
     AnthropicChatCompletionService.cs   Claude, karena SK tidak punya connector
+    LlmFactory.cs                 wiring provider yang dipakai bersama Jack dan konverter
+    Conversion/                   konverter Python ke C#: pemindai, analisis import,
+                                  perencana, peta library, rujukan API hasil reflection,
+                                  prompt, loop build-dan-perbaiki, --convert dan --capture-converter
     LogService.cs                 sink log bersama
   Plugins/                        16 kernel function
-  ViewModels/                     shell, explorer, editor, chat
+  ViewModels/                     shell, explorer, editor, chat, konverter
   Views/                          AXAML + code-behind
   Themes/Tokens.axaml             token warna, tipografi, dan spasi
   Themes/Controls.axaml           gaya kontrol
+  Samples/Python/                 contoh proyek Python untuk konverter
+tests/ScienceAppGen.Tests/        bagian deterministik konverter, dan loop build-perbaiki-jalankan
+                                  yang digerakkan model tiruan berskrip
 ```
 
 Dua catatan implementasi yang perlu diketahui sebelum menyunting:

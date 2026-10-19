@@ -4,7 +4,7 @@ A data science and AI ecosystem for **.NET 10** — seven libraries that mirror 
 each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
-[![tests](https://img.shields.io/badge/tests-4081%20passing-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-4128%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![nuget](https://img.shields.io/badge/nuget-Gravicode.Science.*-004880)](https://www.nuget.org/packages?q=Gravicode.Science)
 
@@ -126,6 +126,15 @@ The template path was driven through the UI separately; here is `ml-pipeline` ge
 run without a line typed in between.
 
 [![The generated project running, printing a classification report](docs/screenshots/scienceappgen-run.png)](docs/ScienceAppGen.md#a-template-start-to-finish)
+
+**Python to C#.** A second page converts a Python script, a notebook or a whole project — numpy,
+pandas, scikit-learn and scipy onto GraviNum, GraviFrame, GraviLearn and SciNet; matplotlib, seaborn
+and plotly onto Visual.Net. The LLM translates; the converter fixes the names and the `using` block
+before it starts, gives it the real SciNet and Visual.Net signatures read by reflection, then builds
+and runs the result and sends compiler errors and run-time exceptions back until it works. Also
+headless: `ScienceAppGen --convert path/to/project --run`.
+
+[![Converting a five-module pandas and scikit-learn project](docs/screenshots/scienceappgen-convert-done.png)](docs/ScienceAppGen.md#python-to-c)
 
 Details in [ScienceAppGen.md](docs/ScienceAppGen.md).
 

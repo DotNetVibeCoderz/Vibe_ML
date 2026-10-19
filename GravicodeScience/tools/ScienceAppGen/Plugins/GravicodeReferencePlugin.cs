@@ -117,6 +117,20 @@ public sealed class GravicodeReferencePlugin
               df.DropMissing(), FillMissing(0.0), FillMissingWithMean(), MissingCounts()
               df.ToNdArray(), ToNdArray("a", "b")   // the bridge into GraviLearn
 
+            pandas idioms (verified):
+              pd.read_csv(p) -> DataFrame.ReadCsv(p). ISO date columns are ALREADY inferred as
+                DateTimeSeries, so pd.to_datetime(df["date"]) needs no code.
+              df["date"].dt.month -> df = df.WithColumn(df.DateTimes("date").Component(d => d.Month, "month"))
+              df["date"].dt.dayofweek -> Component(d => ((int)d.DayOfWeek + 6) % 7, "weekday")
+                (pandas counts Monday = 0; .NET's DayOfWeek counts Sunday = 0 - convert, or weekends shift)
+              df["new"] = expr -> df = df.WithColumn("new", i => ...)  - i is the ROW INDEX (int), so read
+                cells as df.Numeric("a")[i]; a whole-column result goes in as a Series instead
+              df.groupby("k")["v"].mean() -> df.GroupBy("k").Mean("v")   a frame with columns k, v
+              .sort_values("v", ascending=False) -> .SortBy("v", ascending: false)
+              df["c"].nunique() -> df["c"].Unique().Count;  df["c"].to_numpy() -> df.Numeric("c").Values
+              df[cols].to_numpy(dtype=float) -> df.ToNdArray(cols...)   NdArray, rows x columns
+              len(df) -> df.RowCount;  mask df["x"] >= 5 -> df.Numeric("x").Values.Select(v => v >= 5)
+
             Column types: NumericSeries (double[], NaN = missing), TextSeries, BooleanSeries, DateTimeSeries
               numeric.Sum/Mean/Min/Max/Median/Std/Var/Quantile(q)/Describe()
               numeric.FillMissingWithMedian(), ForwardFill(), BackwardFill(), Interpolate()
@@ -609,6 +623,9 @@ public sealed class GravicodeReferencePlugin
               between models scored on the same observations.
             """,
     };
+
+    /// <summary>The curated reference for one library, or null; shared with the Python converter.</summary>
+    internal static string? Lookup(string library) => Libraries.TryGetValue(library, out var text) ? text : null;
 
     [KernelFunction("GravicodeReference")]
     [Description("Returns the real API surface of a Gravicode.Science library: namespaces, types, " +

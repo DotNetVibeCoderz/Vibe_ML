@@ -21,6 +21,7 @@
          ScottPlot samples off SkiaSharp 3. -->
     <PackageVersion Include="Gravicode.Matplotlib.Net" Version="1.1.0" />
     <PackageVersion Include="Gravicode.Seaborn.Net" Version="1.1.0" />
+    <PackageVersion Include="Gravicode.Plotly.Net" Version="1.1.0" />
 
     <!-- Avalonia core. Kept next to Avalonia.Desktop so the versions cannot drift apart. -->
     <PackageVersion Include="Avalonia" Version="12.1.1" />

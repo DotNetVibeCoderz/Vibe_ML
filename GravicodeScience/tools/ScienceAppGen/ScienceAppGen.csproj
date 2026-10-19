@@ -12,6 +12,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The converter's deterministic parts are tested from tests/ScienceAppGen.Tests. -->
+    <InternalsVisibleTo Include="ScienceAppGen.Tests" />
+    <!-- Sample Python projects for the converter: documentation and test input, not app content. -->
+    <None Remove="Samples\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
     <AvaloniaResource Include="Themes\**" />
     <EmbeddedResource Include="Templates\**" />
@@ -35,6 +42,14 @@
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.Ollama" />
 
     <PackageReference Include="System.Configuration.ConfigurationManager" />
+
+    <!-- Visual.Net, so the Python converter can describe its real API by reflection. -->
+    <PackageReference Include="Gravicode.Matplotlib.Net" />
+    <PackageReference Include="Gravicode.Seaborn.Net" />
+    <PackageReference Include="Gravicode.Plotly.Net" />
+    <!-- Avalonia brings SkiaSharp 3's Linux native library, which wins over Visual.Net's
+         SkiaSharp 4 and breaks it on Linux; see the Science Gallery notes in CLAUDE.md. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" VersionOverride="4.151.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -42,6 +57,8 @@
     <ProjectReference Include="..\..\src\GraviNum\GraviNum.csproj" />
     <ProjectReference Include="..\..\src\GraviFrame\GraviFrame.csproj" />
     <ProjectReference Include="..\..\src\GraviLearn\GraviLearn.csproj" />
+    <!-- The converter reflects over SciNet to give the model scipy's real counterparts. -->
+    <ProjectReference Include="..\..\src\SciNet\SciNet.csproj" />
   </ItemGroup>
 
 </Project>

@@ -47,6 +47,11 @@
             <MenuItem Header="_Deploy" Click="OnDeploy" />
           </MenuItem>
 
+          <MenuItem Header="_Convert">
+            <MenuItem Header="_Python to C#…" Click="OnOpenConverter" InputGesture="Ctrl+Shift+P" />
+            <MenuItem Header="_Back to Editor" Click="OnCloseConverter" InputGesture="Escape" />
+          </MenuItem>
+
           <MenuItem Header="_Tools">
             <MenuItem Header="_Settings…" Click="OnSettings" InputGesture="Ctrl+," />
             <MenuItem Header="_Clear Logs" Click="OnClearLogs" />
@@ -80,6 +85,9 @@
         <Border Width="1" Margin="8,10" Background="{DynamicResource BorderSoft}" />
         <Button Classes="tool" Content="Format" Click="OnFormat" ToolTip.Tip="Format code (Ctrl+K)" />
         <Button Classes="tool" Content="Go to Line" Click="OnGoToLine" ToolTip.Tip="Go to line (Ctrl+G)" />
+        <Border Width="1" Margin="8,10" Background="{DynamicResource BorderSoft}" />
+        <Button Classes="tool" Content="Python → C#" Click="OnOpenConverter"
+                ToolTip.Tip="Convert a Python script, notebook or project (Ctrl+Shift+P)" />
       </StackPanel>
     </Border>
 
@@ -92,7 +100,12 @@
       its own view model, so those bindings reach back through $parent[Window].DataContext.
       A cast in the binding path cannot be resolved at runtime and throws on startup.
     -->
-    <Grid Grid.Row="3" ColumnDefinitions="Auto,4,*,4,Auto">
+    <!-- The converter page takes the workspace's place rather than opening a window, so the
+         status bar, menu and theme stay shared and a converted project opens in place. -->
+    <views:ConverterView Grid.Row="3" DataContext="{Binding Converter}"
+                         IsVisible="{Binding $parent[Window].DataContext.IsConverterOpen}" />
+
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,4,*,4,Auto" IsVisible="{Binding IsWorkspaceVisible}">
 
       <views:ExplorerView Grid.Column="0" DataContext="{Binding Explorer}"
                           Width="{Binding $parent[Window].DataContext.ExplorerWidth, Mode=TwoWay}"

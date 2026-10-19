@@ -41,6 +41,48 @@ public partial class MainWindow : Window
         Bind(Key.F6, KeyModifiers.None, () => _ = BuildAsync());
         Bind(Key.F5, KeyModifiers.None, () => _ = RunAsync());
         Bind(Key.OemComma, KeyModifiers.Control, () => _ = SettingsAsync());
+        Bind(Key.P, KeyModifiers.Control | KeyModifiers.Shift, OpenConverter);
+        Bind(Key.Escape, KeyModifiers.None, CloseConverter);
+
+        DataContextChanged += (_, _) =>
+        {
+            if (Shell is null) return;
+            Shell.Converter.OpenProjectRequested -= OpenConvertedProject;
+            Shell.Converter.OpenProjectRequested += OpenConvertedProject;
+        };
+    }
+
+    // ---------------------------------------------------------------- convert
+
+    private void OnOpenConverter(object? sender, RoutedEventArgs e) => OpenConverter();
+
+    private void OnCloseConverter(object? sender, RoutedEventArgs e) => CloseConverter();
+
+    private void OpenConverter()
+    {
+        if (Shell is not null) Shell.IsConverterOpen = true;
+    }
+
+    private void CloseConverter()
+    {
+        if (Shell is { IsConverterOpen: true }) Shell.IsConverterOpen = false;
+    }
+
+    /// <summary>Opens a converted project in the workspace and lands on its Program.cs.</summary>
+    private void OpenConvertedProject(string folder)
+    {
+        if (Shell is null) return;
+        try
+        {
+            Shell.Projects.OpenProject(folder);
+            Shell.IsConverterOpen = false;
+            Shell.StatusMessage = $"Opened {Path.GetFileName(folder)}";
+            OpenFirstSourceFile(folder);
+        }
+        catch (Exception ex)
+        {
+            Shell.Logs.Error("project", ex.Message);
+        }
     }
 
     // ---------------------------------------------------------------- project
