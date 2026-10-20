@@ -80,6 +80,20 @@ internal sealed class RotaryEmbedding
         _inverseFrequency = InverseFrequencies(dimensions, theta);
     }
 
+    /// <summary>
+    /// Unscaled rotation with the inverse frequencies a checkpoint stores, one per pair of dimensions.
+    /// </summary>
+    /// <remarks>
+    /// ESM-2 saves its <c>rotary_embeddings.inv_freq</c> buffers rounded to float16, the precision it
+    /// was trained in, and transformers 5 loads them rather than recomputing them: 0.316162109375, not
+    /// 0.31622776. Recomputing moves ESM-2 t6's hidden states by about 3e-3.
+    /// </remarks>
+    internal RotaryEmbedding(double[] inverseFrequencies)
+    {
+        Dimensions = inverseFrequencies.Length * 2;
+        _inverseFrequency = inverseFrequencies;
+    }
+
     private static double[] InverseFrequencies(int dimensions, double theta)
     {
         var half = dimensions / 2;

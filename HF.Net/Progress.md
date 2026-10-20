@@ -7,7 +7,7 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.11.0 — current
+## v0.11.1 — current
 
 **29 projects, 503 tests (500 offline + 3 download-gated), whole solution builds clean with no warnings.**
 
@@ -257,6 +257,11 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-10-20** — 0.11.1: ESM rotary embeddings now use the `inv_freq` buffer stored in the checkpoint
+(ESM-2 stores it rounded to float16, and transformers 5 keeps those values) instead of recomputing it. That
+was a 2.8e-3 gap to PyTorch on `facebook/esm2_t6_8M_UR50D`; it is now 5e-6. The test fixtures no longer
+recompute the frequencies, which is why the old tests missed it.
 
 **2026-10-15** — 0.11.0: ESM, Geneformer's pickles, models without a tokenizer, a package icon. These
 are the gaps Biotech.Net had worked around.

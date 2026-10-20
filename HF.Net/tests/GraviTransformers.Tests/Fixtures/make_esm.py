@@ -11,7 +11,8 @@ esm-reference.json   transformers' float64 outputs for both, and EsmTokenizer's 
 transformers computes the rotary angles, and the rotation itself, in float32 even inside a float64 model.
 HF.Net does both in double, so the reference patches EsmRotaryEmbedding.forward and apply_rotary_pos_emb to
 stay in double; without the patch expect differences around 3e-7, which are the reference's rounding, not a
-bug. Token dropout's observed mask ratio is float32 in the reference too, and HF.Net reproduces that one.
+bug. The patch keeps the model's inv_freq buffer: ESM-2 checkpoints store it rounded to float16 and transformers
+uses the stored values, so esm-rotary stores float16-rounded frequencies as well. Token dropout's observed mask ratio is float32 in the reference too, and HF.Net reproduces that one.
 """
 import json, os, shutil, sys
 import torch
@@ -26,9 +27,8 @@ VOCAB = ["<cls>", "<pad>", "<eos>", "<unk>", "L", "A", "G", "V", "S", "E", "R", 
 
 
 def double_rotary(self, x, position_ids, layer_type=None):
-    dim = self.inv_freq.shape[0] * 2
-    base = getattr(self.config, "rope_theta", None) or 10000.0
-    inv = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float64) / dim))
+    # The model's own buffer, as transformers uses it: a checkpoint's stored (float16-rounded) values.
+    inv = self.inv_freq.double()
     freqs = position_ids[:, :, None].double() * inv[None, None, :]
     emb = torch.cat((freqs, freqs), dim=-1)
     return emb.cos().to(x.dtype), emb.sin().to(x.dtype)
@@ -67,7 +67,20 @@ def random_model(folder, **overrides):
             p.normal_(0, 0.3 if p.dim() > 1 else 0.2)
             if "LayerNorm.weight" in name or "layer_norm" in name and name.endswith("weight"):
                 p.add_(1.0)
+        # ESM-2 stores its rotary frequencies rounded to float16, and transformers keeps them; do the
+        # same here so that a reader recomputing 1 / 10000^(2i/d) fails the rotary test.
+        if model.esm.rotary_embeddings is not None:
+            inv = model.esm.rotary_embeddings.inv_freq
+            inv.copy_(inv.half().float())
     model.save_pretrained(folder)
+    if model.esm.rotary_embeddings is not None:
+        # transformers does not write the buffer; add it per layer, as the published ESM-2 files hold it.
+        from safetensors.torch import load_file, save_file
+        path = os.path.join(folder, "model.safetensors")
+        tensors = load_file(path)
+        for i in range(model.config.num_hidden_layers):
+            tensors[f"esm.encoder.layer.{i}.attention.self.rotary_embeddings.inv_freq"] =                 model.esm.rotary_embeddings.inv_freq.clone()
+        save_file(tensors, path, metadata={"format": "pt"})
     return tok, model.double()
 
 

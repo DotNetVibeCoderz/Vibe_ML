@@ -105,7 +105,7 @@ internal sealed class EsmEncoder : IInferenceEncoder
         }
 
         var embeddingNorm = options.EmbeddingNormBefore ? LayerNorm($"{prefix}embeddings.layer_norm") : null;
-        var rotary = options.PositionEmbeddingType == "rotary" ? new RotaryEmbedding(config.HeadSize, options.RopeTheta) : null;
+        var rotary = options.PositionEmbeddingType == "rotary" ? LoadRotary(weights, prefix, config, loaded) : null;
 
         var blocks = new EncoderBlock[config.Layers];
         for (var i = 0; i < blocks.Length; i++)
@@ -130,6 +130,43 @@ internal sealed class EsmEncoder : IInferenceEncoder
         var encoder = new EsmEncoder(options, hidden, config.VocabularySize, tokens, positions, embeddingNorm, blocks, finalNorm);
 
         return (encoder, new LoadReport(loaded, [], prefix));
+    }
+
+    /// <summary>
+    /// The rotary embedding, from the checkpoint's stored inverse frequencies when it has them.
+    /// </summary>
+    /// <remarks>
+    /// The published ESM-2 checkpoints store <c>encoder.layer.{i}.attention.self.rotary_embeddings.inv_freq</c>
+    /// rounded to float16; transformers 5 moves the first of them to the model-level
+    /// <c>rotary_embeddings.inv_freq</c>, keeps its values, and saves under that name. Both spellings are
+    /// read, layer 0's winning as it does in transformers' load hook. A checkpoint with neither falls back
+    /// to <c>1 / theta^(2i/d)</c>.
+    /// </remarks>
+    private static RotaryEmbedding LoadRotary(WeightStore weights, string prefix, PretrainedConfig config, List<string> loaded)
+    {
+        var options = config.Esm!;
+        var shared = $"{prefix}rotary_embeddings.inv_freq";
+        var perLayer = Enumerable.Range(0, config.Layers)
+            .Select(i => $"{prefix}encoder.layer.{i}.attention.self.rotary_embeddings.inv_freq")
+            .Where(weights.Contains)
+            .ToList();
+
+        var source = weights.Contains(shared) ? shared : perLayer.FirstOrDefault();
+        if (source is null) return new RotaryEmbedding(config.HeadSize, options.RopeTheta);
+
+        var stored = weights.Read(source);
+        if (stored.Size != config.HeadSize / 2)
+        {
+            throw new InvalidDataException(
+                $"'{source}' holds {stored.Size} frequencies but a {config.HeadSize}-wide head rotates {config.HeadSize / 2} pairs.");
+        }
+
+        var frequencies = new double[config.HeadSize / 2];
+        for (var i = 0; i < frequencies.Length; i++) frequencies[i] = stored.At(i);
+
+        if (weights.Contains(shared)) loaded.Add(shared);
+        loaded.AddRange(perLayer);
+        return new RotaryEmbedding(frequencies);
     }
 
     /// <summary><c>esm.</c> for a model with a head (<c>EsmForMaskedLM</c>), nothing for a bare <c>EsmModel</c>.</summary>
