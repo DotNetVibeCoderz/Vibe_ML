@@ -15,7 +15,6 @@
 
   <ItemGroup>
     <PackageReference Include="Gravicode.Science.GraviNum" />
-    <PackageReference Include="Gravicode.Science.GraviFrame" />
   </ItemGroup>
 
 </Project>

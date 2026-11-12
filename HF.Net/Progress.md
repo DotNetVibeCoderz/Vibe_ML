@@ -7,7 +7,11 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.11.1 — current
+## v0.11.2 — current
+
+Same as 0.11.1 plus a lighter GraviHub dependency graph (see the log).
+
+## v0.11.1
 
 **29 projects, 503 tests (500 offline + 3 download-gated), whole solution builds clean with no warnings.**
 
@@ -257,6 +261,14 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-11-12** — 0.11.2: GraviHub and GraviTransformers no longer reference `Gravicode.Science.GraviFrame`, which neither used. Through
+central transitive pinning that reference put Parquet.Net into every HF.Net package, and Parquet.Net's managed `Parquet.dll` breaks
+GDAL on Windows when it loads first (the OS reuses a loaded module by file name and GDAL imports a native `parquet.dll`). GraviHub now
+depends only on GraviNum and ILGPU. GraviTokenizers and GraviTransformers still bring Parquet.Net through Gravicode.Science GraviText →
+GraviLearn → GraviFrame; splitting GraviFrame's Parquet IO into its own package would free them too. GraviHub, GraviTokenizers,
+GraviTransformers and GraviDatasets tests pass. The release build now reports NU1903 for SixLabors.ImageSharp 3.1.12 (new advisories);
+3.2.0+ needs a commercial licence for Release builds.
 
 **2026-10-20** — 0.11.1: ESM rotary embeddings now use the `inv_freq` buffer stored in the checkpoint
 (ESM-2 stores it rounded to float16, and transformers 5 keeps those values) instead of recomputing it. That

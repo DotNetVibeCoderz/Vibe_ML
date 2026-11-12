@@ -27,7 +27,6 @@
 
   <ItemGroup>
     <PackageReference Include="Gravicode.Science.GraviNum" />
-    <PackageReference Include="Gravicode.Science.GraviFrame" />
     <PackageReference Include="Gravicode.Science.GraviLearn" />
     <PackageReference Include="Gravicode.Science.GraviText" />
 
