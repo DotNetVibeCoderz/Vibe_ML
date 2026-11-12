@@ -7,7 +7,11 @@ Development tracking for HF.Net. `requirements.md` is the specification of recor
 
 ---
 
-## v0.11.2 — current
+## v0.12.0 — current
+
+Built on Gravicode.Science 2.0.0; only GraviDatasets (and GraviAccelerate through it) still brings Parquet.Net.
+
+## v0.11.2
 
 Same as 0.11.1 plus a lighter GraviHub dependency graph (see the log).
 
@@ -261,6 +265,11 @@ Carried into [PLAN.md](PLAN.md):
 ---
 
 ## Log
+
+**2026-11-12** — 0.12.0: moved from Gravicode.Science 1.0.0 to 2.0.0, which splits `ParquetIO` into
+`Gravicode.Science.GraviFrame.Parquet`. GraviDatasets references that package; GraviHub, GraviTokenizers, GraviTransformers, GraviOptimum,
+GraviPEFT and GraviDiffusers no longer bring Parquet.Net at all (its `Parquet.dll` breaks GDAL on Windows when loaded first). All 501
+offline tests pass on 2.0.0. Must be released after Gravicode.Science 2.0.0 is on nuget.org.
 
 **2026-11-12** — 0.11.2: GraviHub and GraviTransformers no longer reference `Gravicode.Science.GraviFrame`, which neither used. Through
 central transitive pinning that reference put Parquet.Net into every HF.Net package, and Parquet.Net's managed `Parquet.dll` breaks

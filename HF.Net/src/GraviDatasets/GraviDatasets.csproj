@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Gravicode.Science.GraviNum" />
     <PackageReference Include="Gravicode.Science.GraviFrame" />
+    <PackageReference Include="Gravicode.Science.GraviFrame.Parquet" />
   </ItemGroup>
 
   <ItemGroup>

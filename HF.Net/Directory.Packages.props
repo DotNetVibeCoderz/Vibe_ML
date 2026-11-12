@@ -12,10 +12,12 @@
       .nupkg with no dependency recorded at all, so consumers would restore HF.Net and then fail at
       the first NdArray. Published by Gravicode Studios on nuget.org.
     -->
-    <PackageVersion Include="Gravicode.Science.GraviNum" Version="1.0.0" />
-    <PackageVersion Include="Gravicode.Science.GraviFrame" Version="1.0.0" />
-    <PackageVersion Include="Gravicode.Science.GraviLearn" Version="1.0.0" />
-    <PackageVersion Include="Gravicode.Science.GraviText" Version="1.0.0" />
+    <PackageVersion Include="Gravicode.Science.GraviNum" Version="2.0.0" />
+    <PackageVersion Include="Gravicode.Science.GraviFrame" Version="2.0.0" />
+    <!-- Parquet I/O is a separate package since Gravicode.Science 2.0.0 (only GraviDatasets needs it). -->
+    <PackageVersion Include="Gravicode.Science.GraviFrame.Parquet" Version="2.0.0" />
+    <PackageVersion Include="Gravicode.Science.GraviLearn" Version="2.0.0" />
+    <PackageVersion Include="Gravicode.Science.GraviText" Version="2.0.0" />
 
     <!-- GPU backend (CUDA / OpenCL / CPU accelerator), used by GraviAccelerate. -->
     <PackageVersion Include="ILGPU" Version="1.5.3" />
