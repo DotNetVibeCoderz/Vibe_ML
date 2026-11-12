@@ -15,6 +15,7 @@
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <ProjectReference Include="..\..\src\GraviFrame\GraviFrame.csproj" />
+    <ProjectReference Include="..\..\src\GraviFrame.Parquet\GraviFrame.Parquet.csproj" />
   </ItemGroup>
 
 </Project>

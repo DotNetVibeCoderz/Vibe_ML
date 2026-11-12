@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v1.4.0 · **Target framework**: .NET 10 · **Tests**: 4,081 passing, 0 failing
+**Release**: v2.0.0 · **Target framework**: .NET 10 · **Tests**: 4,081 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -249,6 +249,13 @@ remains the better baseline on a small dataset.
   Harwell–Boeing, NetCDF, WAV, ARFF, Fortran, IDL)
 
 ---
+
+## 2.0.0 — Parquet split (2026-11-12)
+
+`ParquetIO` moved from GraviFrame into the new package `Gravicode.Science.GraviFrame.Parquet` (same namespace and API). GraviFrame,
+GraviLearn and GraviText no longer depend on Parquet.Net, whose managed `Parquet.dll` broke GDAL on Windows when it loaded first
+(GDAL imports a native `parquet.dll`, and Windows reuses a loaded module by file name). The change is source-compatible: add the package.
+It is binary-breaking for code compiled against 1.x that calls `ParquetIO`, hence the major version.
 
 ## Bugs found and fixed during development
 

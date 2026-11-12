@@ -10,6 +10,7 @@
     <!-- Samples render the screenshots referenced by docs/. -->
     <PackageReference Include="ScottPlot" />
     <ProjectReference Include="..\..\src\GraviFrame\GraviFrame.csproj" />
+    <ProjectReference Include="..\..\src\GraviFrame.Parquet\GraviFrame.Parquet.csproj" />
   </ItemGroup>
 
 </Project>

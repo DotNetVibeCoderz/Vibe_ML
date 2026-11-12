@@ -37,6 +37,10 @@ var back = ParquetIO.Read("data.parquet");
 var subset = ParquetIO.Read("data.parquet", ["value", "date"]);   // columns only
 ```
 
+`ParquetIO` is in the separate package **`Gravicode.Science.GraviFrame.Parquet`** (since 2.0.0; same namespace, add the package).
+GraviFrame itself no longer depends on Parquet.Net. Parquet.Net's managed `Parquet.dll` has the same file name as the native `parquet.dll`
+that GDAL imports, and on Windows whichever loads first wins, so libraries that only need data frames now stay out of that conflict.
+
 Types are inferred per column from the first 1,000 rows by default. Override when needed:
 
 ```csharp

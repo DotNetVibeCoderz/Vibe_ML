@@ -54,6 +54,8 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
   `TextNormalizer.StripAccents` uses an explicit folding table for this reason.
 - **`ConnectedComponents` is *weak* connectivity on directed graphs.** This is deliberate; see the
   Cora numbers in `docs/GraviGraph.md`.
+- Parquet I/O lives in `src/GraviFrame.Parquet` (package `Gravicode.Science.GraviFrame.Parquet`, namespace `Gravicode.Science.GraviFrame.Io`);
+  GraviFrame must not reference Parquet.Net again — its `Parquet.dll` shadows GDAL's native `parquet.dll` on Windows.
 - Parquet is pinned to **Parquet.Net 5.6.1**; 6.x replaced the `DataColumn` API with a lower-level
   `Memory<T>` surface.
 - **`DecisionTree.FindBestSplit` sweeps running class counts, deliberately.** Materialising

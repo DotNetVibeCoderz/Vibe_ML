@@ -38,6 +38,11 @@ var back = ParquetIO.Read("data.parquet");
 var subset = ParquetIO.Read("data.parquet", ["value", "date"]);   // kolom tertentu saja
 ```
 
+`ParquetIO` ada di paket terpisah **`Gravicode.Science.GraviFrame.Parquet`** (sejak 2.0.0; namespace sama, cukup tambahkan paketnya).
+GraviFrame sendiri tidak lagi bergantung pada Parquet.Net. `Parquet.dll` managed milik Parquet.Net bernama sama dengan `parquet.dll` native
+yang diimpor GDAL, dan di Windows yang dimuat lebih dulu yang dipakai. Dengan pemisahan ini, pustaka yang hanya butuh data frame tidak lagi
+terkena konflik tersebut.
+
 Tipe disimpulkan per kolom dari 1.000 baris pertama secara bawaan. Timpa bila perlu:
 
 ```csharp
