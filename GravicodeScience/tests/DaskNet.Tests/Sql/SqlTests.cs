@@ -221,7 +221,6 @@ public sealed class SqlTests
     [InlineData("SELECT product FROM sales s JOIN products p ON s.product = p.product", "ambiguous")]
     [InlineData("SELECT region, qty FROM sales GROUP BY region", "must appear in GROUP BY")]
     [InlineData("SELECT id FROM sales WHERE SUM(qty) > 3", "not allowed in WHERE")]
-    [InlineData("SELECT COUNT(DISTINCT region) FROM sales", "DISTINCT")]
     [InlineData("SELECT id FROM sales LIMIT 3 OFFSET 2", "OFFSET")]
     [InlineData("SELECT id FROM sales s JOIN products p ON s.qty > p.weight", "equality")]
     [InlineData("SELECT id FROM sales WHERE", "Expected an expression")]

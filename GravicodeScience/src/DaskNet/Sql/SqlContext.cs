@@ -13,14 +13,17 @@ namespace Gravicode.Science.DaskNet.Sql;
 /// Supported: <c>SELECT [DISTINCT] ... FROM t [alias] [INNER|LEFT|RIGHT|FULL JOIN u ON ...]
 /// [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ... [ASC|DESC]] [LIMIT n]</c>, subqueries in
 /// <c>FROM</c>, <c>CASE</c>, <c>CAST</c>, <c>IN</c>, <c>BETWEEN</c>, <c>LIKE</c>, <c>IS [NOT] NULL</c>,
-/// the aggregates COUNT/SUM/AVG/MIN/MAX/STDDEV/VARIANCE (and their <c>_POP</c> forms), and the
+/// the aggregates COUNT/SUM/AVG/MIN/MAX/STDDEV/VARIANCE (and their <c>_POP</c> forms, each
+/// optionally <c>DISTINCT</c>), and the
 /// scalar functions listed in <see cref="ScalarFunctions"/>. Missing values follow SQL's
 /// three-valued logic, as <see cref="Expr"/> does.
 /// </para>
 /// <para>
+/// <c>UNION [ALL]</c> combines queries; ORDER BY and LIMIT after the last one apply to the union.
+/// Window functions: ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD and COUNT/SUM/AVG/MIN/MAX
+/// <c>OVER ([PARTITION BY ...] [ORDER BY ...])</c>, with the default frame.
 /// Not supported, and refused with a message rather than approximated: <c>OFFSET</c>,
-/// <c>UNION</c>, <c>CROSS JOIN</c>, <c>COUNT(DISTINCT ...)</c>, subqueries outside <c>FROM</c>,
-/// window functions, and a join condition with no equality between the two sides.
+/// <c>CROSS JOIN</c>, subqueries outside <c>FROM</c>, explicit window frames, and a join condition with no equality between the two sides.
 /// </para>
 /// </remarks>
 public sealed class SqlContext
@@ -107,6 +110,7 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
 
     public DaskFrame Compile(SelectStatement s)
     {
+        if (s.Unions.Length > 0) return CompileUnion(s);
         var (frame, scope) = CompileFrom(s);
 
         if (s.Where is not null)
@@ -121,6 +125,18 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
                          || s.OrderBy.Any(o => ContainsAggregate(o.Expr));
         Func<SqlNode, Expr> compile = n => Plain(n, scope);
         if (aggregated) (frame, compile) = CompileAggregation(s, frame, scope);
+
+        // Window functions see the rows after WHERE, GROUP BY and HAVING, and run before the
+        // projection, DISTINCT, ORDER BY and LIMIT - the order SQL defines.
+        var windows = new List<WindowCall>();
+        void FindWindows(SqlNode n)
+        {
+            if (n is WindowCall w) windows.Add(w);
+            else foreach (var child in Children(n)) FindWindows(child);
+        }
+        foreach (var item in s.Items) FindWindows(item.Expr);
+        foreach (var o in s.OrderBy) FindWindows(o.Expr);
+        if (windows.Count > 0) (frame, compile) = CompileWindows(windows, frame, compile);
 
         // Projection, with hidden columns for ORDER BY expressions that are not outputs.
         var outputs = new List<Expr>();
@@ -188,6 +204,144 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
         }
         if (sortKeys.Count > 0) frame = frame.SortBy(sortKeys);
         if (hidden.Count > 0) frame = frame.Drop(hidden.ToArray());
+        if (s.Limit is { } limit) frame = frame.Limit(limit);
+        return frame;
+    }
+
+    // ------------------------------------------------------------------ window functions
+
+    private static readonly Dictionary<string, string> WindowAggregates = new(StringComparer.Ordinal)
+    {
+        ["COUNT"] = "count", ["SUM"] = "sum", ["AVG"] = "mean", ["MEAN"] = "mean", ["MIN"] = "min", ["MAX"] = "max",
+    };
+
+    /// <summary>
+    /// Window calls with the same PARTITION BY and ORDER BY share one window (one shuffle).
+    /// Partition, order and argument expressions are compiled with <paramref name="inner"/>, so in
+    /// a grouped query they may use group keys and aggregates (<c>RANK() OVER (ORDER BY SUM(x))</c>).
+    /// </summary>
+    private (DaskFrame, Func<SqlNode, Expr>) CompileWindows(List<WindowCall> windows, DaskFrame frame, Func<SqlNode, Expr> inner)
+    {
+        var pre = new List<Expr>();
+        var preByText = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Column(SqlNode n)
+        {
+            if (ContainsWindow(n)) throw new SqlException("Window functions cannot be nested", n.Position);
+            var e = inner(n);
+            if (e is ColumnExpr c) return c.Name;
+            var text = e.ToString()!;
+            if (!preByText.TryGetValue(text, out var name))
+            {
+                name = $"__win{_hidden++}";
+                preByText[text] = name;
+                pre.Add(e.As(name));
+            }
+            return name;
+        }
+
+        var outputs = new Dictionary<WindowCall, string>(ReferenceEqualityComparer.Instance);
+        var specs = new List<(string Key, string[] Partition, (string, bool)[] Order, List<WindowFunction> Functions)>();
+        foreach (var w in windows)
+        {
+            var call = w.Function;
+            var partition = w.PartitionBy.Select(Column).ToArray();
+            var order = w.OrderBy.Select(o => (Column(o.Expr), o.Ascending)).ToArray();
+            var output = $"__window{_hidden++}";
+            void Arity(int min, int max)
+            {
+                if (call.Star || call.Args.Length < min || call.Args.Length > max)
+                    throw new SqlException($"{call.Name} takes {(min == max ? min.ToString() : $"{min} to {max}")} argument(s)", call.Position);
+            }
+            WindowFunction function;
+            switch (call.Name)
+            {
+                case "ROW_NUMBER" or "RANK" or "DENSE_RANK":
+                    Arity(0, 0);
+                    if (order.Length == 0) throw new SqlException($"{call.Name} needs ORDER BY in its window", call.Position);
+                    function = new WindowFunction(output, call.Name.ToLowerInvariant());
+                    break;
+                case "LAG" or "LEAD":
+                {
+                    Arity(1, 3);
+                    if (call.Args.Length == 3)
+                        throw new SqlException($"{call.Name}'s default argument is not supported; wrap the call in COALESCE", call.Args[2].Position);
+                    var offset = 1;
+                    if (call.Args.Length == 2)
+                    {
+                        if (call.Args[1] is not Literal { Value: double d } || d != Math.Floor(d) || d < 0)
+                            throw new SqlException($"{call.Name}'s offset must be a non-negative whole number", call.Args[1].Position);
+                        offset = (int)d;
+                    }
+                    function = new WindowFunction(output, call.Name.ToLowerInvariant(), Column(call.Args[0]), offset);
+                    break;
+                }
+                case "COUNT" when call.Star:
+                    function = new WindowFunction(output, "size");
+                    break;
+                default:
+                    if (!WindowAggregates.TryGetValue(call.Name, out var how))
+                        throw new SqlException(AggregateNames.ContainsKey(call.Name)
+                            ? $"{call.Name} is not supported as a window function"
+                            : $"Unknown window function {call.Name}", call.Position);
+                    Arity(1, 1);
+                    function = new WindowFunction(output, how, Column(call.Args[0]));
+                    break;
+            }
+            var key = string.Join("\u001F", partition) + "|" + string.Join("\u001F", order.Select(o => $"{o.Item1} {o.Item2}"));
+            var index = specs.FindIndex(x => x.Key == key);
+            if (index < 0) { specs.Add((key, partition, order, [])); index = specs.Count - 1; }
+            specs[index].Functions.Add(function);
+            outputs[w] = output;
+        }
+
+        if (pre.Count > 0) frame = frame.WithColumns(pre.ToArray());
+        foreach (var spec in specs) frame = frame.Window(spec.Partition, spec.Order, spec.Functions.ToArray());
+
+        Expr Windowed(SqlNode n)
+            => n is WindowCall w ? Expr.Col(outputs[w]) : ContainsWindow(n) ? Build(n, Windowed) : inner(n);
+        return (frame, Windowed);
+    }
+
+    private static bool ContainsWindow(SqlNode n) => n is WindowCall || Children(n).Any(ContainsWindow);
+
+    // ------------------------------------------------------------------ UNION
+
+    /// <summary>
+    /// Branches are matched by position and take the first branch's names. The combination is
+    /// built left to right, so <c>a UNION ALL b UNION c</c> deduplicates all three, while
+    /// <c>a UNION b UNION ALL c</c> keeps c's duplicates. ORDER BY may name output columns or
+    /// positions only, since the branches have no other columns in common.
+    /// </summary>
+    private DaskFrame CompileUnion(SelectStatement s)
+    {
+        var frame = Compile(s with { OrderBy = [], Limit = null, Unions = [] });
+        var names = frame.Columns.ToArray();
+        foreach (var part in s.Unions)
+        {
+            var branch = Compile(part.Query);
+            var columns = branch.Columns;
+            if (columns.Count != names.Length)
+                throw new SqlException($"Each UNION query must have the same number of columns ({names.Length} vs {columns.Count})", part.Position);
+            if (!columns.SequenceEqual(names))
+                branch = branch.Select(columns.Select((c, i) => Expr.Col(c).As(names[i])).ToArray());
+            frame = DaskFrame.Concat(frame, branch);
+            if (!part.All)
+            {
+                var count = $"__count{_hidden++}";
+                frame = frame.GroupBy(names).Size(count).Drop(count);
+            }
+        }
+
+        var sortKeys = new List<(string Column, bool Ascending)>();
+        foreach (var o in s.OrderBy)
+        {
+            if (o.Expr is Literal { Value: double d } && d == Math.Floor(d) && d >= 1 && d <= names.Length)
+                sortKeys.Add((names[(int)d - 1], o.Ascending));
+            else if (o.Expr is ColumnRef { Table: null } r && names.FirstOrDefault(n => n.Equals(r.Name, StringComparison.OrdinalIgnoreCase)) is { } name)
+                sortKeys.Add((name, o.Ascending));
+            else throw new SqlException("ORDER BY after a UNION must name an output column or position", o.Expr.Position);
+        }
+        if (sortKeys.Count > 0) frame = frame.SortBy(sortKeys);
         if (s.Limit is { } limit) frame = frame.Limit(limit);
         return frame;
     }
@@ -307,12 +461,13 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
         }
 
         var aggregations = new List<Aggregation>();
+        var distinct = new List<Aggregation>();
         var aggByText = new Dictionary<string, string>(StringComparer.Ordinal);
         void Collect(SqlNode n)
         {
             if (n is Call call && AggregateNames.TryGetValue(call.Name, out var how))
             {
-                if (call.Distinct) throw new SqlException($"{call.Name}(DISTINCT ...) is not supported yet", call.Position);
+                if (call.Distinct && call.Star) throw new SqlException($"{call.Name}(DISTINCT *) is not valid", call.Position);
                 if (!call.Star && call.Args.Length != 1) throw new SqlException($"{call.Name} takes one argument", call.Position);
                 if (call.Star && call.Name != "COUNT") throw new SqlException($"{call.Name}(*) is not valid", call.Position);
                 if (call.Args.Any(ContainsAggregate)) throw new SqlException("Aggregates cannot be nested", call.Position);
@@ -329,7 +484,7 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
                     column = $"__arg{_hidden++}";
                     pre.Add(arg.As(column));
                 }
-                aggregations.Add(new Aggregation(output, how, column));
+                (call.Distinct ? distinct : aggregations).Add(new Aggregation(output, how, column));
                 return;
             }
             foreach (var child in Children(n)) Collect(child);
@@ -340,7 +495,9 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
         if (aggregations.Count == 0) aggregations.Add(new Aggregation($"__agg{_hidden++}", "size", null));
 
         if (pre.Count > 0) frame = frame.WithColumns(pre.ToArray());
+        var source = frame;
         frame = keyNames.Count > 0 ? frame.GroupBy(keyNames.ToArray()).Agg(aggregations.ToArray()) : frame.Aggregate(aggregations.ToArray());
+        foreach (var byColumn in distinct.GroupBy(a => a.Column!)) frame = JoinDistinct(frame, source, keyNames, byColumn.Key, byColumn.ToArray());
 
         Expr Grouped(SqlNode n)
         {
@@ -360,8 +517,32 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
         return (frame, Grouped);
     }
 
+    /// <summary>
+    /// <c>AGG(DISTINCT x)</c>: (keys, x) pairs are made distinct by grouping on both, the
+    /// aggregate runs per key over those, and the result is joined onto the other aggregates by
+    /// the group keys. Every group of the main aggregation has at least one pair (x may be
+    /// missing, which COUNT and SUM skip), so an inner join loses nothing; missing keys match each
+    /// other in GraviFrame joins, as they group together.
+    /// </summary>
+    private DaskFrame JoinDistinct(DaskFrame grouped, DaskFrame source, List<string> keys, string column, Aggregation[] aggs)
+    {
+        var pairs = keys.Append(column).Distinct().ToArray();
+        var size = $"__size{_hidden++}";
+        var unique = source.Select(pairs).GroupBy(pairs).Size(size).Drop(size);
+        if (keys.Count > 0)
+        {
+            var result = grouped.Merge(unique.GroupBy(keys.ToArray()).Agg(aggs), keys.ToArray(), keys.ToArray(), JoinKind.Inner, "__dup");
+            var duplicates = result.Columns.Where(c => c.EndsWith("__dup", StringComparison.Ordinal)).ToArray();
+            return duplicates.Length > 0 ? result.Drop(duplicates) : result;
+        }
+        // No GROUP BY: both sides are one row; join them on a constant.
+        var all = $"__all{_hidden++}";
+        var one = Expr.Lit(1.0).As(all);
+        return grouped.WithColumns(one).Merge(unique.Aggregate(aggs).WithColumns(one), [all], [all]).Drop(all);
+    }
+
     private string AggregateKey(Call call, SqlScope scope)
-        => $"{call.Name}({(call.Star ? "*" : Plain(call.Args[0], scope).ToString())})"
+        => $"{call.Name}({(call.Distinct ? "DISTINCT " : "")}{(call.Star ? "*" : Plain(call.Args[0], scope).ToString())})"
            .Replace("STDDEV_SAMP", "STDDEV").Replace("VAR_SAMP", "VARIANCE");
 
     private static bool ContainsAggregate(SqlNode n)
@@ -379,6 +560,7 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
         LikeOp l => [l.Value, l.Pattern],
         IsNullOp i => [i.Value],
         CastOp c => [c.Value],
+        WindowCall w => [.. w.Function.Args, .. w.PartitionBy, .. w.OrderBy.Select(o => o.Expr)],
         _ => [],
     };
 
@@ -466,6 +648,8 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
                 return Function(call, sub);
             case StarRef star:
                 throw new SqlException("* is only allowed in the select list or COUNT(*)", star.Position);
+            case WindowCall w:
+                throw new SqlException("Window functions are only allowed in the select list and ORDER BY", w.Position);
             default:
                 throw new SqlException($"Unsupported expression {n.GetType().Name}", n.Position);
         }

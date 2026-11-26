@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Gravicode.Science.DaskNet.Distributed;
 
@@ -23,6 +24,24 @@ public sealed record WorkerOptions
 
     /// <summary>A name for logs and statistics; defaults to the address.</summary>
     public string? Name { get; init; }
+
+    /// <summary>Encrypts connections from clients and to peers; null for plain TCP.</summary>
+    public TlsOptions? Tls { get; init; }
+
+    /// <summary>
+    /// Bytes of results to keep in memory (estimated, see <see cref="SizeOf"/>); null keeps
+    /// everything in memory. Past <see cref="MemoryTarget"/> of it, the least recently used
+    /// results are spilled to <see cref="SpillDirectory"/> and read back when a task or a peer
+    /// needs them.
+    /// </summary>
+    public long? MemoryLimit { get; init; }
+
+    /// <summary>The fraction of <see cref="MemoryLimit"/> the worker spills down to (Dask's 0.6).</summary>
+    public double MemoryTarget { get; init; } = 0.6;
+
+    /// <summary>Where spilled results go; a fresh folder under the system temp folder by default.
+    /// The worker deletes what it wrote when it stops.</summary>
+    public string? SpillDirectory { get; init; }
 }
 
 /// <summary>
@@ -45,7 +64,7 @@ public sealed class Worker : IAsyncDisposable
 {
     private readonly WorkerOptions _options;
     private readonly TcpListener _listener;
-    private readonly ConcurrentDictionary<TaskKey, object?> _data = new();
+    private readonly WorkerStore _data;
     private readonly ConcurrentDictionary<string, Lazy<Task<RpcClient>>> _peers = new(StringComparer.Ordinal);
     private readonly ConcurrentBag<WireConnection> _connections = [];
     private readonly SemaphoreSlim _slots;
@@ -59,6 +78,7 @@ public sealed class Worker : IAsyncDisposable
         _slots = new SemaphoreSlim(options.Threads, options.Threads);
         Address = WireConnection.FormatAddress((IPEndPoint)listener.LocalEndpoint);
         Name = options.Name ?? Address;
+        _data = new WorkerStore(options.MemoryLimit, options.MemoryTarget, options.SpillDirectory, Name);
     }
 
     /// <summary>Where clients connect: <c>host:port</c>.</summary>
@@ -70,8 +90,11 @@ public sealed class Worker : IAsyncDisposable
     /// <summary>Tasks run so far.</summary>
     public long TasksRun => Interlocked.Read(ref _tasksRun);
 
-    /// <summary>Results held now.</summary>
+    /// <summary>Results held now, in memory or spilled.</summary>
     public int StoredKeys => _data.Count;
+
+    /// <summary>Memory use and spilling so far.</summary>
+    public StoreStatistics Memory => _data.Statistics();
 
     /// <summary>Starts listening.</summary>
     public static Task<Worker> StartAsync(WorkerOptions options)
@@ -80,6 +103,10 @@ public sealed class Worker : IAsyncDisposable
         if (string.IsNullOrEmpty(options.Token) || options.Token.Length < 16)
             throw new ArgumentException("A worker needs a token of at least 16 characters.", nameof(options));
         if (options.Threads <= 0) throw new ArgumentOutOfRangeException(nameof(options), "Threads must be positive.");
+        if (options.Tls is { Certificate: null })
+            throw new ArgumentException("A TLS worker needs TlsOptions.Certificate (with its private key).", nameof(options));
+        if (options.MemoryLimit is <= 0) throw new ArgumentOutOfRangeException(nameof(options), "MemoryLimit must be positive.");
+        if (options.MemoryTarget is <= 0 or > 1) throw new ArgumentOutOfRangeException(nameof(options), "MemoryTarget must be in (0, 1].");
 
         var address = options.Host is "localhost" ? IPAddress.Loopback
             : options.Host is "*" or "0.0.0.0" ? IPAddress.Any : IPAddress.Parse(options.Host);
@@ -103,7 +130,7 @@ public sealed class Worker : IAsyncDisposable
 
     private async Task ServeAsync(TcpClient client)
     {
-        var connection = await WireConnection.AcceptAsync(client, _options.Token, _stop.Token).ConfigureAwait(false);
+        var connection = await WireConnection.AcceptAsync(client, _options.Token, _options.Tls, _stop.Token).ConfigureAwait(false);
         if (connection is null) return;
         _connections.Add(connection);
         try
@@ -123,7 +150,7 @@ public sealed class Worker : IAsyncDisposable
                     {
                         using var r = message.Reader();
                         var count = r.ReadInt32();
-                        for (var i = 0; i < count; i++) _data.TryRemove(WireCodec.ReadKey(r), out _);
+                        for (var i = 0; i < count; i++) _data.Remove(WireCodec.ReadKey(r));
                         await connection.SendAsync(MessageKind.Ok, message.Id).ConfigureAwait(false);
                         break;
                     }
@@ -135,6 +162,10 @@ public sealed class Worker : IAsyncDisposable
                             w.Write(_data.Count);
                             w.Write(TasksRun);
                             w.Write(Environment.ProcessId);
+                            var memory = _data.Statistics();
+                            w.Write(memory.MemoryBytes);
+                            w.Write(memory.SpilledKeys);
+                            w.Write(memory.SpilledBytes);
                         }).ConfigureAwait(false);
                         break;
                 }
@@ -148,9 +179,8 @@ public sealed class Worker : IAsyncDisposable
     {
         using var r = message.Reader();
         var key = WireCodec.ReadKey(r);
-        if (_data.TryGetValue(key, out var value))
+        if (_data.TryGetSerialized(key, out var bytes))
         {
-            var bytes = WireCodec.Serialize(value);
             await connection.SendAsync(MessageKind.Data, message.Id, w => { w.Write(bytes.Length); w.Write(bytes); }).ConfigureAwait(false);
         }
         else
@@ -192,11 +222,11 @@ public sealed class Worker : IAsyncDisposable
             var fetched = new List<TaskKey>();
             foreach (var (dep, holder) in deps)
             {
-                if (_data.TryGetValue(dep, out var local)) { inputs[dep] = local; continue; }
+                if (_data.TryGet(dep, out var local)) { inputs[dep] = local; continue; }
                 try
                 {
                     var value = await FetchAsync(dep, holder).ConfigureAwait(false);
-                    _data[dep] = value;
+                    _data.Set(dep, value);
                     inputs[dep] = value;
                     fetched.Add(dep);
                 }
@@ -221,7 +251,7 @@ public sealed class Worker : IAsyncDisposable
                     return;
                 }
             }
-            _data[key] = result;
+            _data.Set(key, result);
             Interlocked.Increment(ref _tasksRun);
             var elapsed = clock.Elapsed.TotalMilliseconds;
             await connection.SendAsync(MessageKind.Done, message.Id, w =>
@@ -240,7 +270,7 @@ public sealed class Worker : IAsyncDisposable
     {
         if (string.IsNullOrEmpty(holder) || holder == Address)
             throw new KeyNotFoundException($"{Name} was told it holds {key}, and does not.");
-        var peer = await _peers.GetOrAdd(holder, a => new Lazy<Task<RpcClient>>(() => RpcClient.ConnectAsync(a, _options.Token))).Value
+        var peer = await _peers.GetOrAdd(holder, a => new Lazy<Task<RpcClient>>(() => RpcClient.ConnectAsync(a, _options.Token, _options.Tls))).Value
             .ConfigureAwait(false);
         if (peer.IsClosed)
         {
@@ -271,7 +301,7 @@ public sealed class Worker : IAsyncDisposable
         _stop.Cancel();
         _listener.Stop();
         foreach (var c in _connections) c.Abort();
-        _data.Clear();
+        _data.Dispose();
     }
 
     /// <summary>Stops listening and closes every connection.</summary>
@@ -282,22 +312,35 @@ public sealed class Worker : IAsyncDisposable
         foreach (var c in _connections) await c.DisposeAsync().ConfigureAwait(false);
         foreach (var p in _peers.Values)
             if (p.IsValueCreated && p.Value.IsCompletedSuccessfully) await p.Value.Result.DisposeAsync().ConfigureAwait(false);
-        _data.Clear();
+        _data.Dispose();
     }
 
     /// <summary>
     /// Runs a worker from command-line arguments until the process is stopped or standard input
-    /// closes: <c>--host</c>, <c>--port</c>, <c>--threads</c>, <c>--name</c> and any number of
-    /// <c>--preload path.dll</c>. The token comes from the <c>DASKNET_TOKEN</c> environment
-    /// variable, not the command line, where other users could read it from the process list.
+    /// closes: <c>--host</c>, <c>--port</c>, <c>--threads</c>, <c>--name</c>, any number of
+    /// <c>--preload path.dll</c>, and <c>--tls-pfx cluster.pfx</c> for TLS (that certificate is
+    /// presented, trusted and required of callers; <c>--tls-trust other.cer</c> pins more). The
+    /// token comes from the <c>DASKNET_TOKEN</c> environment variable and the PFX password from
+    /// <c>DASKNET_TLS_PASSWORD</c>, not the command line, where other users could read them from
+    /// the process list.
+    /// <c>DASKNET_HOST</c> and <c>DASKNET_PORT</c> supply the host and port when the flags are absent.
+    /// <c>--memory-limit 4GB</c> (B, KB, MB, GB; powers of 1024) and <c>--spill-dir path</c> set
+    /// <see cref="WorkerOptions.MemoryLimit"/> and <see cref="WorkerOptions.SpillDirectory"/>.
     /// Prints <c>DASKNET_WORKER_LISTENING host:port</c> once ready.
     /// </summary>
     public static async Task<int> RunCommandLineAsync(string[] args, TextWriter? output = null)
     {
         output ??= Console.Out;
-        string host = "127.0.0.1", name = "";
-        int port = 0, threads = Environment.ProcessorCount;
+        // DASKNET_HOST/DASKNET_PORT let an orchestrator (an Aspire AppHost's WithEndpoint(env: ...),
+        // a Kubernetes pod spec) set them without templating the command line; flags win.
+        string host = Environment.GetEnvironmentVariable("DASKNET_HOST") is { Length: > 0 } h ? h : "127.0.0.1", name = "";
+        int port = int.TryParse(Environment.GetEnvironmentVariable("DASKNET_PORT"), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var envPort) ? envPort : 0,
+            threads = Environment.ProcessorCount;
         var preload = new List<string>();
+        string? pfx = null, spillDirectory = null;
+        long? memoryLimit = null;
+        var trust = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value.");
@@ -308,6 +351,10 @@ public sealed class Worker : IAsyncDisposable
                 case "--threads": threads = int.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--name": name = Next(); break;
                 case "--preload": preload.Add(Next()); break;
+                case "--tls-pfx": pfx = Next(); break;
+                case "--tls-trust": trust.Add(Next()); break;
+                case "--memory-limit": memoryLimit = ParseBytes(Next()); break;
+                case "--spill-dir": spillDirectory = Next(); break;
                 default: throw new ArgumentException($"Unknown option {args[i]}.");
             }
         }
@@ -319,10 +366,24 @@ public sealed class Worker : IAsyncDisposable
             return 2;
         }
 
+        TlsOptions? tls = null;
+        if (pfx is not null)
+        {
+            tls = TlsOptions.FromPfx(pfx, Environment.GetEnvironmentVariable("DASKNET_TLS_PASSWORD"));
+            if (trust.Count > 0)
+                tls = tls with { TrustedCertificates = [.. tls.TrustedCertificates, .. trust.Select(X509CertificateLoader.LoadCertificateFromFile)] };
+        }
+        else if (trust.Count > 0)
+        {
+            await output.WriteLineAsync("--tls-trust needs --tls-pfx.").ConfigureAwait(false);
+            return 2;
+        }
+
         Preload(preload);
         await using var worker = await StartAsync(new WorkerOptions
         {
-            Host = host, Port = port, Threads = threads, Token = token, Name = name.Length > 0 ? name : null,
+            Host = host, Port = port, Threads = threads, Token = token, Name = name.Length > 0 ? name : null, Tls = tls,
+            MemoryLimit = memoryLimit, SpillDirectory = spillDirectory,
         }).ConfigureAwait(false);
         await output.WriteLineAsync($"DASKNET_WORKER_LISTENING {worker.Address}").ConfigureAwait(false);
         await output.FlushAsync().ConfigureAwait(false);
@@ -334,6 +395,17 @@ public sealed class Worker : IAsyncDisposable
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancel.TrySetResult(); };
         await Task.WhenAny(stdinClosed, cancel.Task).ConfigureAwait(false);
         return 0;
+    }
+
+    /// <summary>Parses <c>512MB</c>, <c>4GB</c>, <c>1.5 GiB</c> or a plain byte count.</summary>
+    public static long ParseBytes(string text)
+    {
+        var t = text.Trim().ToUpperInvariant().Replace("IB", "B", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal);
+        (string Suffix, long Scale)[] units = [("TB", 1L << 40), ("GB", 1L << 30), ("MB", 1L << 20), ("KB", 1L << 10), ("B", 1)];
+        foreach (var (suffix, scale) in units)
+            if (t.EndsWith(suffix, StringComparison.Ordinal))
+                return checked((long)(double.Parse(t[..^suffix.Length], System.Globalization.CultureInfo.InvariantCulture) * scale));
+        return long.Parse(t, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>Loads assemblies so their <see cref="RemoteTaskAttribute"/> methods can be called,

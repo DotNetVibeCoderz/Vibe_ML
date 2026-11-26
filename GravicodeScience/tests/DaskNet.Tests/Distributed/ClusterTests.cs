@@ -89,7 +89,7 @@ public sealed class ClusterTests
         ]);
         var df = DaskFrame.FromFrame(sales, 6)
             .Filter(Col("price") > 20)
-            .Join(DaskFrame.FromFrame(products, 2), "product")
+            .Join(DaskFrame.FromFrame(products, 2), "product", broadcast: false)   // a real shuffle across workers
             .WithColumn("load", Col("weight") * Col("qty"))
             .GroupBy("region").Agg(("load", "sum"), ("price", "mean"));
 
@@ -151,7 +151,7 @@ public sealed class ClusterTests
     public async Task A_lost_worker_is_recovered_by_recomputation()
     {
         await using var cluster = await LocalCluster.StartAsync(workers: 3, threadsPerWorker: 2);
-        var (total, events) = await RunAndKill(cluster, victim: "worker-0", kill: () => cluster.KillWorker(0));
+        var (total, events) = await RunAndKill(cluster, victim: "worker-0", kill: () => cluster.KillWorker(0), gateMilliseconds: 30_000);
         Assert.Equal(Enumerable.Range(0, 12).Sum(), total);
         Assert.Equal(2, cluster.Client.Workers.Count);
         Assert.Contains(events, e => e.Kind == TaskEventKind.Recomputing);
@@ -159,11 +159,14 @@ public sealed class ClusterTests
 
     /// <summary>
     /// Kills <paramref name="victim"/> the moment one of its leaf results exists. Every leaf is
-    /// consumed together with a slow "gate" task, so no leaf result can have been released yet:
+    /// consumed together with a "gate" task, so no leaf result can have been released yet:
     /// recovery has to recompute it, whatever the machine's load. (A wall-clock kill passed
-    /// alone and failed under the full suite, when no leaf had finished in time.)
+    /// alone and failed under the full suite, when no leaf had finished in time.) The gate opens
+    /// only after the kill on in-process workers; a fixed 600 ms gate once closed before a
+    /// starved thread pool ran the kill, leaving nothing to recompute. Child processes cannot
+    /// see the event and wait <paramref name="gateMilliseconds"/>.
     /// </summary>
-    internal static async Task<(double Total, List<TaskEvent> Events)> RunAndKill(LocalCluster cluster, string victim, Action kill)
+    internal static async Task<(double Total, List<TaskEvent> Events)> RunAndKill(LocalCluster cluster, string victim, Action kill, int gateMilliseconds)
     {
         var events = new List<TaskEvent>();
         var leafDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -174,7 +177,8 @@ public sealed class ClusterTests
                 leafDone.TrySetResult();
         };
 
-        var gate = Dask.Delayed(RemoteFunctions.Slow, Dask.Value(0.0), Dask.Value(600), name: "gate");
+        var gateId = Guid.NewGuid().ToString("N");
+        var gate = Dask.Delayed(RemoteFunctions.Gate, Dask.Value(0.0), Dask.Value(gateId), Dask.Value(gateMilliseconds), name: "gate");
         var leaves = Enumerable.Range(0, 12)
             .Select(i => Dask.Delayed(RemoteFunctions.Add, Dask.Delayed(RemoteFunctions.Slow, Dask.Value((double)i), Dask.Value(30)), gate))
             .ToList();
@@ -185,6 +189,7 @@ public sealed class ClusterTests
         var first = await Task.WhenAny(leafDone.Task, run, Task.Delay(TimeSpan.FromSeconds(30)));
         Assert.True(first == leafDone.Task, "the victim never finished a leaf before the run ended");
         kill();
+        RemoteFunctions.Release(gateId);
         var total = await run;
         lock (events) return (total, events.ToList());
     }
@@ -216,7 +221,7 @@ public sealed class ProcessClusterTests
     {
         await using var cluster = await LocalCluster.StartProcessesAsync(Host, workers: 3, threadsPerWorker: 2,
             preload: [typeof(RemoteFunctions).Assembly.Location]);
-        var (total, events) = await ClusterTests.RunAndKill(cluster, victim: "process-1", kill: () => cluster.KillWorker(1));
+        var (total, events) = await ClusterTests.RunAndKill(cluster, victim: "process-1", kill: () => cluster.KillWorker(1), gateMilliseconds: 1_500);
         Assert.Equal(Enumerable.Range(0, 12).Sum(), total);
         Assert.Contains(events, e => e.Kind == TaskEventKind.Recomputing);
     }

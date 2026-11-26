@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 v0.1.0 is implemented and complete against `requirements.md`, a seventh library, **SciNet**
 (SciPy for .NET), has been added beside the original six, and an eighth, **Dask.Net** (Dask +
-dask-sql, `src/DaskNet`, 115 tests), against `Dask.Net-Features.md`. The solution has 38 projects and
-**4,243 tests passing** (2,983 of them SciNet's, 115 Dask.Net's, 47 ScienceAppGen's), eight samples
+dask-sql, `src/DaskNet`, 184 tests), against `Dask.Net-Features.md`. The solution has 38 projects and
+**4,312 tests passing** (2,983 of them SciNet's, 184 Dask.Net's, 47 ScienceAppGen's), eight samples
 that run end to end, eight notebooks, eight benchmark suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -435,12 +435,62 @@ and GraviFrame only. The worker host is `tools/DaskNet.Worker`; the test project
   victim on its first finished leaf, and every leaf is consumed together with a slow "gate" task
   so the result cannot have been released yet. Wall-clock kills passed alone and failed in the
   full suite under load, when the victim had finished nothing - assert `Recomputing`, or a
-  "recovery" test can pass without recovering anything.
+  "recovery" test can pass without recovering anything. The gate is an event the test opens
+  after the kill (a fixed 600 ms gate closed first when a starved pool delayed the kill), and
+  opening it promptly exposed that losses were reported only by `OnWorkerLost`: a handle is dead
+  the moment its connection drops, a `Dispatch` that ran before the queued loss event replanned
+  the dead holders away, and the work was recomputed with no `Recomputing` event. `Replan` reports.
 - **Notebook cells cannot declare `[RemoteTask]` classes** (the cell checker concatenates cells as
   top-level statements, and submission types are not resolvable by workers). Use library kernels
   on clusters in notebooks.
 - **Per-task overhead is ~5-9 us**; partitioning a frame that fits in memory is slower than one
   GraviFrame call. Don't quote Dask.Net as a speed-up for in-memory data.
+- **TLS runs before the token handshake, and `SelfSigned` re-imports through PKCS#12.** Windows'
+  SChannel cannot use `CreateSelfSigned`'s ephemeral key ("Key not valid for use in specified
+  state"); the re-import is `Exportable` because `LocalCluster` writes it to a temp `.pfx` for
+  child workers. Mismatched settings must fail with a reason, not hang: the handshake has a 10 s
+  timeout, and an mTLS rejection that surfaces as an `IOException` on the hello read is rethrown
+  as `AuthenticationException`. `TlsTests` checks encryption on the wire with a recording relay.
+- **A scan pruned to zero columns has zero rows.** `COUNT(*)` alone, or `SELECT 1 FROM t`, names
+  no column, and projection pushdown used to drop them all, so the count was 0. The scan now keeps
+  one column. Any new node that can need no input columns relies on this.
+- **Filters never move below a `WindowNode`** (it falls into `PushOne`'s default). `rn <= 3`
+  above `ROW_NUMBER` must see every row's number. Windows shuffle by the partition keys and
+  gather into one task without them - a window over a whole large frame is a single task.
+- **`AGG(DISTINCT x)` is a second aggregation joined back on the group keys**, which relies on
+  missing keys matching each other in GraviFrame joins (they group together, so they must join
+  together). Every group has at least one (keys, x) pair even when x is all missing, so the inner
+  join cannot drop a group.
+- **Worker memory limits count estimated result sizes, not the working set.** `SizeOf` is 8 bytes
+  a number and UTF-16 for text; a Bag partition is sampled (first 1000 items) and scaled. Spilled
+  results are their wire encoding, so peers are sent file bytes undecoded; a value the codec cannot
+  encode is marked unspillable and stays in memory. A result bigger than the target alone is read
+  through rather than unspilled, or it would evict everything else and be spilled straight back.
+  `Persist(client)` gathers blocks to the client - it does not pin data on workers.
+- **Small joins broadcast by estimated size now, so tests must pin the shuffle path.** With the
+  16 MB `Dask.BroadcastJoinBytes` default, every test-sized inner/left join broadcasts; tests meant
+  to exercise the hash shuffle pass `broadcast: false` (the join theory runs all three settings).
+  Never flip the global in a test - other classes read it in parallel; call
+  `CostModel.ChooseJoins(plan, threshold)` instead. Estimates err large where output is unbounded
+  (grouped aggregates, joins), because an underestimate broadcasts something big.
+- **A turned-around join is projected back by tracing each column to (side, source column).**
+  Suffixes move to the other side when the join is swapped, and a shared single key is kept from
+  the left only - so the original left key maps to the swapped *left* (originally right) key,
+  which is the same value in an inner join. Only inner joins are swapped: GraviFrame's right/outer
+  joins coalesce the key into text, so a swapped right join would change a column's type.
+- **Workers join a live `Client` through discovery; its worker list is copy-on-write.** A run
+  reads the array while `JoinAsync` replaces it, lost handles stay in it (runs hold references), and
+  `WatchNewWorkers` hooks the loss of workers that arrive mid-run. Unreachable discovered addresses
+  are skipped, but a wrong token or a TLS failure is rethrown - those are configuration errors.
+- **Connectors pin types once and convert every partition.** `ReadJson` infers from a sample of
+  the first file; `ReadSql` probes the schema (`WHERE 1 = 0` for tables, the first query for the
+  query overload). SQLite types an undeclared column by its values, so an all-NULL range reads back
+  as text - `Sql_partitions_are_pinned_to_one_schema` reproduces it and fails without `Typed.Pin`.
+  The SQL test with declared types passed with pinning removed, which is why that test exists.
+- **`ReadSql` ranges: first open below, last open above plus NULLs.** Even-split interior edges
+  only; otherwise rows outside caller-given bounds, or with a NULL index, are silently skipped.
+  Workers resolve the provider by type name and its static `Instance`, so a cluster needs the
+  provider assembly preloaded; the connection string crosses the wire with every task.
 - **The icon is neon 640 nm**; `make_icons.py DaskNet` renders only it, and SciNet's strip keeps
   its original six lines so published icons do not change.
 

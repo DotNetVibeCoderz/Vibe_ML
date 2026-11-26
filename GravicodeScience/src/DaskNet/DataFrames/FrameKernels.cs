@@ -12,7 +12,7 @@ namespace Gravicode.Science.DaskNet;
 /// <remarks>Operation lists and aggregation specs arrive as bytes (see <see cref="FrameOp"/>):
 /// that is the one form every transport carries unchanged.</remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static class FrameKernels
+public static partial class FrameKernels
 {
     // ------------------------------------------------------------------ sources
 

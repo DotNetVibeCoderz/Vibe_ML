@@ -23,7 +23,7 @@ namespace Gravicode.Science.DaskNet;
 /// the price of being opaque to both.
 /// </para>
 /// </remarks>
-public sealed class DaskFrame
+public sealed partial class DaskFrame
 {
     internal DaskFrame(PlanNode plan) => Plan = plan;
 
@@ -201,6 +201,30 @@ public sealed class DaskFrame
 
     // ------------------------------------------------------------------ reshaping
 
+    /// <summary>
+    /// Adds window-function columns (SQL's <c>OVER (PARTITION BY ... ORDER BY ...)</c>): ranks,
+    /// lag/lead, and running or per-partition aggregates. Every row is kept. Rows are
+    /// hash-shuffled by <paramref name="partitionBy"/> so each window partition is computed whole
+    /// in one task; with no partition keys the frame is gathered into one task.
+    /// </summary>
+    public DaskFrame Window(string[] partitionBy, IReadOnlyList<(string Column, bool Ascending)> orderBy, params WindowFunction[] functions)
+    {
+        ArgumentNullException.ThrowIfNull(partitionBy);
+        ArgumentNullException.ThrowIfNull(orderBy);
+        if (functions.Length == 0) throw new ArgumentException("Give at least one window function.", nameof(functions));
+        foreach (var k in partitionBy) CheckColumn(k);
+        foreach (var (c, _) in orderBy) CheckColumn(c);
+        foreach (var f in functions)
+        {
+            f.Validate();
+            if (f.Column is not null) CheckColumn(f.Column);
+            if (WindowFunction.Ranking.Contains(f.How) && orderBy.Count == 0)
+                throw new ArgumentException($"Window function '{f.How}' needs an order.");
+            if (Columns.Contains(f.Output)) throw new ArgumentException($"Column '{f.Output}' already exists.");
+        }
+        return new DaskFrame(new WindowNode(Plan, new WindowSpec(partitionBy.ToArray(), orderBy.ToArray(), functions.ToArray())));
+    }
+
     /// <summary>Groups rows by key columns; aggregate the result to get a frame.</summary>
     public DaskGroupBy GroupBy(params string[] keys)
     {
@@ -217,20 +241,40 @@ public sealed class DaskFrame
     }
 
     /// <summary>Joins on a column both sides share.</summary>
-    public DaskFrame Join(DaskFrame other, string on, JoinKind kind = JoinKind.Inner, string suffix = "_right", int? partitions = null)
-        => Merge(other, [on], [on], kind, suffix, partitions);
+    public DaskFrame Join(DaskFrame other, string on, JoinKind kind = JoinKind.Inner, string suffix = "_right", int? partitions = null,
+        bool? broadcast = null)
+        => Merge(other, [on], [on], kind, suffix, partitions, broadcast);
 
     /// <summary>
-    /// Joins on key columns. A right side of one partition is broadcast to every left partition
-    /// (inner and left joins); otherwise both sides are hash-shuffled so matching keys meet.
+    /// Joins on key columns. Inner and left joins <b>broadcast</b> the right side - gather it into
+    /// one partition that every left partition reads - when it has one partition already, or when
+    /// it is estimated at or below <see cref="Dask.BroadcastJoinBytes"/>; an inner join whose left
+    /// side is the small one is turned around. Otherwise both sides are hash-shuffled so matching
+    /// keys meet.
     /// </summary>
+    /// <param name="other">The right side.</param>
+    /// <param name="leftOn">Key columns of this frame.</param>
+    /// <param name="rightOn">Key columns of <paramref name="other"/>, matched by position.</param>
+    /// <param name="kind">Inner, left, right or outer.</param>
+    /// <param name="suffix">Added to right columns whose names the left side also has.</param>
+    /// <param name="partitions">Shuffle into this many partitions (and never broadcast).</param>
+    /// <param name="broadcast">true to broadcast the right side whatever its size (inner and left
+    /// joins only), false to always shuffle, null to decide by size (Dask's <c>broadcast=</c>).</param>
     public DaskFrame Merge(DaskFrame other, string[] leftOn, string[] rightOn, JoinKind kind = JoinKind.Inner,
-        string suffix = "_right", int? partitions = null)
+        string suffix = "_right", int? partitions = null, bool? broadcast = null)
     {
         if (leftOn.Length == 0 || leftOn.Length != rightOn.Length) throw new ArgumentException("Give matching key lists.");
         foreach (var k in leftOn) CheckColumn(k);
         foreach (var k in rightOn) other.CheckColumn(k);
-        return new DaskFrame(new JoinNode(Plan, other.Plan, leftOn, rightOn, kind, suffix, partitions));
+        var right = other.Plan;
+        if (broadcast == true)
+        {
+            if (kind is not (JoinKind.Inner or JoinKind.Left))
+                throw new ArgumentException("Only inner and left joins can broadcast the right side; the others must see every right row.", nameof(broadcast));
+            if (partitions is not null) throw new ArgumentException("A broadcast join keeps the left partitioning; do not give partitions.", nameof(partitions));
+            if (right.Partitions > 1) right = new RepartitionNode(right, 1);
+        }
+        return new DaskFrame(new JoinNode(Plan, right, leftOn, rightOn, kind, suffix, partitions, broadcast));
     }
 
     /// <summary>

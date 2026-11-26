@@ -119,8 +119,10 @@ x.Rechunk([5_000, 5_000]);         // ubah ukuran chunk
 x.MapBlocks(b => b * 2);           // fungsi NdArray apa pun, per blok (hanya scheduler lokal)
 ```
 
-Operasi element-wise membutuhkan bentuk yang sama (belum ada broadcasting); array dengan chunking
-berbeda di-rechunk ke kisi bersama lebih dulu. `Random` memberi seed tiap blok dari `(seed,
+Operasi element-wise melakukan **broadcasting** dengan aturan NumPy, sehingga `x - x.Mean(axis: 0)`
+memusatkan kolom dan `x / x.Sum(axis: 1).ExpandDims(1)` menormalkan baris. Operand yang
+direntangkan memakai satu chunk sepanjang sumbu itu dan setiap blok keluaran membacanya; selain
+itu array dengan chunking berbeda di-rechunk ke kisi bersama lebih dulu. `Random` memberi seed tiap blok dari `(seed,
 indeks blok)`, sehingga hasilnya tidak bergantung pada berapa thread yang menjalankannya. Setiap
 kernel array adalah `[RemoteTask]`, jadi graph array langsung bisa berjalan di cluster.
 
@@ -167,7 +169,7 @@ Bandingkan `Explain(optimized: false)` dengan `Explain()` untuk melihat apa yang
 | Operasi | Strategi |
 |---|---|
 | `GroupBy().Agg` | agregat parsial per partisi, digabung bertingkat (`DefaultSplitEvery`, default 8), lalu diselesaikan sekali. Mean/var/std membawa state (count, mean, M2). |
-| `Join` / `Merge` | **broadcast** bila sisi kanan satu partisi (inner dan left join); selain itu **hash shuffle** agar key yang cocok bertemu. Hash-nya FNV-1a atas key bertipe, karena `string.GetHashCode` berbeda antar proses. |
+| `Join` / `Merge` | **broadcast** (inner dan left join) bila sisi kanan satu partisi atau diperkirakan paling besar `Dask.BroadcastJoinBytes` (16 MB); inner join yang sisi *kiri*-nya kecil dibalik. Selain itu **hash shuffle** agar key yang cocok bertemu. `broadcast: true/false` menimpa pilihan itu, seperti `broadcast=` di Dask. Hash-nya FNV-1a atas key bertipe, karena `string.GetHashCode` berbeda antar proses. |
 | `SortBy` | range partitioning dengan batas yang diambil dari sampel data, sehingga menggabungkan partisi secara berurutan menghasilkan frame terurut. |
 | `Repartition`, `Limit`, `Concat` | menggabung/memecah partisi bertetangga; tanpa shuffle. |
 
@@ -185,6 +187,47 @@ crash tidak meninggalkan bagian yang setengah tertulis.
 frame yang membaca dari sana; partisi yang sudah ada tidak dihitung ulang, sehingga pipeline
 panjang yang dijalankan ulang setelah crash melanjutkan dari titik berhentinya. `Persist()`
 melakukan hal yang sama di memori.
+
+**Estimasi ukuran.** Strategi join diambil dari estimasi ukuran, yang ditampilkan `Explain()` di
+setiap join (`[est. left 1.2 MB, right 4 KB]`). Partisi di memori diukur, berkas dihitung dari
+panjangnya di disk, filter dianggap menyisakan separuh input dan proyeksi sebanding jumlah
+kolomnya. Bila keluaran tidak bisa dibatasi - agregat ber-group, join - estimasinya sengaja
+kebesaran, karena estimasi yang kekecilan adalah kesalahan yang mahal: data besar akan di-broadcast
+ke setiap partisi. Partisi dari `FromDelayed` atau `MapPartitions` tidak punya estimasi dan tidak
+pernah di-broadcast berdasarkan ukuran. Membalik join hanya mengubah urutan baris, yang memang
+tidak pernah dijanjikan join yang di-shuffle.
+
+### Konektor: JSON dan basis data
+
+```csharp
+// JSON Lines, dipecah menjadi blok byte seperti CSV; atau lines: false untuk berkas berisi satu array.
+var events = DaskFrame.ReadJson("logs/*.jsonl", blockSize: 32L << 20);
+events.ToJson("out/");                                    // satu .jsonl per partisi
+
+// Provider ADO.NET apa pun (SQL Server, PostgreSQL, SQLite, MySQL ...), dipecah menurut kolom numerik.
+var orders = DaskFrame.ReadSql(NpgsqlFactory.Instance, connectionString, "sales.orders", index: "id", partitions: 16);
+// ... atau satu partisi per query, untuk pemecahan yang tidak bisa dinyatakan dengan rentang.
+var byMonth = DaskFrame.ReadSql(SqliteFactory.Instance, cs, months.Select(m =>
+    new SqlPartition("SELECT * FROM orders WHERE month = @m", new Dictionary<string, object?> { ["m"] = m })).ToList());
+```
+
+**JSON.** Kolom dan tipenya ditetapkan dari sampel berkas pertama (`inferenceRows`), lalu setiap
+blok dibaca dengan skema itu, sehingga posisi awal blok tidak bisa mengubah tipe kolom. String
+angka di kolom numerik di-parse, nilai yang tidak cocok menjadi hilang, objek dan array bersarang
+disimpan sebagai teks JSON-nya, dan string menjadi tanggal hanya bila setiap sampelnya ISO-8601.
+Properti yang baru muncul setelah sampel diabaikan.
+
+**Basis data.** Dask.Net tidak bergantung pada driver apa pun: ia terikat ke `System.Data.Common`
+lewat `SqlReader` milik GraviFrame, dan worker membuat koneksinya sendiri dari `DbProviderFactory`
+provider (dikirim lewat wire sebagai nama tipe, jadi worker cluster harus sudah memuat provider-nya
+- `--preload`). Pembacaan tabel membagi `[MIN, MAX]` kolom indeks secara merata; rentang pertama
+terbuka ke bawah dan yang terakhir terbuka ke atas serta mengambil baris berindeks NULL, sehingga
+setiap baris terbaca tepat sekali walau batas yang diberikan terlalu sempit. Hanya kolom yang
+dibutuhkan query yang di-SELECT - projection pushdown sampai ke SQL. Tipe di-pin dari probe skema
+sehingga rentang yang kosong atau seluruhnya NULL tidak kembali dengan tipe berbeda (sebuah tes
+mereproduksi persis hal itu dengan kolom SQLite tanpa tipe). Nama tabel dan kolom ditulis ke dalam
+SQL dan harus berupa identifier biasa; nilai selalu lewat parameter. Connection string ikut
+terkirim bersama setiap task - gunakan TLS di cluster.
 
 ## SQL (`dask-sql`)
 
@@ -227,9 +270,24 @@ bila hanya satu tabel yang memilikinya. Dengan `SELECT *`, nama yang bentrok kel
 kualifikasi (`s.product`, `p.product`); baris left join yang tidak cocok memiliki key sisi kanan
 yang **hilang**, sesuai SQL, bukan disalin dari sisi kiri.
 
+`UNION [ALL]` didukung: cabang dicocokkan menurut posisi dan digabung dari kiri ke kanan;
+`ORDER BY`/`LIMIT` setelah cabang terakhir berlaku untuk seluruh union. Setiap agregat juga bisa
+ditulis `AGG(DISTINCT x)`; `COUNT(DISTINCT x)` dihitung sebagai pasangan (key, x) yang unik,
+diagregasi per key lalu di-join kembali ke agregat lain, jadi biayanya satu agregasi dan satu
+join tambahan.
+
+**Window function**: `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `LAG`/`LEAD` (dengan offset) dan
+`COUNT`/`SUM`/`AVG`/`MIN`/`MAX` `OVER ([PARTITION BY ...] [ORDER BY ...])`, juga di atas query
+yang di-group (`RANK() OVER (ORDER BY SUM(qty) DESC)`, `SUM(SUM(qty)) OVER ()`). Baris di-shuffle
+dengan hash menurut key partisi sehingga setiap partisi window dihitung utuh dalam satu task (tanpa
+`PARTITION BY` semuanya dikumpulkan ke satu task). Agregat dengan `ORDER BY` adalah nilai berjalan
+yang menyertakan baris yang seri dengan baris saat ini - frame bawaan SQL, satu-satunya yang
+didukung. Operasi yang sama tersedia sebagai `DaskFrame.Window(partitionBy, orderBy, new
+WindowFunction("rn", "row_number"))`.
+
 Ditolak dengan `SqlException` yang menyebut posisinya, alih-alih diaproksimasi: `OFFSET`,
-`UNION`, `CROSS JOIN`, `COUNT(DISTINCT ...)`, subquery di luar `FROM`, window function, CTE, dan
-join tanpa kesamaan antar sisi.
+`CROSS JOIN`, subquery di luar `FROM`, frame window eksplisit (`ROWS`/`RANGE BETWEEN`), nilai
+bawaan `LAG`/`LEAD`, CTE, dan join tanpa kesamaan antar sisi.
 
 ## Eksekusi terdistribusi (`dask.distributed`)
 
@@ -254,6 +312,74 @@ dotnet DaskNet.Worker.dll --host 0.0.0.0 --port 8786 --threads 8 --name node-1 -
 
 lalu sambungkan: `await Client.ConnectAsync(["node-1:8786", "node-2:8786"], token)`.
 
+**Penemuan worker.** Alih-alih alamat, berikan client sebuah `IWorkerDiscovery`. Client
+tersambung ke setiap worker yang menjawab, melewati yang tidak menjawab (pod yang masih
+menyala), dan dengan `refreshEvery` terus mencari: worker yang muncul belakangan ikut bergabung,
+di antara run maupun di tengah run, dan dipakai oleh keputusan penempatan berikutnya.
+`RefreshAsync()` menjalankan satu putaran secara manual.
+
+```csharp
+var discovery = WorkerDiscovery.Dns("dask-workers.analytics.svc.cluster.local", 8786);  // Kubernetes
+// WorkerDiscovery.Aspire("dask-worker-*", "tcp")        service discovery .NET Aspire
+// WorkerDiscovery.EnvironmentVariable("DASKNET_WORKERS") "host:port,host:port"
+// WorkerDiscovery.Static(...), .From(lookup), .Combine(a, b)
+await using var client = await Client.ConnectAsync(discovery, token, tls, refreshEvery: TimeSpan.FromSeconds(30));
+```
+
+Keduanya tidak memerlukan paket. Di Kubernetes, Service headless di-resolve menjadi satu record
+per pod yang siap, sehingga menambah replika Deployment itulah yang memperbesar cluster:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata: { name: dask-workers }
+spec:
+  clusterIP: None              # headless: the name resolves to every ready pod
+  selector: { app: dask-worker }
+  ports: [{ port: 8786 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: dask-worker }
+spec:
+  replicas: 4
+  selector: { matchLabels: { app: dask-worker } }
+  template:
+    metadata: { labels: { app: dask-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: registry.example/dasknet-worker:2.2.0   # dotnet publish tools/DaskNet.Worker
+          args: ["--threads", "4", "--memory-limit", "6GB", "--preload", "/app/MyTasks.dll"]
+          env:
+            - { name: DASKNET_HOST, value: "0.0.0.0" }
+            - { name: DASKNET_PORT, value: "8786" }
+            - { name: DASKNET_TOKEN, valueFrom: { secretKeyRef: { name: dask, key: token } } }
+          resources: { limits: { memory: 8Gi } }
+```
+
+Dengan .NET Aspire, AppHost menyuntikkan variabel `services__{nama}__{endpoint}__{i}` ke setiap
+resource yang mereferensikannya; `WorkerDiscovery.Aspire` membacanya. Host worker mengambil port
+dari `DASKNET_PORT` dan alamat bind dari `DASKNET_HOST` bila flag-nya tidak diberikan.
+`WithReplicas` akan menaruh replika di belakang satu alamat proxy yang terlihat seperti satu
+worker, jadi deklarasikan satu resource per worker dan cocokkan dengan wildcard:
+
+```csharp
+// AppHost: satu resource per worker, sehingga masing-masing punya alamat sendiri.
+var token = builder.AddParameter("dask-token", secret: true);
+var app = builder.AddProject<Projects.MyApp>("app").WithEnvironment("DASKNET_TOKEN", token);
+for (var i = 0; i < 3; i++)
+{
+    var worker = builder.AddProject<Projects.DaskNet_Worker>($"dask-worker-{i}")
+        .WithEndpoint(name: "tcp", scheme: "tcp", env: "DASKNET_PORT")
+        .WithEnvironment("DASKNET_TOKEN", token);
+    app.WithReference(worker.GetEndpoint("tcp"));
+}
+
+// MyApp
+var client = await Client.ConnectAsync(WorkerDiscovery.Aspire("dask-worker-*", "tcp"), token);
+```
+
 **Apa yang dikirim lewat jaringan.** Task adalah referensi method plus argumen. Hanya method
 `public static` bertanda `[RemoteTask]` yang bisa disebut — worker menolak yang lain, sehingga
 client tidak bisa menyuruhnya menjalankan `File.Delete`. Nilai memakai codec biner tertutup
@@ -266,6 +392,17 @@ banyak, dengan pemecah seri berupa jumlah task berjalan paling sedikit. Worker m
 yang kurang langsung dari sesama worker, bukan lewat client, dan client melepas hasil begitu
 tidak ada lagi yang membutuhkannya.
 
+**Batas memori dan spill.** `WorkerOptions.MemoryLimit` (CLI `--memory-limit 4GB`,
+`LocalCluster.StartAsync(memoryLimit: ...)`) membatasi hasil yang disimpan worker di memori.
+Melewati `MemoryTarget` dari batas itu (0,6, seperti Dask), hasil yang paling lama tidak dipakai
+ditulis ke `SpillDirectory` dalam encoding wire-nya dan dibaca kembali saat sebuah task
+membutuhkannya; peer yang meminta hasil yang sudah di-spill dikirimi byte berkasnya tanpa
+di-decode. Hasil yang sendirian lebih besar dari target dibaca langsung dan tetap di disk, alih-alih
+mengusir semua yang lain. Ukurannya adalah estimasi (8 byte per angka, UTF-16 untuk teks;
+`SizeOf.Estimate`), bukan working set proses, dan `GetWorkerInfoAsync` melaporkan memori, jumlah
+key dan byte yang di-spill per worker. Sebuah tes memusatkan array 8 MB di worker yang dibatasi
+1 MB dan memeriksa hasilnya identik bit demi bit.
+
 **Toleransi kegagalan.** Ketika sebuah worker hilang, client menandai setiap hasil yang
 dipegangnya sebagai hilang dan menyusun ulang rencana: task yang input-nya hilang dihitung ulang
 dari lineage graph, lalu run berlanjut di worker yang tersisa. Retry menangani task yang
@@ -273,8 +410,37 @@ melempar exception. Keduanya diuji dengan membunuh worker (in-process maupun seb
 sungguhan) di tengah run.
 
 **Keamanan.** Koneksi diawali tantangan HMAC-SHA256 atas token bersama, sehingga hanya pemegang
-token yang bisa mengirim task. Lalu lintasnya **tidak dienkripsi** — tempatkan cluster di
-jaringan tepercaya atau lewat tunnel; TLS ada di roadmap.
+token yang bisa mengirim task. Tanpa TLS lalu lintasnya berupa teks biasa: siapa pun di jalur
+jaringan bisa membaca argumen dan hasil task.
+
+**TLS.** Berikan `TlsOptions` yang sama ke setiap worker dan ke client; worker juga memakainya
+untuk transfer antar-worker. TLS dinegosiasikan lebih dulu dan handshake token berjalan di
+dalamnya.
+
+```csharp
+// Satu sertifikat self-signed untuk seluruh cluster, di-pin menurut hash, sertifikat client wajib.
+var tls = TlsOptions.SelfSigned();
+await using var worker = await Worker.StartAsync(new WorkerOptions { Token = token, Tls = tls });
+await using var client = await Client.ConnectAsync([worker.Address], token, tls);
+
+// Atau biarkan LocalCluster yang mengatur (proses anak menerima kunci lewat .pfx sementara,
+// yang dihapus saat dispose).
+await using var cluster = await LocalCluster.StartAsync(workers: 4, tls: true);
+```
+
+```bash
+export DASKNET_TLS_PASSWORD=...
+dotnet DaskNet.Worker.dll --port 8786 --tls-pfx cluster.pfx [--tls-trust client.cer]
+```
+
+Peer diterima bila hash SHA-256 sertifikatnya ada di `TrustedCertificates` (pinning), atau, bila
+tidak ada yang di-pin, bila pemeriksaan rantai dan nama host sistem operasi lolos.
+`FromCertificate`/`FromPfx`/`SelfSigned` mem-pin satu sertifikat itu dan mewajibkannya dari client
+(mutual TLS). Pengaturan yang tidak cocok langsung gagal dengan alasan: client biasa ke worker TLS
+mendapat `TimeoutException` yang menyebut TLS, client TLS ke worker biasa atau sertifikat yang tidak
+dipercaya mendapat `AuthenticationException`, dan token yang salah tetap
+`UnauthorizedAccessException`. Sebuah tes meneruskan lalu lintas lewat proxy perekam dan memeriksa
+bahwa penanda yang dikirim sebagai argumen task terbaca tanpa TLS dan tidak ada dengan TLS.
 
 ## Observabilitas
 
@@ -310,23 +476,23 @@ Dask.Net untuk data yang tidak muat, bukan demi kecepatan.
 |---|---|
 | DataFrame berpartisi dan lazy; optimasi query; predicate dan projection pushdown | **Selesai** |
 | CSV (dipecah per blok), Arrow IPC, berkas apa pun via `ReadFiles` (Parquet lewat GraviFrame.Parquet) | **Selesai** |
-| JSON, Excel, Delta Lake, Iceberg, Hudi | Roadmap (`ReadFiles` dengan reader sudah bisa hari ini) |
-| Mesin lazy: eksekusi tertunda, planner, pipeline fusion | **Selesai**; optimasi berbasis biaya masih roadmap (baru berbasis aturan) |
+| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines dan array, baca dan tulis) **selesai**; sisanya lewat `ReadFiles` dengan reader (Excel: `ExcelReader` milik GraviFrame); format tabel masih roadmap |
+| Mesin lazy: eksekusi tertunda, planner, pipeline fusion | **Selesai**; strategi join berbasis biaya (estimasi ukuran), rewrite lain berbasis aturan; pengurutan ulang join banyak arah masih roadmap |
 | DAG scheduler: visualisasi (DOT/Mermaid), cull/fuse, retry policy, pelacakan dependensi | **Selesai** |
-| Cluster lokal: multi-core, isolasi proses | **Selesai**; batas memori per worker masih roadmap |
+| Cluster lokal: multi-core, isolasi proses, batas memori per worker dengan spill ke disk | **Selesai** |
 | Cluster multi-node lewat TCP | **Selesai**; transport gRPC/QUIC/HTTP/3 masih roadmap |
-| Penemuan worker (Consul, Kubernetes, Service Fabric, Aspire) | Roadmap — alamat diberikan secara eksplisit |
+| Penemuan worker (Consul, Kubernetes, Service Fabric, Aspire) | **Selesai** untuk Kubernetes (DNS Service headless) dan Aspire, dengan refresh di latar belakang sehingga worker bisa bergabung ke client yang sedang berjalan; Consul/Service Fabric lewat `WorkerDiscovery.From` |
 | Parallel LINQ: map, reduce, fold, aggregate, shuffle, broadcast | **Selesai** (`Bag`) |
 | Koleksi terdistribusi (`DistributedList` dsb.) | Roadmap; `Bag`, `DaskArray` dan `Persist` menangani kasus yang dominan baca |
 | Arrow: zero-copy, lintas bahasa | Berkas Arrow IPC **selesai**; shared memory antar proses masih roadmap |
-| SQL: join, agregasi | **Selesai**; window function, CTE dan ANSI penuh masih roadmap |
+| SQL: join, agregasi, UNION, window function | **Selesai**; frame window eksplisit, CTE dan ANSI penuh masih roadmap |
 | GIS, ML, ETL/streaming, AI, basis data vektor | Roadmap (modul terpisah) |
 | Observabilitas: OpenTelemetry | **Selesai** (ActivitySource + Meter); Prometheus/Grafana/Jaeger lewat exporter OTel |
 | Operator Kubernetes, dashboard Aspire | Roadmap |
 | Toleransi kegagalan: retry task, checkpoint, pemulihan worker | **Selesai**; eksekusi spekulatif masih roadmap |
-| Konektor penyimpanan (basis data, data lake, warehouse) | Roadmap |
+| Konektor penyimpanan (basis data, data lake, warehouse) | Basis data **selesai** lewat provider ADO.NET apa pun (dipartisi per rentang atau per query, bisa jalan di cluster); data lake dan warehouse masih roadmap |
 | Scheduler: thread, cluster | **Selesai**; pool proses adalah `LocalCluster.StartProcessesAsync`; Kubernetes masih roadmap |
-| Keamanan: worker dengan autentikasi token | **Selesai**; TLS/mTLS/OAuth2/Entra ID, multi-tenancy dan kuota masih roadmap |
+| Keamanan: worker dengan autentikasi token, TLS dan mutual TLS | **Selesai**; OAuth2/Entra ID, multi-tenancy dan kuota masih roadmap |
 
 ## Batasan yang diketahui
 

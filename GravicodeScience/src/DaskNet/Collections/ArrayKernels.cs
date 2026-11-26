@@ -135,6 +135,15 @@ public static class ArrayKernels
     [RemoteTask]
     public static NdArray Transpose(NdArray a) => a.Transpose().Copy();
 
+    /// <summary>A block with a unit axis inserted at <paramref name="axis"/>.</summary>
+    [RemoteTask]
+    public static NdArray ExpandDims(NdArray a, int axis)
+    {
+        var shape = a.Shape.ToArray().ToList();
+        shape.Insert(axis, 1);
+        return a.Copy().Reshape(shape.ToArray());
+    }
+
     /// <summary>
     /// Assembles a target block from the source blocks that overlap it.
     /// </summary>

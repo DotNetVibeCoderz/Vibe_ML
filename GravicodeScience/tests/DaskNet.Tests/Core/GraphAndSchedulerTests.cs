@@ -253,9 +253,28 @@ public static class RemoteFunctions
         return x;
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ManualResetEventSlim> Gates = new();
+
+    /// <summary>
+    /// Blocks until <see cref="Release"/> opens the named gate, or <paramref name="maxMilliseconds"/>
+    /// pass. In-process workers see the test's gate; a child-process worker cannot, and waits the
+    /// whole time.
+    /// </summary>
+    [RemoteTask]
+    public static double Gate(double x, string id, int maxMilliseconds)
+    {
+        Gates.GetOrAdd(id, _ => new ManualResetEventSlim()).Wait(maxMilliseconds);
+        return x;
+    }
+
+    public static void Release(string id) => Gates.GetOrAdd(id, _ => new ManualResetEventSlim()).Set();
+
     [RemoteTask]
     public static int ProcessId(double _) => Environment.ProcessId;
 
     [RemoteTask]
     public static double Fail(double _) => throw new InvalidOperationException("remote failure");
+
+    [RemoteTask]
+    public static string Shout(string text) => text.ToUpperInvariant();
 }

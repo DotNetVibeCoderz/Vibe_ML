@@ -34,7 +34,7 @@
     version cannot disagree.
   -->
   <PropertyGroup>
-    <VersionPrefix>2.1.0</VersionPrefix>
+    <VersionPrefix>2.2.0</VersionPrefix>
   </PropertyGroup>
 
   <!-- NuGet metadata shared by the shipping libraries (src/**). -->

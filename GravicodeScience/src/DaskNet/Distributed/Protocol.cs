@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -36,42 +38,87 @@ internal readonly record struct Message(MessageKind Kind, long Id, byte[] Body)
 /// The token itself never crosses the wire, and a recorded answer is useless against a new nonce.
 /// </para>
 /// <para>
-/// The traffic is not encrypted. Keep clusters on a private network, or tunnel them; TLS is on
-/// the roadmap. The token stops strangers from running tasks - which, since tasks run code, is
-/// the property that matters most - not eavesdroppers from reading data.
+/// With <see cref="TlsOptions"/> the socket is wrapped in TLS before the token handshake, so
+/// tasks, results and the handshake itself are encrypted. Without it the traffic is plain: the
+/// token stops strangers from running tasks - which, since tasks run code, matters most - but not
+/// eavesdroppers from reading data.
 /// </para>
 /// </remarks>
 internal sealed class WireConnection : IAsyncDisposable
 {
     private static readonly byte[] Magic = "DASKNET1"u8.ToArray();
+    private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
     private readonly TcpClient _client;
-    private readonly NetworkStream _stream;
+    private readonly Stream _stream;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    private WireConnection(TcpClient client, string remote)
+    private WireConnection(TcpClient client, Stream stream, string remote)
     {
         _client = client;
         _client.NoDelay = true;
-        _stream = client.GetStream();
+        _stream = stream;
         Remote = remote;
     }
 
     public string Remote { get; }
 
-    public static async Task<WireConnection> ConnectAsync(string address, string token, CancellationToken cancellationToken = default)
+    /// <summary>Whether the connection is encrypted.</summary>
+    public bool IsEncrypted => _stream is SslStream;
+
+    public static async Task<WireConnection> ConnectAsync(string address, string token, TlsOptions? tls = null,
+        CancellationToken cancellationToken = default)
     {
         var (host, port) = ParseAddress(address);
         var client = new TcpClient();
         try
         {
             await client.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-            var connection = new WireConnection(client, address);
-            var hello = await connection.ReadExactAsync(Magic.Length + 32, cancellationToken).ConfigureAwait(false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(HandshakeTimeout);
+            Stream stream = client.GetStream();
+            if (tls is not null)
+            {
+                var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
+                try
+                {
+                    await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+                    {
+                        TargetHost = tls.TargetHost ?? host,
+                        ClientCertificates = tls.Certificate is null ? null : [tls.Certificate],
+                        RemoteCertificateValidationCallback = (_, cert, _, errors) => tls.Validate(cert, errors, isServer: false),
+                    }, timeout.Token).ConfigureAwait(false);
+                }
+                catch (Exception e) when (e is AuthenticationException or IOException)
+                {
+                    throw new AuthenticationException($"TLS with worker {address} failed: {e.Message} " +
+                        "(is the worker running without TLS, or with a certificate this client does not trust?)", e);
+                }
+                stream = ssl;
+            }
+            var connection = new WireConnection(client, stream, address);
+            byte[] hello;
+            try { hello = await connection.ReadExactAsync(Magic.Length + 32, timeout.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"{address} sent no Dask.Net greeting" +
+                    (tls is null ? " - is the worker expecting TLS?" : "."));
+            }
+            catch (EndOfStreamException e) when (tls is null && !cancellationToken.IsCancellationRequested)
+            {
+                // A TLS worker gives up on its own handshake after the same timeout and closes;
+                // whichever side's timer fires first decides which of these two the caller sees.
+                throw new TimeoutException($"{address} closed the connection without a Dask.Net greeting - is the worker expecting TLS?", e);
+            }
+            catch (IOException e) when (tls is not null)
+            {
+                // A worker that requires a client certificate and rejects ours closes right here.
+                throw new AuthenticationException($"Worker {address} closed the TLS connection: it may require a client certificate this client did not present.", e);
+            }
             if (!hello.AsSpan(0, Magic.Length).SequenceEqual(Magic))
                 throw new InvalidDataException($"{address} is not a Dask.Net worker.");
             var answer = HMACSHA256.HashData(Encoding.UTF8.GetBytes(token), hello.AsSpan(Magic.Length));
             await connection._stream.WriteAsync(answer, cancellationToken).ConfigureAwait(false);
-            var verdict = await connection.ReadExactAsync(1, cancellationToken).ConfigureAwait(false);
+            var verdict = await connection.ReadExactAsync(1, timeout.Token).ConfigureAwait(false);
             if (verdict[0] != 1) throw new UnauthorizedAccessException($"Worker {address} rejected the token.");
             return connection;
         }
@@ -83,23 +130,37 @@ internal sealed class WireConnection : IAsyncDisposable
     }
 
     /// <summary>Server side of the handshake; returns null (and closes) if the caller fails it.</summary>
-    public static async Task<WireConnection?> AcceptAsync(TcpClient client, string token, CancellationToken cancellationToken)
+    public static async Task<WireConnection?> AcceptAsync(TcpClient client, string token, TlsOptions? tls, CancellationToken cancellationToken)
     {
-        var connection = new WireConnection(client, client.Client.RemoteEndPoint?.ToString() ?? "?");
+        WireConnection? connection = null;
         try
         {
-            var nonce = RandomNumberGenerator.GetBytes(32);
-            await connection._stream.WriteAsync(Magic.Concat(nonce).ToArray(), cancellationToken).ConfigureAwait(false);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            timeout.CancelAfter(HandshakeTimeout);
+            Stream stream = client.GetStream();
+            if (tls is not null)
+            {
+                var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
+                await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = tls.Certificate ?? throw new InvalidOperationException("A TLS worker needs a certificate."),
+                    ClientCertificateRequired = tls.RequireClientCertificate,
+                    RemoteCertificateValidationCallback = (_, cert, _, errors) => tls.Validate(cert, errors, isServer: true),
+                }, timeout.Token).ConfigureAwait(false);
+                stream = ssl;
+            }
+            connection = new WireConnection(client, stream, client.Client.RemoteEndPoint?.ToString() ?? "?");
+            var nonce = RandomNumberGenerator.GetBytes(32);
+            await connection._stream.WriteAsync(Magic.Concat(nonce).ToArray(), timeout.Token).ConfigureAwait(false);
             var answer = await connection.ReadExactAsync(32, timeout.Token).ConfigureAwait(false);
             var expected = HMACSHA256.HashData(Encoding.UTF8.GetBytes(token), nonce);
             var ok = CryptographicOperations.FixedTimeEquals(answer, expected);
-            await connection._stream.WriteAsync(new[] { ok ? (byte)1 : (byte)0 }, cancellationToken).ConfigureAwait(false);
+            await connection._stream.WriteAsync(new[] { ok ? (byte)1 : (byte)0 }, timeout.Token).ConfigureAwait(false);
             if (ok) return connection;
         }
-        catch (Exception e) when (e is IOException or OperationCanceledException or SocketException) { }
-        await connection.DisposeAsync().ConfigureAwait(false);
+        catch (Exception e) when (e is IOException or OperationCanceledException or SocketException or AuthenticationException) { }
+        if (connection is not null) await connection.DisposeAsync().ConfigureAwait(false);
+        else client.Dispose();
         return null;
     }
 
@@ -146,6 +207,7 @@ internal sealed class WireConnection : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        _stream.Dispose();
         _client.Dispose();
         _writeLock.Dispose();
         return ValueTask.CompletedTask;
@@ -189,8 +251,9 @@ internal sealed class RpcClient : IAsyncDisposable
 
     public bool IsClosed => _closed.Task.IsCompleted;
 
-    public static async Task<RpcClient> ConnectAsync(string address, string token, CancellationToken cancellationToken = default)
-        => new(await WireConnection.ConnectAsync(address, token, cancellationToken).ConfigureAwait(false), address);
+    public static async Task<RpcClient> ConnectAsync(string address, string token, TlsOptions? tls = null,
+        CancellationToken cancellationToken = default)
+        => new(await WireConnection.ConnectAsync(address, token, tls, cancellationToken).ConfigureAwait(false), address);
 
     public async Task<Message> RequestAsync(MessageKind kind, Action<BinaryWriter>? body = null, CancellationToken cancellationToken = default)
     {

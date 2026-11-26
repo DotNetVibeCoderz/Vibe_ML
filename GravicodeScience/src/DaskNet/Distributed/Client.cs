@@ -10,7 +10,11 @@ namespace Gravicode.Science.DaskNet.Distributed;
 /// <param name="StoredKeys">Results it holds.</param>
 /// <param name="TasksRun">Tasks it has run.</param>
 /// <param name="ProcessId">Its operating-system process id.</param>
-public sealed record WorkerInfo(string Address, string Name, int Threads, int StoredKeys, long TasksRun, int ProcessId);
+/// <param name="MemoryBytes">Estimated bytes of results in memory.</param>
+/// <param name="SpilledKeys">Results spilled to disk.</param>
+/// <param name="SpilledBytes">Bytes spilled to disk.</param>
+public sealed record WorkerInfo(string Address, string Name, int Threads, int StoredKeys, long TasksRun, int ProcessId,
+    long MemoryBytes, int SpilledKeys, long SpilledBytes);
 
 /// <summary>
 /// A scheduler that runs task graphs on a cluster of <see cref="Worker"/>s (Dask's
@@ -39,10 +43,21 @@ public sealed record WorkerInfo(string Address, string Name, int Threads, int St
 /// </remarks>
 public sealed class Client : IScheduler, IAsyncDisposable
 {
-    private readonly List<WorkerHandle> _workers = [];
+    // Replaced, never mutated: a run reads it while discovery adds workers. Lost workers stay in
+    // it (closed), because a run's bookkeeping refers to their handles.
+    private WorkerHandle[] _workers = [];
     private readonly string _token;
+    private readonly TlsOptions? _tls;
+    private readonly SemaphoreSlim _joining = new(1, 1);
+    private IWorkerDiscovery? _discovery;
+    private CancellationTokenSource? _refreshStop;
+    private Task? _refreshLoop;
 
-    private Client(string token) => _token = token;
+    private Client(string token, TlsOptions? tls)
+    {
+        _token = token;
+        _tls = tls;
+    }
 
     /// <summary>Retries for tasks whose own code fails (not for lost workers, which are always recovered).</summary>
     public RetryPolicy Retry { get; set; } = RetryPolicy.None;
@@ -59,18 +74,108 @@ public sealed class Client : IScheduler, IAsyncDisposable
     /// <summary>Addresses of the workers still connected.</summary>
     public IReadOnlyList<string> Workers => _workers.Where(w => !w.Rpc.IsClosed).Select(w => w.Address).ToArray();
 
-    /// <summary>Connects to running workers.</summary>
-    public static async Task<Client> ConnectAsync(IEnumerable<string> addresses, string token, CancellationToken cancellationToken = default)
+    /// <summary>Connects to running workers over plain TCP.</summary>
+    public static Task<Client> ConnectAsync(IEnumerable<string> addresses, string token, CancellationToken cancellationToken = default)
+        => ConnectAsync(addresses, token, tls: null, cancellationToken);
+
+    /// <summary>Connects to running workers, over TLS when <paramref name="tls"/> is given.</summary>
+    public static async Task<Client> ConnectAsync(IEnumerable<string> addresses, string token, TlsOptions? tls,
+        CancellationToken cancellationToken = default)
     {
-        var client = new Client(token);
+        var client = new Client(token, tls);
         foreach (var address in addresses)
         {
-            var rpc = await RpcClient.ConnectAsync(address, token, cancellationToken).ConfigureAwait(false);
+            var rpc = await RpcClient.ConnectAsync(address, token, tls, cancellationToken).ConfigureAwait(false);
             var info = await Ping(rpc, cancellationToken).ConfigureAwait(false);
-            client._workers.Add(new WorkerHandle(address, rpc, info.Threads, info.Name));
+            client._workers = [.. client._workers, new WorkerHandle(address, rpc, info.Threads, info.Name)];
         }
-        if (client._workers.Count == 0) throw new ArgumentException("No worker addresses given.");
+        if (client._workers.Length == 0) throw new ArgumentException("No worker addresses given.");
         return client;
+    }
+
+    /// <summary>
+    /// Connects to the workers <paramref name="discovery"/> finds, skipping any that do not answer
+    /// (a pod still starting). With <paramref name="refreshEvery"/>, discovery runs again in the
+    /// background and newly found workers join - between runs or in the middle of one - so the
+    /// cluster can grow while it is used. Workers that leave are handled as lost workers always are.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No discovered worker could be reached.</exception>
+    public static async Task<Client> ConnectAsync(IWorkerDiscovery discovery, string token, TlsOptions? tls = null,
+        TimeSpan? refreshEvery = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(discovery);
+        var client = new Client(token, tls) { _discovery = discovery };
+        var (added, tried, failures) = await client.JoinAsync(cancellationToken).ConfigureAwait(false);
+        if (added == 0)
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw new InvalidOperationException(tried.Count == 0
+                ? $"{discovery.Describe()} found no workers."
+                : $"No worker found by {discovery.Describe()} answered: {string.Join("; ", failures)}");
+        }
+        if (refreshEvery is { } every)
+        {
+            if (every <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(refreshEvery));
+            client._refreshStop = new CancellationTokenSource();
+            client._refreshLoop = client.RefreshLoopAsync(every, client._refreshStop.Token);
+        }
+        return client;
+    }
+
+    /// <summary>
+    /// Runs discovery once and connects any worker not already connected (including one that
+    /// came back at an address that was lost). Returns how many joined. Only for clients made
+    /// with an <see cref="IWorkerDiscovery"/>.
+    /// </summary>
+    public async Task<int> RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        if (_discovery is null) throw new InvalidOperationException("This client was given fixed addresses; connect with an IWorkerDiscovery to refresh.");
+        return (await JoinAsync(cancellationToken).ConfigureAwait(false)).Added;
+    }
+
+    private async Task<(int Added, IReadOnlyList<string> Tried, List<string> Failures)> JoinAsync(CancellationToken cancellationToken)
+    {
+        var found = await _discovery!.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+        await _joining.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var live = _workers.Where(w => w.Alive).Select(w => w.Address).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var fresh = found.Where(a => !live.Contains(a)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var failures = new List<string>();
+            var joined = await Task.WhenAll(fresh.Select(async address =>
+            {
+                try
+                {
+                    var rpc = await RpcClient.ConnectAsync(address, _token, _tls, cancellationToken).ConfigureAwait(false);
+                    var info = await Ping(rpc, cancellationToken).ConfigureAwait(false);
+                    return new WorkerHandle(address, rpc, info.Threads, info.Name);
+                }
+                catch (Exception e) when (e is not OperationCanceledException and not UnauthorizedAccessException
+                                              and not System.Security.Authentication.AuthenticationException)
+                {
+                    lock (failures) failures.Add($"{address}: {e.Message}");
+                    return null;
+                }
+            })).ConfigureAwait(false);
+            var added = joined.OfType<WorkerHandle>().ToArray();
+            if (added.Length > 0) _workers = [.. _workers, .. added];
+            return (added.Length, found, failures);
+        }
+        finally { _joining.Release(); }
+    }
+
+    private async Task RefreshLoopAsync(TimeSpan every, CancellationToken stop)
+    {
+        while (!stop.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(every, stop).ConfigureAwait(false);
+                await JoinAsync(stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
+            catch (Exception) { /* discovery or a connection failed this time; try again next time */ }
+        }
     }
 
     /// <summary>Asks every connected worker for its state.</summary>
@@ -84,7 +189,8 @@ public sealed class Client : IScheduler, IAsyncDisposable
     {
         var reply = await rpc.RequestAsync(MessageKind.Ping, cancellationToken: cancellationToken).ConfigureAwait(false);
         using var r = reply.Reader();
-        return new WorkerInfo(rpc.Address, r.ReadString(), r.ReadInt32(), r.ReadInt32(), r.ReadInt64(), r.ReadInt32());
+        return new WorkerInfo(rpc.Address, r.ReadString(), r.ReadInt32(), r.ReadInt32(), r.ReadInt64(), r.ReadInt32(),
+            r.ReadInt64(), r.ReadInt32(), r.ReadInt64());
     }
 
     /// <inheritdoc />
@@ -105,8 +211,20 @@ public sealed class Client : IScheduler, IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        foreach (var w in _workers) await w.Rpc.DisposeAsync().ConfigureAwait(false);
-        _workers.Clear();
+        if (_refreshStop is not null)
+        {
+            await _refreshStop.CancelAsync().ConfigureAwait(false);
+            try { await _refreshLoop!.ConfigureAwait(false); } catch (OperationCanceledException) { }
+            _refreshStop.Dispose();
+            _refreshStop = null;
+        }
+        await _joining.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            foreach (var w in _workers) await w.Rpc.DisposeAsync().ConfigureAwait(false);
+            _workers = [];
+        }
+        finally { _joining.Release(); }
     }
 
     internal sealed class WorkerHandle(string address, RpcClient rpc, int threads, string name)
@@ -153,16 +271,26 @@ public sealed class Client : IScheduler, IAsyncDisposable
 
         public RunStatistics Statistics { get; } = new();
 
-        public async Task<IReadOnlyDictionary<TaskKey, object?>> ExecuteAsync()
+        private readonly HashSet<WorkerHandle> _watched = [];
+
+        /// <summary>Hooks the loss of every live worker not hooked yet - those present at the start,
+        /// and any that discovery adds while the run is going.</summary>
+        private void WatchNewWorkers()
         {
-            var clock = Stopwatch.StartNew();
-            _graph.Validate();
-            foreach (var w in _client._workers.Where(w => w.Alive))
+            foreach (var w in _client._workers)
             {
+                if (!w.Alive || !_watched.Add(w)) continue;
                 var worker = w;
                 _ = worker.Rpc.Closed.ContinueWith(_ => _events.Writer.TryWrite(() => { OnWorkerLost(worker); return Task.CompletedTask; }),
                     TaskScheduler.Default);
             }
+        }
+
+        public async Task<IReadOnlyDictionary<TaskKey, object?>> ExecuteAsync()
+        {
+            var clock = Stopwatch.StartNew();
+            _graph.Validate();
+            WatchNewWorkers();
 
             try
             {
@@ -170,6 +298,7 @@ public sealed class Client : IScheduler, IAsyncDisposable
                 while (!AllOutputsAvailable())
                 {
                     _cancel.ThrowIfCancellationRequested();
+                    WatchNewWorkers();
                     if (!_client._workers.Any(w => w.Alive))
                         throw new WorkerLostException("all", new InvalidOperationException("Every worker is gone."));
                     Dispatch();
@@ -203,10 +332,18 @@ public sealed class Client : IScheduler, IAsyncDisposable
         /// </summary>
         private void Replan()
         {
+            // Losses are reported here, not in OnWorkerLost: a handle is marked dead as soon as its
+            // connection drops, but the loss event is queued, and a Dispatch that runs first
+            // replans and drops the dead holders - the loss handler then found nothing to report.
             foreach (var (key, holders) in _holders.ToArray())
             {
+                var dead = holders.FirstOrDefault(w => !w.Alive);
+                if (dead is null && holders.Count > 0) continue;
                 holders.RemoveWhere(w => !w.Alive);
-                if (holders.Count == 0) _holders.Remove(key);
+                if (holders.Count > 0) continue;
+                _holders.Remove(key);
+                if (dead is not null)
+                    _client.OnEvent?.Invoke(new TaskEvent(TaskEventKind.Recomputing, key, _graph.Contains(key) ? _graph[key].Label : "?", _completed, _graph.Count, dead.Name));
             }
 
             var needed = new HashSet<TaskKey>();
@@ -396,16 +533,27 @@ public sealed class Client : IScheduler, IAsyncDisposable
                 _inFlight.Remove(key);
                 worker.InFlight--;
             }
-            var lostKeys = _holders.Where(p => p.Value.Contains(worker) && p.Value.All(h => h == worker || !h.Alive)).Select(p => p.Key).ToArray();
-            foreach (var key in lostKeys)
-                _client.OnEvent?.Invoke(new TaskEvent(TaskEventKind.Recomputing, key, _graph.Contains(key) ? _graph[key].Label : "?", _completed, _graph.Count, worker.Name));
-            Replan();
+            Replan();   // reports the keys only this worker held
         }
 
         private async Task<object?> GatherAsync(TaskKey key)
         {
             while (true)
             {
+                if (!Available(key))
+                {
+                    // Lost between finishing and being gathered (its holder may already be marked
+                    // dead before its loss event runs): run what is needed again.
+                    Replan();
+                    while (!Available(key))
+                    {
+                        if (!_client._workers.Any(w => w.Alive))
+                            throw new WorkerLostException("all", new InvalidOperationException("Every worker is gone."));
+                        Dispatch();
+                        var next = await _events.Reader.ReadAsync(_cancel).ConfigureAwait(false);
+                        await next().ConfigureAwait(false);
+                    }
+                }
                 var holder = _holders[key].First(h => h.Alive);
                 try
                 {
@@ -417,18 +565,6 @@ public sealed class Client : IScheduler, IAsyncDisposable
                 catch (WorkerLostException)
                 {
                     _holders[key].Remove(holder);
-                }
-
-                if (!Available(key))
-                {
-                    // Lost between finishing and being gathered: run what is needed again.
-                    OnWorkerLost(holder);
-                    while (!Available(key))
-                    {
-                        Dispatch();
-                        var next = await _events.Reader.ReadAsync(_cancel).ConfigureAwait(false);
-                        await next().ConfigureAwait(false);
-                    }
                 }
             }
         }

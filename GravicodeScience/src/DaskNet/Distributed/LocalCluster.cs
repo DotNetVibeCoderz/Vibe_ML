@@ -23,11 +23,21 @@ public sealed class LocalCluster : IAsyncDisposable
 {
     private readonly List<Worker> _inProcess = [];
     private readonly List<Process> _processes = [];
+    private string? _pfxPath;
 
-    private LocalCluster(string token) => Token = token;
+    private LocalCluster(string token, TlsOptions? tls)
+    {
+        Token = token;
+        Tls = tls;
+    }
 
     /// <summary>The cluster's shared secret.</summary>
     public string Token { get; }
+
+    /// <summary>The TLS settings every node uses, or null when traffic is plain TCP. Give these to
+    /// <see cref="Client.ConnectAsync(IEnumerable{string}, string, TlsOptions?, CancellationToken)"/>
+    /// to connect a second client.</summary>
+    public TlsOptions? Tls { get; }
 
     /// <summary>The connected client; use it as the scheduler.</summary>
     public Client Client { get; private set; } = null!;
@@ -41,17 +51,21 @@ public sealed class LocalCluster : IAsyncDisposable
     /// <summary>The worker processes (empty for an in-process cluster).</summary>
     public IReadOnlyList<Process> Processes => _processes;
 
-    /// <summary>Starts workers in this process.</summary>
-    public static async Task<LocalCluster> StartAsync(int workers = 2, int threadsPerWorker = 2, RetryPolicy? retry = null)
+    /// <summary>Starts workers in this process. With <paramref name="tls"/>, every connection is
+    /// encrypted with a fresh self-signed cluster certificate (<see cref="TlsOptions.SelfSigned"/>).
+    /// <paramref name="memoryLimit"/> is each worker's <see cref="WorkerOptions.MemoryLimit"/>.</summary>
+    public static async Task<LocalCluster> StartAsync(int workers = 2, int threadsPerWorker = 2, RetryPolicy? retry = null,
+        bool tls = false, long? memoryLimit = null)
     {
         if (workers <= 0) throw new ArgumentOutOfRangeException(nameof(workers));
-        var cluster = new LocalCluster(NewToken());
+        var cluster = new LocalCluster(NewToken(), tls ? TlsOptions.SelfSigned() : null);
         try
         {
             for (var i = 0; i < workers; i++)
                 cluster._inProcess.Add(await Worker.StartAsync(new WorkerOptions
                 {
-                    Token = cluster.Token, Threads = threadsPerWorker, Name = $"worker-{i}",
+                    Token = cluster.Token, Threads = threadsPerWorker, Name = $"worker-{i}", Tls = cluster.Tls,
+                    MemoryLimit = memoryLimit,
                 }).ConfigureAwait(false));
             cluster.Addresses = cluster._inProcess.Select(w => w.Address).ToArray();
             cluster.Client = await ConnectClient(cluster, retry).ConfigureAwait(false);
@@ -67,15 +81,26 @@ public sealed class LocalCluster : IAsyncDisposable
     /// <summary>
     /// Starts workers as child processes running <paramref name="workerHost"/> (a
     /// <c>DaskNet.Worker.dll</c>, or an executable). Assemblies in <paramref name="preload"/> are
-    /// loaded by every worker so their <see cref="RemoteTaskAttribute"/> methods can run.
+    /// loaded by every worker so their <see cref="RemoteTaskAttribute"/> methods can run. With
+    /// <paramref name="tls"/>, the cluster certificate is handed to the children as a PKCS#12 file
+    /// readable only through a password in their environment, and deleted when the cluster stops.
     /// </summary>
     public static async Task<LocalCluster> StartProcessesAsync(string workerHost, int workers = 2, int threadsPerWorker = 2,
-        IEnumerable<string>? preload = null, RetryPolicy? retry = null, TimeSpan? startTimeout = null)
+        IEnumerable<string>? preload = null, RetryPolicy? retry = null, TimeSpan? startTimeout = null, bool tls = false,
+        long? memoryLimit = null)
     {
         if (!File.Exists(workerHost)) throw new FileNotFoundException("Worker host not found.", workerHost);
-        var cluster = new LocalCluster(NewToken());
+        var cluster = new LocalCluster(NewToken(), tls ? TlsOptions.SelfSigned() : null);
+        string? pfxPassword = null;
         try
         {
+            if (cluster.Tls is not null)
+            {
+                pfxPassword = NewToken();
+                cluster._pfxPath = Path.Combine(Path.GetTempPath(), $"dasknet-{Guid.NewGuid():N}.pfx");
+                await File.WriteAllBytesAsync(cluster._pfxPath,
+                    cluster.Tls.Certificate!.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pkcs12, pfxPassword)).ConfigureAwait(false);
+            }
             var addresses = new List<string>();
             for (var i = 0; i < workers; i++)
             {
@@ -91,12 +116,23 @@ public sealed class LocalCluster : IAsyncDisposable
                 if (isDll) start.ArgumentList.Add(workerHost);
                 foreach (var a in new[] { "--threads", threadsPerWorker.ToString(System.Globalization.CultureInfo.InvariantCulture), "--name", $"process-{i}" })
                     start.ArgumentList.Add(a);
+                if (memoryLimit is { } limit)
+                {
+                    start.ArgumentList.Add("--memory-limit");
+                    start.ArgumentList.Add(limit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
                 foreach (var p in preload ?? [])
                 {
                     start.ArgumentList.Add("--preload");
                     start.ArgumentList.Add(Path.GetFullPath(p));
                 }
                 start.Environment["DASKNET_TOKEN"] = cluster.Token;
+                if (cluster._pfxPath is not null)
+                {
+                    start.ArgumentList.Add("--tls-pfx");
+                    start.ArgumentList.Add(cluster._pfxPath);
+                    start.Environment["DASKNET_TLS_PASSWORD"] = pfxPassword;
+                }
 
                 var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start a worker process.");
                 cluster._processes.Add(process);
@@ -115,7 +151,7 @@ public sealed class LocalCluster : IAsyncDisposable
 
     private static async Task<Client> ConnectClient(LocalCluster cluster, RetryPolicy? retry)
     {
-        var client = await Client.ConnectAsync(cluster.Addresses, cluster.Token).ConfigureAwait(false);
+        var client = await Client.ConnectAsync(cluster.Addresses, cluster.Token, cluster.Tls).ConfigureAwait(false);
         if (retry is not null) client.Retry = retry;
         return client;
     }
@@ -170,6 +206,10 @@ public sealed class LocalCluster : IAsyncDisposable
             }
             catch (InvalidOperationException) { }
             p.Dispose();
+        }
+        if (_pfxPath is not null)
+        {
+            try { File.Delete(_pfxPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
 }

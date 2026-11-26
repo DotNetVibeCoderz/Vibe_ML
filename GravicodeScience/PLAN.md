@@ -765,32 +765,6 @@ What is still open, in order of value:
    kernel moved into GraviNum (`PackedMatMul.Gemm`) and `LinAlg.Dot` uses it from a 16-cube up
    (200-cube 0.81 -> 0.27 ms); SciNet's `LinalgGemm` forwards to it.
 
-## Non-goals
-
-Worth stating so the scope stays legible:
-
-- **Not a deep learning framework.** No competition with TensorFlow or PyTorch. The transformer
-  and GNN layers exist to make those architectures usable from .NET, not to train foundation
-  models.
-- **Not a distributed compute engine.** No competition with Spark or Dask.
-- **Not a plotting library.** Visualisation stays behind ScottPlot and OxyPlot hooks.
-
----
-
-## How to contribute
-
-1. Open an issue describing the use case before writing a large feature.
-2. Every new algorithm needs tests that pin it against a known-correct reference — a closed-form
-   answer, a published figure, or a naive implementation in the test itself.
-3. Documentation lands in both languages in the same change.
-4. Performance claims need a benchmark in `benchmarks/`.
-
----
-
-*Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*
-
----
-
 ## Dask.Net — parallel and distributed computing
 
 Added as an eighth library, against `Dask.Net-Features.md`. That document describes a product
@@ -806,15 +780,54 @@ locality-aware placement, peer-to-peer data transfer and lineage recovery.
 
 **Next, in order of what unblocks the most:**
 
-1. **TLS on the wire.** Authentication is there; encryption is not, which confines clusters to
-   trusted networks.
-2. **Broadcasting in `DaskArray`** element-wise ops, and `COUNT(DISTINCT)` / `UNION` / window
-   functions in SQL.
-3. **Spill to disk** on workers under memory pressure, and per-worker memory limits.
-4. **Worker discovery** (Aspire service discovery first, then Kubernetes) instead of explicit
-   addresses.
-5. **Cost-based join ordering** — the optimiser is rule-based; it chooses broadcast vs shuffle by
-   partition count, not by size.
-6. Connectors (Parquet is already reachable through `ReadFiles`; JSON and databases next), then
-   the GIS/ML/streaming modules as separate packages.
+1. ✅ **TLS on the wire.** `TlsOptions` on workers, peers and the client: pinned or
+   system-validated certificates, mutual TLS, `LocalCluster(tls: true)` for child processes too.
+   A recording relay proves task data is unreadable on the wire.
+2. ✅ **Broadcasting in `DaskArray`** (NumPy rules, plus `ExpandDims`), and in SQL
+   `AGG(DISTINCT x)`, `UNION [ALL]` and window functions (`ROW_NUMBER`/`RANK`/`DENSE_RANK`,
+   `LAG`/`LEAD`, running and per-partition aggregates; `DaskFrame.Window` underneath).
+3. ✅ **Spill to disk** under per-worker memory limits: estimated result sizes, LRU spilling of
+   wire-encoded results, read-through for results bigger than the target, stats in `WorkerInfo`.
+4. ✅ **Worker discovery**: Kubernetes (headless-Service DNS) and Aspire (`services__` variables,
+   one resource per worker), with background refresh so workers join a live client mid-run.
+5. ✅ **Cost-based join strategy**: size estimates per plan node; small sides broadcast by size
+   (16 MB default), small left sides of inner joins turned around, `broadcast:` override.
+   Multi-way join *reordering* is still open.
+6. ✅ **Connectors**: JSON (Lines in byte blocks, arrays, writing) and databases through any ADO.NET
+   provider (range- or query-partitioned, projection pushed into the SELECT, types pinned).
 
+**Next:**
+
+1. **Multi-way join reordering** for SQL queries with three or more tables, on the same estimates.
+2. **Predicate pushdown into SQL sources** - filters run after rows are read today; translating
+   `Expr` to a parameterised WHERE would cut what crosses the network.
+3. **Table formats**: Delta Lake / Iceberg readers on top of the Parquet package.
+4. **The GIS / ML / streaming modules** of `Dask.Net-Features.md`, as separate packages.
+5. **Worker-side scheduling** (work stealing between workers) - the client is still the single
+   scheduler of a run, and a client that dies loses the run.
+
+## Non-goals
+
+Worth stating so the scope stays legible:
+
+- **Not a deep learning framework.** No competition with TensorFlow or PyTorch. The transformer
+  and GNN layers exist to make those architectures usable from .NET, not to train foundation
+  models.
+- **Not a data platform.** Dask.Net is Dask's core for .NET - task graphs, chunked arrays,
+  partitioned frames, SQL and a TCP cluster - not a managed, multi-tenant service competing with
+  Spark or Databricks.
+- **Not a plotting library.** Visualisation stays behind ScottPlot and OxyPlot hooks.
+
+---
+
+## How to contribute
+
+1. Open an issue describing the use case before writing a large feature.
+2. Every new algorithm needs tests that pin it against a known-correct reference — a closed-form
+   answer, a published figure, or a naive implementation in the test itself.
+3. Documentation lands in both languages in the same change.
+4. Performance claims need a benchmark in `benchmarks/`.
+
+---
+
+*Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*

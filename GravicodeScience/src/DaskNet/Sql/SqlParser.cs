@@ -133,6 +133,8 @@ internal sealed record LikeOp(SqlNode Value, SqlNode Pattern, bool Negated, int 
 internal sealed record IsNullOp(SqlNode Value, bool Negated, int Position) : SqlNode(Position);
 internal sealed record CastOp(SqlNode Value, string Type, int Position) : SqlNode(Position);
 internal sealed record StarRef(string? Table, int Position) : SqlNode(Position);
+/// <summary><c>f(...) OVER (PARTITION BY ... ORDER BY ...)</c>.</summary>
+internal sealed record WindowCall(Call Function, SqlNode[] PartitionBy, OrderItem[] OrderBy, int Position) : SqlNode(Position);
 
 internal sealed record SelectItem(SqlNode Expr, string? Alias, string Text);
 internal abstract record TableRef(string Alias, int Position);
@@ -143,7 +145,15 @@ internal sealed record OrderItem(SqlNode Expr, bool Ascending);
 
 internal sealed record SelectStatement(
     bool Distinct, SelectItem[] Items, TableRef From, JoinClause[] Joins, SqlNode? Where,
-    SqlNode[] GroupBy, SqlNode? Having, OrderItem[] OrderBy, int? Limit);
+    SqlNode[] GroupBy, SqlNode? Having, OrderItem[] OrderBy, int? Limit)
+{
+    /// <summary>Queries combined with this one, left to right. When there are any, ORDER BY and
+    /// LIMIT belong to the whole combination, not to this branch.</summary>
+    public UnionPart[] Unions { get; init; } = [];
+}
+
+/// <summary><c>UNION [ALL] query</c>; without ALL, duplicate rows of the combination so far are removed.</summary>
+internal sealed record UnionPart(bool All, SelectStatement Query, int Position);
 
 // ---------------------------------------------------------------------------------- parser
 
@@ -154,7 +164,7 @@ internal sealed class SqlParser
     {
         "SELECT", "DISTINCT", "FROM", "WHERE", "GROUP", "BY", "HAVING", "ORDER", "LIMIT", "OFFSET", "JOIN", "INNER",
         "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "ON", "AS", "AND", "OR", "NOT", "IS", "NULL", "IN", "BETWEEN",
-        "LIKE", "CASE", "WHEN", "THEN", "ELSE", "END", "ASC", "DESC", "UNION", "TRUE", "FALSE", "CAST",
+        "LIKE", "OVER", "CASE", "WHEN", "THEN", "ELSE", "END", "ASC", "DESC", "UNION", "TRUE", "FALSE", "CAST",
     };
 
     private readonly string _sql;
@@ -170,7 +180,7 @@ internal sealed class SqlParser
     public static SelectStatement Parse(string sql)
     {
         var parser = new SqlParser(sql);
-        var statement = parser.ParseSelect();
+        var statement = parser.ParseQuery();
         if (parser.Peek.IsSymbol(";")) parser._at++;
         if (parser.Peek.Kind != TokenKind.End) throw parser.Error($"Unexpected {parser.Peek}");
         return statement;
@@ -220,6 +230,28 @@ internal sealed class SqlParser
 
     // ------------------------------------------------------------------ statements
 
+    /// <summary>A SELECT, or several joined by UNION [ALL]. ORDER BY and LIMIT written after the
+    /// last branch apply to the whole union, as in standard SQL; on an earlier branch they are
+    /// refused rather than silently applied to the union.</summary>
+    private SelectStatement ParseQuery()
+    {
+        var first = ParseSelect();
+        if (!Peek.Is("UNION")) return first;
+        var parts = new List<UnionPart>();
+        var last = first;
+        while (Peek.Is("UNION"))
+        {
+            if (last.OrderBy.Length > 0 || last.Limit is not null)
+                throw Error("ORDER BY and LIMIT may only follow the last query of a UNION; wrap a branch in a subquery to sort it");
+            var position = Next().Position;
+            var all = Accept("ALL");
+            if (!all) Accept("DISTINCT");
+            last = ParseSelect();
+            parts.Add(new UnionPart(all, last with { OrderBy = [], Limit = null }, position));
+        }
+        return first with { OrderBy = last.OrderBy, Limit = last.Limit, Unions = parts.ToArray() };
+    }
+
     private SelectStatement ParseSelect()
     {
         Expect("SELECT");
@@ -267,7 +299,6 @@ internal sealed class SqlParser
             limit = n;
         }
         if (Peek.Is("OFFSET")) throw Error("OFFSET is not supported; a distributed frame has no cheap row positions");
-        if (Peek.Is("UNION")) throw Error("UNION is not supported yet; use DaskFrame.Concat on two queries");
         return new SelectStatement(distinct, items.ToArray(), from, joins.ToArray(), where, groupBy.ToArray(), having, orderBy.ToArray(), limit);
     }
 
@@ -333,7 +364,7 @@ internal sealed class SqlParser
         var position = Peek.Position;
         if (AcceptSymbol("("))
         {
-            var query = ParseSelect();
+            var query = ParseQuery();
             ExpectSymbol(")");
             Accept("AS");
             return new SubqueryTable(query, Identifier("an alias for the subquery"), position);
@@ -513,7 +544,7 @@ internal sealed class SqlParser
             if (AcceptSymbol("*"))
             {
                 ExpectSymbol(")");
-                return new Call(name, [], Star: true, Distinct: false, t.Position);
+                return Over(new Call(name, [], Star: true, Distinct: false, t.Position));
             }
             var distinct = Accept("DISTINCT");
             var args = new List<SqlNode>();
@@ -523,7 +554,7 @@ internal sealed class SqlParser
                 while (AcceptSymbol(",")) args.Add(ParseExpression());
             }
             ExpectSymbol(")");
-            return new Call(name, args.ToArray(), Star: false, distinct, t.Position);
+            return Over(new Call(name, args.ToArray(), Star: false, distinct, t.Position));
         }
         if (AcceptSymbol("."))
         {
@@ -531,6 +562,38 @@ internal sealed class SqlParser
             return new ColumnRef(t.Text, column, t.Position);
         }
         return new ColumnRef(null, t.Text, t.Position);
+    }
+
+    /// <summary>An optional <c>OVER (...)</c> after a call. Explicit frames (ROWS/RANGE BETWEEN) are
+    /// refused: the default frame is the only one implemented.</summary>
+    private SqlNode Over(Call call)
+    {
+        if (!Accept("OVER")) return call;
+        if (call.Distinct) throw Error("DISTINCT is not supported in a window function");
+        ExpectSymbol("(");
+        var partition = new List<SqlNode>();
+        if (Peek.Is("PARTITION"))
+        {
+            _at++;
+            Expect("BY");
+            do partition.Add(ParseExpression()); while (AcceptSymbol(","));
+        }
+        var order = new List<OrderItem>();
+        if (Accept("ORDER"))
+        {
+            Expect("BY");
+            do
+            {
+                var e = ParseExpression();
+                var ascending = !Accept("DESC");
+                if (ascending) Accept("ASC");
+                order.Add(new OrderItem(e, ascending));
+            } while (AcceptSymbol(","));
+        }
+        if (Peek.Is("ROWS") || Peek.Is("RANGE") || Peek.Is("GROUPS"))
+            throw Error("Explicit window frames are not supported; the default (start of partition to current row and its ties) is used");
+        ExpectSymbol(")");
+        return new WindowCall(call, partition.ToArray(), order.ToArray(), call.Position);
     }
 
     private SqlNode ParseCase(int position)

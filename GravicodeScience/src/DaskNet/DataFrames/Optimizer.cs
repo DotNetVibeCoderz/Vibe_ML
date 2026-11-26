@@ -3,8 +3,8 @@ using Gravicode.Science.GraviFrame;
 namespace Gravicode.Science.DaskNet;
 
 /// <summary>
-/// Rule-based rewrites of a <see cref="DaskFrame"/> plan: predicate pushdown, projection pushdown,
-/// filter merging. Row-wise operations left adjacent afterwards are fused into one task per
+/// Rewrites of a <see cref="DaskFrame"/> plan: predicate pushdown, projection pushdown, filter
+/// merging, then join strategy by estimated size (<see cref="CostModel"/>). Row-wise operations left adjacent afterwards are fused into one task per
 /// partition when the plan is lowered.
 /// </summary>
 /// <remarks>
@@ -24,7 +24,7 @@ internal static class Optimizer
             if (ReferenceEquals(next, current)) break;
             current = next;
         }
-        return Prune(current, null);
+        return CostModel.ChooseJoins(Prune(current, null), Dask.BroadcastJoinBytes);
     }
 
     // ------------------------------------------------------------------ predicate pushdown
@@ -137,7 +137,7 @@ internal static class Optimizer
         PlanNode moved = new JoinNode(
             toLeft is null ? join.Left : new FilterNode(join.Left, toLeft),
             toRight is null ? join.Right : new FilterNode(join.Right, toRight),
-            join.LeftOn, join.RightOn, join.Kind, join.Suffix, join.RequestedPartitions);
+            join.LeftOn, join.RightOn, join.Kind, join.Suffix, join.RequestedPartitions, join.BroadcastHint);
         return stay is null ? moved : new FilterNode(moved, stay);
     }
 
@@ -166,6 +166,9 @@ internal static class Optimizer
                 var need = required is null ? scan.Source.Columns.ToHashSet() : new HashSet<string>(required);
                 if (scan.Predicate is not null) need.UnionWith(scan.Predicate.Columns());
                 var columns = scan.Source.Columns.Where(need.Contains).ToArray();
+                // A frame with no columns has no rows either, so COUNT(*) or SELECT 1 - which name
+                // no column - would count nothing. Keep one column to carry the row count.
+                if (columns.Length == 0 && scan.Source.Columns.Count > 0) columns = [scan.Source.Columns[0]];
                 return new ScanNode(scan.Source, columns.Length == scan.Source.Columns.Count ? null : columns, scan.Predicate);
             }
 
@@ -238,6 +241,14 @@ internal static class Optimizer
 
             case SortNode sort:
                 return sort.WithChildren([Prune(sort.Input, Union(required, sort.Columns))]);
+
+            case WindowNode window:
+            {
+                if (required is null) return window.WithChildren([Prune(window.Input, null)]);
+                var outputs = window.Spec.Functions.Select(f => f.Output).ToHashSet(StringComparer.Ordinal);
+                var need = required.Where(r => !outputs.Contains(r)).Concat(window.Spec.InputColumns).ToHashSet(StringComparer.Ordinal);
+                return window.WithChildren([Prune(window.Input, need)]);
+            }
 
             case RepartitionNode or LimitNode:
                 return node.WithChildren([Prune(node.Children[0], required)]);

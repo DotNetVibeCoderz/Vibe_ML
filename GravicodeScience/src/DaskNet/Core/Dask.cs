@@ -33,6 +33,14 @@ public static class Dask
     public static bool FuseGraphs { get; set; } = true;
 
     /// <summary>
+    /// Joins whose smaller side is estimated at or below this many bytes broadcast that side
+    /// instead of shuffling both (Spark's <c>autoBroadcastJoinThreshold</c>); an inner join is
+    /// turned around when its left side is the small one. 0 chooses by partition count only, as
+    /// before. Estimates are rough - see <c>DaskFrame.Explain</c> for what was chosen.
+    /// </summary>
+    public static long BroadcastJoinBytes { get; set; } = 16L << 20;
+
+    /// <summary>
     /// Uses <paramref name="scheduler"/> for every compute in this async flow until the returned
     /// handle is disposed (Dask's <c>with dask.config.set(scheduler=...)</c>).
     /// </summary>

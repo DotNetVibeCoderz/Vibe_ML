@@ -46,6 +46,9 @@ internal abstract class ScanSource
     public abstract bool Remotable { get; }
     public abstract string Describe();
 
+    /// <summary>Estimated bytes of all partitions (see <see cref="CostModel"/>), or null if unknown.</summary>
+    public virtual long? EstimatedBytes => null;
+
     /// <summary>Tasks producing the final partitions: only <paramref name="columns"/> (all if null),
     /// with <paramref name="ops"/> applied.</summary>
     public abstract TaskSpec[] Build(string name, string[]? columns, IReadOnlyList<FrameOp> ops);
@@ -70,6 +73,7 @@ internal sealed class CsvSource(IReadOnlyList<(string Path, long Start, long End
     public override int Partitions => blocks.Count;
     public override bool Remotable => true;
     public IReadOnlyList<DataType> Types => types;
+    public override long? EstimatedBytes => blocks.Sum(b => b.End - b.Start);
 
     public override string Describe()
         => $"ReadCsv {blocks.Select(b => Path.GetFileName(b.Path)).Distinct().Count()} file(s), {blocks.Count} block(s)";
@@ -93,6 +97,7 @@ internal sealed class ArrowSource(string[] files, string[] columns) : ScanSource
     public override int Partitions => files.Length;
     public override bool Remotable => true;
     public override string Describe() => $"ReadArrow {files.Length} file(s)";
+    public override long? EstimatedBytes => CostModel.FileBytes(files);
 
     public override TaskSpec[] Build(string name, string[]? cols, IReadOnlyList<FrameOp> ops)
     {
@@ -103,6 +108,8 @@ internal sealed class ArrowSource(string[] files, string[] columns) : ScanSource
 
 internal sealed class MemorySource(DataFrame[] partitions, string label = "from-frame") : ScanSource
 {
+    private readonly Lazy<long> _bytes = new(() => partitions.Sum(Distributed.SizeOf.Estimate));
+    public override long? EstimatedBytes => _bytes.Value;
     public override IReadOnlyList<string> Columns => partitions[0].ColumnNames;
     public override int Partitions => partitions.Length;
     public override bool Remotable => true;
@@ -124,6 +131,7 @@ internal sealed class DelegateSource(string[] files, Func<string, DataFrame> rea
     public override int Partitions => files.Length;
     public override bool Remotable => false;
     public override string Describe() => $"ReadFiles {files.Length} file(s) with {reader.Method.Name}";
+    public override long? EstimatedBytes => CostModel.FileBytes(files);
 
     public override TaskSpec[] Build(string name, string[]? cols, IReadOnlyList<FrameOp> ops)
     {
@@ -253,7 +261,7 @@ internal sealed class AggregateNode(PlanNode input, string[] keys, Aggregation[]
 }
 
 internal sealed class JoinNode(PlanNode left, PlanNode right, string[] leftOn, string[] rightOn, JoinKind kind, string suffix,
-    int? partitions) : PlanNode
+    int? partitions, bool? broadcast = null) : PlanNode
 {
     public PlanNode Left { get; } = left;
     public PlanNode Right { get; } = right;
@@ -262,11 +270,15 @@ internal sealed class JoinNode(PlanNode left, PlanNode right, string[] leftOn, s
     public JoinKind Kind { get; } = kind;
     public string Suffix { get; } = suffix;
     public int? RequestedPartitions { get; } = partitions;
+
+    /// <summary>The caller's choice: false always shuffles, true was applied when the join was
+    /// built (the right side gathered into one partition), null lets <see cref="CostModel"/> decide.</summary>
+    public bool? BroadcastHint { get; } = broadcast;
     public override IReadOnlyList<PlanNode> Children => [Left, Right];
 
     /// <summary>Broadcast when the right side is one partition and every right row is either matched
     /// or dropped - true for inner and left joins only.</summary>
-    public bool Broadcast => Right.Partitions == 1 && Kind is JoinKind.Inner or JoinKind.Left && RequestedPartitions is null;
+    public bool Broadcast => BroadcastHint != false && Right.Partitions == 1 && Kind is JoinKind.Inner or JoinKind.Left && RequestedPartitions is null;
 
     public override int Partitions => Broadcast ? Left.Partitions : RequestedPartitions ?? Math.Max(Left.Partitions, Right.Partitions);
 
@@ -289,9 +301,10 @@ internal sealed class JoinNode(PlanNode left, PlanNode right, string[] leftOn, s
 
     public override string Describe()
         => $"Join {Kind} on {(LeftOn.SequenceEqual(RightOn) ? List(LeftOn) : $"[{List(LeftOn)}] = [{List(RightOn)}]")}"
-           + (Broadcast ? " (broadcast right)" : $" (hash shuffle, {Partitions} partitions)");
+           + (Broadcast ? " (broadcast right)" : $" (hash shuffle, {Partitions} partitions)")
+           + $" [est. left {CostModel.Format(CostModel.Bytes(Left))}, right {CostModel.Format(CostModel.Bytes(Right))}]";
 
-    public override PlanNode WithChildren(IReadOnlyList<PlanNode> c) => new JoinNode(c[0], c[1], LeftOn, RightOn, Kind, Suffix, RequestedPartitions);
+    public override PlanNode WithChildren(IReadOnlyList<PlanNode> c) => new JoinNode(c[0], c[1], LeftOn, RightOn, Kind, Suffix, RequestedPartitions, BroadcastHint);
 }
 
 internal sealed class SortNode(PlanNode input, string[] columns, bool[] ascending, int? partitions) : PlanNode

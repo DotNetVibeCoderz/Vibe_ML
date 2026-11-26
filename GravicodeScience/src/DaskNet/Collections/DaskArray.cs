@@ -67,6 +67,7 @@ public sealed class DaskArray : IDaskCollection
     private static readonly MethodInfo MatMulMethod = Kernel(nameof(ArrayKernels.MatMul));
     private static readonly MethodInfo SumBlocksMethod = Kernel(nameof(ArrayKernels.SumBlocks));
     private static readonly MethodInfo TransposeMethod = Kernel(nameof(ArrayKernels.Transpose));
+    private static readonly MethodInfo ExpandDimsMethod = Kernel(nameof(ArrayKernels.ExpandDims));
     private static readonly MethodInfo AssembleMethod = Kernel(nameof(ArrayKernels.Assemble));
     private static readonly MethodInfo ReduceMethod = Kernel(nameof(ArrayKernels.Reduce));
     private static readonly MethodInfo CombineReduceMethod = Kernel(nameof(ArrayKernels.CombineReduce));
@@ -147,14 +148,66 @@ public sealed class DaskArray : IDaskCollection
 
     // ------------------------------------------------------------------ element-wise
 
-    /// <summary>Element-wise combination with another array of the same shape.</summary>
+    /// <summary>
+    /// Element-wise combination with another array, broadcasting as NumPy does: shapes are aligned
+    /// from the right and an axis of length 1 (or a missing leading axis) stretches to match, so
+    /// <c>x - x.Mean(axis: 0)</c> centres every column.
+    /// </summary>
+    /// <remarks>
+    /// The output takes its chunking from whichever operand spans each axis (this one when both
+    /// do; the other is rechunked to it). A broadcast operand is not copied per block: each output
+    /// block reads block 0 of it along the stretched axes, and GraviNum broadcasts inside the kernel.
+    /// </remarks>
     public DaskArray Elementwise(DaskArray other, BinaryOp op)
     {
-        if (!Shape.SequenceEqual(other.Shape))
-            throw new ArgumentException($"Shapes [{string.Join(", ", Shape)}] and [{string.Join(", ", other.Shape)}] differ.");
-        var right = SameChunks(other) ? other : other.RechunkTo(Chunks);
-        return BlockWise($"{op}".ToLowerInvariant(), [Layer, right.Layer], b =>
-            new RemoteCall(BinaryMethod, new TaskRef(OutputKeys[b]), new TaskRef(right.OutputKeys[b]), (int)op));
+        if (Shape.SequenceEqual(other.Shape))
+        {
+            var same = SameChunks(other) ? other : other.RechunkTo(Chunks);
+            return BlockWise($"{op}".ToLowerInvariant(), [Layer, same.Layer], b =>
+                new RemoteCall(BinaryMethod, new TaskRef(OutputKeys[b]), new TaskRef(same.OutputKeys[b]), (int)op));
+        }
+
+        var rank = Math.Max(Rank, other.Rank);
+        var shape = new int[rank];
+        var chunks = new int[rank][];
+        for (var ax = 0; ax < rank; ax++)
+        {
+            int ia = ax - (rank - Rank), ib = ax - (rank - other.Rank);
+            int da = ia >= 0 ? Shape[ia] : 1, db = ib >= 0 ? other.Shape[ib] : 1;
+            if (da != db && da != 1 && db != 1)
+                throw new ArgumentException(
+                    $"Shapes [{string.Join(", ", Shape)}] and [{string.Join(", ", other.Shape)}] cannot be broadcast together (axis {ax}: {da} vs {db}).");
+            shape[ax] = Math.Max(da, db);
+            chunks[ax] = da == shape[ax] && ia >= 0 ? Chunks[ia] : db == shape[ax] && ib >= 0 ? other.Chunks[ib] : [shape[ax]];
+        }
+
+        // Each operand keeps one block along a stretched axis and takes the output's chunks elsewhere.
+        DaskArray Fit(DaskArray x) => x.SameChunks(Target(x)) ? x : x.RechunkTo(Target(x));
+        int[][] Target(DaskArray x) => Enumerable.Range(0, x.Rank).Select(k =>
+        {
+            var ax = k + rank - x.Rank;
+            return x.Shape[k] == 1 && shape[ax] != 1 ? [1] : chunks[ax];
+        }).ToArray();
+        var left = Fit(this);
+        var right = Fit(other);
+
+        var grid = chunks.Select(c => c.Length).ToArray();
+        int Source(DaskArray x, int[] coords)
+        {
+            var own = Enumerable.Range(0, x.Rank).Select(k => x.BlockGrid[k] == 1 ? 0 : coords[k + rank - x.Rank]).ToArray();
+            return Ravel(own, x.BlockGrid);
+        }
+        var label = $"{op}".ToLowerInvariant();
+        var name = TaskKey.NewName(label);
+        var tasks = new TaskSpec[grid.Aggregate(1, (p, g) => p * g)];
+        for (var b = 0; b < tasks.Length; b++)
+        {
+            var coords = Unravel(b, grid);
+            var call = new RemoteCall(BinaryMethod, new TaskRef(left.OutputKeys[Source(left, coords)]),
+                new TaskRef(right.OutputKeys[Source(right, coords)]), (int)op);
+            tasks[b] = TaskSpec.FromRemote(new TaskKey(name, b), call, label);
+        }
+        return new DaskArray(new GraphLayer(name, tasks, [left.Layer, right.Layer]), name, shape, chunks);
     }
 
     /// <summary>Element-wise combination with a scalar.</summary>
@@ -429,6 +482,24 @@ public sealed class DaskArray : IDaskCollection
 
     /// <summary>The transpose.</summary>
     public DaskArray T => Transpose();
+
+    /// <summary>
+    /// A unit axis inserted at <paramref name="axis"/> (NumPy's <c>expand_dims</c>, or <c>[:, None]</c>),
+    /// so a reduced array broadcasts back along the axis it lost: <c>x / x.Sum(axis: 1).ExpandDims(1)</c>.
+    /// </summary>
+    public DaskArray ExpandDims(int axis)
+    {
+        if (axis < 0) axis += Rank + 1;
+        if (axis < 0 || axis > Rank) throw new ArgumentOutOfRangeException(nameof(axis));
+        var name = TaskKey.NewName("expand-dims");
+        var tasks = Enumerable.Range(0, BlockCount).Select(b => TaskSpec.FromRemote(new TaskKey(name, b),
+            new RemoteCall(ExpandDimsMethod, new TaskRef(OutputKeys[b]), axis), "expand-dims")).ToArray();
+        var shape = Shape.ToList();
+        shape.Insert(axis, 1);
+        var chunks = Chunks.ToList();
+        chunks.Insert(axis, [1]);
+        return new DaskArray(new GraphLayer(name, tasks, [Layer]), name, shape.ToArray(), chunks.ToArray());
+    }
 
     /// <summary>The same values in blocks of at most <paramref name="chunkSize"/> per axis.</summary>
     public DaskArray Rechunk(params int[] chunkSize) => RechunkTo(NormaliseChunks(Shape, chunkSize));

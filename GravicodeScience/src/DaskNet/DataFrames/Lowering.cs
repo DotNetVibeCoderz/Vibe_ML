@@ -24,6 +24,7 @@ internal sealed class Lowering(IScheduler scheduler)
     private static readonly MethodInfo Sample = K(nameof(FrameKernels.SampleColumn));
     private static readonly MethodInfo RangeSplit = K(nameof(FrameKernels.RangeSplit));
     private static readonly MethodInfo Sort = K(nameof(FrameKernels.SortFrame));
+    private static readonly MethodInfo WindowKernel = K(nameof(FrameKernels.WindowFrame));
 
     /// <summary>The partitions of a lowered node: their keys and the layer that holds them.</summary>
     public sealed record Parts(GraphLayer Layer, TaskKey[] Keys) : IDaskCollection
@@ -64,6 +65,7 @@ internal sealed class Lowering(IScheduler scheduler)
             RepartitionNode r => LowerRepartition(r),
             ConcatNode c => LowerConcat(c),
             LimitNode l => LowerLimit(l),
+            WindowNode w => LowerWindow(w),
             _ => throw new NotSupportedException(node.GetType().Name),
         };
         return pending.Count == 0 ? parts : Apply(parts, pending);
@@ -256,6 +258,24 @@ internal sealed class Lowering(IScheduler scheduler)
         var tasks = keys.Select((k, i) => TaskSpec.FromRemote(new TaskKey(name, i),
             new RemoteCall(Builtins.IdentityMethod, new TaskRef(k)), "concat")).ToArray();
         return new Parts(new GraphLayer(name, tasks, inputs.Select(i => i.Layer)), tasks.Select(t => t.Key).ToArray());
+    }
+
+    private Parts LowerWindow(WindowNode w)
+    {
+        var input = Lower(w.Input);
+        var spec = w.Spec.Encode();
+        var name = TaskKey.NewName("window");
+        if (w.Spec.PartitionBy.Length == 0 || input.Keys.Length == 1)
+        {
+            var single = TaskSpec.FromRemote(new TaskKey(name, 0), new RemoteCall(WindowKernel,
+                new RemoteCall(Concat, new TaskRefList(input.Keys)), spec), "window");
+            return new Parts(new GraphLayer(name, [single], [input.Layer]), [single.Key]);
+        }
+        var n = input.Keys.Length;
+        var (buckets, layer) = Shuffle(input, w.Spec.PartitionBy, n, "window-shuffle");
+        var tasks = Enumerable.Range(0, n).Select(b => TaskSpec.FromRemote(new TaskKey(name, b), new RemoteCall(WindowKernel,
+            new RemoteCall(Concat, new TaskRefList(buckets[b])), spec), "window")).ToArray();
+        return new Parts(new GraphLayer(name, tasks, [layer]), tasks.Select(t => t.Key).ToArray());
     }
 
     private Parts LowerLimit(LimitNode l)

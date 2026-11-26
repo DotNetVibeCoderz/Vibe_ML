@@ -13,6 +13,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- A real ADO.NET provider for the ReadSql connector. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <ProjectReference Include="..\..\src\DaskNet\DaskNet.csproj" />
     <!-- The process-cluster tests start this host as child processes. -->
     <ProjectReference Include="..\..\tools\DaskNet.Worker\DaskNet.Worker.csproj" />

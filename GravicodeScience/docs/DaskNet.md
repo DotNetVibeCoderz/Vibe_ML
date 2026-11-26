@@ -118,8 +118,10 @@ x.Rechunk([5_000, 5_000]);         // re-tile
 x.MapBlocks(b => b * 2);           // any NdArray function, per block (local schedulers only)
 ```
 
-Element-wise operations need equal shapes (there is no broadcasting yet); arrays with different
-chunkings are rechunked to a common grid first.
+Element-wise operations **broadcast** by NumPy's rules, so `x - x.Mean(axis: 0)` centres columns
+and `x / x.Sum(axis: 1).ExpandDims(1)` normalises rows. A stretched operand keeps one chunk along
+the stretched axis and every output block reads it; otherwise arrays with different chunkings are
+rechunked to a common grid first.
 `Random` seeds each block from `(seed, block index)`, so a result does not depend on how many
 threads ran it. Every array kernel is a `[RemoteTask]`, so array graphs run on a cluster as is.
 
@@ -165,7 +167,7 @@ Compare `Explain(optimized: false)` with `Explain()` to see what moved.
 | Operation | Strategy |
 |---|---|
 | `GroupBy().Agg` | partial aggregate per partition, tree-combined (`DefaultSplitEvery`, default 8), finished once. Mean/var/std carry (count, mean, M2) states. |
-| `Join` / `Merge` | **broadcast** when the right side is one partition (inner and left joins); otherwise a **hash shuffle** so matching keys meet. Hashing is FNV-1a over a type-tagged key, because `string.GetHashCode` differs between processes. |
+| `Join` / `Merge` | **broadcast** (inner and left joins) when the right side is one partition or is estimated at or below `Dask.BroadcastJoinBytes` (16 MB); an inner join whose *left* side is the small one is turned around. Otherwise a **hash shuffle** so matching keys meet. `broadcast: true/false` overrides the choice, as Dask's `broadcast=` does. Hashing is FNV-1a over a type-tagged key, because `string.GetHashCode` differs between processes. |
 | `SortBy` | range partitioning on boundaries sampled from the data, so concatenating partitions in order gives a sorted frame. |
 | `Repartition`, `Limit`, `Concat` | merge/split neighbouring partitions; no shuffle. |
 
@@ -181,6 +183,45 @@ partition, writing to `.partial` and renaming so a crashed run leaves no half-wr
 **Checkpointing.** `frame.Checkpoint("ckpt/")` writes every partition to Arrow and returns a
 frame that reads from there; partitions already present are not recomputed, so a long pipeline
 that is re-run after a crash resumes where it stopped. `Persist()` does the same in memory.
+
+**Size estimates.** Join strategy comes from estimated sizes, shown by `Explain()` on each join
+(`[est. left 1.2 MB, right 4 KB]`). In-memory partitions are measured, files count their length on
+disk, a filter is assumed to keep half its input and a projection its share of the columns.
+Where an output cannot be bounded - a grouped aggregate, a join - the estimate errs large,
+because an underestimate is the costly mistake: it would broadcast something big to every
+partition. Partitions from `FromDelayed` or `MapPartitions` have no estimate and never broadcast
+by size. Turning a join around changes row order only, which a shuffled join never promised.
+
+### Connectors: JSON and databases
+
+```csharp
+// JSON Lines, split into byte blocks like CSV; or lines: false for files that hold one array.
+var events = DaskFrame.ReadJson("logs/*.jsonl", blockSize: 32L << 20);
+events.ToJson("out/");                                    // one .jsonl per partition
+
+// Any ADO.NET provider (SQL Server, PostgreSQL, SQLite, MySQL ...), split on a numeric column.
+var orders = DaskFrame.ReadSql(NpgsqlFactory.Instance, connectionString, "sales.orders", index: "id", partitions: 16);
+// ... or one partition per query, for splits a range cannot express.
+var byMonth = DaskFrame.ReadSql(SqliteFactory.Instance, cs, months.Select(m =>
+    new SqlPartition("SELECT * FROM orders WHERE month = @m", new Dictionary<string, object?> { ["m"] = m })).ToList());
+```
+
+**JSON.** Columns and types are fixed from a sample of the first file (`inferenceRows`), then every
+block is read to that schema, so where a block starts cannot change a column's type. A numeric
+string in a numeric column is parsed, a value that does not fit is missing, nested objects and
+arrays are kept as their JSON text, and strings become dates only when every sampled one is
+ISO-8601. Properties that first appear after the sample are ignored.
+
+**Databases.** Dask.Net takes no driver dependency: it binds to `System.Data.Common` through
+GraviFrame's `SqlReader`, and a worker makes its own connections from the provider's
+`DbProviderFactory` (named on the wire by type, so cluster workers must have the provider loaded -
+`--preload`). A table read splits `[MIN, MAX]` of the index column evenly; the first range is open
+below and the last open above and takes the NULL-index rows, so every row is read exactly once
+even with bounds that are too narrow. Only the columns the query needs are selected - projection
+pushdown reaches the SQL. Types are pinned from a schema probe so an empty or all-NULL range
+cannot come back typed differently (a test reproduces exactly that with an untyped SQLite column).
+Table and column names are written into the SQL and must be plain identifiers; values always go
+through parameters. The connection string travels with each task - use TLS on a cluster.
 
 ## SQL (`dask-sql`)
 
@@ -211,12 +252,26 @@ scheduler.
 Supported: `SELECT [DISTINCT]`, `*` and `t.*`, aliases, `FROM` tables and subqueries,
 `[INNER|LEFT|RIGHT|FULL] JOIN ... ON` (equalities between the two sides, plus any extra
 conditions on inner joins), `WHERE`, `GROUP BY` (expressions, output aliases and positions),
-`HAVING`, `ORDER BY` (outputs, positions or any expression), `LIMIT`. Expressions: arithmetic,
+`HAVING`, `ORDER BY` (outputs, positions or any expression), `LIMIT`, and `UNION [ALL]`
+(branches matched by position, combined left to right; `ORDER BY`/`LIMIT` after the last branch
+apply to the whole union). Expressions: arithmetic,
 `||`, comparisons, `AND/OR/NOT`, `IS [NOT] NULL`, `[NOT] IN (...)`, `[NOT] BETWEEN`,
 `[NOT] LIKE`, `CASE` (both forms), `CAST`, `DATE '...'`. Aggregates: `COUNT(*)`, `COUNT`, `SUM`,
-`AVG`, `MIN`, `MAX`, `STDDEV[_SAMP|_POP]`, `VARIANCE`/`VAR_SAMP`/`VAR_POP`. Functions: `ABS`,
+`AVG`, `MIN`, `MAX`, `STDDEV[_SAMP|_POP]`, `VARIANCE`/`VAR_SAMP`/`VAR_POP`, each also as
+`AGG(DISTINCT x)`. Functions: `ABS`,
 `SQRT`, `LN`/`LOG`, `EXP`, `POWER`, `ROUND`, `FLOOR`, `CEIL`, `LOWER`, `UPPER`, `TRIM`, `LENGTH`,
 `COALESCE`, `IFNULL`, `NULLIF`, `CONCAT`, `YEAR`, `MONTH`, `DAY`.
+
+**Window functions**: `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `LAG`/`LEAD` (with an offset) and
+`COUNT`/`SUM`/`AVG`/`MIN`/`MAX` `OVER ([PARTITION BY ...] [ORDER BY ...])`, also over a grouped
+query (`RANK() OVER (ORDER BY SUM(qty) DESC)`, `SUM(SUM(qty)) OVER ()`). Rows are hash-shuffled by
+the partition keys so each window partition is computed whole in one task (no `PARTITION BY`
+gathers everything into one). An aggregate with `ORDER BY` is a running value that includes the
+current row's ties - SQL's default frame, the only one supported. The same operation is
+`DaskFrame.Window(partitionBy, orderBy, new WindowFunction("rn", "row_number"))`.
+
+`COUNT(DISTINCT x)` is computed as distinct (keys, x) pairs, aggregated per key and joined back
+onto the other aggregates, so it costs a second aggregation and a join.
 
 After a join, every column is addressable as `alias.column`; an unqualified name works when only
 one table has it. With `SELECT *`, clashing names come out qualified (`s.product`,
@@ -224,8 +279,8 @@ one table has it. With `SELECT *`, clashing names come out qualified (`s.product
 not copied from the left.
 
 Refused with a `SqlException` that names the position, rather than approximated: `OFFSET`,
-`UNION`, `CROSS JOIN`, `COUNT(DISTINCT ...)`, subqueries outside `FROM`, window functions, CTEs,
-and joins with no equality between the sides.
+`CROSS JOIN`, subqueries outside `FROM`, explicit window frames (`ROWS`/`RANGE BETWEEN`),
+`LAG`/`LEAD` defaults, CTEs, and joins with no equality between the sides.
 
 ## Distributed execution (`dask.distributed`)
 
@@ -250,6 +305,73 @@ dotnet DaskNet.Worker.dll --host 0.0.0.0 --port 8786 --threads 8 --name node-1 -
 
 and connect: `await Client.ConnectAsync(["node-1:8786", "node-2:8786"], token)`.
 
+**Discovery.** Instead of addresses, give the client an `IWorkerDiscovery`. It connects to every
+worker that answers, skips any that do not (a pod still starting), and with `refreshEvery` keeps
+looking: workers that appear later join, between runs or in the middle of one, and are used by the
+next placement decision. `RefreshAsync()` does one round by hand.
+
+```csharp
+var discovery = WorkerDiscovery.Dns("dask-workers.analytics.svc.cluster.local", 8786);  // Kubernetes
+// WorkerDiscovery.Aspire("dask-worker-*", "tcp")        .NET Aspire service discovery
+// WorkerDiscovery.EnvironmentVariable("DASKNET_WORKERS") "host:port,host:port"
+// WorkerDiscovery.Static(...), .From(lookup), .Combine(a, b)
+await using var client = await Client.ConnectAsync(discovery, token, tls, refreshEvery: TimeSpan.FromSeconds(30));
+```
+
+Neither needs a package. On Kubernetes, a headless Service resolves to one record per ready pod,
+so scaling the Deployment is what grows the cluster:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata: { name: dask-workers }
+spec:
+  clusterIP: None              # headless: the name resolves to every ready pod
+  selector: { app: dask-worker }
+  ports: [{ port: 8786 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: dask-worker }
+spec:
+  replicas: 4
+  selector: { matchLabels: { app: dask-worker } }
+  template:
+    metadata: { labels: { app: dask-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: registry.example/dasknet-worker:2.2.0   # dotnet publish tools/DaskNet.Worker
+          args: ["--threads", "4", "--memory-limit", "6GB", "--preload", "/app/MyTasks.dll"]
+          env:
+            - { name: DASKNET_HOST, value: "0.0.0.0" }
+            - { name: DASKNET_PORT, value: "8786" }
+            - { name: DASKNET_TOKEN, valueFrom: { secretKeyRef: { name: dask, key: token } } }
+          resources: { limits: { memory: 8Gi } }
+```
+
+With .NET Aspire, the AppHost injects `services__{name}__{endpoint}__{i}` variables into
+whatever references a resource; `WorkerDiscovery.Aspire` reads them. The worker host takes its
+port from `DASKNET_PORT` and its bind address from `DASKNET_HOST` when the flags are absent.
+`WithReplicas` would put replicas behind one proxied address that looks like a single worker, so
+declare one resource per worker and match them with a wildcard:
+
+```csharp
+// AppHost: one resource per worker, so each has its own address.
+var token = builder.AddParameter("dask-token", secret: true);
+var app = builder.AddProject<Projects.MyApp>("app").WithEnvironment("DASKNET_TOKEN", token);
+for (var i = 0; i < 3; i++)
+{
+    var worker = builder.AddProject<Projects.DaskNet_Worker>($"dask-worker-{i}")
+        .WithEndpoint(name: "tcp", scheme: "tcp", env: "DASKNET_PORT")
+        .WithEnvironment("DASKNET_TOKEN", token);
+    app.WithReference(worker.GetEndpoint("tcp"));
+}
+
+// MyApp
+var client = await Client.ConnectAsync(WorkerDiscovery.Aspire("dask-worker-*", "tcp"), token);
+```
+
 **What crosses the wire.** Tasks are a method reference plus arguments. Only `public static`
 methods marked `[RemoteTask]` can be named — a worker refuses anything else, so a client can't
 make it run `File.Delete`. Values use a closed binary codec (numbers, strings, arrays, `NdArray`,
@@ -261,14 +383,51 @@ sent.
 inputs, breaking ties by the fewest tasks in flight. Workers fetch missing inputs from each other directly,
 not through the client, and the client releases results once nothing needs them.
 
+**Memory limits and spilling.** `WorkerOptions.MemoryLimit` (CLI `--memory-limit 4GB`,
+`LocalCluster.StartAsync(memoryLimit: ...)`) caps the results a worker keeps in memory. Past
+`MemoryTarget` of it (0.6, as in Dask) the least recently used results are written to
+`SpillDirectory` in their wire encoding and read back when a task needs them; a peer asking for a
+spilled result is sent the file's bytes without decoding them. A result larger than the target on
+its own is read through and stays on disk rather than evicting everything else. Sizes are
+estimates (8 bytes a number, UTF-16 for text; `SizeOf.Estimate`), not the process's working set,
+and `GetWorkerInfoAsync` reports memory, spilled keys and spilled bytes per worker. A test centres
+an 8 MB array on a worker limited to 1 MB and checks the answer is bit-identical.
+
 **Fault tolerance.** When a worker disappears, the client marks every result it held as lost and
 re-plans: tasks whose inputs are gone are recomputed from the graph's lineage, then the run
 continues on the remaining workers. Retries cover tasks that throw. Both are tested by killing a
 worker (in-process and as a real process) halfway through a run.
 
 **Security.** Connections start with an HMAC-SHA256 challenge on the shared token, so only
-holders of the token can submit tasks. Traffic is **not encrypted** — keep the cluster on a
-trusted network or tunnel it; TLS is on the roadmap.
+holders of the token can submit tasks. Without TLS, traffic is plain text: anyone on the network
+path can read task arguments and results.
+
+**TLS.** Give the same `TlsOptions` to every worker and to the client; workers use them for
+peer-to-peer transfers too. TLS is negotiated first and the token handshake runs inside it.
+
+```csharp
+// One self-signed certificate for the whole cluster, pinned by hash, client certificates required.
+var tls = TlsOptions.SelfSigned();
+await using var worker = await Worker.StartAsync(new WorkerOptions { Token = token, Tls = tls });
+await using var client = await Client.ConnectAsync([worker.Address], token, tls);
+
+// Or let LocalCluster do it (child processes get the key in a temp .pfx, deleted on dispose).
+await using var cluster = await LocalCluster.StartAsync(workers: 4, tls: true);
+```
+
+```bash
+export DASKNET_TLS_PASSWORD=...
+dotnet DaskNet.Worker.dll --port 8786 --tls-pfx cluster.pfx [--tls-trust client.cer]
+```
+
+A peer is accepted when its certificate's SHA-256 hash is in `TrustedCertificates` (pinning), or,
+when nothing is pinned, when the operating system's chain and host-name checks pass.
+`FromCertificate`/`FromPfx`/`SelfSigned` pin the one certificate and require it from clients
+(mutual TLS). Mismatched settings fail fast with a reason: a plain client against a TLS worker
+gets a `TimeoutException` that mentions TLS, a TLS client against a plain worker or an untrusted
+certificate gets an `AuthenticationException`, and a wrong token is still
+`UnauthorizedAccessException`. A test relays the traffic through a recording proxy and checks
+that a marker sent as a task argument is readable without TLS and absent with it.
 
 ## Observability
 
@@ -304,23 +463,23 @@ Dask.Net for the data that doesn't, not for speed.
 |---|---|
 | Partitioned, lazy DataFrame; query optimisation; predicate and projection pushdown | **Done** |
 | CSV (block-split), Arrow IPC, any file via `ReadFiles` (Parquet through GraviFrame.Parquet) | **Done** |
-| JSON, Excel, Delta Lake, Iceberg, Hudi | Roadmap (`ReadFiles` with a reader works today) |
-| Lazy engine: deferred execution, planner, pipeline fusion | **Done**; cost-based optimisation is roadmap (rules only) |
+| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines and arrays, read and write) **done**; the rest through `ReadFiles` with a reader (Excel: GraviFrame's `ExcelReader`); table formats are roadmap |
+| Lazy engine: deferred execution, planner, pipeline fusion | **Done**; join strategy is cost-based (size estimates), the other rewrites are rule-based; multi-way join reordering is roadmap |
 | DAG scheduler: visualisation (DOT/Mermaid), cull/fuse, retry policy, dependency tracking | **Done** |
-| Local cluster: multi-core, process isolation | **Done**; per-worker memory limits are roadmap |
+| Local cluster: multi-core, process isolation, per-worker memory limits with spill to disk | **Done** |
 | Multi-node cluster over TCP | **Done**; gRPC/QUIC/HTTP/3 transports are roadmap |
-| Worker discovery (Consul, Kubernetes, Service Fabric, Aspire) | Roadmap — addresses are passed explicitly |
+| Worker discovery (Consul, Kubernetes, Service Fabric, Aspire) | **Done** for Kubernetes (headless-Service DNS) and Aspire, with background refresh so workers can join a live client; Consul/Service Fabric through `WorkerDiscovery.From` |
 | Parallel LINQ: map, reduce, fold, aggregate, shuffle, broadcast | **Done** (`Bag`) |
 | Distributed collections (`DistributedList` etc.) | Roadmap; `Bag`, `DaskArray` and `Persist` cover the read-mostly cases |
 | Arrow: zero-copy, cross-language | Arrow IPC files **done**; shared memory between processes is roadmap |
-| SQL: joins, aggregations | **Done**; window functions, CTE and full ANSI are roadmap |
+| SQL: joins, aggregations, UNION, window functions | **Done**; explicit window frames, CTE and full ANSI are roadmap |
 | GIS, ML, ETL/streaming, AI, vector databases | Roadmap (separate modules) |
 | Observability: OpenTelemetry | **Done** (ActivitySource + Meter); Prometheus/Grafana/Jaeger via the OTel exporters |
 | Kubernetes operator, Aspire dashboard | Roadmap |
 | Fault tolerance: task retry, checkpointing, worker recovery | **Done**; speculative execution is roadmap |
-| Storage connectors (databases, data lakes, warehouses) | Roadmap |
+| Storage connectors (databases, data lakes, warehouses) | Databases **done** through any ADO.NET provider (range- or query-partitioned, remotable); lakes and warehouses are roadmap |
 | Schedulers: thread, cluster | **Done**; a process pool is `LocalCluster.StartProcessesAsync`; Kubernetes is roadmap |
-| Security: token-authenticated workers | **Done**; TLS/mTLS/OAuth2/Entra ID, multi-tenancy and quotas are roadmap |
+| Security: token-authenticated workers, TLS and mutual TLS | **Done**; OAuth2/Entra ID, multi-tenancy and quotas are roadmap |
 
 ## Known limits
 

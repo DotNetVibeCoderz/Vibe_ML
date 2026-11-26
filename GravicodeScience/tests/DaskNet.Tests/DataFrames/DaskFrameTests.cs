@@ -190,14 +190,22 @@ public sealed class DaskFrameTests
         Assert.True(double.IsNaN(none.Numeric("m")[0]));
     }
 
+    /// <summary>Every kind, with the right side in one or several partitions, under each broadcast
+    /// setting - so the shuffle path stays covered now that small joins broadcast by size.</summary>
+    public static TheoryData<JoinKind, int, bool?> JoinCases()
+    {
+        var data = new TheoryData<JoinKind, int, bool?>();
+        foreach (var kind in new[] { JoinKind.Inner, JoinKind.Left, JoinKind.Right, JoinKind.Outer })
+            foreach (var partitions in new[] { 1, 3 })
+                foreach (var broadcast in new bool?[] { null, false, true })
+                    if (broadcast != true || kind is JoinKind.Inner or JoinKind.Left)
+                        data.Add(kind, partitions, broadcast);
+        return data;
+    }
+
     [Theory]
-    [InlineData(JoinKind.Inner, 1)]
-    [InlineData(JoinKind.Inner, 3)]
-    [InlineData(JoinKind.Left, 1)]
-    [InlineData(JoinKind.Left, 4)]
-    [InlineData(JoinKind.Right, 2)]
-    [InlineData(JoinKind.Outer, 3)]
-    public void Joins_match_graviframe(JoinKind kind, int rightPartitions)
+    [MemberData(nameof(JoinCases))]
+    public void Joins_match_graviframe(JoinKind kind, int rightPartitions, bool? broadcast)
     {
         var products = new DataFrame([
             new TextSeries("product", Enumerable.Range(0, 15).Select(i => (string?)$"p{i:D2}").ToArray()),
@@ -206,7 +214,11 @@ public sealed class DaskFrameTests
         ]);
         var left = Sales.Rows(0, 300);
         var expected = Joins.Merge(left, products, "product", "product", kind);
-        var actual = DaskFrame.FromFrame(left, 5).Join(DaskFrame.FromFrame(products, rightPartitions), "product", kind).Compute();
+        var joined = DaskFrame.FromFrame(left, 5).Join(DaskFrame.FromFrame(products, rightPartitions), "product", kind, broadcast: broadcast);
+        var explain = joined.Explain();
+        if (broadcast == false) Assert.Contains("hash shuffle", explain);
+        if (broadcast == true || (broadcast is null && kind is JoinKind.Inner or JoinKind.Left)) Assert.Contains("broadcast right", explain);
+        var actual = joined.Compute();
         Assert.Equal(expected.ColumnNames, actual.ColumnNames);
         Assert.Equal(SalesData.Rows(expected, sorted: true), SalesData.Rows(actual, sorted: true));
     }

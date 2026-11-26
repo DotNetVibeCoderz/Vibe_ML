@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v2.1.0 · **Target framework**: .NET 10 · **Tests**: 4,243 passing, 0 failing
+**Release**: v2.2.0 · **Target framework**: .NET 10 · **Tests**: 4,312 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -18,7 +18,7 @@ Roadmap: [PLAN.md](PLAN.md)
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
 | SciNet | ✅ Complete | 2,198 tests — SciPy for .NET, all 15 `scipy.*` modules |
-| Dask.Net | ✅ Core complete | 115 tests — task graphs, Bag, Array, DataFrame, SQL, TCP cluster with recovery; see the coverage table in docs/DaskNet.md |
+| Dask.Net | ✅ Core complete | 184 tests — task graphs, Bag, Array, DataFrame, SQL (windows, UNION, DISTINCT aggregates), TCP cluster with recovery, TLS, spilling, discovery, cost-based joins, JSON/SQL connectors; see the coverage table in docs/DaskNet.md |
 | Sample apps | ✅ Complete | 8 apps, all run end to end |
 | Notebooks | ✅ Complete | 8 notebooks, cells compile-checked |
 | Benchmarks | ✅ Complete | 8 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
@@ -251,7 +251,7 @@ remains the better baseline on a small dataset.
 
 ---
 
-### Dask.Net — 115 tests
+### Dask.Net — 184 tests
 
 - [x] Task graph core: `TaskKey`/`TaskSpec`/`GraphLayer`, cull, linear fusion, depth-first
   priorities, cycle detection, DOT and Mermaid (task-level and layer-level)
@@ -268,13 +268,39 @@ remains the better baseline on a small dataset.
   types; Arrow I/O; atomic writes; resumable `Checkpoint`
 - [x] `SqlContext`: SELECT/DISTINCT, joins of all four kinds, WHERE, GROUP BY (expressions,
   aliases, positions), HAVING, ORDER BY (hidden expressions), LIMIT, subqueries in FROM, CASE,
-  CAST, IN/BETWEEN/LIKE; positioned errors for what is refused
+  CAST, IN/BETWEEN/LIKE; `AGG(DISTINCT x)`, `UNION [ALL]`, window functions (ROW_NUMBER, RANK,
+  DENSE_RANK, LAG, LEAD, running and per-partition aggregates); positioned errors for what is
+  refused
+- [x] `DaskArray` broadcasting by NumPy rules, `ExpandDims`
+- [x] Cost-based join strategy: size estimates per plan node, broadcast by size, small inner-join
+  left sides turned around, `broadcast:` override; `Explain` shows the estimates
+- [x] Connectors: `ReadJson`/`ToJson` (JSON Lines in byte blocks, arrays), `ReadSql` through any
+  ADO.NET provider (index ranges or one query per partition), types pinned across partitions
 - [x] Distributed: closed wire codec, HMAC token handshake, workers with peer-to-peer fetch,
   `Client` with locality placement and lineage recovery, `LocalCluster` in-process or as child
   processes (`tools/DaskNet.Worker`)
-- [x] Verified: SQL against LINQ over the raw rows; joins against GraviFrame; optimised plans equal
-  unoptimised results; cluster results equal thread results bit for bit; a worker killed mid-run
-  (in-process and as a real process) is recovered by recomputation
+- [x] TLS and mutual TLS (`TlsOptions`: pinned or system-validated certificates), verified on the
+  wire by a recording relay
+- [x] Per-worker memory limits with LRU spill to disk (`WorkerOptions.MemoryLimit`, `--memory-limit`)
+- [x] Worker discovery: Kubernetes DNS, Aspire service discovery, environment, custom; background
+  refresh adds workers to a live client, mid-run included
+- [x] Verified: SQL against LINQ over the raw rows; joins against GraviFrame under every broadcast
+  setting; optimised plans equal unoptimised results; cluster results equal thread results bit for
+  bit; a worker killed mid-run (in-process and as a real process) is recovered by recomputation;
+  an 8 MB computation on a worker limited to 1 MB is bit-identical; a swapped join keeps names,
+  order and rows
+
+## 2.2.0 — Dask.Net: TLS, spilling, discovery, cost-based joins, connectors (2026-11-26)
+
+Dask.Net gains TLS and mutual TLS, per-worker memory limits with LRU spill to disk, worker discovery
+(Kubernetes DNS, Aspire, environment) with workers joining a live client, NumPy broadcasting for
+`DaskArray`, SQL `AGG(DISTINCT)`, `UNION [ALL]` and window functions, size-estimated join strategy
+(broadcast under `Dask.BroadcastJoinBytes`, small inner-join left sides turned around, `broadcast:`
+override), and `ReadJson`/`ToJson`/`ReadSql` connectors. Fixes: `COUNT(*)` with no named column
+returned 0; worker losses were sometimes recovered without a `Recomputing` event; a TLS mismatch
+could surface as a bare `EndOfStreamException`. Behaviour change: small inner/left joins now
+broadcast by default. `WorkerInfo` has three more members. Other packages are unchanged and
+re-released at 2.2.0.
 
 ## 2.1.0 — Dask.Net (2026-11-26)
 
@@ -301,6 +327,9 @@ Each is now covered by a regression test.
 | Cora reported 1,550 components, largest 77 nodes | `ConnectedComponents` followed out-edges only on a directed graph | Weak connectivity; added `StronglyConnectedComponents` |
 | Node embeddings put same-topic papers *further* apart | Random walks on a directed citation graph strand after one step | Added `Graph.AsUndirected()` |
 | Every word similarity ≈ 1.00 | Trained vectors share a dominant common direction | Added `RemoveCommonComponent()` |
+| Dask.Net `SELECT COUNT(*) FROM t` returned 0 | Projection pushdown pruned the scan to zero columns when no column was named, and a frame with no columns has no rows | A scan always keeps one column; `Queries_naming_no_column_still_count_rows` |
+| Dask.Net recomputed lost results without reporting `Recomputing` | A handle is marked dead when its connection drops, but the loss handler runs from a queue; a `Dispatch` in between replanned the dead holders away, so the handler found nothing to report. `GatherAsync` could also pick a holder with `First(h => h.Alive)` after the only one died | Losses are reported from `Replan`; gather recovers before choosing a holder; the kill tests' gate opens on an event after the kill |
+| Dask.Net TLS mismatch error depended on timing | A plain client and a TLS worker both time out the handshake after 10 s; when the worker's timer won, the client saw a bare `EndOfStreamException` | End of stream before the greeting is reported as the same "is the worker expecting TLS?" timeout |
 | Variational inference returned θ = 11.3 for a Beta parameter | The Gaussian family was fitted on the constrained scale | Support transforms with log Jacobians |
 | `AggregateException` from a misspecified model | `Parallel.For` wrapped the real exception | Probe for a feasible start before going parallel |
 | `GroupBy.Aggregate` with a custom result name threw | The output name was used to look up the source column | Separate source and output names |
