@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    dask-worker for Dask.Net: hosts one worker process. The token comes from DASKNET_TOKEN; the
+    options are host, port, threads, name and preload (see Worker.RunCommandLineAsync).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.DaskNet.WorkerHost</RootNamespace>
+    <AssemblyName>DaskNet.Worker</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DaskNet\DaskNet.csproj" />
+  </ItemGroup>
+
+</Project>

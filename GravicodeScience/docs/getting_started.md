@@ -230,6 +230,34 @@ Console.WriteLine($"P(|Z| > 1.96) = {2 * Stats.Norm().Sf(1.96):F4}");
 
 ---
 
+## Dask.Net
+
+```csharp
+using Gravicode.Science.DaskNet;
+using Gravicode.Science.DaskNet.Sql;
+using static Gravicode.Science.DaskNet.Expr;
+
+// A lazy, partitioned CSV: the filter is pushed into the scan, columns nobody reads are not parsed.
+var prices = DaskFrame.ReadCsv("datasets/finance_timeseries.csv", blockSize: 8 * 1024);
+var monthly = prices.WithColumn("month", Col("date").Month())
+    .Filter(Col("volume") > 500_000)
+    .GroupBy("ticker", "month").Agg(("close", "mean"));
+Console.WriteLine(monthly.Explain());
+Console.WriteLine(monthly.Compute());
+
+// The same engine through SQL.
+var sql = new SqlContext().RegisterCsv("titanic", "datasets/titanic.csv");
+Console.WriteLine(sql.Execute("SELECT class, AVG(survived) AS rate FROM titanic GROUP BY class ORDER BY rate DESC"));
+
+// A chunked array reduction on the thread pool.
+var x = DaskArray.RandomNormal([4000, 4000], [1000, 1000], seed: 1);
+Console.WriteLine($"std = {x.Std().Compute():F4}");
+```
+
+[Full guide →](DaskNet.md)
+
+---
+
 ## Using several libraries together
 
 The libraries are designed to hand data to each other without conversion glue:

@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-v0.1.0 is implemented and complete against `requirements.md`, and a seventh library, **SciNet**
-(SciPy for .NET), has been added beside the original six: 28 projects, **4,128 tests passing**
-(2,983 of them SciNet's, 47 ScienceAppGen's), seven samples that run end to end, seven notebooks, seven benchmark
-suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
+v0.1.0 is implemented and complete against `requirements.md`, a seventh library, **SciNet**
+(SciPy for .NET), has been added beside the original six, and an eighth, **Dask.Net** (Dask +
+dask-sql, `src/DaskNet`, 115 tests), against `Dask.Net-Features.md`. The solution has 38 projects and
+**4,243 tests passing** (2,983 of them SciNet's, 115 Dask.Net's, 47 ScienceAppGen's), eight samples
+that run end to end, eight notebooks, eight benchmark suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
 Target framework is **.NET 10** (SDK 10.0.400 installed locally). The solution file is
@@ -404,6 +405,45 @@ its own folder of `src/SciNet/` and `tests/SciNet.Tests/`.
 - **An empty variable-length string is a null heap ID** on disk (that is what HDF5 writes), so
   SciNet's reader returns null for it; h5py returns ''.
 
+### DaskNet specifics
+
+`src/DaskNet` (namespace `Gravicode.Science.DaskNet`; `.Distributed`, `.Sql`) depends on GraviNum
+and GraviFrame only. The worker host is `tools/DaskNet.Worker`; the test project references it so
+`DaskNet.Worker.dll` lands next to the tests for the process-cluster tests.
+
+- **Only `[RemoteTask]` public static methods cross the wire, by name.** A lambda graph runs
+  locally and is refused by `Client` with `NotSupportedException`. Every array/frame/SQL kernel
+  must stay a `[RemoteTask]` - a `Then(lambda)` sneaking into a lowering silently makes the whole
+  collection local-only (`FinishReduce` exists because full reductions did exactly that).
+- **Join hashing is FNV-1a over GraviFrame's join `Signature`, never `GetHashCode`.** String
+  hashes are randomised per process, so workers would route the same key to different partitions
+  and a join would quietly drop matches. Only visible on a real cluster.
+- **Pushing a right-side predicate below a LEFT join is wrong**: it turns "no match" (kept, nulls)
+  into "dropped". The optimiser only pushes the preserved side's predicates through outer joins.
+- **`TreeReduce` takes a key factory**; a combine that ignored the given key produced a root under
+  the wrong key. And `Sum(int)` was ambiguous between axis and split_every - split_every is now
+  `WithSplitEvery`, never a positional int.
+- **Variance merges are Welford shifted by the first value, combined with Chan.** At values ~1e9
+  the plain form lost every digit.
+- **SQL qualifies every column as `alias.col` once a query has a join**, so `a.id`/`b.id` both
+  survive and a left join leaves `b.id` missing. Multi-key joins go through temporary `__key{i}`
+  copies because `JoinFrames` needs equal names for several keys. Output name dedup must find
+  clashes *before* renaming any (it once renamed the first and missed the second).
+- **`WireConnection.Abort` must tolerate a disposed socket** - `TcpClient.Client` is null after
+  Dispose, and killing a worker whose connection already closed threw.
+- **Kill-a-worker tests trigger on an event, never a clock.** `ClusterTests.RunAndKill` kills the
+  victim on its first finished leaf, and every leaf is consumed together with a slow "gate" task
+  so the result cannot have been released yet. Wall-clock kills passed alone and failed in the
+  full suite under load, when the victim had finished nothing - assert `Recomputing`, or a
+  "recovery" test can pass without recovering anything.
+- **Notebook cells cannot declare `[RemoteTask]` classes** (the cell checker concatenates cells as
+  top-level statements, and submission types are not resolvable by workers). Use library kernels
+  on clusters in notebooks.
+- **Per-task overhead is ~5-9 us**; partitioning a frame that fits in memory is slower than one
+  GraviFrame call. Don't quote Dask.Net as a speed-up for in-memory data.
+- **The icon is neon 640 nm**; `make_icons.py DaskNet` renders only it, and SciNet's strip keeps
+  its original six lines so published icons do not change.
+
 ### ScienceAppGen specifics
 
 - **Anthropic has no official Semantic Kernel connector** — `AnthropicChatCompletionService` is
@@ -494,7 +534,7 @@ exactly what ran.
 
 ## Packaging and CI
 
-The seven libraries under `src/` pack as `Gravicode.Science.*`; everything else is
+The libraries under `src/` (eight, plus GraviFrame.Parquet) pack as `Gravicode.Science.*`; everything else is
 `IsPackable=false`. Metadata lives once in `Directory.Build.props`, not in seven `.csproj` files.
 
 - **Each package's icon is `assets/icons/$(MSBuildProjectName).png`**, packed as `icon.png` by
@@ -538,11 +578,13 @@ The seven libraries under `src/` pack as `Gravicode.Science.*`; everything else 
 | `GraviGraph` | PyTorch Geometric / DGL | Graph structures, PageRank/centrality, node2vec, GCN/GAT |
 | `GraviProb` | PyMC / Stan | Distributions, `BayesianModel`, MCMC & variational inference |
 | `SciNet` | SciPy | Special functions, optimize, integrate/ODE, interpolate, linalg, fft, signal, stats, ndimage, cluster, sparse, spatial, io |
+| `DaskNet` | Dask / dask-sql | Task graphs and schedulers, `Bag`, chunked `DaskArray`, partitioned `DaskFrame` with optimiser, SQL, TCP cluster |
 
 **The dependency direction matters:** `GraviNum` is the foundation — every other library builds on its array/tensor and linear-algebra layer. Never introduce a dependency from `GraviNum` back up the stack. The actual graph as built:
 
 ```
 GraviNum ──┬── GraviFrame ── GraviLearn ── GraviText ── GraviGraph
+           │        └── DaskNet
            ├── GraviProb
            └── SciNet
 ```

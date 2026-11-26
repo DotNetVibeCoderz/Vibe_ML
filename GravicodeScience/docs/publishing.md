@@ -1,7 +1,7 @@
 # Publishing and CI
 
-Seven packages ship from `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviLearn`,
-`.GraviText`, `.GraviGraph`, `.GraviProb` and `.SciNet`. Everything else in the repository — samples,
+Nine packages ship from `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviFrame.Parquet`,
+`.GraviLearn`, `.GraviText`, `.GraviGraph`, `.GraviProb`, `.SciNet` and `.DaskNet`. Everything else in the repository — samples,
 benchmarks, notebooks, tests, ScienceAppGen — is marked `IsPackable=false` and never leaves.
 
 ## Where the metadata lives

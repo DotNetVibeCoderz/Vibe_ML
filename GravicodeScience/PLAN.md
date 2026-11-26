@@ -789,3 +789,32 @@ Worth stating so the scope stays legible:
 
 *Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil*
 
+---
+
+## Dask.Net — parallel and distributed computing
+
+Added as an eighth library, against `Dask.Net-Features.md`. That document describes a product
+the size of Spark; what shipped is the core every other module would sit on, built so each
+piece is tested rather than sketched. The coverage table in [docs/DaskNet.md](docs/DaskNet.md#coverage-of-the-feature-list)
+is the authoritative list.
+
+**Done:** task graphs with cull/fuse/priorities and DOT/Mermaid output; thread and synchronous
+schedulers with retries, result release and telemetry; `Delayed`, `Bag`, `DaskArray`,
+`DaskFrame` (rule-based optimiser, tree aggregation, broadcast and shuffle joins, range sort,
+CSV/Arrow I/O, checkpointing); a SQL front end; TCP workers with token authentication,
+locality-aware placement, peer-to-peer data transfer and lineage recovery.
+
+**Next, in order of what unblocks the most:**
+
+1. **TLS on the wire.** Authentication is there; encryption is not, which confines clusters to
+   trusted networks.
+2. **Broadcasting in `DaskArray`** element-wise ops, and `COUNT(DISTINCT)` / `UNION` / window
+   functions in SQL.
+3. **Spill to disk** on workers under memory pressure, and per-worker memory limits.
+4. **Worker discovery** (Aspire service discovery first, then Kubernetes) instead of explicit
+   addresses.
+5. **Cost-based join ordering** — the optimiser is rule-based; it chooses broadcast vs shuffle by
+   partition count, not by size.
+6. Connectors (Parquet is already reachable through `ReadFiles`; JSON and databases next), then
+   the GIS/ML/streaming modules as separate packages.
+

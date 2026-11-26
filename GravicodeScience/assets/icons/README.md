@@ -20,6 +20,7 @@ The script writes the SVG sources and renders 256×256 PNGs with a headless Chro
 | GraviGraph | `#4F46D6` | H-gamma, 434 nm | a graph with one hub |
 | GraviProb | `#9634C8` | calcium K, 393 nm | posterior with its interval shaded |
 | SciNet | `#16132E` ink | the whole spectrum | an integral over a damped wave, above all six lines |
+| DaskNet | `#EC6A2C` | neon, 640 nm | four partitions reduced in a tree to one result |
 
 Every tile shares one lattice bent towards the same mass in the lower-right corner — the "Gravi"
 in the names — so the family reads as a set even at 32 px, where only the glyph is legible.
@@ -27,6 +28,9 @@ SciNet is the instrument rather than a line: its strip places the six library co
 real relative wavelengths.
 
 A new library needs a colour from a real emission line not yet used, a glyph function in
-`make_icons.py`, and an entry in `LINES`/`GLYPHS`.
+`make_icons.py`, and an entry in `LINES`/`GLYPHS`. SciNet's strip keeps the six lines it was
+published with (`WAVELENGTHS`), so adding a library does not change a released icon. Render only
+the new one with `python tools/icons/make_icons.py DaskNet`: re-rendering the others through a
+different browser build moves pixels in icons that have already shipped.
 
 Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.

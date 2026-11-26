@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.Benchmarks.DaskNet</RootNamespace>
+    <AssemblyName>DaskNet.Benchmark</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <ProjectReference Include="..\..\src\DaskNet\DaskNet.csproj" />
+  </ItemGroup>
+
+</Project>

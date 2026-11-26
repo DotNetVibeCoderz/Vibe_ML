@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v2.0.0 · **Target framework**: .NET 10 · **Tests**: 4,081 passing, 0 failing
+**Release**: v2.1.0 · **Target framework**: .NET 10 · **Tests**: 4,243 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -10,7 +10,7 @@ Roadmap: [PLAN.md](PLAN.md)
 
 | Area | Status | Notes |
 |---|---|---|
-| Solution and build | ✅ Complete | 28 projects, central package management, Release build clean |
+| Solution and build | ✅ Complete | 38 projects, central package management, Release build clean |
 | GraviNum | ✅ Complete | 301 tests |
 | GraviFrame | ✅ Complete | 165 tests |
 | GraviLearn | ✅ Complete | 176 tests |
@@ -18,9 +18,10 @@ Roadmap: [PLAN.md](PLAN.md)
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
 | SciNet | ✅ Complete | 2,198 tests — SciPy for .NET, all 15 `scipy.*` modules |
-| Sample apps | ✅ Complete | 7 apps, all run end to end |
-| Notebooks | ✅ Complete | 7 notebooks, cells compile-checked |
-| Benchmarks | ✅ Complete | 7 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
+| Dask.Net | ✅ Core complete | 115 tests — task graphs, Bag, Array, DataFrame, SQL, TCP cluster with recovery; see the coverage table in docs/DaskNet.md |
+| Sample apps | ✅ Complete | 8 apps, all run end to end |
+| Notebooks | ✅ Complete | 8 notebooks, cells compile-checked |
+| Benchmarks | ✅ Complete | 8 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
 | Datasets | ✅ Complete | 4 real, 4 generated |
 | Documentation | ✅ Complete | 10 pages × 2 languages, with a visualisation gallery per library |
 | Screenshots | ✅ Complete | 13 rendered by the samples, plus 6 of ScienceAppGen |
@@ -250,6 +251,36 @@ remains the better baseline on a small dataset.
 
 ---
 
+### Dask.Net — 115 tests
+
+- [x] Task graph core: `TaskKey`/`TaskSpec`/`GraphLayer`, cull, linear fusion, depth-first
+  priorities, cycle detection, DOT and Mermaid (task-level and layer-level)
+- [x] `ThreadScheduler`/`SynchronousScheduler`: dependency counting, results released after their
+  last reader, `RetryPolicy`, cancellation, `TaskEvent` callbacks, OpenTelemetry activities/metrics
+- [x] `Delayed<T>` with method groups that become remotable when marked `[RemoteTask]`
+- [x] `Bag<T>`: map/filter/flatmap, tree reductions, `FoldBy`, `Frequencies`, `TopK`, shuffle
+  `GroupBy`/`Distinct`, `Repartition`, `Zip`, block-split `ReadText`, LINQ query syntax
+- [x] `DaskArray`: chunked `NdArray`, element-wise ops with rechunking, full and axis reductions
+  (Chan-merged moments), blocked `Dot`, transpose, rechunk, per-block seeded random
+- [x] `DaskFrame`: serialisable `Expr` with SQL null logic; rule optimiser (predicate pushdown
+  through joins with outer-join semantics, projection pushdown); pipeline fusion; tree
+  aggregation; broadcast and hash-shuffle joins; sampled range sort; CSV byte blocks with pinned
+  types; Arrow I/O; atomic writes; resumable `Checkpoint`
+- [x] `SqlContext`: SELECT/DISTINCT, joins of all four kinds, WHERE, GROUP BY (expressions,
+  aliases, positions), HAVING, ORDER BY (hidden expressions), LIMIT, subqueries in FROM, CASE,
+  CAST, IN/BETWEEN/LIKE; positioned errors for what is refused
+- [x] Distributed: closed wire codec, HMAC token handshake, workers with peer-to-peer fetch,
+  `Client` with locality placement and lineage recovery, `LocalCluster` in-process or as child
+  processes (`tools/DaskNet.Worker`)
+- [x] Verified: SQL against LINQ over the raw rows; joins against GraviFrame; optimised plans equal
+  unoptimised results; cluster results equal thread results bit for bit; a worker killed mid-run
+  (in-process and as a real process) is recovered by recomputation
+
+## 2.1.0 — Dask.Net (2026-11-26)
+
+New package `Gravicode.Science.DaskNet`: parallel and distributed computing (Dask + dask-sql for .NET). No
+changes to the existing packages' APIs; they are re-released at 2.1.0 so the family shares one version.
+
 ## 2.0.0 — Parquet split (2026-11-12)
 
 `ParquetIO` moved from GraviFrame into the new package `Gravicode.Science.GraviFrame.Parquet` (same namespace and API). GraviFrame,
@@ -347,6 +378,11 @@ Each is now covered by a regression test.
 ---
 
 ## Next
+
+**Dask.Net** was added as an eighth library (Dask + dask-sql for .NET) with its sample, notebook,
+benchmark suite, bilingual docs and icon. It implements the core of `Dask.Net-Features.md`; the
+cloud, GIS, ML, streaming and enterprise modules in that document are roadmap, listed in
+[PLAN.md](PLAN.md#dasknet--parallel-and-distributed-computing).
 
 **SciNet** (SciPy for .NET) was added as a seventh library, with its sample, notebook, benchmark
 suite, bilingual docs and a NuGet icon for every package; the suite grew from 1,059 to 2,699.

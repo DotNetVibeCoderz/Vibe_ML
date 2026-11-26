@@ -6,7 +6,7 @@ The family system:
 * Each library's tile colour is a real emission line - the colour a spectroscope sees when that
   element glows. GraviNum is H-alpha (656 nm), GraviFrame the sodium D doublet (589 nm), GraviLearn
   the mercury green line (546 nm), GraviText H-beta (486 nm), GraviGraph H-gamma (434 nm) and
-  GraviProb calcium K (393 nm).
+  GraviProb calcium K (393 nm), DaskNet the neon line (640 nm) that lights every sign.
 * Every tile carries the same lattice, bent towards one mass in the lower-right corner - the
   "Gravi" in the name. The bend is identical across the family, so the icons read as one set even
   at 32 px where the glyphs are all that is legible.
@@ -15,6 +15,7 @@ The family system:
 
 Usage:
     python tools/icons/make_icons.py          # writes assets/icons/*.svg, renders *.png and preview.png
+    python tools/icons/make_icons.py DaskNet  # only the named icons (re-rendering the others moves pixels)
 
 PNG rendering uses a headless Chrome or Edge with a transparent background; no Python packages
 are needed beyond the standard library.
@@ -44,6 +45,7 @@ LINES = {
     "GraviText":  ("#1B95BC", PAPER, "H\u03b2 486 nm"),
     "GraviGraph": ("#4F46D6", PAPER, "H\u03b3 434 nm"),
     "GraviProb":  ("#9634C8", PAPER, "Ca K 393 nm"),
+    "DaskNet":    ("#EC6A2C", INK,   "Ne 640 nm"),
 }
 WAVELENGTHS = {"GraviNum": 656, "GraviFrame": 589, "GraviLearn": 546,
                "GraviText": 486, "GraviGraph": 434, "GraviProb": 393}
@@ -191,13 +193,31 @@ def glyph_prob(c: str, bg: str) -> str:
     ])
 
 
+def glyph_dask(c: str, bg: str) -> str:
+    """Partitions reduced in a tree: four chunks, two partial results, one answer."""
+    chunks = [44, 86, 128, 170]
+    partials = [(71, 124), (153, 124)]
+    root = (112, 180)
+    parts = []
+    for i, x in enumerate(chunks):
+        px, py = partials[i // 2]
+        parts.append(f'<line x1="{x + 13}" y1="82" x2="{px}" y2="{py}" stroke="{c}" stroke-width="7" stroke-linecap="round"/>')
+    for px, py in partials:
+        parts.append(f'<line x1="{px}" y1="{py}" x2="{root[0]}" y2="{root[1]}" stroke="{c}" stroke-width="8" stroke-linecap="round"/>')
+    parts += [f'<rect x="{x}" y="50" width="26" height="32" rx="6" fill="{c}"/>' for x in chunks]
+    parts += [f'<circle cx="{px}" cy="{py}" r="14" fill="{c}"/>' for px, py in partials]
+    parts.append(f'<circle cx="{root[0]}" cy="{root[1]}" r="19" fill="{bg}" stroke="{c}" stroke-width="9"/>')
+    return "\n  ".join(parts)
+
+
 def wavelength_hex(name: str) -> str:
     return LINES[name][0]
 
 
 def scinet() -> str:
     """The instrument: an integral over a damped wave, above the family's emission spectrum."""
-    colours = [wavelength_hex(n) for n in LINES]
+    # The six lines SciNet's strip was drawn with; later libraries do not move a published icon.
+    colours = [wavelength_hex(n) for n in WAVELENGTHS]
     lat = lattice(colours, 0.30, 1.5)
     xs = [i for i in range(94, 209, 2)]
     wave = " ".join(f"{'M' if i == 0 else 'L'}{x} {112 - 40 * math.exp(-(x - 94) / 64) * math.sin((x - 94) / 9.0):.1f}"
@@ -205,7 +225,7 @@ def scinet() -> str:
     # spectrum strip: a dark band with the six lines at their real relative wavelengths
     x0, x1, lo, hi = 46, 210, 380, 680
     strip = [f'<rect x="{x0 - 8}" y="176" width="{x1 - x0 + 16}" height="30" rx="8" fill="#0B0A1A" stroke="{PAPER}" stroke-opacity="0.25" stroke-width="2"/>']
-    for name in LINES:
+    for name in WAVELENGTHS:
         wl = WAVELENGTHS[name]
         x = x0 + (wl - lo) / (hi - lo) * (x1 - x0)
         strip.append(f'<rect x="{x - 2.5:.1f}" y="180" width="5" height="22" rx="1.5" fill="{wavelength_hex(name)}"/>')
@@ -221,7 +241,8 @@ def scinet() -> str:
 
 
 GLYPHS = {"GraviNum": glyph_num, "GraviFrame": glyph_frame, "GraviLearn": glyph_learn,
-          "GraviText": glyph_text, "GraviGraph": glyph_graph, "GraviProb": glyph_prob}
+          "GraviText": glyph_text, "GraviGraph": glyph_graph, "GraviProb": glyph_prob,
+          "DaskNet": glyph_dask}
 
 
 def library(name: str) -> str:
@@ -256,8 +277,11 @@ def main() -> int:
     os.makedirs(OUT, exist_ok=True)
     svgs = {name: library(name) for name in LINES}
     svgs["SciNet"] = scinet()
+    only = set(sys.argv[1:])
     browser = find_browser()
     for name, svg in svgs.items():
+        if only and name not in only:
+            continue
         path = os.path.join(OUT, f"{name}.svg")
         with open(path, "w", encoding="utf-8") as f:
             f.write(svg)

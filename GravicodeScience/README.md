@@ -1,10 +1,10 @@
 ?# Gravicode.Science
 
-A data science and AI ecosystem for **.NET 10** — seven libraries that mirror the Python stack,
+A data science and AI ecosystem for **.NET 10** — eight libraries that mirror the Python stack,
 each with a runnable sample, an interactive notebook, benchmarks and tests.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com)
-[![tests](https://img.shields.io/badge/tests-4128%20passing-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-4243%20passing-brightgreen)](tests)
 [![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![nuget](https://img.shields.io/badge/nuget-Gravicode.Science.*-004880)](https://www.nuget.org/packages?q=Gravicode.Science)
 
@@ -20,6 +20,7 @@ Published from
 | [**GraviGraph**](docs/GraviGraph.md) | PyTorch Geometric / DGL | Graph structures, embeddings, GNNs |
 | [**GraviProb**](docs/GraviProb.md) | PyMC / Stan | Distributions, MCMC and NUTS, variational inference, probabilistic models |
 | [**SciNet**](docs/SciNet.md) | SciPy | Special functions, optimisation, ODEs, interpolation, statistics, signal, FFT, sparse, spatial, ndimage, scientific file formats |
+| [**Dask.Net**](docs/DaskNet.md) | Dask + dask-sql | Lazy task graphs, chunked arrays, partitioned DataFrames with a query optimiser, SQL, local and multi-node clusters with recovery |
 
 ## Install
 
@@ -31,6 +32,7 @@ dotnet add package Gravicode.Science.GraviText     # NLP
 dotnet add package Gravicode.Science.GraviGraph    # graphs and GNNs
 dotnet add package Gravicode.Science.GraviProb     # Bayesian inference
 dotnet add package Gravicode.Science.SciNet        # SciPy for .NET
+dotnet add package Gravicode.Science.DaskNet       # parallel and distributed computing
 ```
 
 Take only what you need — every package pulls in `GraviNum`, and nothing else is mandatory. See
@@ -69,14 +71,14 @@ Console.WriteLine(Metrics.ClassificationReport(split.TestY, pipeline.Predict(spl
 ## What is in the box
 
 ```
-src/          seven class libraries
-samples/      seven console apps, each printing real results
-notebooks/    seven .NET Interactive notebooks with charts
-benchmarks/   seven BenchmarkDotNet suites, plus the Python comparison harness
+src/          eight libraries, plus the GraviFrame.Parquet add-on
+samples/      eight console apps, each printing real results
+notebooks/    eight .NET Interactive notebooks
+benchmarks/   eight BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        3,257 tests
+tests/        4,243 tests
 tools/        ScienceAppGen (an IDE that builds apps from a prompt), Science Gallery
-              (45 runnable use cases), the icon generator
+              (45 runnable use cases), the Dask.Net worker host, the icon generator
 assets/       NuGet package icons
 docs/         English, with Bahasa Indonesia in docs/id/
 ```
@@ -171,6 +173,27 @@ workloads it is faster on 21, including sparse LU (2.3×, a multifrontal factori
 SciPy still leads on `curve_fit`, a single `lfilter` and the DCT. The numbers are in
 [docs/SciNet.md](docs/SciNet.md#performance-against-scipy).
 
+## Dask.Net — Dask for .NET
+
+[Dask.Net](docs/DaskNet.md) runs work that is too big or too slow for one call as a lazy task
+graph: `Delayed` functions, `Bag` sequences, chunked `DaskArray`s and partitioned `DaskFrame`s
+whose plans are optimised (predicate and projection pushdown, pipeline fusion) before they run.
+A `SqlContext` compiles SQL to the same plans. The same graph runs on the thread pool or on a
+cluster of workers over TCP, which recomputes what a lost worker held from the graph's lineage.
+
+```csharp
+using Gravicode.Science.DaskNet;
+using Gravicode.Science.DaskNet.Distributed;
+using static Gravicode.Science.DaskNet.Expr;
+
+var report = DaskFrame.ReadCsv("sales/*.csv")
+    .Filter(Col("price") > 20)
+    .GroupBy("region").Agg(("qty", "sum"), ("price", "mean"));
+
+await using var cluster = await LocalCluster.StartAsync(workers: 4);
+var result = report.Compute(cluster.Client);
+```
+
 ## Design
 
 **`GraviNum` is the foundation.** Every other library builds on its array and linear-algebra
@@ -179,7 +202,8 @@ layer, and nothing above it is ever referenced back down.
 ```
 GraviNum ──┬── GraviFrame ── GraviLearn ── GraviText ── GraviGraph
            ├── GraviProb
-           └── SciNet
+           ├── SciNet
+           └── GraviFrame ── DaskNet
 ```
 
 **Views, not copies.** Reshaping, transposing and slicing an `NdArray` produce views over one
@@ -256,6 +280,7 @@ failure rather than as a plausible-looking number:
 | ScienceAppGen | [ScienceAppGen.md](docs/ScienceAppGen.md) | [id/ScienceAppGen.md](docs/id/ScienceAppGen.md) |
 | Publishing and CI | [publishing.md](docs/publishing.md) | [id/publishing.md](docs/id/publishing.md) |
 | SciNet (SciPy for .NET) | [SciNet.md](docs/SciNet.md) | [id/SciNet.md](docs/id/SciNet.md) |
+| Dask.Net (Dask for .NET) | [DaskNet.md](docs/DaskNet.md) | [id/DaskNet.md](docs/id/DaskNet.md) |
 | Science Gallery | [ScienceGallery.md](docs/ScienceGallery.md) | [id/ScienceGallery.md](docs/id/ScienceGallery.md) |
 | Package icons | [assets/icons/README.md](assets/icons/README.md) | |
 
@@ -275,6 +300,7 @@ dotnet run --project samples/GraviText.Console    # bilingual sentiment, embeddi
 dotnet run --project samples/GraviGraph.Console   # Cora: PageRank, centrality, GCN
 dotnet run --project samples/GraviProb.Console    # Bayesian coin toss, HMM, Bayesian network
 dotnet run --project samples/SciNet.Console       # ODEs, optimisation, filters, statistics, file formats
+dotnet run --project samples/DaskNet.Console      # task graphs, chunked arrays, lazy CSV, SQL, a cluster losing a worker
 ```
 
 They also render the charts in [`docs/screenshots/`](docs/screenshots).

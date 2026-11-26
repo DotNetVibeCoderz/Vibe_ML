@@ -1,7 +1,7 @@
 # Penerbitan dan CI
 
-Tujuh paket dikirim dari `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviLearn`,
-`.GraviText`, `.GraviGraph`, `.GraviProb`, dan `.SciNet`. Selebihnya di repositori ini — sample, benchmark,
+Sembilan paket dikirim dari `src/`: `Gravicode.Science.GraviNum`, `.GraviFrame`, `.GraviFrame.Parquet`,
+`.GraviLearn`, `.GraviText`, `.GraviGraph`, `.GraviProb`, `.SciNet`, dan `.DaskNet`. Selebihnya di repositori ini — sample, benchmark,
 notebook, tes, ScienceAppGen — ditandai `IsPackable=false` dan tidak pernah ikut terbit.
 
 ## Di mana metadatanya berada

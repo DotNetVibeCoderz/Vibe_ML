@@ -287,6 +287,25 @@ or queries, above measured thresholds; its SIMD is in the FFT butterflies, the d
 the element-wise special functions. The comparison against SciPy is below, in
 [SciNet vs SciPy](#scinet-vs-scipy).
 
+## Dask.Net
+
+`benchmarks/DaskNet.Benchmark` measures what the scheduling layer costs and where it pays:
+
+```bash
+dotnet run --project benchmarks/DaskNet.Benchmark -c Release -- --filter "*"
+```
+
+| Benchmark | Result (ratio to the baseline, one run) |
+|---|---|
+| 100 / 1000 trivial tasks | ~5 µs per task synchronous, ~6-9 µs on the thread pool |
+| `Std` of a 2000² / 4000² array in 16 chunks | thread scheduler 0.61× / 0.50× GraviNum on the whole array |
+| Filter + group-by, 200k / 1M rows | 3.2× / 1.55× GraviFrame on one frame (high variance) |
+| Array reduction on a 3-worker in-process cluster | 1.12× the thread scheduler |
+
+Partitioning wins when chunks can run in parallel and each is substantial; for data that fits and
+a library call that is already parallel, the single-frame path is faster. Details in
+[DaskNet.md](DaskNet.md#performance).
+
 ## Against the Python stack
 
 The question every .NET data-science library has to answer is how it compares to NumPy, pandas

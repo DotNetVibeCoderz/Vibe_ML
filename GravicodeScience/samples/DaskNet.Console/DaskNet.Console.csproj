@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gravicode.Science.Samples.DaskNet</RootNamespace>
+    <AssemblyName>DaskNet.Console</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DaskNet\DaskNet.csproj" />
+  </ItemGroup>
+
+</Project>

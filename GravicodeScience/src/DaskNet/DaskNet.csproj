@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Dask.Net - Dask for .NET. Lazy task graphs, parallel collections (Bag, Array, DataFrame), a
+    SQL front end and a TCP cluster, from one thread to many processes. Builds on GraviNum (chunks
+    of Array) and GraviFrame (partitions of DataFrame); nothing else.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.DaskNet</RootNamespace>
+    <AssemblyName>Gravicode.Science.DaskNet</AssemblyName>
+    <PackageId>Gravicode.Science.DaskNet</PackageId>
+    <Description>Dask.Net - Dask for .NET: lazy task graphs and delayed computations, thread and cluster schedulers, partitioned DataFrames with a query optimiser, chunked n-dimensional arrays, parallel bags with LINQ, a distributed SQL front end and a TCP worker cluster with lineage recovery. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;distributed-computing;parallel;dataframe;task-graph;scheduler;cluster;big-data;dotnet;gravicode</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GraviNum\GraviNum.csproj" />
+    <ProjectReference Include="..\GraviFrame\GraviFrame.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DaskNet.Tests" />
+  </ItemGroup>
+
+</Project>

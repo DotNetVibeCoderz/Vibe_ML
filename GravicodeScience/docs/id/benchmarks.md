@@ -290,6 +290,25 @@ atau kueri yang independen, di atas ambang yang diukur; SIMD-nya ada di butterfl
 jarak, dan fungsi khusus elemen per elemen. Perbandingan dengan SciPy ada di bawah, di
 [SciNet versus SciPy](#scinet-versus-scipy).
 
+## Dask.Net
+
+`benchmarks/DaskNet.Benchmark` mengukur biaya lapisan penjadwalan dan kapan ia menguntungkan:
+
+```bash
+dotnet run --project benchmarks/DaskNet.Benchmark -c Release -- --filter "*"
+```
+
+| Benchmark | Hasil (rasio terhadap baseline, satu run) |
+|---|---|
+| 100 / 1000 task sepele | ~5 µs per task sinkron, ~6-9 µs di thread pool |
+| `Std` array 2000² / 4000² dalam 16 chunk | thread scheduler 0,61× / 0,50× GraviNum pada array utuh |
+| Filter + group-by, 200 rb / 1 jt baris | 3,2× / 1,55× GraviFrame pada satu frame (varians tinggi) |
+| Reduksi array di cluster in-process 3 worker | 1,12× thread scheduler |
+
+Partisi menang ketika chunk bisa berjalan paralel dan masing-masing cukup besar; untuk data yang
+muat dan panggilan library yang sudah paralel, jalur satu frame lebih cepat. Rinciannya di
+[DaskNet.md](DaskNet.md#performa).
+
 ## Dibandingkan dengan ekosistem Python
 
 Pertanyaan yang harus dijawab setiap library data science di .NET adalah bagaimana ia dibandingkan

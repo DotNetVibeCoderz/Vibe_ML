@@ -231,6 +231,35 @@ Console.WriteLine($"P(|Z| > 1.96) = {2 * Stats.Norm().Sf(1.96):F4}");
 
 ---
 
+## Dask.Net
+
+```csharp
+using Gravicode.Science.DaskNet;
+using Gravicode.Science.DaskNet.Sql;
+using static Gravicode.Science.DaskNet.Expr;
+
+// CSV yang lazy dan berpartisi: filter didorong ke dalam scan, kolom yang tak dibaca tidak di-parse.
+var prices = DaskFrame.ReadCsv("datasets/finance_timeseries.csv", blockSize: 8 * 1024);
+var monthly = prices.WithColumn("month", Col("date").Month())
+    .Filter(Col("volume") > 500_000)
+    .GroupBy("ticker", "month").Agg(("close", "mean"));
+Console.WriteLine(monthly.Explain());
+Console.WriteLine(monthly.Compute());
+
+// Mesin yang sama lewat SQL.
+var sql = new SqlContext().RegisterCsv("titanic", "datasets/titanic.csv");
+Console.WriteLine(sql.Execute("SELECT class, AVG(survived) AS rate FROM titanic GROUP BY class ORDER BY rate DESC"));
+
+// Reduksi array ber-chunk di thread pool.
+var x = DaskArray.RandomNormal([4000, 4000], [1000, 1000], seed: 1);
+Console.WriteLine($"std = {x.Std().Compute():F4}");
+```
+
+[Panduan lengkap →](DaskNet.md)
+
+---
+
+
 ## Menggunakan beberapa library bersamaan
 
 Library dirancang agar bisa saling mengoper data tanpa kode perekat:
