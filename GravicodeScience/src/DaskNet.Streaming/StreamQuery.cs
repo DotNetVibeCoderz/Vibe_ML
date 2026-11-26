@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 using Gravicode.Science.GraviFrame;
 
 namespace Gravicode.Science.DaskNet.Streaming;
@@ -17,11 +18,15 @@ public sealed class StreamStatistics
     /// <summary>Rows handed to the sink.</summary>
     public long OutputRows { get; internal set; }
 
-    /// <summary>Rows dropped because every window they belong to had already closed, over the query's life.</summary>
+    /// <summary>Rows dropped as late over the query's life: for a window, rows whose every window
+    /// had closed; for a join, rows older than their own side's watermark.</summary>
     public long LateRows { get; internal set; }
 
     /// <summary>Windows emitted by this run.</summary>
     public long WindowsEmitted { get; internal set; }
+
+    /// <summary>Rows a join holds in its state after the run (both sides).</summary>
+    public long JoinStateRows { get; internal set; }
 
     /// <summary>Wall-clock time of the run.</summary>
     public TimeSpan Elapsed { get; internal set; }
@@ -33,8 +38,8 @@ public sealed class StreamStatistics
 
 /// <summary>
 /// A stream with a sink, ready to run. With a checkpoint directory the query is restartable: after
-/// each batch's sink returns, the consumed files, the batch count and the open windows are saved;
-/// a new run of the same query resumes from there.
+/// each batch's sink returns, the consumed files or Kafka offsets, the batch count, the open
+/// windows and any join state are saved; a new run of the same query resumes from there.
 /// </summary>
 /// <remarks>
 /// Delivery is at-least-once: a crash after the sink but before the checkpoint replays that batch.
@@ -45,14 +50,16 @@ public sealed class StreamQuery
 {
     private readonly DaskStream _stream;
     private readonly WindowSpec? _window;
+    private readonly JoinSpec? _join;
     private readonly Func<DataFrame, StreamBatch, Task>? _sink;
     private readonly List<DataFrame> _results = [];
 
-    internal StreamQuery(DaskStream stream, WindowSpec? window, Func<DataFrame, StreamBatch, Task>? sink)
+    internal StreamQuery(DaskStream stream, WindowSpec? window, Func<DataFrame, StreamBatch, Task>? sink, JoinSpec? join = null)
     {
         _stream = stream;
         _window = window;
         _sink = sink;
+        _join = join;
     }
 
     /// <summary>Output batches kept by a <c>Collect()</c> query.</summary>
@@ -61,8 +68,8 @@ public sealed class StreamQuery
     /// <summary>Every collected batch as one frame.</summary>
     public DataFrame CollectedFrame() => _results.Count == 0 ? DataFrame.Empty() : DataFrame.Concat(_results);
 
-    /// <summary>Whether a windowed query emits its still-open windows when a finite source ends.
-    /// On by default; a cancelled run never flushes (its windows stay in the checkpoint).</summary>
+    /// <summary>Whether a windowed or outer-joined query emits what it still holds when a finite
+    /// source ends. On by default; a cancelled run never flushes (the state stays in the checkpoint).</summary>
     public bool FlushOnEnd { get; set; } = true;
 
     /// <summary>The counters of the current or last run.</summary>
@@ -70,7 +77,8 @@ public sealed class StreamQuery
 
     /// <summary>
     /// Runs until the source ends or <paramref name="cancellationToken"/> fires (a watched directory
-    /// only ends that way; cancellation then returns normally with the statistics so far).
+    /// or a broker without an idle timeout only ends that way; cancellation then returns normally
+    /// with the statistics so far). A joined query ends when both of its sources have.
     /// </summary>
     public async Task<StreamStatistics> RunAsync(string? checkpointDirectory = null, CancellationToken cancellationToken = default)
     {
@@ -78,40 +86,87 @@ public sealed class StreamQuery
         var clock = Stopwatch.StartNew();
         var source = new SourceState();
         var windows = _window is null ? null : new WindowState(_window);
+        var join = _join is null ? null : new JoinState(_join);
         var path = checkpointDirectory is null ? null : Path.Combine(Path.GetFullPath(checkpointDirectory), "checkpoint.json");
-        if (path is not null && File.Exists(path)) Checkpoint.Load(path, source, windows);
-        stats.LateRows = windows?.LateRows ?? 0;
+        if (path is not null && File.Exists(path)) Checkpoint.Load(path, source, windows, join);
+        stats.LateRows = (windows?.LateRows ?? 0) + (join?.LateRows ?? 0);
 
         var finished = false;
         try
         {
-            await foreach (var batch in _stream.Source.ReadAsync(source, cancellationToken).ConfigureAwait(false))
+            await foreach (var (side, batch) in ReadAsync(source, join, cancellationToken).ConfigureAwait(false))
             {
-                var output = await _stream.ApplyAsync(batch.Frame, cancellationToken).ConfigureAwait(false);
-                if (windows is not null)
-                {
-                    output = windows.Add(output) ?? DataFrame.Empty();
-                    stats.LateRows = windows.LateRows;
-                }
-                await EmitAsync(output, new StreamBatch(source.Batches, batch.Frame.RowCount, batch.Files, windows?.Watermark), stats).ConfigureAwait(false);
-                foreach (var f in batch.Files) source.Files.Add(f);
+                var stream = side == 1 ? _join!.Right : _stream;
+                var output = await stream.ApplyAsync(batch.Frame, cancellationToken).ConfigureAwait(false);
+                if (join is not null) output = join.Add(side == 0, output) ?? DataFrame.Empty();
+                if (windows is not null) output = windows.Add(output) ?? DataFrame.Empty();
+                stats.LateRows = (windows?.LateRows ?? 0) + (join?.LateRows ?? 0);
+                await EmitAsync(output, new StreamBatch(source.Batches, batch.Frame.RowCount, batch.Files, windows?.Watermark ?? join?.Watermark), stats).ConfigureAwait(false);
+                (join is null ? source : side == 0 ? join.Left.Source : join.Right.Source).Consumed(batch);
                 source.Batches++;
                 stats.Batches++;
                 stats.InputRows += batch.Frame.RowCount;
-                if (path is not null) Checkpoint.Save(path, source, windows);
+                if (path is not null) Checkpoint.Save(path, source, windows, join);
+                batch.Commit?.Invoke();                            // only now is the batch safe
             }
             finished = !cancellationToken.IsCancellationRequested;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
 
-        if (finished && windows is not null && FlushOnEnd && windows.Flush() is { } rest)
+        if (finished && FlushOnEnd && (windows is not null || join is not null))
         {
-            await EmitAsync(rest, new StreamBatch(source.Batches, 0, [], windows.Watermark), stats).ConfigureAwait(false);
-            source.Batches++;
-            if (path is not null) Checkpoint.Save(path, source, windows);
+            var rest = join?.Flush();
+            if (windows is not null)
+            {
+                var closed = rest is null ? null : windows.Add(rest);
+                var open = windows.Flush();
+                rest = closed is null ? open : open is null ? closed : DataFrame.Concat([closed, open]);
+            }
+            if (rest is { RowCount: > 0 })
+            {
+                await EmitAsync(rest, new StreamBatch(source.Batches, 0, [], windows?.Watermark ?? join?.Watermark), stats).ConfigureAwait(false);
+                source.Batches++;
+                if (path is not null) Checkpoint.Save(path, source, windows, join);
+            }
         }
+        stats.JoinStateRows = join is null ? 0 : join.Left.Count + join.Right.Count;
         stats.Elapsed = clock.Elapsed;
         return stats;
+    }
+
+    /// <summary>
+    /// The batches to process, tagged 0 (left / only) or 1 (right). A joined query reads both
+    /// sources concurrently, each at most one batch ahead, in whatever order they arrive.
+    /// </summary>
+    private async IAsyncEnumerable<(int Side, SourceBatch Batch)> ReadAsync(SourceState source, JoinState? join,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (join is null)
+        {
+            await foreach (var b in _stream.Source.ReadAsync(source, cancellationToken).ConfigureAwait(false)) yield return (0, b);
+            yield break;
+        }
+
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var channel = Channel.CreateBounded<(int, SourceBatch)>(new BoundedChannelOptions(2) { SingleReader = true });
+        async Task Pump(int side, StreamSource s, SourceState state)
+        {
+            await foreach (var b in s.ReadAsync(state, stop.Token).ConfigureAwait(false))
+                await channel.Writer.WriteAsync((side, b), stop.Token).ConfigureAwait(false);
+        }
+        var pumps = new[] { Pump(0, _stream.Source, join.Left.Source), Pump(1, _join!.Right.Source, join.Right.Source) };
+        _ = Task.WhenAll(pumps).ContinueWith(t => channel.Writer.TryComplete(t.Exception?.InnerException), TaskScheduler.Default);
+        try
+        {
+            await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return item;
+        }
+        finally
+        {
+            stop.Cancel();
+            try { await Task.WhenAll(pumps).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (ChannelClosedException) { }
+        }
     }
 
     private async Task EmitAsync(DataFrame output, StreamBatch info, StreamStatistics stats)
@@ -153,11 +208,20 @@ internal static class Checkpoint
         public int Version { get; set; } = 1;
         public long Batches { get; set; }
         public List<string> Files { get; set; } = [];
+        public List<OffsetDocument> Offsets { get; set; } = [];
         public long? MaxEvent { get; set; }
         public long LateRows { get; set; }
         public string[]? KeyKinds { get; set; }
         public string? Window { get; set; }
         public List<WindowDocument> Windows { get; set; } = [];
+        public JoinDocument? Join { get; set; }
+    }
+
+    private sealed class OffsetDocument
+    {
+        public string Topic { get; set; } = "";
+        public int Partition { get; set; }
+        public long Next { get; set; }
     }
 
     private sealed class WindowDocument
@@ -170,12 +234,86 @@ internal static class Checkpoint
         public double[] Max { get; set; } = [];
     }
 
+    private sealed class JoinDocument
+    {
+        public string Definition { get; set; } = "";
+        public long LateRows { get; set; }
+        public SideDocument Left { get; set; } = new();
+        public SideDocument Right { get; set; } = new();
+    }
+
+    private sealed class SideDocument
+    {
+        public List<string> Files { get; set; } = [];
+        public List<OffsetDocument> Offsets { get; set; } = [];
+        public long? MaxEvent { get; set; }
+        public string[]? Columns { get; set; }
+        public string[]? Kinds { get; set; }
+        public List<RowDocument> Rows { get; set; } = [];
+    }
+
+    private sealed class RowDocument
+    {
+        public long Time { get; set; }
+        public string?[] Values { get; set; } = [];
+        public bool Matched { get; set; }
+    }
+
     private static string Describe(WindowSpec s)
         => $"{s.TimeColumn}|{s.Size.Ticks}|{s.Slide.Ticks}|{string.Join(",", s.Keys)}|{string.Join(",", s.OutputNames)}";
 
-    public static void Save(string path, SourceState source, WindowState? windows)
+    private static List<OffsetDocument> Offsets(SourceState s)
     {
-        var doc = new Document { Batches = source.Batches, Files = [.. source.Files.Order(StringComparer.Ordinal)] };
+        lock (s) return [.. s.Offsets.OrderBy(o => o.Key.Topic, StringComparer.Ordinal).ThenBy(o => o.Key.Partition)
+            .Select(o => new OffsetDocument { Topic = o.Key.Topic, Partition = o.Key.Partition, Next = o.Value })];
+    }
+
+    private static List<string> Files(SourceState s)
+    {
+        lock (s) return [.. s.Files.Order(StringComparer.Ordinal)];
+    }
+
+    private static void Restore(SourceState s, List<string> files, List<OffsetDocument> offsets)
+    {
+        lock (s)
+        {
+            foreach (var f in files) s.Files.Add(f);
+            foreach (var o in offsets) s.Offsets[(o.Topic, o.Partition)] = o.Next;
+        }
+    }
+
+    private static SideDocument Side(JoinSide side) => new()
+    {
+        Files = Files(side.Source),
+        Offsets = Offsets(side.Source),
+        MaxEvent = side.MaxEvent,
+        Columns = side.Columns,
+        Kinds = side.Kinds,
+        Rows = [.. side.Buffer.Values.SelectMany(b => b).Select(r => new RowDocument
+        {
+            Time = r.Time!.Value, Values = [.. r.Values.Select(WindowState.Format)], Matched = r.Matched,
+        })],
+    };
+
+    private static void Side(SideDocument doc, JoinSide side, string[] on)
+    {
+        Restore(side.Source, doc.Files, doc.Offsets);
+        side.MaxEvent = doc.MaxEvent;
+        side.Columns = doc.Columns;
+        side.Kinds = doc.Kinds;
+        if (doc.Columns is null || doc.Kinds is null) return;
+        var keyIndex = on.Select(k => Array.IndexOf(doc.Columns, k)).ToArray();
+        foreach (var r in doc.Rows)
+        {
+            var values = r.Values.Select((v, i) => WindowState.Parse(v, doc.Kinds[i])).ToArray();
+            var key = string.Join("\u001f", keyIndex.Select(k => WindowState.Format(values[k])));
+            side.Add(new JoinRow(r.Time, key, values) { Matched = r.Matched });
+        }
+    }
+
+    public static void Save(string path, SourceState source, WindowState? windows, JoinState? join = null)
+    {
+        var doc = new Document { Batches = source.Batches, Files = Files(source), Offsets = Offsets(source) };
         if (windows is not null)
         {
             doc.MaxEvent = windows.MaxEvent;
@@ -187,19 +325,31 @@ internal static class Checkpoint
                 Start = w.Start, Keys = [.. w.Keys.Select(WindowState.Format)], Sum = w.Sum, Count = w.Count, Min = w.Min, Max = w.Max,
             })];
         }
+        if (join is not null)
+            doc.Join = new JoinDocument { Definition = join.Spec.Describe(), LateRows = join.LateRows, Left = Side(join.Left), Right = Side(join.Right) };
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(doc, Options));
         File.Move(temp, path, overwrite: true);
     }
 
-    public static void Load(string path, SourceState source, WindowState? windows)
+    public static void Load(string path, SourceState source, WindowState? windows, JoinState? join = null)
     {
         var doc = JsonSerializer.Deserialize<Document>(File.ReadAllText(path), Options)
             ?? throw new InvalidDataException($"{path} is not a stream checkpoint.");
         if (doc.Version != 1) throw new InvalidDataException($"Checkpoint version {doc.Version} is not supported.");
         source.Batches = doc.Batches;
-        foreach (var f in doc.Files) source.Files.Add(f);
+        Restore(source, doc.Files, doc.Offsets);
+        if (join is not null)
+        {
+            if (doc.Join is null || doc.Join.Definition != join.Spec.Describe())
+                throw new InvalidOperationException($"The checkpoint at {path} belongs to a different join ({doc.Join?.Definition ?? "none"}); use a new checkpoint directory.");
+            join.LateRows = doc.Join.LateRows;
+            Side(doc.Join.Left, join.Left, join.Spec.On);
+            Side(doc.Join.Right, join.Right, join.Spec.On);
+        }
+        else if (doc.Join is not null)
+            throw new InvalidOperationException($"The checkpoint at {path} belongs to a joined query; use a new checkpoint directory.");
         if (windows is null) return;
         if (doc.Window is not null && doc.Window != Describe(windows.Spec))
             throw new InvalidOperationException($"The checkpoint at {path} belongs to a different window ({doc.Window}); use a new checkpoint directory.");

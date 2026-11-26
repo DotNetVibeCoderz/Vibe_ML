@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 v0.1.0 is implemented and complete against `requirements.md`, a seventh library, **SciNet**
 (SciPy for .NET), has been added beside the original six, and an eighth, **Dask.Net** (Dask +
-dask-sql, `src/DaskNet`, 203 tests, plus the Lakehouse, Geo, ML and Streaming add-ons with 53 more),
+dask-sql, `src/DaskNet`, 211 tests, plus the Lakehouse, Geo, ML and Streaming add-ons with 115 more),
 against `Dask.Net-Features.md`. The solution has 46 projects and
-**4,417 tests passing** (2,983 of them SciNet's, 256 Dask.Net's, 80 ScienceAppGen's), eight samples
+**4,487 tests passing** (2,983 of them SciNet's, 326 Dask.Net's, 80 ScienceAppGen's), eight samples
 that run end to end, eight notebooks, eight benchmark suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -518,6 +518,39 @@ and GraviFrame only. The worker host is `tools/DaskNet.Worker`; the test project
 - **Stream window state is keyed by aligned start + key text, and late rows are judged against the
   watermark from *before* the batch**, as in Spark. A checkpoint is tied to its window definition
   and refuses a different one rather than mixing state.
+- **A detached run's standby is told cancel/forget *before* the scheduler.** It polls the
+  scheduler, and "unknown run" means "restarted" to it - forget the scheduler first and the standby
+  takes over a run that was meant to be gone. A takeover recomputes the whole graph (results died
+  with the scheduler); `Worker.Takeovers` counts them.
+- **Shared-memory segments must stay mapped.** Mapping a view per transfer measured 0.87x the
+  socket at 64 MiB (page faults through the whole segment on both sides); the pooled holder
+  segments plus the reader's 4-entry mapping cache are what make it 5x. A segment is reused only
+  after the reader's `SharedDone`, or dropped after a minute - never reused on a timer. It carries
+  the wire encoding, not Arrow, and the reader still copies out.
+- **`WireCodec.Serialize` measures first** (`Measure` runs the writer over a counting stream) and
+  allocates once; `ToArray()` on a growing `MemoryStream` copied a 64 MB array three times.
+  Contiguous `NdArray`s are written from their span, not `ToArray()`.
+- **Incremental models carry their settings as properties** because `ModelSpec` rebuilds them on
+  workers from (kind, settings) and the state from `State()`. A new `IIncrementalModel` needs both
+  switch arms. The chain is sequential by design; bit-identity with a local `PartialFit` loop
+  needs the same seeded partition order (`new Random(seed).Shuffle`).
+- **GEOS and NTS buffers differ by up to 1.8e-4 relative** (round-join approximation), while
+  dissolve/overlay/simplify agree to 1e-9. The buffer test bounds the gap by the area a 32-gon
+  misses of its circle; don't tighten it into a flaky 1e-9. Overlay drops edge-only (zero-area)
+  intersections, as geopandas does.
+- **A Delta file is identified by (path, deletion-vector id).** Spark writes `add(P, newDV)` and
+  `remove(P, oldDV)` in one commit; keyed by path alone, DV tables read as zero rows. DV positions
+  are file positions, so they are applied before any pushed filter. Under column mapping, file
+  paths and partition values use *physical* names while `partitionColumns` uses logical ones.
+- **Spark fixtures on Windows** (`make_lake_fixtures_spark.py`) need winutils.exe/hadoop.dll, rows
+  built in SQL (Python workers crash on 3.12), `file:///` URIs for Hudi, and a small bloom index
+  or every Hudi base file is ~430 KB. Hudi 1.0 commit metadata is Avro, not JSON.
+- **Stream message columns pin their type at the first value**, so batches never change schema;
+  JSON strings stay text ("007" is not 7). Join state evicts a row when the *other* side's
+  watermark passes its last possible match - that rule is why matches are independent of batch
+  interleaving. Kafka offsets go to the checkpoint first and to the group only after the sink.
+- **Kafka's Windows `.bat` scripts fail on deep paths** ("input line is too long"); start the
+  broker with `java -cp "libs/*" kafka.Kafka`. The real-broker test runs only with `DASKNET_KAFKA`.
 - **The icon is neon 640 nm**; `make_icons.py DaskNet` renders only it, and SciNet's strip keeps
   its original six lines so published icons do not change.
 

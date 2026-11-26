@@ -49,9 +49,40 @@ public static class WireCodec
     /// <summary>A value as bytes.</summary>
     public static byte[] Serialize(object? value)
     {
-        using var ms = new MemoryStream();
+        // Measured first, so the buffer is allocated once at its final size and returned as is:
+        // a growing MemoryStream plus ToArray() copied a 64 MB array three times.
+        var size = Measure(value);
+        if (size > Array.MaxLength) throw new InvalidOperationException($"A {size:N0}-byte value is too large to send in one piece.");
+        var buffer = new byte[size];
+        using var ms = new MemoryStream(buffer, 0, buffer.Length, writable: true, publiclyVisible: true);
         using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true)) Write(w, value);
-        return ms.ToArray();
+        return buffer;
+    }
+
+    /// <summary>The number of bytes <see cref="Write"/> produces for <paramref name="value"/>;
+    /// arrays cost nothing to measure, text is encoded once to count it.</summary>
+    internal static long Measure(object? value)
+    {
+        using var counter = new CountingStream();
+        using (var w = new BinaryWriter(counter, Encoding.UTF8, leaveOpen: true)) Write(w, value);
+        return counter.Length;
+    }
+
+    private sealed class CountingStream : Stream
+    {
+        private long _length;
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => _length;
+        public override long Position { get => _length; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => _length += count;
+        public override void Write(ReadOnlySpan<byte> buffer) => _length += buffer.Length;
+        public override void WriteByte(byte value) => _length++;
     }
 
     /// <summary>A value from bytes.</summary>
@@ -200,7 +231,14 @@ public static class WireCodec
     {
         w.Write(n.Rank);
         foreach (var d in n.Shape) w.Write(d);
-        WriteDoubles(w, n.ToArray());
+        if (!n.IsContiguous)
+        {
+            WriteDoubles(w, n.ToArray());
+            return;
+        }
+        var span = n.AsSpan();                     // no copy for the common, contiguous case
+        w.Write(span.Length);
+        w.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(span));
     }
 
     private static NdArray ReadNdArray(BinaryReader r)

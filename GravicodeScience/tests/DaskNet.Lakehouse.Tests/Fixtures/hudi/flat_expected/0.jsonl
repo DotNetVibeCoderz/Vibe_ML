@@ -1,0 +1,12 @@
+{"amount": null, "flag": null, "id": 0, "name": null, "region": "north", "seq": 1, "ts": "2024-01-01T00:00:00"}
+{"amount": 1.25, "flag": false, "id": 1, "name": "item-1", "region": "south", "seq": 1, "ts": "2024-01-01T01:00:00"}
+{"amount": 2.5, "flag": true, "id": 2, "name": "item-2", "region": "east", "seq": 1, "ts": "2024-01-01T02:00:00"}
+{"amount": 3.75, "flag": false, "id": 3, "name": "item-3", "region": "north", "seq": 1, "ts": "2024-01-01T03:00:00"}
+{"amount": 5.0, "flag": true, "id": 4, "name": "item-4", "region": "south", "seq": 1, "ts": "2024-01-01T04:00:00"}
+{"amount": 6.25, "flag": false, "id": 5, "name": "item-5", "region": "east", "seq": 1, "ts": "2024-01-01T05:00:00"}
+{"amount": 7.5, "flag": true, "id": 6, "name": "item-6", "region": "north", "seq": 1, "ts": "2024-01-01T06:00:00"}
+{"amount": null, "flag": false, "id": 7, "name": "item-7", "region": "south", "seq": 1, "ts": "2024-01-01T07:00:00"}
+{"amount": 10.0, "flag": true, "id": 8, "name": "item-8", "region": "east", "seq": 1, "ts": "2024-01-01T08:00:00"}
+{"amount": 11.25, "flag": false, "id": 9, "name": "item-9", "region": "north", "seq": 1, "ts": "2024-01-01T09:00:00"}
+{"amount": 12.5, "flag": true, "id": 10, "name": "item-10", "region": "south", "seq": 1, "ts": "2024-01-01T10:00:00"}
+{"amount": 13.75, "flag": false, "id": 11, "name": null, "region": "east", "seq": 1, "ts": "2024-01-01T11:00:00"}

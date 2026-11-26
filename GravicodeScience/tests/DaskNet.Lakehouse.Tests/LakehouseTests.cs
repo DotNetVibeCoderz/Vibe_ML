@@ -16,10 +16,10 @@ namespace Gravicode.Science.Tests.DaskNet.Lakehouse;
 /// </summary>
 public sealed class LakehouseTests
 {
-    private static string Fixture(params string[] parts) => Path.Combine([AppContext.BaseDirectory, "Fixtures", .. parts]);
+    internal static string Fixture(params string[] parts) => Path.Combine([AppContext.BaseDirectory, "Fixtures", .. parts]);
 
     /// <summary>One canonical line per row: columns sorted, numbers round-tripped, dates ISO.</summary>
-    private static List<string> Canonical(DataFrame frame)
+    internal static List<string> Canonical(DataFrame frame)
     {
         var columns = frame.ColumnNames.Order(StringComparer.Ordinal).ToArray();
         return Enumerable.Range(0, frame.RowCount).Select(i => string.Join("|", columns.Select(c => c + "=" + frame[c].GetValue(i) switch
@@ -49,7 +49,7 @@ public sealed class LakehouseTests
             }));
         }).Order(StringComparer.Ordinal).ToList();
 
-    private static void Same(string expectedFile, DataFrame actual)
+    internal static void Same(string expectedFile, DataFrame actual)
     {
         var expected = Expected(expectedFile);
         var got = Canonical(actual);
@@ -152,7 +152,7 @@ public sealed class LakehouseTests
             var log = Path.Combine(copy, "_delta_log");
             File.AppendAllText(Path.Combine(log, $"{2:D20}.json"),
                 """{"metaData":{"id":"x","format":{"provider":"parquet","options":{}},"schemaString":"{\"type\":\"struct\",\"fields\":[{\"name\":\"id\",\"type\":\"long\",\"nullable\":true,\"metadata\":{}}]}","partitionColumns":[],"configuration":{"delta.columnMapping.mode":"name"}}}""" + "\n");
-            Assert.Contains("column mapping", Assert.Throws<NotSupportedException>(() => DeltaLake.Read(copy).Compute()).Message);
+            Assert.Contains("no physical name", Assert.Throws<InvalidDataException>(() => DeltaLake.Read(copy).Compute()).Message);
 
             File.WriteAllText(Path.Combine(log, $"{3:D20}.json"), """{"protocol":{"minReaderVersion":3,"minWriterVersion":7,"readerFeatures":["variantType"]}}""" + "\n");
             Assert.Contains("variantType", Assert.Throws<NotSupportedException>(() => DeltaLake.Read(copy)).Message);
@@ -224,14 +224,14 @@ public sealed class LakehouseTests
         Assert.All(records.Cast<Dictionary<string, object?>>(), r => Assert.EndsWith(".avro", (string)r["manifest_path"]!));
     }
 
-    private static LakeSource Scan(DaskFrame frame)
+    internal static LakeSource Scan(DaskFrame frame)
     {
         var node = Optimizer.Optimize(frame.Plan);
         while (node is not ScanNode) node = node.Children[0];
         return (LakeSource)((ScanNode)node).Source;
     }
 
-    private static void CopyDirectory(string from, string to)
+    internal static void CopyDirectory(string from, string to)
     {
         if (Directory.Exists(to)) Directory.Delete(to, recursive: true);
         foreach (var dir in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories))

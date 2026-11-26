@@ -814,16 +814,38 @@ locality-aware placement, peer-to-peer data transfer and lineage recovery.
    client (status, results, cancel, forget by a JSON handle), and speculative execution gives
    stragglers a second attempt on an idle worker.
 
+**Then (2.4.0):**
+
+1. ✅ **Shared memory between processes on one machine**: results of 1 MiB and up go to a
+   co-located peer or client through pooled, persistently mapped segments - 5x faster than
+   loopback TCP for 8-64 MiB arrays. It carries Dask.Net's wire encoding, not Arrow, and the reader
+   still copies out.
+2. ✅ **Geometry operations** in `DaskNet.Geo` on NetTopologySuite: buffer, simplify, centroid,
+   measures, dissolve (tree-merged unions per key) and overlay (intersection, difference), checked
+   against shapely/GEOS.
+3. ✅ **Incremental ML** (`SgdRegressor`, `SgdClassifier`, `IncrementalGaussianNaiveBayes`, trained
+   as a chain over partitions, bit-identical to a local loop) and **ONNX batch scoring** with one
+   ONNX Runtime session per worker.
+4. ✅ **Streaming sources** MQTT and Kafka (offsets in the checkpoint, committed after the sink),
+   verified against MQTTnet's broker and a real Kafka 4.3; **stream-stream interval joins**
+   (inner/left/right/outer) with watermark-bounded state.
+5. ✅ **Hudi** (copy-on-write, read-optimized merge-on-read, both timeline layouts), and Delta
+   **deletion vectors** and **column mapping**, against fixtures written by Spark, delta-spark and Hudi.
+6. ✅ **Scheduler survival**: every detached run has a standby worker that takes it over (and
+   recomputes lost results) when its scheduling worker dies.
+
 **Next:**
 
-1. **Shared-memory Arrow between processes**, so co-located workers stop copying partitions
-   through sockets.
-2. **Geometry operations** (buffer, union, overlay) - would need NetTopologySuite in `DaskNet.Geo`.
-3. **Incremental ML** (`partial_fit`-style training over partitions) and ONNX batch scoring.
-4. **Streaming sources beyond files and channels** (Kafka, MQTT) and stream-stream joins.
-5. **Hudi**, and Delta deletion vectors / column mapping, which are refused today.
-6. **A scheduler that survives its own worker's death** - a detached run is still lost with the
-   worker that schedules it.
+1. **Hudi merge-on-read snapshots** (merging Avro log blocks into base files) and Delta v2
+   checkpoints.
+2. **Zero-copy reads from shared memory** - frames and arrays as views over the mapped segment
+   instead of a copy, which needs lifetime tracking for the segment.
+3. **Exactly-once Kafka** (transactional sink) and MQTT acknowledgement after the sink.
+4. **Kafka in its own package**: Confluent.Kafka brings librdkafka's native binaries into every
+   `DaskNet.Streaming` user.
+5. **Geometry in metres**: CRS-aware buffers and areas (a projection step) instead of planar degrees.
+6. **Run-state replication**: a standby that resumes from the scheduler's finished tasks instead of
+   recomputing the whole graph, and more than one standby.
 
 ## Non-goals
 

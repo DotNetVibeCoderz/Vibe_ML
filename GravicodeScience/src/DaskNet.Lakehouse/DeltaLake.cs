@@ -24,17 +24,22 @@ public sealed record DeltaCommit(long Version, DateTimeOffset? Timestamp, string
 /// in files written before it was added.
 /// </para>
 /// <para>
-/// Refused rather than misread: column mapping (renamed or dropped columns, where the file's
-/// column names are not the table's), deletion vectors on any live file, v2 (UUID-named)
-/// checkpoints, nested column types, and a reader version above 3 or a reader feature not listed
-/// in <see cref="SupportedReaderFeatures"/>. Local paths only; reading cloud storage needs it
-/// mounted or synced.
+/// Column mapping (<c>name</c> and <c>id</c> modes) is followed: columns are read from the files
+/// under their physical names (or, in <c>id</c> mode, by Parquet field id) and come back under the
+/// table's logical names, so renamed and dropped columns read as the table says. Deletion vectors
+/// - inline, beside the table, or at an absolute path - are applied on the worker as each file is
+/// read: the rows they mark are dropped before any filter runs.
+/// </para>
+/// <para>
+/// Refused rather than misread: v2 (UUID-named) checkpoints, nested column types, and a reader
+/// version above 3 or a reader feature not listed in <see cref="SupportedReaderFeatures"/>. Local
+/// paths only; reading cloud storage needs it mounted or synced.
 /// </para>
 /// </remarks>
 public static class DeltaLake
 {
     /// <summary>Reader features a table may declare and still be read.</summary>
-    public static IReadOnlyCollection<string> SupportedReaderFeatures { get; } = ["timestampNtz", "vacuumProtocolCheck", "deletionVectors"];
+    public static IReadOnlyCollection<string> SupportedReaderFeatures { get; } = ["timestampNtz", "vacuumProtocolCheck", "deletionVectors", "columnMapping"];
 
     /// <summary>Reads the table at <paramref name="path"/>, at its latest version or at <paramref name="version"/>.</summary>
     public static DaskFrame Read(string path, long? version = null)
@@ -94,24 +99,41 @@ public static class DeltaLake
         public string? SchemaString { get; set; }
         public string[] PartitionColumns { get; set; } = [];
         public Dictionary<string, string> Configuration { get; set; } = [];
-        public Dictionary<string, (long Size, Dictionary<string, string?> Values, bool HasDeletionVector)> Files { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, (long Size, Dictionary<string, string?> Values, string? DeletionVector)> Files { get; } = new(StringComparer.Ordinal);
 
         public DaskFrame ToFrame()
         {
             if (SchemaString is null) throw new InvalidDataException($"Delta table at {Root} has no metaData action at version {Version}.");
             var mode = Configuration.GetValueOrDefault("delta.columnMapping.mode", "none");
-            if (mode != "none")
-                throw new NotSupportedException($"Delta table at {Root} uses column mapping (mode '{mode}'); its files' column names are not the table's.");
-            var withVectors = Files.Where(f => f.Value.HasDeletionVector).Select(f => f.Key).FirstOrDefault();
-            if (withVectors is not null)
-                throw new NotSupportedException($"Delta table at {Root} has deletion vectors on live files (e.g. {withVectors}); rows marked deleted would be read.");
+            if (mode is not ("none" or "name" or "id"))
+                throw new NotSupportedException($"Delta table at {Root} uses column mapping mode '{mode}', which is not supported.");
+            var schema = Schema(SchemaString, Root, mode);
+            var names = schema.Select(c => c.Name).ToArray();
+            var types = schema.Select(c => c.Type).ToArray();
 
-            var (names, types) = Schema(SchemaString, Root);
+            // Mapped tables name file columns, and key partition values, by physical name.
+            var fileNames = schema.Where(c => c.Physical != c.Name).ToDictionary(c => c.Name, c => c.Physical);
+            var fieldIds = mode == "id" ? schema.Where(c => c.Id > 0).ToDictionary(c => c.Name, c => c.Id) : [];
             var files = Files.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => new LakeFile(
-                Path.GetFullPath(Path.Combine(Root, Uri.UnescapeDataString(f.Key).Replace('/', Path.DirectorySeparatorChar))),
-                f.Value.Size, f.Value.Values, new Dictionary<string, string>())).ToArray();
+                Path.GetFullPath(Path.Combine(Root, Uri.UnescapeDataString(PathOf(f.Key)).Replace('/', Path.DirectorySeparatorChar))),
+                f.Value.Size, LogicalPartitionValues(f.Value.Values, schema, PartitionColumns), fileNames)
+            {
+                FieldIds = fieldIds,
+                DeletionVector = f.Value.DeletionVector,
+            }).ToArray();
             var source = new LakeSource($"Delta {Path.GetFileName(Root)} v{Version}", names, types, files, PartitionColumns, partitionsInFile: false);
             return new DaskFrame(new ScanNode(source));
+        }
+
+        private static Dictionary<string, string?> LogicalPartitionValues(Dictionary<string, string?> stored, IReadOnlyList<SchemaColumn> schema, string[] partitionColumns)
+        {
+            var values = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var column in partitionColumns)
+            {
+                var physical = schema.FirstOrDefault(c => c.Name == column).Physical ?? column;
+                values[column] = stored.TryGetValue(physical, out var v) ? v : stored.GetValueOrDefault(column);
+            }
+            return values;
         }
     }
 
@@ -185,13 +207,13 @@ public static class DeltaLake
             switch (action.Name)
             {
                 case "add":
-                    snapshot.Files[a.GetProperty("path").GetString()!] = (
+                    snapshot.Files[FileKey(a.GetProperty("path").GetString()!, VectorId(a))] = (
                         a.TryGetProperty("size", out var size) ? size.GetInt64() : 0,
                         PartitionValues(a),
-                        a.TryGetProperty("deletionVector", out var dv) && dv.ValueKind == JsonValueKind.Object);
+                        DeletionVectors.FromJson(a, snapshot.Root));
                     break;
                 case "remove":
-                    snapshot.Files.Remove(a.GetProperty("path").GetString()!);
+                    snapshot.Files.Remove(FileKey(a.GetProperty("path").GetString()!, VectorId(a)));
                     break;
                 case "metaData":
                     snapshot.SchemaString = a.GetProperty("schemaString").GetString();
@@ -210,6 +232,21 @@ public static class DeltaLake
             }
         }
     }
+
+    // A file's identity is its path *and* its deletion vector: deleting more rows of a file adds
+    // (path, new vector) and removes (path, old vector) in one commit, in either order.
+    private static string FileKey(string path, string vectorId) => vectorId.Length == 0 ? path : path + "\u0000" + vectorId;
+
+    private static string PathOf(string key) => key.IndexOf('\u0000') is var cut and >= 0 ? key[..cut] : key;
+
+    private static string VectorId(JsonElement action)
+        => action.TryGetProperty("deletionVector", out var dv) && dv.ValueKind == JsonValueKind.Object
+            ? VectorId(dv.GetProperty("storageType").GetString()!, dv.GetProperty("pathOrInlineDv").GetString(),
+                dv.TryGetProperty("offset", out var o) && o.ValueKind == JsonValueKind.Number ? o.GetInt64() : null)
+            : "";
+
+    private static string VectorId(string storageType, string? pathOrInline, long? offset)
+        => offset is { } at ? $"{storageType}{pathOrInline}@{at.ToString(CultureInfo.InvariantCulture)}" : storageType + pathOrInline;
 
     private static Dictionary<string, string?> PartitionValues(JsonElement add)
         => add.TryGetProperty("partitionValues", out var pv) && pv.ValueKind == JsonValueKind.Object
@@ -248,10 +285,16 @@ public static class DeltaLake
                     .ToDictionary(e => e.Key, e => e.Value ?? "");
             }
             if (Struct(fields, "add") is { } a && Get(a, "path") is string path)
-                snapshot.Files[path] = (
+                snapshot.Files[FileKey(path, Struct(a, "deletionVector") is { } id && Get(id, "storageType") is string kind
+                    ? VectorId(kind, (string?)Get(id, "pathOrInlineDv"), Get(id, "offset") is { } at ? Convert.ToInt64(at, CultureInfo.InvariantCulture) : null)
+                    : "")] = (
                     Get(a, "size") is { } size ? Convert.ToInt64(size, CultureInfo.InvariantCulture) : 0,
                     StringMap(Get(a, "partitionValues")),
-                    (Struct(a, "deletionVector") is { } dv ? Get(dv, "storageType") : null) is not null);
+                    Struct(a, "deletionVector") is { } dv && Get(dv, "storageType") is string storage
+                        ? DeletionVectors.Describe(storage, (string)Get(dv, "pathOrInlineDv")!,
+                            Get(dv, "offset") is { } offset ? Convert.ToInt32(offset, CultureInfo.InvariantCulture) : null,
+                            Convert.ToInt32(Get(dv, "sizeInBytes"), CultureInfo.InvariantCulture), snapshot.Root)
+                        : null);
             // A checkpoint's remove actions are tombstones of files already gone; nothing to undo.
         }
     }
@@ -293,21 +336,33 @@ public static class DeltaLake
 
     // ------------------------------------------------------------------ schema
 
-    internal static (string[] Names, DataType[] Types) Schema(string schemaString, string root)
+    /// <summary>A table column: its logical name and type, and (under column mapping) the name and
+    /// field id its files use.</summary>
+    internal readonly record struct SchemaColumn(string Name, DataType Type, string Physical, int Id);
+
+    internal static IReadOnlyList<SchemaColumn> Schema(string schemaString, string root, string mode = "none")
     {
         using var doc = JsonDocument.Parse(schemaString);
-        var names = new List<string>();
-        var types = new List<DataType>();
+        var columns = new List<SchemaColumn>();
         foreach (var field in doc.RootElement.GetProperty("fields").EnumerateArray())
         {
             var name = field.GetProperty("name").GetString()!;
             var type = field.GetProperty("type");
             if (type.ValueKind != JsonValueKind.String)
                 throw new NotSupportedException($"Delta table at {root}: column '{name}' is a nested type, which is not supported.");
-            names.Add(name);
-            types.Add(TypeOf(type.GetString()!, name, root));
+            var physical = name;
+            var id = 0;
+            if (mode != "none")
+            {
+                if (!field.TryGetProperty("metadata", out var meta) || meta.ValueKind != JsonValueKind.Object
+                    || !meta.TryGetProperty("delta.columnMapping.physicalName", out var p))
+                    throw new InvalidDataException($"Delta table at {root} uses column mapping, but column '{name}' has no physical name.");
+                physical = p.GetString()!;
+                if (meta.TryGetProperty("delta.columnMapping.id", out var i) && i.ValueKind == JsonValueKind.Number) id = i.GetInt32();
+            }
+            columns.Add(new SchemaColumn(name, TypeOf(type.GetString()!, name, root), physical, id));
         }
-        return (names.ToArray(), types.ToArray());
+        return columns;
     }
 
     private static DataType TypeOf(string type, string column, string root) => type switch

@@ -11,9 +11,16 @@ namespace Gravicode.Science.DaskNet.Lakehouse;
 /// <param name="PartitionValues">Partition column values as the table format stores them (text),
 /// keyed by table column name. Delta keeps these out of the file; Iceberg keeps them in it.</param>
 /// <param name="FileNames">Where a column has a different name in this file than in the table
-/// (an Iceberg rename): table name to file name.</param>
+/// (an Iceberg rename, a Delta mapped column): table name to file name.</param>
 internal sealed record LakeFile(string Path, long Size, IReadOnlyDictionary<string, string?> PartitionValues,
-    IReadOnlyDictionary<string, string> FileNames);
+    IReadOnlyDictionary<string, string> FileNames)
+{
+    /// <summary>Parquet field ids to match columns by, before names (Delta's column mapping by id).</summary>
+    public IReadOnlyDictionary<string, int> FieldIds { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>A <see cref="DeletionVectors"/> descriptor of the rows deleted from the file, if any.</summary>
+    public string? DeletionVector { get; init; }
+}
 
 /// <summary>
 /// A table snapshot as a scan: one partition per data file, columns pinned to the table schema.
@@ -58,9 +65,11 @@ internal sealed class LakeSource(string label, string[] names, DataType[] types,
         var fromLog = partitionsInFile || file is null ? [] : keep.Where(partitionColumns.Contains).ToArray();
         var read = keep.Except(fromLog).ToArray();
         var fileNames = read.Select(c => file?.FileNames.GetValueOrDefault(c) ?? c).ToArray();
+        var fieldIds = read.Select(c => file?.FieldIds.GetValueOrDefault(c) ?? 0).ToArray();
         string?[] constants = fromLog.Select(c => file!.PartitionValues.GetValueOrDefault(c)).ToArray();
         return TaskSpec.Call(new TaskKey(name, i), ReadMethod,
-            [file?.Path ?? "", read, fileNames, fromLog, constants, keep, keepTypes, encoded], "read-" + label.Split(' ')[0].ToLowerInvariant());
+            [file?.Path ?? "", read, fileNames, fieldIds, file?.DeletionVector ?? "", fromLog, constants, keep, keepTypes, encoded],
+            "read-" + label.Split(' ')[0].ToLowerInvariant());
     }
 
     /// <summary>True when a partition filter is not true for the file's partition values.</summary>
@@ -90,9 +99,12 @@ public static class LakeKernels
     /// to <paramref name="types"/>; then applies <paramref name="ops"/>. An empty path is a file
     /// that was pruned, or a table with no files: an empty frame of the right shape.
     /// </summary>
+    /// <remarks>A positive entry of <c>fieldIds</c> finds that column by Parquet field id first,
+    /// whatever it is called in the file; a non-empty <c>deletionVector</c> names row positions
+    /// to drop before anything else runs.</remarks>
     [RemoteTask]
-    public static DataFrame ReadLakeFile(string path, string[] read, string[] fileNames, string[] constantNames,
-        string?[] constants, string[] names, int[] types, byte[] ops)
+    public static DataFrame ReadLakeFile(string path, string[] read, string[] fileNames, int[] fieldIds, string deletionVector,
+        string[] constantNames, string?[] constants, string[] names, int[] types, byte[] ops)
     {
         DataFrame frame;
         long rows;
@@ -103,7 +115,13 @@ public static class LakeKernels
         }
         else
         {
-            var present = Present(path);
+            var (present, byId) = Present(path);
+            if (fieldIds.Any(id => id > 0))
+            {
+                fileNames = (string[])fileNames.Clone();
+                for (var i = 0; i < fileNames.Length; i++)
+                    if (fieldIds[i] > 0 && byId.TryGetValue(fieldIds[i], out var named)) fileNames[i] = named;
+            }
             var wanted = fileNames.Where(present.Contains).Distinct().ToArray();
             frame = wanted.Length > 0 ? ParquetIO.Read(path, wanted) : new DataFrame(Array.Empty<Series>());
             rows = wanted.Length > 0 ? frame.RowCount : RowCount(path);
@@ -119,14 +137,30 @@ public static class LakeKernels
             if (frame.HasColumn(fileName)) return Typed.Build(n, type, Enumerable.Range(0, count).Select(frame[fileName].GetValue).ToArray());
             return Typed.Build(n, type, new object?[count]);
         });
-        return FrameOp.ApplyAll(new DataFrame(columns), FrameOp.Decode(ops));
+        var table = new DataFrame(columns);
+        if (deletionVector.Length > 0 && count > 0)
+        {
+            var keep = new bool[count];
+            Array.Fill(keep, true);
+            foreach (var row in DeletionVectors.Read(deletionVector))
+            {
+                if (row >= count) throw new InvalidDataException($"{path} has {count} rows; its deletion vector deletes row {row}.");
+                keep[row] = false;
+            }
+            table = table.Filter(keep);
+        }
+        return FrameOp.ApplyAll(table, FrameOp.Decode(ops));
     }
 
-    private static HashSet<string> Present(string path)
+    private static (HashSet<string> Names, Dictionary<int, string> ById) Present(string path)
     {
         using var stream = File.OpenRead(path);
         using var reader = ParquetReader.CreateAsync(stream).GetAwaiter().GetResult();
-        return reader.Schema.GetDataFields().Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var fields = reader.Schema.GetDataFields();
+        var byId = new Dictionary<int, string>();
+        foreach (var f in fields)
+            if (f.FieldId is int id && id > 0) byId.TryAdd(id, f.Name);
+        return (fields.Select(f => f.Name).ToHashSet(StringComparer.Ordinal), byId);
     }
 
     private static long RowCount(string path)

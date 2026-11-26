@@ -82,6 +82,82 @@ public sealed class DetachedRunTests
         await Assert.ThrowsAsync<NotSupportedException>(() => client.SubmitAsync(Dask.Delayed((double x) => x + 1, Dask.Value(1.0))));
     }
 
+    private static Worker WorkerAt(LocalCluster cluster, string address)
+        => cluster.InProcessWorkers.Single(w => w.Address.Equals(address, StringComparison.OrdinalIgnoreCase));
+
+    private static void Kill(LocalCluster cluster, string address)
+        => cluster.KillWorker(cluster.Addresses.ToList().FindIndex(a => a.Equals(address, StringComparison.OrdinalIgnoreCase)));
+
+    [Fact]
+    public async Task The_standby_takes_over_when_the_scheduler_dies_mid_run()
+    {
+        await using var cluster = await LocalCluster.StartAsync(workers: 3, threadsPerWorker: 2);
+        var client = cluster.Client;
+        var run = await client.SubmitAsync(Sum(30, 60));
+        Assert.NotNull(run.Standby);
+        Assert.NotEqual(run.Scheduler, run.Standby);
+        Assert.Equal(run.Standby, RunHandle.Parse(run.ToString()).Standby);
+
+        // Kill on an event, not a clock: the scheduler has made progress the standby can see.
+        var clock = Stopwatch.StartNew();
+        while ((await client.StatusAsync(run)).Completed < 3)
+        {
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), "the run made no progress");
+            await Task.Delay(10);
+        }
+        var standby = WorkerAt(cluster, run.Standby!);
+        Assert.Equal(0, standby.Takeovers);
+        Kill(cluster, run.Scheduler);
+
+        Assert.Equal(Enumerable.Range(0, 30).Sum(), await client.ResultAsync<double>(run));
+        Assert.Equal(1, standby.Takeovers);
+        var status = await client.StatusAsync(run);
+        Assert.Equal(RunState.Finished, status.State);
+        Assert.Equal(status.Total, status.Completed);
+        await client.ForgetAsync(run);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => client.StatusAsync(run));
+    }
+
+    [Fact]
+    public async Task Results_lost_with_a_finished_scheduler_are_recomputed_by_the_standby()
+    {
+        await using var cluster = await LocalCluster.StartAsync(workers: 3, threadsPerWorker: 2);
+        var client = cluster.Client;
+        var sales = DaskFrame.FromFrame(SalesData.Make(2_000), 4);
+        var report = sales.GroupBy("region").Agg(("qty", "sum"));
+        var run = await client.SubmitAsync(report);
+        var expected = SalesData.Rows(report.Compute(), sorted: true);
+        Assert.Equal(expected, SalesData.Rows(await client.FrameResultAsync(run), sorted: true));
+
+        Kill(cluster, run.Scheduler);
+        Assert.Equal(expected, SalesData.Rows(await client.FrameResultAsync(run), sorted: true));
+        Assert.Equal(1, WorkerAt(cluster, run.Standby!).Takeovers);
+    }
+
+    [Fact]
+    public async Task Forgetting_or_cancelling_never_wakes_the_standby()
+    {
+        await using var cluster = await LocalCluster.StartAsync(workers: 2, threadsPerWorker: 2);
+        var client = cluster.Client;
+        var done = await client.SubmitAsync(Sum(4, 5));
+        Assert.Equal(6, await client.ResultAsync<double>(done));
+        await client.ForgetAsync(done);
+
+        var slow = await client.SubmitAsync(Sum(40, 300));
+        await client.CancelAsync(slow);
+        await WaitFor(client, slow, RunState.Cancelled);
+
+        await Task.Delay(Worker.StandbyPoll * (Worker.StandbyStrikes + 3));
+        Assert.All(cluster.InProcessWorkers, w => Assert.Equal(0, w.Takeovers));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => client.StatusAsync(done));
+
+        // One worker: no standby, nothing changes.
+        await using var single = await LocalCluster.StartAsync(workers: 1, threadsPerWorker: 2);
+        var alone = await single.Client.SubmitAsync(Sum(4, 5));
+        Assert.Null(alone.Standby);
+        Assert.Equal(6, await single.Client.ResultAsync<double>(alone));
+    }
+
     [Fact]
     public async Task A_straggler_is_overtaken_by_a_speculative_attempt()
     {

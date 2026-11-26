@@ -2,20 +2,24 @@
 
   <!--
     Dask.Net geospatial: geohash partitioning, distance and point-in-polygon joins over
-    partitioned frames. A separate package so Dask.Net stays free of geometry code; it has no
-    dependency beyond Dask.Net itself.
+    partitioned frames, and geometry operations (buffer, dissolve, overlay) on NetTopologySuite.
+    A separate package so Dask.Net stays free of geometry code.
   -->
 
   <PropertyGroup>
     <RootNamespace>Gravicode.Science.DaskNet.Geo</RootNamespace>
     <AssemblyName>Gravicode.Science.DaskNet.Geo</AssemblyName>
     <PackageId>Gravicode.Science.DaskNet.Geo</PackageId>
-    <Description>Geospatial operations for Dask.Net (a dask-geopandas analogue): geohashes, spatial partitioning, distance joins and point-in-polygon joins over WKT, all runnable on a cluster. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
-    <PackageTags>dask;geospatial;geohash;spatial-join;wkt;dataframe;dotnet;gravicode</PackageTags>
+    <Description>Geospatial operations for Dask.Net (a dask-geopandas analogue): geohashes, spatial partitioning, distance joins, point-in-polygon joins, and buffer, simplify, dissolve and overlay on NetTopologySuite, all runnable on a cluster. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;geospatial;geohash;spatial-join;wkt;overlay;dissolve;netTopologySuite;dataframe;dotnet;gravicode</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DaskNet\DaskNet.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NetTopologySuite" />
   </ItemGroup>
 
   <ItemGroup>

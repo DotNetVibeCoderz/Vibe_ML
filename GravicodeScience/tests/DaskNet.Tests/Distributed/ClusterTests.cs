@@ -214,6 +214,13 @@ public sealed class ProcessClusterTests
 
         var a = DaskArray.Random([60, 60], [20, 20]);
         Assert.Equal(a.Sum().Compute(), a.Sum().Compute(cluster.Client));
+
+        // Large blocks cross between the processes through shared memory, bit for bit.
+        var big = DaskArray.Random([1200, 1200], [600, 600], seed: 11);
+        Assert.Equal(big.Compute().ToArray(), big.Compute(cluster.Client).ToArray());
+        Assert.Equal((big * 3).Sum(axis: 1).Compute().ToArray(), (big * 3).Sum(axis: 1).Compute(cluster.Client).ToArray());
+        var after = await cluster.Client.GetWorkerInfoAsync();
+        Assert.True(after.Sum(i => i.SharedMemoryBytesSent) >= 4L * 600 * 600 * 8, "blocks did not go through shared memory");
     }
 
     [Fact]

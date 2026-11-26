@@ -10,12 +10,14 @@
     <RootNamespace>Gravicode.Science.DaskNet.Streaming</RootNamespace>
     <AssemblyName>Gravicode.Science.DaskNet.Streaming</AssemblyName>
     <PackageId>Gravicode.Science.DaskNet.Streaming</PackageId>
-    <Description>Micro-batch streaming for Dask.Net: filters, projections and SQL per batch on any scheduler, event-time tumbling and sliding windows with watermarks, incremental directory sources and checkpointed restarts. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
-    <PackageTags>dask;streaming;micro-batch;windowing;watermark;etl;dataframe;dotnet;gravicode</PackageTags>
+    <Description>Micro-batch streaming for Dask.Net: filters, projections and SQL per batch on any scheduler, event-time tumbling and sliding windows with watermarks, stream-stream interval joins, directory, MQTT and Kafka sources, and checkpointed restarts. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;streaming;kafka;mqtt;stream-join;micro-batch;windowing;watermark;etl;dataframe;dotnet;gravicode</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DaskNet\DaskNet.csproj" />
+    <PackageReference Include="MQTTnet" />
+    <PackageReference Include="Confluent.Kafka" />
   </ItemGroup>
 
   <ItemGroup>

@@ -13,6 +13,14 @@
     <!-- IO -->
     <!-- 5.6.x keeps the DataColumn-based API; 6.x replaced it with a lower-level Memory<T> surface. -->
     <PackageVersion Include="Parquet.Net" Version="5.6.1" />
+    <!-- Streaming sources for DaskNet.Streaming; MQTTnet.Server is test-only (in-process broker). -->
+    <PackageVersion Include="MQTTnet" Version="5.2.0.1603" />
+    <PackageVersion Include="MQTTnet.Server" Version="5.2.0.1603" />
+    <PackageVersion Include="Confluent.Kafka" Version="2.16.0" />
+    <!-- Geometry operations (buffer, union, overlay) in DaskNet.Geo. -->
+    <PackageVersion Include="NetTopologySuite" Version="2.6.0" />
+    <!-- ONNX batch scoring in DaskNet.ML. -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.23.2" />
 
     <!-- Visualization hooks used by samples and notebooks -->
     <PackageVersion Include="ScottPlot" Version="5.1.59" />

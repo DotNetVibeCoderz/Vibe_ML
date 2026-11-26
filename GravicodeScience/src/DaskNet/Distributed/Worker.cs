@@ -42,6 +42,13 @@ public sealed record WorkerOptions
     /// <summary>Where spilled results go; a fresh folder under the system temp folder by default.
     /// The worker deletes what it wrote when it stops.</summary>
     public string? SpillDirectory { get; init; }
+
+    /// <summary>
+    /// Results of at least this many encoded bytes go to a reader on the same machine (a peer, or
+    /// a client) through shared memory rather than the socket; null sends everything over the
+    /// socket and never asks peers for shared memory. 1 MiB by default.
+    /// </summary>
+    public long? SharedMemoryThreshold { get; init; } = 1 << 20;
 }
 
 /// <summary>
@@ -69,7 +76,11 @@ public sealed partial class Worker : IAsyncDisposable
     private readonly ConcurrentBag<WireConnection> _connections = [];
     private readonly SemaphoreSlim _slots;
     private readonly CancellationTokenSource _stop = new();
+    private readonly SharedSegments _segments = new();
+    private readonly ConcurrentDictionary<string, bool> _noShared = new(StringComparer.OrdinalIgnoreCase);
     private long _tasksRun;
+    private long _sharedBytes;
+    private long _socketBytes;
 
     private Worker(WorkerOptions options, TcpListener listener)
     {
@@ -89,6 +100,17 @@ public sealed partial class Worker : IAsyncDisposable
 
     /// <summary>Tasks run so far.</summary>
     public long TasksRun => Interlocked.Read(ref _tasksRun);
+
+    /// <summary>Encoded bytes of results handed to readers through shared memory.</summary>
+    public long SharedMemoryBytesSent => Interlocked.Read(ref _sharedBytes);
+
+    internal int LiveSharedSegments => _segments.Count;
+
+    /// <summary>Stores a value as if a task had produced it (tests and measurements).</summary>
+    internal void Put(TaskKey key, object? value) => _data.Set(key, value);
+
+    /// <summary>Encoded bytes of results sent to readers over the socket.</summary>
+    public long SocketBytesSent => Interlocked.Read(ref _socketBytes);
 
     /// <summary>Results held now, in memory or spilled.</summary>
     public int StoredKeys => _data.Count;
@@ -144,9 +166,18 @@ public sealed partial class Worker : IAsyncDisposable
                         _ = Task.Run(() => RunAsync(connection, message));
                         break;
                     case MessageKind.Get:
+                    case MessageKind.GetShared:
                         await ReplyGetAsync(connection, message).ConfigureAwait(false);
                         break;
+                    case MessageKind.SharedDone:
+                    {
+                        using var r = message.Reader();
+                        _segments.Release(r.ReadInt64());
+                        await connection.SendAsync(MessageKind.Ok, message.Id).ConfigureAwait(false);
+                        break;
+                    }
                     case MessageKind.Submit:
+                    case MessageKind.Standby:
                         await SubmitAsync(connection, message).ConfigureAwait(false);
                         break;
                     case MessageKind.Status:
@@ -179,6 +210,8 @@ public sealed partial class Worker : IAsyncDisposable
                             w.Write(memory.MemoryBytes);
                             w.Write(memory.SpilledKeys);
                             w.Write(memory.SpilledBytes);
+                            w.Write(SharedMemoryBytesSent);
+                            w.Write(SocketBytesSent);
                         }).ConfigureAwait(false);
                         break;
                 }
@@ -192,8 +225,39 @@ public sealed partial class Worker : IAsyncDisposable
     {
         using var r = message.Reader();
         var key = WireCodec.ReadKey(r);
-        if (_data.TryGetSerialized(key, out var bytes))
+        var sameHost = message.Kind == MessageKind.GetShared && r.ReadString() == SharedMemory.HostId;
+        if (_data.TryGetForTransfer(key, out var value, out var spilled))
         {
+            if (sameHost && _options.SharedMemoryThreshold is { } threshold)
+            {
+                var size = spilled?.LongLength ?? WireCodec.Measure(value);
+                (long Id, SharedMemory.Mapping Mapping)? lent = null;
+                if (size >= threshold)
+                    try
+                    {
+                        lent = _segments.Lend(size);
+                        if (spilled is not null) SharedMemory.Write(lent.Value.Mapping, spilled);
+                        else SharedMemory.Write(lent.Value.Mapping, value, size);
+                    }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                    {
+                        if (lent is { } failed) _segments.Release(failed.Id);
+                        lent = null;                    // no shared memory here: use the socket
+                    }
+                if (lent is { } segment)
+                {
+                    Interlocked.Add(ref _sharedBytes, size);
+                    await connection.SendAsync(MessageKind.SharedData, message.Id, w =>
+                    {
+                        w.Write(segment.Id);
+                        w.Write(segment.Mapping.Locator);
+                        w.Write(size);
+                    }).ConfigureAwait(false);
+                    return;
+                }
+            }
+            var bytes = spilled ?? WireCodec.Serialize(value);
+            Interlocked.Add(ref _socketBytes, bytes.LongLength);
             await connection.SendAsync(MessageKind.Data, message.Id, w => { w.Write(bytes.Length); w.Write(bytes); }).ConfigureAwait(false);
         }
         else
@@ -290,10 +354,10 @@ public sealed partial class Worker : IAsyncDisposable
             _peers.TryRemove(holder, out _);
             throw new WorkerLostException(holder);
         }
-        var reply = await peer.RequestAsync(MessageKind.Get, w => WireCodec.WriteKey(w, key)).ConfigureAwait(false);
-        using var r = reply.Reader();
-        if (reply.Kind == MessageKind.Error) throw new KeyNotFoundException($"{holder} does not hold {key}.");
-        return WireCodec.Deserialize(r.ReadBytes(r.ReadInt32()));
+        var (found, value) = await SharedMemory.GetAsync(peer, key,
+            _options.SharedMemoryThreshold is not null && !_noShared.ContainsKey(holder), () => _noShared[holder] = true, _stop.Token).ConfigureAwait(false);
+        if (!found) throw new KeyNotFoundException($"{holder} does not hold {key}.");
+        return value;
     }
 
     private static Task SendErrorAsync(WireConnection connection, long id, Exception e, TaskKey? missing)
@@ -315,6 +379,7 @@ public sealed partial class Worker : IAsyncDisposable
         _listener.Stop();
         foreach (var c in _connections) c.Abort();
         _data.Dispose();
+        _segments.Dispose();
     }
 
     /// <summary>Stops listening and closes every connection.</summary>
@@ -326,6 +391,7 @@ public sealed partial class Worker : IAsyncDisposable
         foreach (var p in _peers.Values)
             if (p.IsValueCreated && p.Value.IsCompletedSuccessfully) await p.Value.Result.DisposeAsync().ConfigureAwait(false);
         _data.Dispose();
+        _segments.Dispose();
     }
 
     /// <summary>
@@ -338,7 +404,8 @@ public sealed partial class Worker : IAsyncDisposable
     /// the process list.
     /// <c>DASKNET_HOST</c> and <c>DASKNET_PORT</c> supply the host and port when the flags are absent.
     /// <c>--memory-limit 4GB</c> (B, KB, MB, GB; powers of 1024) and <c>--spill-dir path</c> set
-    /// <see cref="WorkerOptions.MemoryLimit"/> and <see cref="WorkerOptions.SpillDirectory"/>.
+    /// <see cref="WorkerOptions.MemoryLimit"/> and <see cref="WorkerOptions.SpillDirectory"/>;
+    /// <c>--shared-memory-threshold 4MB</c> (or <c>off</c>) sets <see cref="WorkerOptions.SharedMemoryThreshold"/>.
     /// Prints <c>DASKNET_WORKER_LISTENING host:port</c> once ready.
     /// </summary>
     public static async Task<int> RunCommandLineAsync(string[] args, TextWriter? output = null)
@@ -353,6 +420,7 @@ public sealed partial class Worker : IAsyncDisposable
         var preload = new List<string>();
         string? pfx = null, spillDirectory = null;
         long? memoryLimit = null;
+        long? sharedThreshold = new WorkerOptions { Token = "" }.SharedMemoryThreshold;
         var trust = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
@@ -368,6 +436,12 @@ public sealed partial class Worker : IAsyncDisposable
                 case "--tls-trust": trust.Add(Next()); break;
                 case "--memory-limit": memoryLimit = ParseBytes(Next()); break;
                 case "--spill-dir": spillDirectory = Next(); break;
+                case "--shared-memory-threshold":
+                {
+                    var v = Next();
+                    sharedThreshold = v.Equals("off", StringComparison.OrdinalIgnoreCase) ? null : ParseBytes(v);
+                    break;
+                }
                 default: throw new ArgumentException($"Unknown option {args[i]}.");
             }
         }
@@ -396,7 +470,7 @@ public sealed partial class Worker : IAsyncDisposable
         await using var worker = await StartAsync(new WorkerOptions
         {
             Host = host, Port = port, Threads = threads, Token = token, Name = name.Length > 0 ? name : null, Tls = tls,
-            MemoryLimit = memoryLimit, SpillDirectory = spillDirectory,
+            MemoryLimit = memoryLimit, SpillDirectory = spillDirectory, SharedMemoryThreshold = sharedThreshold,
         }).ConfigureAwait(false);
         await output.WriteLineAsync($"DASKNET_WORKER_LISTENING {worker.Address}").ConfigureAwait(false);
         await output.FlushAsync().ConfigureAwait(false);

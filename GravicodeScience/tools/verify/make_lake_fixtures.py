@@ -8,6 +8,9 @@ expected/<version>.jsonl holds the rows every version or snapshot must read back
     venv/Scripts/python tools/verify/make_lake_fixtures.py
 
 Output: tests/DaskNet.Lakehouse.Tests/Fixtures/{delta,iceberg}/...
+
+Deletion vectors, column mapping with renames and Hudi tables need Spark; see
+make_lake_fixtures_spark.py.
 """
 import datetime as dt
 import json

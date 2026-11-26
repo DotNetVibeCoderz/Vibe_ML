@@ -10,13 +10,17 @@
     <RootNamespace>Gravicode.Science.DaskNet.ML</RootNamespace>
     <AssemblyName>Gravicode.Science.DaskNet.ML</AssemblyName>
     <PackageId>Gravicode.Science.DaskNet.ML</PackageId>
-    <Description>Distributed machine learning for Dask.Net (a dask-ml analogue): grid and random hyperparameter search with one task per candidate and fold, and batch prediction over partitioned frames, for GraviLearn estimators. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
-    <PackageTags>dask;machine-learning;hyperparameter-search;cross-validation;gravilearn;dotnet;gravicode</PackageTags>
+    <Description>Distributed machine learning for Dask.Net (a dask-ml analogue): grid and random hyperparameter search with one task per candidate and fold, batch prediction over partitioned frames for GraviLearn estimators, incremental (partial_fit) training over partitions, and ONNX batch scoring with ONNX Runtime. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;machine-learning;hyperparameter-search;cross-validation;incremental-learning;onnx;gravilearn;dotnet;gravicode</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DaskNet\DaskNet.csproj" />
     <ProjectReference Include="..\GraviLearn\GraviLearn.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
   </ItemGroup>
 
   <ItemGroup>

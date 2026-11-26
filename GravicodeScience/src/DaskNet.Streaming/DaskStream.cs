@@ -13,14 +13,29 @@ public abstract class StreamSource
     internal abstract IAsyncEnumerable<SourceBatch> ReadAsync(SourceState state, CancellationToken cancellationToken);
 }
 
-/// <summary>One batch from a source, and the files it came from (for the checkpoint).</summary>
-internal sealed record SourceBatch(DataFrame Frame, string[] Files);
+/// <summary>One batch from a source: the files it came from, or the next offset per Kafka
+/// partition after it (both for the checkpoint), and what to call once it is safely processed.</summary>
+internal sealed record SourceBatch(DataFrame Frame, string[] Files,
+    IReadOnlyDictionary<(string Topic, int Partition), long>? Offsets = null, Action? Commit = null);
 
-/// <summary>What a source has consumed, carried in the checkpoint.</summary>
+/// <summary>What a source has consumed, carried in the checkpoint. Lock the instance to read or
+/// change it: a joined query's sources run beside the loop that records their progress.</summary>
 internal sealed class SourceState
 {
     public HashSet<string> Files { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<(string Topic, int Partition), long> Offsets { get; } = [];
     public long Batches { get; set; }
+
+    /// <summary>Records a processed batch.</summary>
+    public void Consumed(SourceBatch batch)
+    {
+        lock (this)
+        {
+            foreach (var f in batch.Files) Files.Add(f);
+            if (batch.Offsets is { } offsets)
+                foreach (var (k, v) in offsets) Offsets[k] = v;
+        }
+    }
 }
 
 /// <summary>
@@ -78,6 +93,53 @@ public sealed class DaskStream
         ArgumentException.ThrowIfNullOrEmpty(directory);
         ArgumentOutOfRangeException.ThrowIfLessThan(filesPerBatch, 1);
         return new(new DirectorySource(Path.GetFullPath(directory), pattern, watch, pollInterval ?? TimeSpan.FromSeconds(1), options, filesPerBatch), [], 1, null);
+    }
+
+    /// <summary>
+    /// An MQTT subscription: every message on <paramref name="topics"/> (filters, so <c>+</c> and
+    /// <c>#</c> work) becomes a row, decoded by <paramref name="format"/>, in batches of up to
+    /// <see cref="MessageSourceOptions.MaxBatchRows"/> messages or
+    /// <see cref="MessageSourceOptions.MaxBatchDelay"/>.
+    /// </summary>
+    /// <remarks>MQTT cannot replay, so a checkpoint keeps the windows and the batch count but not
+    /// a position: what is published while the query is down is lost, unless a fixed
+    /// <see cref="MqttOptions.ClientId"/> with <see cref="MqttOptions.CleanSession"/> off has the
+    /// broker queue it (QoS 1 or 2). Messages are acknowledged on receipt, not after the sink.</remarks>
+    public static DaskStream FromMqtt(string host, string[] topics, MessageFormat format, MqttOptions? options = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(host);
+        ArgumentNullException.ThrowIfNull(topics);
+        if (topics.Length == 0) throw new ArgumentException("Subscribe to at least one topic.", nameof(topics));
+        ArgumentNullException.ThrowIfNull(format);
+        options ??= new MqttOptions();
+        options.Validate();
+        if (options.QualityOfService is < 0 or > 2) throw new ArgumentOutOfRangeException(nameof(options), "QoS is 0, 1 or 2.");
+        return new(new MqttSource(host, topics, format, options), [], 1, null);
+    }
+
+    /// <summary>
+    /// A Kafka consumer group on <paramref name="topics"/>: each message value becomes a row,
+    /// decoded by <paramref name="format"/>. With a checkpoint, each partition resumes after the
+    /// last batch whose sink returned; without one, from the group's committed offsets.
+    /// </summary>
+    /// <remarks>Delivery is at-least-once: offsets go to the checkpoint and are committed to the
+    /// group only after a batch's sink has returned, so a crash in between replays the batch
+    /// (make the sink idempotent by <see cref="StreamBatch.Id"/>, as the CSV sink is).</remarks>
+    public static DaskStream FromKafka(string bootstrapServers, string[] topics, string groupId, MessageFormat format, KafkaOptions? options = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(bootstrapServers);
+        ArgumentNullException.ThrowIfNull(topics);
+        if (topics.Length == 0) throw new ArgumentException("Subscribe to at least one topic.", nameof(topics));
+        ArgumentException.ThrowIfNullOrEmpty(groupId);
+        options ??= new KafkaOptions();
+        return FromKafkaConsumer(() => new ConfluentConsumer(bootstrapServers, topics, groupId, options), format, options);
+    }
+
+    internal static DaskStream FromKafkaConsumer(Func<IKafkaConsumer> consumer, MessageFormat format, KafkaOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(format);
+        options.Validate();
+        return new(new KafkaSource(consumer, format, options), [], 1, null);
     }
 
     // ------------------------------------------------------------------ steps
@@ -153,6 +215,29 @@ public sealed class DaskStream
         TimeSpan? slide = null, TimeSpan allowedLateness = default)
         => new(this, new WindowSpec(timeColumn, size, slide ?? size, keys, aggregations, allowedLateness));
 
+    /// <summary>
+    /// Joins with another stream on equal <paramref name="on"/> keys and event times at most
+    /// <paramref name="within"/> apart (Spark's stream-stream join). Both sides are buffered and
+    /// evicted by each other's watermark (latest event time minus <paramref name="allowedLateness"/>),
+    /// so state stays bounded; unmatched rows of an outer side are emitted once they can no longer
+    /// match. Each side runs its own steps first.
+    /// </summary>
+    public JoinedStream Join(DaskStream right, string[] on, string leftTime, string rightTime, TimeSpan within,
+        StreamJoinType how = StreamJoinType.Inner, TimeSpan allowedLateness = default, string suffix = "_right")
+    {
+        if (within < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(within));
+        return IntervalJoin(right, on, leftTime, rightTime, -within, within, how, allowedLateness, suffix);
+    }
+
+    /// <summary>
+    /// Like <see cref="Join"/> with an asymmetric interval: a right row matches a left row when
+    /// <c>rightTime - leftTime</c> is in [<paramref name="lower"/>, <paramref name="upper"/>] - for
+    /// "a click within an hour after the impression", lower 0 and upper one hour.
+    /// </summary>
+    public JoinedStream IntervalJoin(DaskStream right, string[] on, string leftTime, string rightTime, TimeSpan lower, TimeSpan upper,
+        StreamJoinType how = StreamJoinType.Inner, TimeSpan allowedLateness = default, string suffix = "_right")
+        => new(this, new JoinSpec(right, on, leftTime, rightTime, lower, upper, how, allowedLateness, suffix));
+
     // ------------------------------------------------------------------ sinks
 
     /// <summary>Calls <paramref name="sink"/> with each non-empty output batch.</summary>
@@ -200,10 +285,9 @@ public sealed class DaskStream
         {
             while (true)
             {
-                var fresh = Directory.Exists(directory)
-                    ? Directory.EnumerateFiles(directory, pattern).Select(Path.GetFileName).Where(n => !state.Files.Contains(n!))
-                        .Order(StringComparer.Ordinal).Select(n => n!).ToArray()
-                    : [];
+                var present = Directory.Exists(directory) ? Directory.EnumerateFiles(directory, pattern).Select(n => Path.GetFileName(n)!).ToArray() : [];
+                string[] fresh;
+                lock (state) fresh = [.. present.Where(n => !state.Files.Contains(n)).Order(StringComparer.Ordinal)];
                 foreach (var chunk in fresh.Chunk(perBatch))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -221,24 +305,26 @@ public sealed class DaskStream
 /// <summary>A stream with a window; finish it with a sink.</summary>
 public sealed class WindowedStream
 {
-    internal WindowedStream(DaskStream stream, WindowSpec spec)
+    internal WindowedStream(DaskStream stream, WindowSpec spec, JoinSpec? join = null)
     {
         spec.Validate();
         Stream = stream;
         Spec = spec;
+        Join = join;
     }
 
     internal DaskStream Stream { get; }
     internal WindowSpec Spec { get; }
+    internal JoinSpec? Join { get; }
 
     /// <summary>Calls <paramref name="sink"/> with each batch of closed windows.</summary>
-    public StreamQuery ForEachBatch(Func<DataFrame, StreamBatch, Task> sink) => new(Stream, Spec, sink);
+    public StreamQuery ForEachBatch(Func<DataFrame, StreamBatch, Task> sink) => new(Stream, Spec, sink, Join);
 
     /// <summary>Keeps every batch of closed windows in <see cref="StreamQuery.Results"/>.</summary>
-    public StreamQuery Collect() => new(Stream, Spec, null);
+    public StreamQuery Collect() => new(Stream, Spec, null, Join);
 
     /// <summary>Writes each batch of closed windows to <c>batch-{id}.csv</c>.</summary>
-    public StreamQuery ToCsvDirectory(string directory) => new(Stream, Spec, StreamQuery.CsvSink(directory));
+    public StreamQuery ToCsvDirectory(string directory) => new(Stream, Spec, StreamQuery.CsvSink(directory), Join);
 }
 
 /// <summary>The batch a sink is given.</summary>

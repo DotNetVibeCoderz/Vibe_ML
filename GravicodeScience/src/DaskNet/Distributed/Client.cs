@@ -14,7 +14,14 @@ namespace Gravicode.Science.DaskNet.Distributed;
 /// <param name="SpilledKeys">Results spilled to disk.</param>
 /// <param name="SpilledBytes">Bytes spilled to disk.</param>
 public sealed record WorkerInfo(string Address, string Name, int Threads, int StoredKeys, long TasksRun, int ProcessId,
-    long MemoryBytes, int SpilledKeys, long SpilledBytes);
+    long MemoryBytes, int SpilledKeys, long SpilledBytes)
+{
+    /// <summary>Encoded bytes of results it handed to readers on its machine through shared memory.</summary>
+    public long SharedMemoryBytesSent { get; init; }
+
+    /// <summary>Encoded bytes of results it sent to readers over the socket.</summary>
+    public long SocketBytesSent { get; init; }
+}
 
 /// <summary>
 /// A scheduler that runs task graphs on a cluster of <see cref="Worker"/>s (Dask's
@@ -67,6 +74,10 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
 
     /// <summary>Speculative re-execution of stragglers on idle workers; off (null) by default.</summary>
     public SpeculationPolicy? Speculation { get; set; }
+
+    /// <summary>Asks workers on this machine for large results through shared memory (their
+    /// <see cref="WorkerOptions.SharedMemoryThreshold"/> decides what is large); on by default.</summary>
+    public bool SharedMemory { get; set; } = true;
 
     /// <summary>Statistics of the most recent run.</summary>
     public RunStatistics? LastRun { get; private set; }
@@ -193,7 +204,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
         var reply = await rpc.RequestAsync(MessageKind.Ping, cancellationToken: cancellationToken).ConfigureAwait(false);
         using var r = reply.Reader();
         return new WorkerInfo(rpc.Address, r.ReadString(), r.ReadInt32(), r.ReadInt32(), r.ReadInt64(), r.ReadInt32(),
-            r.ReadInt64(), r.ReadInt32(), r.ReadInt64());
+            r.ReadInt64(), r.ReadInt32(), r.ReadInt64()) { SharedMemoryBytesSent = r.ReadInt64(), SocketBytesSent = r.ReadInt64() };
     }
 
     /// <inheritdoc />
@@ -238,6 +249,8 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
         public string Name { get; } = name;
         public int InFlight { get; set; }
         public bool Alive => !Rpc.IsClosed;
+        /// <summary>Set once a shared-memory read from this worker failed (not the same machine after all).</summary>
+        public volatile bool NoSharedMemory;
     }
 
     /// <summary>One <c>ExecuteAsync</c>: the state machine, driven from a single loop so it needs no locks.</summary>
@@ -656,9 +669,9 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
                 var holder = _holders[key].First(h => h.Alive);
                 try
                 {
-                    var reply = await holder.Rpc.RequestAsync(MessageKind.Get, w => WireCodec.WriteKey(w, key), _cancel).ConfigureAwait(false);
-                    using var r = reply.Reader();
-                    if (reply.Kind == MessageKind.Data) return WireCodec.Deserialize(r.ReadBytes(r.ReadInt32()));
+                    var (found, value) = await Distributed.SharedMemory.GetAsync(holder.Rpc, key, _client.SharedMemory && !holder.NoSharedMemory,
+                        () => holder.NoSharedMemory = true, _cancel).ConfigureAwait(false);
+                    if (found) return value;
                     _holders[key].Remove(holder);
                 }
                 catch (WorkerLostException)

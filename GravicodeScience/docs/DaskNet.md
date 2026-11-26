@@ -468,9 +468,44 @@ await other.ForgetAsync(handle);                           // release the result
 ```
 
 Only `[RemoteTask]` graphs can be submitted - a lambda cannot leave the process, and
-`SubmitAsync` refuses it with `NotSupportedException`. The worker that schedules a run is a
-single point for that run (if it dies the run is lost, as the client was before), but no longer
-the client.
+`SubmitAsync` refuses it with `NotSupportedException`.
+
+**The scheduler has a standby.** `SubmitAsync` sends the graph to a second worker as well
+(`RunHandle.Standby`), which polls the scheduling worker every 200 ms. After three failed polls -
+or an answer that the scheduler does not know the run, which means it restarted - the standby
+runs the graph itself on every other worker and holds the results. That covers a scheduler that
+dies mid-run and one that dies after finishing (its results died with it, so they are
+recomputed). `StatusAsync`, `ResultsAsync`, `CancelAsync` and `ForgetAsync` fall back to the
+standby on their own; cancel and forget go to the standby *first*, or it would see the
+scheduler forget the run and take over. Losing both workers loses the run, and a one-worker
+cluster has no standby. Tests kill the scheduler on an event (once the run has made progress)
+and after it finished, and check the result and `Worker.Takeovers`.
+
+### Shared memory between workers on one machine
+
+A result of at least `WorkerOptions.SharedMemoryThreshold` (1 MiB by default) that a reader on
+the same machine needs - a peer fetching a task's input, or a client gathering - is handed over
+through shared memory instead of the socket: the holder encodes it straight into a mapped segment
+(a named mapping on Windows, a file in `/dev/shm` elsewhere) and the reader decodes straight out
+of its own mapping. Co-location is claimed by host id and proved by opening the segment; a reader
+that cannot open it falls back to the socket and stops asking that holder. `Client.SharedMemory =
+false` opts a client out, `--shared-memory-threshold off` a worker; `WorkerInfo` reports
+`SharedMemoryBytesSent` and `SocketBytesSent`.
+
+The segments stay mapped, and that is the whole trick. The first version mapped a fresh view per
+transfer and measured *slower* than loopback TCP (0.87x at 64 MiB): every transfer page-faulted
+through the whole segment on both sides. Now the holder keeps a pool of mapped segments (up to
+256 MiB) that it reuses once a reader says it is done, and a reader keeps its last four segments
+mapped. Fetching one `NdArray` from a worker, alternating both paths in one process, best of 32:
+
+| Size | Socket | Shared memory |
+|---|---|---|
+| 8 MiB | 19.8 ms | 3.7 ms (5.3x) |
+| 64 MiB | 124.9 ms | 25.2 ms (5.0x) |
+
+What crosses is Dask.Net's own wire encoding, not Arrow IPC: a reader still copies the data out
+into a new array, so the saving is the socket's copies, not a zero-copy view. A whole `Compute`
+gains less than this table suggests whenever the tasks themselves dominate.
 
 ### Speculative execution: stragglers get a second attempt
 
@@ -511,12 +546,35 @@ One partition per data file. Partition values come from the table's metadata, so
 partition column prunes whole files before anything is read, and only the needed columns are
 read from the files that remain. **Delta**: the log is replayed from the newest checkpoint
 (multi-part checkpoints included) plus the JSON commits after it; schema evolution by added
-columns works, deletion vectors on files that are still live, column mapping and v2 checkpoints
-are refused with the feature named. **Iceberg** (format v1 and v2): metadata JSON, then the Avro
+columns works. **Deletion vectors** are read (inline, relative and absolute storage; the
+RoaringBitmapArray format with array, bitmap and run containers; checksums checked) and the
+deleted rows dropped *before* any pushed filter, since their positions are positions in the file.
+A file's identity is its path *and* its deletion vector, because Spark writes `add(P, newDV)` and
+`remove(P, oldDV)` in one commit. **Column mapping** in `name` and `id` modes: files are read by
+physical name or Parquet field id and columns come back under their logical names, renames and
+drops included. v2 (UUID-named) checkpoints are refused with the feature named. **Iceberg** (format v1 and v2): metadata JSON, then the Avro
 manifest list and manifests; each snapshot is read with its own schema, renamed columns are
 traced by field id, and the table can be moved (paths are re-rooted against its recorded
-location). Delete files are refused rather than ignored. Every fixture version is compared row for
-row with what delta-rs and pyiceberg return (`tools/verify/make_lake_fixtures.py`).
+location). Delete files are refused rather than ignored.
+
+```csharp
+DaskFrame trips = Hudi.Read("lake/trips");                              // latest completed instant
+DaskFrame then = Hudi.Read("lake/trips", instant: "20261101093000000");  // time travel
+DaskFrame fast = Hudi.Read("lake/events_mor", readOptimized: true);      // base files of a MOR table
+IReadOnlyList<HudiInstant> timeline = Hudi.Instants("lake/trips");
+```
+
+**Hudi**: both timeline layouts (0.x `.hoodie/<instant>.<action>` with JSON metadata, 1.x
+`timeline/` with Avro), completed instants only, the latest base file of each file group, file
+groups replaced by `replacecommit` (insert-overwrite, clustering) dropped, partition values from
+hive-style or plain paths with pruning. The `_hoodie_*` columns are dropped unless asked for. A
+snapshot read of a merge-on-read table with live log files is refused - merging Avro log blocks
+is not implemented - and the message says to pass `readOptimized: true`.
+
+Every fixture version is compared row for row with what the reference writers read back:
+delta-rs and pyiceberg (`tools/verify/make_lake_fixtures.py`), and Spark 3.5 with delta-spark
+3.3 and Hudi 1.0 for deletion vectors, column mapping and Hudi
+(`tools/verify/make_lake_fixtures_spark.py`).
 
 ### Geo: spatial joins (`Gravicode.Science.DaskNet.Geo`)
 
@@ -536,8 +594,31 @@ side there. Inside a task the right side is indexed - a grid over polygon boundi
 3-D grid of points on the sphere for distance joins, so the antimeridian and the poles need no
 special case - and every candidate is checked exactly (haversine; boundary points count as
 inside). `SpatialPartition` range-partitions by geohash, a Z-order curve. Both joins are
-compared with a brute-force double loop, locally and on a cluster. Buffers, unions and overlays
-are not included: they need a full topology suite.
+compared with a brute-force double loop, locally and on a cluster.
+
+Geometry operations on WKT columns run on NetTopologySuite:
+
+```csharp
+var zones = parcels.Buffer("geometry", 0.001)                 // in the coordinates' units
+    .Simplify("geometry", 0.0001)                             // topology-preserving
+    .Dissolve("geometry", by: ["district"])                   // union per district, with a count
+    .WithMeasures("geometry");                                // area and length columns
+var shared = parcels.Overlay(floodZones, "geometry", "geometry");                          // intersections
+var dry = parcels.Overlay(floodZones, "geometry", "geometry", OverlayKind.Difference);      // what is left
+var centres = parcels.Centroid("geometry", output: "centre");
+```
+
+`Dissolve` unions each partition's groups first and merges the partial unions pairwise in a
+tree, so no task holds every geometry. `Overlay` broadcasts the right layer and indexes it with
+an STR-tree; pairs that only touch along an edge are dropped. The arithmetic is planar: for
+longitude/latitude a buffer of 0.001 is 0.001 degrees and areas are square degrees, so project
+first when distances must mean metres. Invalid input is repaired with `GeometryFixer` (a bow-tie
+becomes its two triangles) rather than refused. Everything is checked against shapely/GEOS on 60
+star-shaped polygons with holes (`tools/verify/make_geometry_fixtures.py`): dissolve, overlay,
+simplify and centroids agree to 1e-9 relative, under 1, 5 and 16 partitions and on a cluster.
+Buffers agree only to the arc-approximation error (worst 1.8e-4 relative) - GEOS and NTS
+approximate round joins differently - and the test bounds the difference by the area a 32-gon
+misses of its circle.
 
 ### ML: hyperparameter search and batch prediction (`Gravicode.Science.DaskNet.ML`)
 
@@ -565,6 +646,37 @@ and the tests check every score against a plain loop over the same folds. Scorin
 given (dask-ml's `ParallelPostFit`), so the estimator must be deterministic for its seed;
 `Predict` with an already-fitted model works too, but only locally.
 
+**Incremental training** (dask-ml's `Incremental`) for data that does not fit:
+
+```csharp
+var model = Incremental.Fit(new SgdClassifier(classes: [0, 1, 2], learningRate: 0.05),
+    bigFrame, features: ["x1", "x2", "x3"], target: "label", epochs: 3, seed: 4, scheduler: client);
+var scored = bigFrame.Predict(model, ["x1", "x2", "x3"]);            // the state travels, on a cluster too
+```
+
+`SgdRegressor`, `SgdClassifier` (multinomial logistic) and `IncrementalGaussianNaiveBayes`
+implement `IIncrementalModel` (`PartialFit`, plus a `State()` of plain values). Training is a chain
+of tasks, one per partition per epoch, each learning its partition where it lives and passing the
+state on; epochs visit partitions in a seeded order. SGD is sequential by nature, so the chain
+has no parallelism: the gain is memory and locality, not speed. The tests check the trained
+coefficients bit for bit against a plain `PartialFit` loop over the same partitions in the same
+order, locally and on a cluster; naive Bayes merges per-class moments with Chan's formula and
+equals the batch `GaussianNaiveBayes` under 1, 4 and 9 partitions.
+
+**ONNX scoring** runs any ONNX model over a frame, one ONNX Runtime session per worker process:
+
+```csharp
+byte[] onnx = OnnxExport.Build(pipeline, features: 4);     // or File.ReadAllBytes("model.onnx") from skl2onnx, PyTorch...
+var scored = bigFrame.ScoreOnnx(onnx, ["x0", "x1", "x2", "x3"], columns: ["score"]);
+```
+
+The model's first input gets the feature columns (as float or double, whichever it declares); the
+chosen output becomes one column, or `{name}_{i}` columns when it is wider. The model's bytes are
+one value in the graph, fetched once per worker, and sessions are cached by SHA-256. Checked
+against the GraviLearn pipeline it was exported from (to float32 precision), locally and on a
+cluster, and against a model written by Python's `onnx` package whose output is known in closed
+form.
+
 ### Streaming: micro-batches, windows, restartable ETL (`Gravicode.Science.DaskNet.Streaming`)
 
 ```csharp
@@ -590,6 +702,45 @@ the batch count and the open windows are saved after each batch, so a restarted 
 new files and carries its windows over; a test stops a query after four files, adds two more,
 restarts it, and gets the same windows as one uninterrupted run. Delivery is at-least-once; the
 CSV sink names files by batch id, so a replayed batch overwrites its own file.
+
+**Message brokers.** MQTT and Kafka messages become rows through a `MessageFormat` - JSON objects
+with a typed schema, or CSV lines:
+
+```csharp
+var format = MessageFormat.Json(("sensor", ColumnType.Text), ("time", ColumnType.DateTime), ("value", ColumnType.Number));
+var mqtt = DaskStream.FromMqtt("broker.local", ["plant/+/temperature"], format,
+    new MqttOptions { MaxBatchRows = 500, MaxBatchDelay = TimeSpan.FromSeconds(1) });
+var kafka = DaskStream.FromKafka("kafka:9092", ["orders"], groupId: "etl", format,
+    new KafkaOptions { KeyColumn = "key", OffsetColumn = "offset" });
+```
+
+A batch closes at `MaxBatchRows` or after `MaxBatchDelay`; `IdleTimeout` ends a stream that has
+gone quiet, so its windows flush. Each column's type is pinned by the schema (or by its first
+value), so batches never change schema; a value that does not fit is missing. **Kafka** stores
+per-partition offsets in the query's checkpoint and commits them to the group only after the
+sink returns: at-least-once, and a restart resumes where the last finished batch ended. Tested
+against an in-memory broker model (a sink failing mid-run replays exactly the failed batch) and
+against Apache Kafka 4.3 in KRaft mode (a test that runs when `DASKNET_KAFKA` is set). **MQTT** has
+no replay: messages are acknowledged on receipt, and only a fixed client id with
+`CleanSession = false` lets the broker queue what arrives while the query is down. Tested end to
+end against MQTTnet's in-process broker.
+
+**Stream-stream joins** match rows of two streams by key and event time:
+
+```csharp
+var attributed = clicks.IntervalJoin(impressions, on: ["ad"], leftTime: "clicked", rightTime: "shown",
+        lower: TimeSpan.FromHours(-1), upper: TimeSpan.Zero, how: StreamJoinType.Left)
+    .Window("clicked", TimeSpan.FromMinutes(10), keys: ["ad"], [(null, "count")])
+    .ToCsvDirectory("out");
+```
+
+`Join(..., within:)` is the symmetric form; `how` is inner, left, right or outer. Both sides are
+buffered as state, and a row is evicted once the *other* side's watermark has passed the last
+time it could still match - which is what bounds memory, and why the matches do not depend on how
+the two streams' batches interleave. Outer sides emit their unmatched rows at eviction. The state
+is checkpointed like windows. Inner joins are checked against a brute-force join over all rows
+under left-first, right-first, alternating and random arrival and several batch sizes; state
+stayed under 400 rows with 8,000 flowing through.
 
 ## Observability
 
@@ -625,7 +776,7 @@ Dask.Net for the data that doesn't, not for speed.
 |---|---|
 | Partitioned, lazy DataFrame; query optimisation; predicate and projection pushdown | **Done** |
 | CSV (block-split), Arrow IPC, any file via `ReadFiles` (Parquet through GraviFrame.Parquet) | **Done** |
-| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines and arrays, read and write) **done**; Delta Lake and Iceberg **done** (Lakehouse package: time travel, partition pruning); Excel through `ReadFiles` with GraviFrame's `ExcelReader`; Hudi is roadmap |
+| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines and arrays, read and write) **done**; Delta Lake (deletion vectors, column mapping), Iceberg and Hudi (copy-on-write, read-optimized merge-on-read) **done** in the Lakehouse package, with time travel and partition pruning; Excel through `ReadFiles` with GraviFrame's `ExcelReader` |
 | Lazy engine: deferred execution, planner, pipeline fusion | **Done**; join strategy is cost-based (size estimates) and SQL join chains are reordered by estimated size; the other rewrites are rule-based |
 | DAG scheduler: visualisation (DOT/Mermaid), cull/fuse, retry policy, dependency tracking | **Done** |
 | Local cluster: multi-core, process isolation, per-worker memory limits with spill to disk | **Done** |
@@ -633,12 +784,12 @@ Dask.Net for the data that doesn't, not for speed.
 | Worker discovery (Consul, Kubernetes, Service Fabric, Aspire) | **Done** for Kubernetes (headless-Service DNS) and Aspire, with background refresh so workers can join a live client; Consul/Service Fabric through `WorkerDiscovery.From` |
 | Parallel LINQ: map, reduce, fold, aggregate, shuffle, broadcast | **Done** (`Bag`) |
 | Distributed collections (`DistributedList` etc.) | Roadmap; `Bag`, `DaskArray` and `Persist` cover the read-mostly cases |
-| Arrow: zero-copy, cross-language | Arrow IPC files **done**; shared memory between processes is roadmap |
+| Arrow: zero-copy, cross-language | Arrow IPC files **done**; results move between processes on one machine through shared memory (Dask.Net's wire encoding, not Arrow; 5x faster than loopback TCP) |
 | SQL: joins, aggregations, UNION, window functions | **Done**; explicit window frames, CTE and full ANSI are roadmap |
-| GIS, ML, ETL/streaming, AI, vector databases | GIS (Geo: geohash, distance and point-in-polygon joins), ML (hyperparameter search, batch prediction) and streaming (micro-batches, event-time windows, checkpointed directory ETL) **done** as separate packages; AI and vector databases are roadmap |
+| GIS, ML, ETL/streaming, AI, vector databases | GIS (Geo: geohash, distance and point-in-polygon joins, buffer/simplify/dissolve/overlay), ML (hyperparameter search, batch prediction, incremental training, ONNX scoring) and streaming (files, channels, MQTT and Kafka; event-time windows; stream-stream joins; checkpoints) **done** as separate packages; AI and vector databases are roadmap |
 | Observability: OpenTelemetry | **Done** (ActivitySource + Meter); Prometheus/Grafana/Jaeger via the OTel exporters |
 | Kubernetes operator, Aspire dashboard | Roadmap |
-| Fault tolerance: task retry, checkpointing, worker recovery, speculative execution | **Done**; runs can be detached from the client (`SubmitAsync`) |
+| Fault tolerance: task retry, checkpointing, worker recovery, speculative execution | **Done**; runs can be detached from the client (`SubmitAsync`), and a standby worker takes a run over if its scheduling worker dies |
 | Storage connectors (databases, data lakes, warehouses) | Databases **done** through any ADO.NET provider (range- or query-partitioned, filters pushed into the SQL, remotable); Delta Lake and Iceberg **done**; warehouses are roadmap |
 | Schedulers: thread, cluster | **Done**; a process pool is `LocalCluster.StartProcessesAsync`; Kubernetes is roadmap |
 | Security: token-authenticated workers, TLS and mutual TLS | **Done**; OAuth2/Entra ID, multi-tenancy and quotas are roadmap |
@@ -650,7 +801,13 @@ Dask.Net for the data that doesn't, not for speed.
   `[RemoteTask]` method to run custom code on a cluster.
 - Joins on several keys need the same key names on both sides (SQL handles different names).
 - With `Compute`, the client is the scheduler of the run, and a client that dies loses it;
-  `SubmitAsync` moves that role to a worker (which is then the single point for that run).
+  `SubmitAsync` moves that role to a worker with a standby, so the run survives either one dying
+  but not both.
+- A merge-on-read Hudi table with live log files is read only as `readOptimized`; Delta v2
+  checkpoints and nested types are refused.
+- Geometry arithmetic is planar; project longitude/latitude before buffering by a distance.
+- Kafka and MQTT delivery is at-least-once; MQTT has no replay. Stream joins match on equal keys
+  only.
 - Join reordering applies to SQL inner-join chains only, not to `DaskFrame.Join` calls, which run
   in the order written.
 

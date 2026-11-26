@@ -34,10 +34,10 @@ dotnet add package Gravicode.Science.GraviProb     # Bayesian inference
 dotnet add package Gravicode.Science.SciNet        # SciPy for .NET
 dotnet add package Gravicode.Science.DaskNet       # parallel and distributed computing
 # Dask.Net add-ons
-dotnet add package Gravicode.Science.DaskNet.Lakehouse   # Delta Lake and Iceberg tables
-dotnet add package Gravicode.Science.DaskNet.Geo         # geohash, distance and point-in-polygon joins
-dotnet add package Gravicode.Science.DaskNet.ML          # distributed hyperparameter search, batch scoring
-dotnet add package Gravicode.Science.DaskNet.Streaming   # micro-batches, event-time windows, restartable ETL
+dotnet add package Gravicode.Science.DaskNet.Lakehouse   # Delta Lake, Iceberg and Hudi tables
+dotnet add package Gravicode.Science.DaskNet.Geo         # spatial joins, buffer/dissolve/overlay (NetTopologySuite)
+dotnet add package Gravicode.Science.DaskNet.ML          # hyperparameter search, incremental training, ONNX scoring
+dotnet add package Gravicode.Science.DaskNet.Streaming   # files, MQTT, Kafka; windows, stream joins, checkpoints
 ```
 
 Take only what you need — every package pulls in `GraviNum`, and nothing else is mandatory. See
@@ -81,7 +81,7 @@ samples/      eight console apps, each printing real results
 notebooks/    eight .NET Interactive notebooks
 benchmarks/   eight BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        4,417 tests
+tests/        4,487 tests
 tools/        ScienceAppGen (an IDE that builds apps from a prompt), Science Gallery
               (50 runnable use cases), the Dask.Net worker host, the icon generator
 assets/       NuGet package icons
@@ -201,9 +201,12 @@ var result = report.Compute(cluster.Client);
 
 SQL chains of inner joins are reordered by estimated size, and filters on database tables are
 pushed into the SQL they send. `Client.SubmitAsync` hands a run to a worker so it outlives the
-client, and speculative execution re-runs stragglers on idle workers. Four add-on packages read
-Delta Lake and Iceberg tables, join by distance and by polygon, cross-validate GraviLearn models
-one task per fold, and run streaming queries with event-time windows and checkpoints.
+client - with a standby worker that takes the run over if the scheduling worker dies - and
+speculative execution re-runs stragglers on idle workers. Workers on one machine hand large
+results over through shared memory. Four add-on packages read Delta Lake, Iceberg and Hudi
+tables; join by distance and by polygon, and buffer, dissolve and overlay geometries; cross-validate,
+train incrementally and score ONNX models over partitions; and run streaming queries over files,
+MQTT and Kafka with event-time windows, stream-stream joins and checkpoints.
 
 ## Design
 

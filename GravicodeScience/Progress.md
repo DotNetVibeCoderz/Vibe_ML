@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v2.3.0 · **Target framework**: .NET 10 · **Tests**: 4,417 passing, 0 failing
+**Release**: v2.4.0 · **Target framework**: .NET 10 · **Tests**: 4,487 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -18,7 +18,7 @@ Roadmap: [PLAN.md](PLAN.md)
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
 | SciNet | ✅ Complete | 2,983 tests — SciPy for .NET, all 15 `scipy.*` modules |
-| Dask.Net | ✅ Core complete | 256 tests (203 core, 53 in the add-ons) — task graphs, Bag, Array, DataFrame, SQL (windows, UNION, DISTINCT aggregates), TCP cluster with recovery, TLS, spilling, discovery, cost-based joins, JSON/SQL connectors, SQL pushdown, join reordering, detached runs, speculation; Lakehouse, Geo, ML and Streaming add-ons; see the coverage table in docs/DaskNet.md |
+| Dask.Net | ✅ Core complete | 326 tests (211 core, 115 in the add-ons) — task graphs, Bag, Array, DataFrame, SQL (windows, UNION, DISTINCT aggregates), TCP cluster with recovery, TLS, spilling, discovery, cost-based joins, JSON/SQL connectors, SQL pushdown, join reordering, detached runs with a standby scheduler, speculation, shared memory between co-located workers; Lakehouse (Delta, Iceberg, Hudi), Geo (joins, buffer/dissolve/overlay), ML (search, incremental, ONNX) and Streaming (files, MQTT, Kafka, stream joins) add-ons; see the coverage table in docs/DaskNet.md |
 | Sample apps | ✅ Complete | 8 apps, all run end to end |
 | Notebooks | ✅ Complete | 8 notebooks, cells compile-checked |
 | Benchmarks | ✅ Complete | 8 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
@@ -251,7 +251,7 @@ remains the better baseline on a small dataset.
 
 ---
 
-### Dask.Net — 256 tests
+### Dask.Net — 326 tests
 
 - [x] Task graph core: `TaskKey`/`TaskSpec`/`GraphLayer`, cull, linear fusion, depth-first
   priorities, cycle detection, DOT and Mermaid (task-level and layer-level)
@@ -304,6 +304,28 @@ remains the better baseline on a small dataset.
   restarts
 - [x] ScienceGallery: 5 Dask.Net use cases; ScienceAppGen: `dask-pipeline`/`dask-cluster`
   templates and Python `dask` conversion, with screenshots in the docs
+- [x] Standby scheduler for detached runs: takes a run over (recomputing) when its scheduling
+  worker dies, mid-run or after finishing
+- [x] Shared memory between co-located workers and clients: pooled mapped segments, 5x loopback
+  TCP at 8-64 MiB; checked bit for bit between real worker processes
+- [x] Lakehouse: Delta deletion vectors and column mapping (name, id), Hudi copy-on-write and
+  read-optimized merge-on-read, against Spark/delta-spark/Hudi fixtures (56 tests)
+- [x] Geo: buffer, simplify, centroid, measures, dissolve, overlay on NetTopologySuite, against
+  shapely/GEOS (18 tests)
+- [x] ML: incremental SGD regression/classification and Gaussian naive Bayes over partitions,
+  ONNX batch scoring (15 tests)
+- [x] Streaming: MQTT and Kafka sources (real Kafka 4.3 checked), stream-stream interval joins
+  (27 tests, one needing `DASKNET_KAFKA`)
+
+## 2.4.0 — Dask.Net: shared memory, standby scheduler, Hudi, geometry, incremental ML, brokers (2026-11-27)
+
+Dask.Net: large results move between processes on one machine through shared memory (5x loopback
+TCP), and detached runs get a standby worker that takes over if the scheduler dies; `WorkerInfo`
+gains `SharedMemoryBytesSent`/`SocketBytesSent` and `RunHandle` gains `Standby`. Lakehouse: Hudi,
+Delta deletion vectors and column mapping. Geo: buffer, simplify, centroid, measures, dissolve and
+overlay (new dependency NetTopologySuite). ML: incremental training and ONNX scoring (new
+dependency Microsoft.ML.OnnxRuntime). Streaming: MQTT and Kafka sources and stream-stream joins
+(new dependencies MQTTnet and Confluent.Kafka).
 
 ## 2.3.0 — Dask.Net add-ons: Lakehouse, Geo, ML, Streaming (2026-11-27)
 

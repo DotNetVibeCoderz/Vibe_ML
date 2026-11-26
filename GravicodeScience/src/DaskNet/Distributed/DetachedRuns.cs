@@ -34,11 +34,18 @@ public sealed record RunStatus(RunState State, int Completed, int Total, string?
 /// <param name="Outputs">The result keys, in collection order.</param>
 public sealed record RunHandle(string Id, string Scheduler, IReadOnlyList<TaskKey> Outputs)
 {
+    /// <summary>
+    /// The worker that holds a copy of the run's graph and takes the run over if
+    /// <see cref="Scheduler"/> dies; null when the cluster had only one worker.
+    /// </summary>
+    public string? Standby { get; init; }
+
     /// <summary>A JSON form of the handle, for <see cref="Parse"/>.</summary>
     public override string ToString() => JsonSerializer.Serialize(new
     {
         id = Id,
         scheduler = Scheduler,
+        standby = Standby,
         outputs = Outputs.Select(k => new { name = k.Name, index = k.Index }),
     });
 
@@ -49,7 +56,10 @@ public sealed record RunHandle(string Id, string Scheduler, IReadOnlyList<TaskKe
         var root = doc.RootElement;
         return new RunHandle(root.GetProperty("id").GetString()!, root.GetProperty("scheduler").GetString()!,
             root.GetProperty("outputs").EnumerateArray()
-                .Select(o => new TaskKey(o.GetProperty("name").GetString()!, o.GetProperty("index").GetInt32())).ToArray());
+                .Select(o => new TaskKey(o.GetProperty("name").GetString()!, o.GetProperty("index").GetInt32())).ToArray())
+        {
+            Standby = root.TryGetProperty("standby", out var standby) && standby.ValueKind == JsonValueKind.String ? standby.GetString() : null,
+        };
     }
 }
 
@@ -65,8 +75,10 @@ public sealed partial class Client
     /// <remarks>
     /// The scheduling worker is the connected live worker with the fewest tasks in flight. It
     /// connects to every worker this client knows, itself included, and recovers lost workers as
-    /// a client does. Lose the scheduling worker and the run is lost - the single point of failure
-    /// moves from the client into the cluster, it does not disappear. Results are held until
+    /// a client does. A second worker, the <see cref="RunHandle.Standby"/>, keeps a copy of the
+    /// graph and watches the scheduler; if the scheduler dies - mid-run or after finishing - the
+    /// standby runs the graph again from its inputs and holds the results instead, and every call
+    /// here falls back to it. Losing both loses the run. Results are held until
     /// <see cref="ForgetAsync"/>.
     /// </remarks>
     public async Task<RunHandle> SubmitAsync(IDaskCollection collection, CancellationToken cancellationToken = default)
@@ -93,9 +105,10 @@ public sealed partial class Client
             throw new NotSupportedException($"Tasks [{string.Join(", ", local)}] wrap local delegates and cannot be submitted to a cluster.");
 
         var live = _workers.Where(w => w.Alive).ToArray();
-        var scheduler = live.OrderBy(w => w.InFlight).FirstOrDefault() ?? throw new InvalidOperationException("No worker is connected.");
+        var ranked = live.OrderBy(w => w.InFlight).ToArray();
+        var scheduler = ranked.FirstOrDefault() ?? throw new InvalidOperationException("No worker is connected.");
         var id = Guid.NewGuid().ToString("N");
-        var reply = await scheduler.Rpc.RequestAsync(MessageKind.Submit, w =>
+        void Body(BinaryWriter w, string? primary)
         {
             w.Write(id);
             w.Write(live.Length);
@@ -110,23 +123,58 @@ public sealed partial class Client
             }
             w.Write(outputs.Count);
             foreach (var k in outputs) WireCodec.WriteKey(w, k);
-        }, cancellationToken).ConfigureAwait(false);
+            if (primary is not null) w.Write(primary);
+        }
+
+        var reply = await scheduler.Rpc.RequestAsync(MessageKind.Submit, w => Body(w, null), cancellationToken).ConfigureAwait(false);
         ThrowIfError(reply);
-        return new RunHandle(id, scheduler.Address, outputs.ToArray());
+        string? standbyAddress = null;
+        foreach (var candidate in ranked.Skip(1))
+        {
+            try
+            {
+                var standby = await candidate.Rpc.RequestAsync(MessageKind.Standby, w => Body(w, scheduler.Address), cancellationToken).ConfigureAwait(false);
+                ThrowIfError(standby);
+                standbyAddress = candidate.Address;
+                break;
+            }
+            catch (WorkerLostException)
+            {
+                // try the next one; the run itself is already scheduled
+            }
+        }
+        return new RunHandle(id, scheduler.Address, outputs.ToArray()) { Standby = standbyAddress };
     }
 
     /// <summary>Where a submitted run is.</summary>
     /// <exception cref="KeyNotFoundException">The scheduling worker knows no such run (it was forgotten, or the worker restarted).</exception>
     public async Task<RunStatus> StatusAsync(RunHandle run, CancellationToken cancellationToken = default)
+        => (await StatusFromAsync(run, cancellationToken).ConfigureAwait(false)).Status;
+
+    /// <summary>The run's status and the worker that gave it: the scheduler while it is reachable
+    /// and knows the run, the standby otherwise.</summary>
+    private async Task<(RunStatus Status, WorkerHandle Holder)> StatusFromAsync(RunHandle run, CancellationToken cancellationToken)
     {
-        var reply = await SchedulerOf(run).Rpc.RequestAsync(MessageKind.Status, w => w.Write(run.Id), cancellationToken).ConfigureAwait(false);
-        ThrowIfError(reply);
-        using var r = reply.Reader();
-        var state = (RunState)r.ReadByte();
-        var completed = r.ReadInt32();
-        var total = r.ReadInt32();
-        var error = r.ReadBoolean() ? r.ReadString() : null;
-        return new RunStatus(state, completed, total, error);
+        Exception? last = null;
+        foreach (var holder in HoldersOf(run))
+        {
+            try
+            {
+                var reply = await holder.Rpc.RequestAsync(MessageKind.Status, w => w.Write(run.Id), cancellationToken).ConfigureAwait(false);
+                ThrowIfError(reply);
+                using var r = reply.Reader();
+                var state = (RunState)r.ReadByte();
+                var completed = r.ReadInt32();
+                var total = r.ReadInt32();
+                var error = r.ReadBoolean() ? r.ReadString() : null;
+                return (new RunStatus(state, completed, total, error), holder);
+            }
+            catch (Exception e) when (e is WorkerLostException or KeyNotFoundException)
+            {
+                last = e;     // a dead scheduler, or one restarted without the run: ask the standby
+            }
+        }
+        throw last ?? NotConnected(run);
     }
 
     /// <summary>Waits for a submitted run and returns its outputs, in order.</summary>
@@ -137,24 +185,32 @@ public sealed partial class Client
         var every = pollEvery ?? TimeSpan.FromMilliseconds(50);
         while (true)
         {
-            var status = await StatusAsync(run, cancellationToken).ConfigureAwait(false);
-            if (status.State == RunState.Finished) break;
+            var (status, holder) = await StatusFromAsync(run, cancellationToken).ConfigureAwait(false);
             if (status.State == RunState.Failed)
                 throw new DaskTaskException(new TaskKey(run.Id), "detached-run", new InvalidOperationException(status.Error));
             if (status.State == RunState.Cancelled) throw new OperationCanceledException($"Run {run.Id} was cancelled.");
+            if (status.State == RunState.Finished)
+            {
+                try
+                {
+                    var results = new object?[run.Outputs.Count];
+                    for (var i = 0; i < results.Length; i++)
+                    {
+                        var key = run.Outputs[i];
+                        var reply = await holder.Rpc.RequestAsync(MessageKind.Get, w => WireCodec.WriteKey(w, key), cancellationToken).ConfigureAwait(false);
+                        ThrowIfError(reply);
+                        using var r = reply.Reader();
+                        results[i] = WireCodec.Deserialize(r.ReadBytes(r.ReadInt32()));
+                    }
+                    return results;
+                }
+                catch (WorkerLostException) when (run.Standby is not null && !holder.Address.Equals(run.Standby, StringComparison.OrdinalIgnoreCase))
+                {
+                    // the scheduler died between reporting and sending: the standby takes over
+                }
+            }
             await Task.Delay(every, cancellationToken).ConfigureAwait(false);
         }
-        var scheduler = SchedulerOf(run);
-        var results = new object?[run.Outputs.Count];
-        for (var i = 0; i < results.Length; i++)
-        {
-            var key = run.Outputs[i];
-            var reply = await scheduler.Rpc.RequestAsync(MessageKind.Get, w => WireCodec.WriteKey(w, key), cancellationToken).ConfigureAwait(false);
-            ThrowIfError(reply);
-            using var r = reply.Reader();
-            results[i] = WireCodec.Deserialize(r.ReadBytes(r.ReadInt32()));
-        }
-        return results;
     }
 
     /// <summary>Waits for a submitted <see cref="Delayed{T}"/> and returns its value.</summary>
@@ -166,17 +222,52 @@ public sealed partial class Client
         => FrameKernels.ConcatFrames((await ResultsAsync(run, cancellationToken: cancellationToken).ConfigureAwait(false)).Cast<DataFrame>().ToArray());
 
     /// <summary>Stops a submitted run; tasks already running finish, nothing new starts.</summary>
-    public async Task CancelAsync(RunHandle run, CancellationToken cancellationToken = default)
-        => ThrowIfError(await SchedulerOf(run).Rpc.RequestAsync(MessageKind.Cancel, w => w.Write(run.Id), cancellationToken).ConfigureAwait(false));
+    public Task CancelAsync(RunHandle run, CancellationToken cancellationToken = default)
+        => TellBothAsync(run, MessageKind.Cancel, cancellationToken);
 
-    /// <summary>Drops a run's results and record from its scheduling worker (cancelling it if it is still running).</summary>
-    public async Task ForgetAsync(RunHandle run, CancellationToken cancellationToken = default)
-        => ThrowIfError(await SchedulerOf(run).Rpc.RequestAsync(MessageKind.Forget, w => w.Write(run.Id), cancellationToken).ConfigureAwait(false));
+    /// <summary>Drops a run's results and record from its scheduling worker and its standby
+    /// (cancelling it if it is still running).</summary>
+    public Task ForgetAsync(RunHandle run, CancellationToken cancellationToken = default)
+        => TellBothAsync(run, MessageKind.Forget, cancellationToken);
 
-    private WorkerHandle SchedulerOf(RunHandle run)
-        => _workers.FirstOrDefault(w => w.Alive && w.Address.Equals(run.Scheduler, StringComparison.OrdinalIgnoreCase))
-           ?? throw new WorkerLostException(run.Scheduler, new InvalidOperationException(
-               $"This client is not connected to {run.Scheduler}, the worker scheduling run {run.Id}."));
+    /// <summary>
+    /// Sends a cancel or forget to the standby first, then the scheduler: told the other way
+    /// round, the standby would see the scheduler forget the run, take it for a restarted
+    /// scheduler and run the graph again. Succeeds if either knew the run.
+    /// </summary>
+    private async Task TellBothAsync(RunHandle run, MessageKind kind, CancellationToken cancellationToken)
+    {
+        Exception? last = null;
+        var told = false;
+        foreach (var holder in Enumerable.Reverse(HoldersOf(run)))
+        {
+            try
+            {
+                ThrowIfError(await holder.Rpc.RequestAsync(kind, w => w.Write(run.Id), cancellationToken).ConfigureAwait(false));
+                told = true;
+            }
+            catch (Exception e) when (e is WorkerLostException or KeyNotFoundException)
+            {
+                last = e;
+            }
+        }
+        if (!told) throw last ?? NotConnected(run);
+    }
+
+    /// <summary>The connected, live workers that may know the run: scheduler first, then standby.</summary>
+    private List<WorkerHandle> HoldersOf(RunHandle run)
+    {
+        var holders = new List<WorkerHandle>(2);
+        foreach (var address in new[] { run.Scheduler, run.Standby })
+            if (address is not null && _workers.FirstOrDefault(w => w.Alive && w.Address.Equals(address, StringComparison.OrdinalIgnoreCase)) is { } h)
+                holders.Add(h);
+        return holders;
+    }
+
+    private static WorkerLostException NotConnected(RunHandle run)
+        => new(run.Scheduler, new InvalidOperationException(
+            $"This client is not connected to {run.Scheduler} (the worker scheduling run {run.Id})"
+            + (run.Standby is null ? "." : $" or to {run.Standby}, its standby.")));
 
     private static void ThrowIfError(Message reply)
     {
@@ -193,6 +284,8 @@ internal sealed class DetachedRun
 {
     public required TaskKey[] Outputs { get; init; }
     public required int Total { get; init; }
+    /// <summary>For a standby: the scheduler it watches. Null once it schedules the run itself.</summary>
+    public volatile string? Watching;
     public CancellationTokenSource Cancel { get; } = new();
     public volatile int Completed;
     public volatile RunState State = RunState.Running;
@@ -211,6 +304,7 @@ public sealed partial class Worker
         int attempts;
         TaskSpec[] tasks;
         TaskKey[] outputs;
+        string? primary;
         try
         {
             using var r = message.Reader();
@@ -224,6 +318,7 @@ public sealed partial class Worker
                 return TaskSpec.FromRemote(key, (RemoteCall)WireCodec.Read(r)!, label);
             }).ToArray();
             outputs = Enumerable.Range(0, r.ReadInt32()).Select(_ => WireCodec.ReadKey(r)).ToArray();
+            primary = message.Kind == MessageKind.Standby ? r.ReadString() : null;
         }
         catch (Exception e)
         {
@@ -231,7 +326,7 @@ public sealed partial class Worker
             return;
         }
 
-        var run = new DetachedRun { Outputs = outputs, Total = tasks.Length };
+        var run = new DetachedRun { Outputs = outputs, Total = tasks.Length, Watching = primary };
         if (!_runs.TryAdd(id, run))
         {
             await SendErrorAsync(connection, message.Id, new InvalidOperationException($"Run {id} already exists."), null).ConfigureAwait(false);
@@ -239,7 +334,9 @@ public sealed partial class Worker
         }
         var graph = new TaskGraph(tasks);
         if (!addresses.Contains(Address, StringComparer.OrdinalIgnoreCase)) addresses = [Address, .. addresses];
-        run.Execution = Task.Run(() => ScheduleAsync(run, graph, addresses, attempts));
+        run.Execution = primary is null
+            ? Task.Run(() => ScheduleAsync(run, graph, addresses, attempts))
+            : Task.Run(() => StandByAsync(run, id, primary, graph, addresses, attempts));
         await connection.SendAsync(MessageKind.Ok, message.Id).ConfigureAwait(false);
     }
 
@@ -249,7 +346,7 @@ public sealed partial class Worker
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(run.Cancel.Token, _stop.Token);
-            await using var client = await Client.ConnectAsync(addresses, _options.Token, ClientTls(), linked.Token).ConfigureAwait(false);
+            await using var client = await ConnectReachableAsync(addresses, linked.Token).ConfigureAwait(false);
             client.Retry = attempts > 0 ? new RetryPolicy(attempts) : RetryPolicy.None;
             client.OnEvent = e => { if (e.Kind == TaskEventKind.Finished) Interlocked.Increment(ref run.Completed); };
             var results = await client.ExecuteAsync(graph, run.Outputs, linked.Token).ConfigureAwait(false);
@@ -265,6 +362,113 @@ public sealed partial class Worker
             run.Error = e is DaskTaskException d ? d.Message : $"{e.GetType().Name}: {e.Message}";
             run.State = RunState.Failed;
         }
+    }
+
+    /// <summary>How often a standby asks its scheduler for the run, and how many failed asks in a
+    /// row it takes as the scheduler's death.</summary>
+    internal static TimeSpan StandbyPoll { get; set; } = TimeSpan.FromMilliseconds(200);
+    internal const int StandbyStrikes = 3;
+
+    /// <summary>
+    /// Holds a run's graph for its scheduler and watches it. While the scheduler answers, this
+    /// reports the scheduler's progress; once it stops answering (or answers that it does not
+    /// know the run - it restarted) this worker schedules the graph itself, on every worker but
+    /// the dead one. A scheduler that already finished is treated the same way: its results died
+    /// with it, so they are recomputed.
+    /// </summary>
+    private async Task StandByAsync(DetachedRun run, string id, string primary, TaskGraph graph, string[] addresses, int attempts)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(run.Cancel.Token, _stop.Token);
+        RpcClient? rpc = null;
+        var strikes = 0;
+        try
+        {
+            while (true)
+            {
+                try
+                {
+                    rpc ??= await RpcClient.ConnectAsync(primary, _options.Token, ClientTls(), linked.Token).ConfigureAwait(false);
+                    var reply = await rpc.RequestAsync(MessageKind.Status, w => w.Write(id), linked.Token).ConfigureAwait(false);
+                    if (reply.Kind == MessageKind.Error)
+                    {
+                        using var e = reply.Reader();
+                        if (e.ReadString() == nameof(KeyNotFoundException)) strikes = StandbyStrikes;   // restarted without the run
+                        else strikes++;
+                    }
+                    else
+                    {
+                        using var r = reply.Reader();
+                        var state = (RunState)r.ReadByte();
+                        run.Completed = r.ReadInt32();
+                        r.ReadInt32();
+                        var error = r.ReadBoolean() ? r.ReadString() : null;
+                        strikes = 0;
+                        if (state is RunState.Failed or RunState.Cancelled)
+                        {
+                            run.Error = error;
+                            run.State = state;          // nothing to take over
+                            return;
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    strikes++;
+                    if (rpc is not null) await rpc.DisposeAsync().ConfigureAwait(false);
+                    rpc = null;
+                }
+                if (strikes >= StandbyStrikes) break;
+                await Task.Delay(StandbyPoll, linked.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (run.Cancel.IsCancellationRequested)
+        {
+            run.State = RunState.Cancelled;
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+            return;                                     // this worker is shutting down
+        }
+        finally
+        {
+            if (rpc is not null) await rpc.DisposeAsync().ConfigureAwait(false);
+        }
+
+        run.Watching = null;
+        run.Completed = 0;
+        Interlocked.Increment(ref _takeovers);
+        await ScheduleAsync(run, graph, addresses.Where(a => !a.Equals(primary, StringComparison.OrdinalIgnoreCase)).ToArray(), attempts).ConfigureAwait(false);
+    }
+
+    private int _takeovers;
+
+    /// <summary>Runs this worker took over from a dead scheduler, as a standby.</summary>
+    public int Takeovers => _takeovers;
+
+    /// <summary>A client of every address that answers; a dead worker in the list is skipped
+    /// rather than failing the run, while a wrong token or TLS failure still throws.</summary>
+    private async Task<Client> ConnectReachableAsync(string[] addresses, CancellationToken cancellationToken)
+    {
+        var reachable = new List<string>();
+        foreach (var address in addresses)
+        {
+            try
+            {
+                await using var probe = await RpcClient.ConnectAsync(address, _options.Token, ClientTls(), cancellationToken).ConfigureAwait(false);
+                reachable.Add(address);
+            }
+            catch (Exception e) when (e is System.Net.Sockets.SocketException or IOException { InnerException: System.Net.Sockets.SocketException })
+            {
+                // gone; the run goes on without it
+            }
+        }
+        if (reachable.Count == 0) throw new InvalidOperationException("No worker of the run could be reached.");
+        return await Client.ConnectAsync(reachable, _options.Token, ClientTls(), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The client side of this worker's TLS settings: it presents its own certificate and

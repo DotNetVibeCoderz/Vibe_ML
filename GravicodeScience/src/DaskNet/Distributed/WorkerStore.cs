@@ -101,6 +101,21 @@ internal sealed class WorkerStore(long? memoryLimit, double target, string? spil
     }
 
     /// <summary>The wire encoding of a result, for a peer: a spilled one is read from disk as is.</summary>
+    /// <summary>A result for sending: its encoded bytes if it is spilled (already encoded), or the
+    /// value itself, so a caller can encode it straight into its destination.</summary>
+    public bool TryGetForTransfer(TaskKey key, out object? value, out byte[]? spilled)
+    {
+        lock (_gate)
+        {
+            value = null;
+            spilled = null;
+            if (!_entries.TryGetValue(key, out var entry)) return false;
+            if (entry.Path is not null) spilled = File.ReadAllBytes(entry.Path);
+            else value = entry.Value;
+            return true;
+        }
+    }
+
     public bool TryGetSerialized(TaskKey key, out byte[] bytes)
     {
         object? value;
