@@ -108,7 +108,7 @@ where a naive sum of squares cancels (values around 1e9 with small spread).
 A grid of GraviNum `NdArray` chunks.
 
 ```csharp
-var x = DaskArray.RandomNormal([20_000, 5_000], chunks: [2_000, 1_000], seed: 7);
+var x = DaskArray.RandomNormal([20_000, 5_000], chunkSize: [2_000, 1_000], seed: 7);
 var gram = x.T.Dot(x) / x.Shape[0];
 NdArray result = gram.Compute();
 
@@ -223,6 +223,17 @@ cannot come back typed differently (a test reproduces exactly that with an untyp
 Table and column names are written into the SQL and must be plain identifiers; values always go
 through parameters. The connection string travels with each task - use TLS on a cluster.
 
+**Filters reach the database too.** A filter on a table read (`orders.Filter(Col("qty") > 10)`,
+or a SQL `WHERE` over a registered `ReadSql` table) is translated into the partition's `WHERE`
+clause as far as it can be, so the database skips rows instead of sending them. The rule is
+*superset-safe*: the pushed clause may keep more rows than the filter, never fewer, and the
+filter itself still runs on what comes back, so the answer cannot change. Numeric comparisons,
+`IS [NOT] NULL` and `BETWEEN` translate exactly; text `=`/`IN` are pushed but re-checked, because
+a database collation may compare case- or space-insensitively (a test uses SQLite `NOCASE`
+to prove the re-check matters); `NOT` is pushed only over exact terms; an `AND` keeps whichever
+sides translate, an `OR` only when both do. Pass `pushFilters: false` for a table whose declared
+column types do not describe its values (SQLite lets a `REAL` column hold text).
+
 ## SQL (`dask-sql`)
 
 ```csharp
@@ -248,6 +259,15 @@ sql.Explain("SELECT ...");                 // the optimised plan
 
 A query compiles to an ordinary `DaskFrame` plan, so it gets the same optimiser and runs on any
 scheduler.
+
+**Join order.** A chain of three or more tables joined by inner equi-joins is reordered by
+estimated size (greedy operator ordering: repeatedly join the connected pair whose combined
+estimate is smallest, the larger input on the left), and each `WHERE` conjunct on one table
+halves that table's estimate. The output columns come back in the order written. Queries are
+left as written when any join is an outer join, when an estimate is missing, when the tables are
+not connected by equalities, or when the written order is already the chosen one;
+`SqlContext.ReorderJoins = false` turns it off. Reordering changes the plan, never the rows - the
+tests compare every reordered query with the written order.
 
 Supported: `SELECT [DISTINCT]`, `*` and `t.*`, aliases, `FROM` tables and subqueries,
 `[INNER|LEFT|RIGHT|FULL] JOIN ... ON` (equalities between the two sides, plus any extra
@@ -429,6 +449,148 @@ certificate gets an `AuthenticationException`, and a wrong token is still
 `UnauthorizedAccessException`. A test relays the traffic through a recording proxy and checks
 that a marker sent as a task argument is readable without TLS and absent with it.
 
+### Detached runs: the cluster keeps working when the client goes away
+
+`Compute` makes the client the scheduler of the run, so a client that dies loses its run.
+`SubmitAsync` hands the graph to a worker instead, which schedules it across the cluster
+(including itself) and holds the results until they are forgotten:
+
+```csharp
+RunHandle run = await client.SubmitAsync(report);          // a Delayed, a DaskArray, a DaskFrame, or a graph
+File.WriteAllText("run.json", run.ToString());             // the handle is plain JSON
+
+// ... later, from any process with the token:
+await using var other = await Client.ConnectAsync(addresses, token);
+var handle = RunHandle.Parse(File.ReadAllText("run.json"));
+RunStatus status = await other.StatusAsync(handle);        // Running / Finished / Failed / Cancelled, with progress
+DataFrame result = await other.FrameResultAsync(handle);   // waits for it to finish
+await other.ForgetAsync(handle);                           // release the results on the workers
+```
+
+Only `[RemoteTask]` graphs can be submitted - a lambda cannot leave the process, and
+`SubmitAsync` refuses it with `NotSupportedException`. The worker that schedules a run is a
+single point for that run (if it dies the run is lost, as the client was before), but no longer
+the client.
+
+### Speculative execution: stragglers get a second attempt
+
+```csharp
+client.Speculation = new SpeculationPolicy(Multiplier: 3, Minimum: TimeSpan.FromSeconds(1), MinimumSamples: 3);
+```
+
+When a task has run `Multiplier` times longer than the median of finished tasks with the same
+label (and at least `Minimum`), and nothing is waiting to run, it is started again on an idle
+worker. Whichever attempt finishes first wins; the other's result is released when it arrives.
+This is the cluster's form of work stealing, aimed at the slow machine or the noisy neighbour.
+It is off by default, and only for tasks without side effects, since both attempts may run to the
+end. `RunStatistics.Speculated` and `SpeculationWins` count it, and a `Speculating` event is
+raised. A test makes one task take 6 s on its first attempt and 60 ms on its second, and the run
+finishes in under 4 s.
+
+## Add-on packages
+
+Four packages extend Dask.Net without adding dependencies to it. Each is a separate NuGet package
+whose kernels are `[RemoteTask]` methods, so they run on a cluster once their assembly is loaded
+on the workers (`--preload` for process workers).
+
+### Lakehouse: Delta Lake and Apache Iceberg (`Gravicode.Science.DaskNet.Lakehouse`)
+
+```csharp
+using Gravicode.Science.DaskNet.Lakehouse;
+
+DaskFrame sales = DeltaLake.Read("lake/sales");                         // latest version
+DaskFrame v3 = DeltaLake.Read("lake/sales", version: 3);                // time travel
+DaskFrame then = DeltaLake.Read("lake/sales", DateTimeOffset.Parse("2026-01-31T00:00Z"));
+IReadOnlyList<DeltaCommit> log = DeltaLake.History("lake/sales");
+
+DaskFrame events = Iceberg.Read("warehouse/db/events");                 // current snapshot
+DaskFrame old = Iceberg.Read("warehouse/db/events", snapshotId: 4871234123L);
+```
+
+One partition per data file. Partition values come from the table's metadata, so a filter on a
+partition column prunes whole files before anything is read, and only the needed columns are
+read from the files that remain. **Delta**: the log is replayed from the newest checkpoint
+(multi-part checkpoints included) plus the JSON commits after it; schema evolution by added
+columns works, deletion vectors on files that are still live, column mapping and v2 checkpoints
+are refused with the feature named. **Iceberg** (format v1 and v2): metadata JSON, then the Avro
+manifest list and manifests; each snapshot is read with its own schema, renamed columns are
+traced by field id, and the table can be moved (paths are re-rooted against its recorded
+location). Delete files are refused rather than ignored. Every fixture version is compared row for
+row with what delta-rs and pyiceberg return (`tools/verify/make_lake_fixtures.py`).
+
+### Geo: spatial joins (`Gravicode.Science.DaskNet.Geo`)
+
+```csharp
+using Gravicode.Science.DaskNet.Geo;
+
+var nearby = customers.DistanceJoin(stores, radiusKm: 5, ("lat", "lon"), ("lat", "lon"));  // adds distance_km
+var tagged = trips.PointInPolygonJoin(districts, ("lat", "lon"), wktColumn: "geometry", keepUnmatched: true);
+var inside = trips.WithinPolygon("lat", "lon", Polygon.Parse("POLYGON ((106.7 -6.4, 107.0 -6.4, 107.0 -6.1, 106.7 -6.1, 106.7 -6.4))"));
+var local = trips.SpatialPartition("lat", "lon", partitions: 16);       // nearby rows share a partition
+string cell = Geohash.Encode(-6.2, 106.8, precision: 7);
+```
+
+Points are latitude/longitude columns in degrees; polygons are WKT (`POLYGON`, `MULTIPOLYGON`,
+holes included; x = longitude). Both joins broadcast the right-hand frame, so put the smaller
+side there. Inside a task the right side is indexed - a grid over polygon bounding boxes, or a
+3-D grid of points on the sphere for distance joins, so the antimeridian and the poles need no
+special case - and every candidate is checked exactly (haversine; boundary points count as
+inside). `SpatialPartition` range-partitions by geohash, a Z-order curve. Both joins are
+compared with a brute-force double loop, locally and on a cluster. Buffers, unions and overlays
+are not included: they need a full topology suite.
+
+### ML: hyperparameter search and batch prediction (`Gravicode.Science.DaskNet.ML`)
+
+```csharp
+using Gravicode.Science.DaskNet.ML;
+
+var result = HyperparameterSearch.Grid<KNearestNeighborsClassifier>(
+    new Dictionary<string, object?[]> { ["k"] = [1, 5, 15], ["metric"] = [DistanceMetric.Euclidean, DistanceMetric.Manhattan] },
+    x, y, folds: 5, scheduler: client);
+Console.WriteLine(result.Best.Spec);              // KNearestNeighborsClassifier(k=15, metric=Manhattan)
+DataFrame table = result.ToFrame();               // like scikit-learn's cv_results_
+IEstimator model = result.BestEstimator!;         // refitted on all the data
+
+var scored = bigFrame.Predict(EstimatorSpec.Of<RandomForestClassifier>(("nTrees", 200), ("seed", 1)),
+    trainX, trainY, features: ["x1", "x2"], probabilities: true);   // runs on a cluster
+```
+
+One task per (candidate, fold). Training data is sent once and fetched once per worker; the
+estimator travels as an `EstimatorSpec` - its type name and constructor arguments, matched by
+name, enums by their names - so any GraviLearn estimator works without serialisation code. The
+folds are fixed before anything runs, so the same seed gives the same scores on any scheduler,
+and the tests check every score against a plain loop over the same folds. Scoring: `accuracy`,
+`f1_macro`, `f1_weighted`, `r2`, `neg_mean_squared_error`, `neg_root_mean_squared_error`.
+`Predict` with a spec fits the model once per worker process and scores every partition it is
+given (dask-ml's `ParallelPostFit`), so the estimator must be deterministic for its seed;
+`Predict` with an already-fitted model works too, but only locally.
+
+### Streaming: micro-batches, windows, restartable ETL (`Gravicode.Science.DaskNet.Streaming`)
+
+```csharp
+using Gravicode.Science.DaskNet.Streaming;
+
+var query = DaskStream.FromDirectory("inbox", watch: true)            // each new CSV file once
+    .Filter(Col("value") >= 0)
+    .WithScheduler(client).Partitions(4)                               // every batch on the cluster
+    .Window("time", TimeSpan.FromMinutes(10), keys: ["sensor"],
+            [(null, "count"), ("value", "mean"), ("value", "max")],
+            allowedLateness: TimeSpan.FromMinutes(2))
+    .ToCsvDirectory("out");
+await query.RunAsync(checkpointDirectory: "ckpt", cancellationToken);
+```
+
+Sources: any `IAsyncEnumerable<DataFrame>`, a `Channel`, or a directory of incremental files.
+Stateless steps (`Filter`, `WithColumns`, `Select`, `Sql` per batch) run on the query's
+scheduler; `Map` runs in-process. `Window` aggregates by event time (tumbling, or sliding with
+`slide:`), aligned to the Unix epoch. A window is emitted when the watermark - the latest event
+time seen minus the allowed lateness - passes its end; rows that arrive for a window already
+emitted are dropped and counted (`LateRows`). With a checkpoint directory, the consumed files,
+the batch count and the open windows are saved after each batch, so a restarted query reads only
+new files and carries its windows over; a test stops a query after four files, adds two more,
+restarts it, and gets the same windows as one uninterrupted run. Delivery is at-least-once; the
+CSV sink names files by batch id, so a replayed batch overwrites its own file.
+
 ## Observability
 
 Every task is an `Activity` on the `ActivitySource` named `Gravicode.Science.DaskNet`, and the
@@ -463,8 +625,8 @@ Dask.Net for the data that doesn't, not for speed.
 |---|---|
 | Partitioned, lazy DataFrame; query optimisation; predicate and projection pushdown | **Done** |
 | CSV (block-split), Arrow IPC, any file via `ReadFiles` (Parquet through GraviFrame.Parquet) | **Done** |
-| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines and arrays, read and write) **done**; the rest through `ReadFiles` with a reader (Excel: GraviFrame's `ExcelReader`); table formats are roadmap |
-| Lazy engine: deferred execution, planner, pipeline fusion | **Done**; join strategy is cost-based (size estimates), the other rewrites are rule-based; multi-way join reordering is roadmap |
+| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines and arrays, read and write) **done**; Delta Lake and Iceberg **done** (Lakehouse package: time travel, partition pruning); Excel through `ReadFiles` with GraviFrame's `ExcelReader`; Hudi is roadmap |
+| Lazy engine: deferred execution, planner, pipeline fusion | **Done**; join strategy is cost-based (size estimates) and SQL join chains are reordered by estimated size; the other rewrites are rule-based |
 | DAG scheduler: visualisation (DOT/Mermaid), cull/fuse, retry policy, dependency tracking | **Done** |
 | Local cluster: multi-core, process isolation, per-worker memory limits with spill to disk | **Done** |
 | Multi-node cluster over TCP | **Done**; gRPC/QUIC/HTTP/3 transports are roadmap |
@@ -473,11 +635,11 @@ Dask.Net for the data that doesn't, not for speed.
 | Distributed collections (`DistributedList` etc.) | Roadmap; `Bag`, `DaskArray` and `Persist` cover the read-mostly cases |
 | Arrow: zero-copy, cross-language | Arrow IPC files **done**; shared memory between processes is roadmap |
 | SQL: joins, aggregations, UNION, window functions | **Done**; explicit window frames, CTE and full ANSI are roadmap |
-| GIS, ML, ETL/streaming, AI, vector databases | Roadmap (separate modules) |
+| GIS, ML, ETL/streaming, AI, vector databases | GIS (Geo: geohash, distance and point-in-polygon joins), ML (hyperparameter search, batch prediction) and streaming (micro-batches, event-time windows, checkpointed directory ETL) **done** as separate packages; AI and vector databases are roadmap |
 | Observability: OpenTelemetry | **Done** (ActivitySource + Meter); Prometheus/Grafana/Jaeger via the OTel exporters |
 | Kubernetes operator, Aspire dashboard | Roadmap |
-| Fault tolerance: task retry, checkpointing, worker recovery | **Done**; speculative execution is roadmap |
-| Storage connectors (databases, data lakes, warehouses) | Databases **done** through any ADO.NET provider (range- or query-partitioned, remotable); lakes and warehouses are roadmap |
+| Fault tolerance: task retry, checkpointing, worker recovery, speculative execution | **Done**; runs can be detached from the client (`SubmitAsync`) |
+| Storage connectors (databases, data lakes, warehouses) | Databases **done** through any ADO.NET provider (range- or query-partitioned, filters pushed into the SQL, remotable); Delta Lake and Iceberg **done**; warehouses are roadmap |
 | Schedulers: thread, cluster | **Done**; a process pool is `LocalCluster.StartProcessesAsync`; Kubernetes is roadmap |
 | Security: token-authenticated workers, TLS and mutual TLS | **Done**; OAuth2/Entra ID, multi-tenancy and quotas are roadmap |
 
@@ -487,8 +649,10 @@ Dask.Net for the data that doesn't, not for speed.
 - `MapPartitions`, `Bag.Map` with lambdas and `DaskArray.MapBlocks` are local-only; write a
   `[RemoteTask]` method to run custom code on a cluster.
 - Joins on several keys need the same key names on both sides (SQL handles different names).
-- The client is the single scheduler of a run; if the client dies, the run is lost (workers
-  survive and accept the next client).
+- With `Compute`, the client is the scheduler of the run, and a client that dies loses it;
+  `SubmitAsync` moves that role to a worker (which is then the single point for that run).
+- Join reordering applies to SQL inner-join chains only, not to `DaskFrame.Join` calls, which run
+  in the order written.
 
 ---
 

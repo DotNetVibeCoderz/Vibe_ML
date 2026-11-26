@@ -269,6 +269,20 @@ public static class RemoteFunctions
 
     public static void Release(string id) => Gates.GetOrAdd(id, _ => new ManualResetEventSlim()).Set();
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> Attempts = new();
+
+    /// <summary>The first attempt for <paramref name="id"/> sleeps <paramref name="slowMilliseconds"/>,
+    /// every later one <paramref name="fastMilliseconds"/>: a straggler that a second attempt beats.</summary>
+    [RemoteTask]
+    public static double SlowFirstTime(double x, string id, int slowMilliseconds, int fastMilliseconds)
+    {
+        Thread.Sleep(Attempts.AddOrUpdate(id, 1, (_, n) => n + 1) == 1 ? slowMilliseconds : fastMilliseconds);
+        return x;
+    }
+
+    /// <summary>How many times <see cref="SlowFirstTime"/> ran for <paramref name="id"/>.</summary>
+    public static int AttemptsOf(string id) => Attempts.GetValueOrDefault(id);
+
     [RemoteTask]
     public static int ProcessId(double _) => Environment.ProcessId;
 

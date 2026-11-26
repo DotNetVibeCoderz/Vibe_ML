@@ -407,6 +407,7 @@ public sealed partial class ConverterViewModel : ObservableObject
         "GraviText" => Success,
         "GraviGraph" => Info,
         "GraviProb" => Assistant,
+        "DaskNet" => "#D9609E",
         "SciNet" => "#5CC4E2",
         "BCL" => Muted,
         _ => "#C4CEDA",   // Visual.Net: a neutral light, so charts read as one family

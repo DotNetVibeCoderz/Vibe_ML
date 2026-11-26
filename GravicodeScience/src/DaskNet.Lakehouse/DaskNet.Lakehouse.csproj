@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Dask.Net table formats: Delta Lake and Apache Iceberg tables read as partitioned DaskFrames,
+    with time travel, partition pruning and column projection. A separate package because it needs
+    Parquet.Net, which Dask.Net itself must not pull in (see GraviFrame.Parquet).
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.DaskNet.Lakehouse</RootNamespace>
+    <AssemblyName>Gravicode.Science.DaskNet.Lakehouse</AssemblyName>
+    <PackageId>Gravicode.Science.DaskNet.Lakehouse</PackageId>
+    <Description>Delta Lake and Apache Iceberg readers for Dask.Net: tables become partitioned DaskFrames with time travel, partition pruning and column projection, readable on a cluster. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;delta-lake;iceberg;lakehouse;parquet;dataframe;dotnet;gravicode</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Parquet.Net" />
+    <ProjectReference Include="..\DaskNet\DaskNet.csproj" />
+    <ProjectReference Include="..\GraviFrame.Parquet\GraviFrame.Parquet.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DaskNet.Lakehouse.Tests" />
+  </ItemGroup>
+
+</Project>

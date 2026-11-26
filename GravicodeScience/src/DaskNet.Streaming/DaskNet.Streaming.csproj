@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Dask.Net streaming: micro-batch queries over frames that keep arriving (Streamz / Spark
+    Structured Streaming's role) - stateless steps run per batch on any scheduler, windowed
+    aggregation keeps state across batches, and a checkpoint makes a query restartable.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.DaskNet.Streaming</RootNamespace>
+    <AssemblyName>Gravicode.Science.DaskNet.Streaming</AssemblyName>
+    <PackageId>Gravicode.Science.DaskNet.Streaming</PackageId>
+    <Description>Micro-batch streaming for Dask.Net: filters, projections and SQL per batch on any scheduler, event-time tumbling and sliding windows with watermarks, incremental directory sources and checkpointed restarts. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;streaming;micro-batch;windowing;watermark;etl;dataframe;dotnet;gravicode</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DaskNet\DaskNet.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DaskNet.Streaming.Tests" />
+  </ItemGroup>
+
+</Project>

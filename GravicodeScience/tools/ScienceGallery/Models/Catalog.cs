@@ -1,6 +1,6 @@
 namespace ScienceGallery.Models;
 
-/// <summary>The seven Gravicode.Science libraries a showcase can use.</summary>
+/// <summary>The eight Gravicode.Science libraries a showcase can use.</summary>
 public enum GraviLibrary
 {
     GraviNum,
@@ -10,6 +10,7 @@ public enum GraviLibrary
     GraviGraph,
     GraviProb,
     SciNet,
+    DaskNet,
 }
 
 /// <summary>Where a showcase is used in real life. Drives the sidebar.</summary>
@@ -48,6 +49,7 @@ public sealed record LibraryInfo(GraviLibrary Library, string Name, string Analo
         new(GraviLibrary.GraviGraph, "GraviGraph", "PyG / DGL", "#4F46D6", 434),
         new(GraviLibrary.GraviProb, "GraviProb", "PyMC", "#9634C8", 393),
         new(GraviLibrary.SciNet, "SciNet", "SciPy", "#16132E", null),
+        new(GraviLibrary.DaskNet, "Dask.Net", "Dask", "#EC6A2C", 640),
     ];
 
     /// <summary>Looks a library up.</summary>

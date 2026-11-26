@@ -60,7 +60,7 @@ public sealed record WorkerOptions
 /// with <c>--preload</c>.
 /// </para>
 /// </remarks>
-public sealed class Worker : IAsyncDisposable
+public sealed partial class Worker : IAsyncDisposable
 {
     private readonly WorkerOptions _options;
     private readonly TcpListener _listener;
@@ -146,6 +146,19 @@ public sealed class Worker : IAsyncDisposable
                     case MessageKind.Get:
                         await ReplyGetAsync(connection, message).ConfigureAwait(false);
                         break;
+                    case MessageKind.Submit:
+                        await SubmitAsync(connection, message).ConfigureAwait(false);
+                        break;
+                    case MessageKind.Status:
+                        await StatusAsync(connection, message).ConfigureAwait(false);
+                        break;
+                    case MessageKind.Cancel:
+                    case MessageKind.Forget:
+                    {
+                        var forget = message.Kind == MessageKind.Forget;
+                        _ = Task.Run(() => CancelOrForgetAsync(connection, message, forget));
+                        break;
+                    }
                     case MessageKind.Release:
                     {
                         using var r = message.Reader();

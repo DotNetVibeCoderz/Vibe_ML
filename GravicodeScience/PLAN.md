@@ -796,15 +796,34 @@ locality-aware placement, peer-to-peer data transfer and lineage recovery.
 6. ✅ **Connectors**: JSON (Lines in byte blocks, arrays, writing) and databases through any ADO.NET
    provider (range- or query-partitioned, projection pushed into the SELECT, types pinned).
 
+**Then (2.3.0):**
+
+1. ✅ **Multi-way join reordering** for SQL chains of three or more inner equi-joins: greedy
+   operator ordering on the size estimates, WHERE conjuncts halving a table's estimate, written
+   column order restored. Outer joins and disconnected chains are left as written.
+2. ✅ **Predicate pushdown into SQL sources**: `Expr` translated to a parameterised `WHERE`,
+   superset-safe (text equality re-checked against collations), the filter always re-applied.
+3. ✅ **Table formats**: `Gravicode.Science.DaskNet.Lakehouse` reads Delta Lake (log replay from
+   checkpoints, time travel by version or timestamp) and Iceberg v1/v2 (Avro manifests, snapshot
+   schemas, renames by field id), with partition pruning, checked against delta-rs and pyiceberg.
+4. ✅ **GIS / ML / streaming as separate packages**: `DaskNet.Geo` (geohash, spatial partitioning,
+   distance and point-in-polygon joins), `DaskNet.ML` (grid/random search one task per candidate
+   and fold, batch prediction fitted once per worker), `DaskNet.Streaming` (micro-batches,
+   tumbling/sliding event-time windows with watermarks, checkpointed directory ETL).
+5. ✅ **Worker-side scheduling**: `Client.SubmitAsync` hands a run to a worker so it outlives the
+   client (status, results, cancel, forget by a JSON handle), and speculative execution gives
+   stragglers a second attempt on an idle worker.
+
 **Next:**
 
-1. **Multi-way join reordering** for SQL queries with three or more tables, on the same estimates.
-2. **Predicate pushdown into SQL sources** - filters run after rows are read today; translating
-   `Expr` to a parameterised WHERE would cut what crosses the network.
-3. **Table formats**: Delta Lake / Iceberg readers on top of the Parquet package.
-4. **The GIS / ML / streaming modules** of `Dask.Net-Features.md`, as separate packages.
-5. **Worker-side scheduling** (work stealing between workers) - the client is still the single
-   scheduler of a run, and a client that dies loses the run.
+1. **Shared-memory Arrow between processes**, so co-located workers stop copying partitions
+   through sockets.
+2. **Geometry operations** (buffer, union, overlay) - would need NetTopologySuite in `DaskNet.Geo`.
+3. **Incremental ML** (`partial_fit`-style training over partitions) and ONNX batch scoring.
+4. **Streaming sources beyond files and channels** (Kafka, MQTT) and stream-stream joins.
+5. **Hudi**, and Delta deletion vectors / column mapping, which are refused today.
+6. **A scheduler that survives its own worker's death** - a detached run is still lost with the
+   worker that schedules it.
 
 ## Non-goals
 

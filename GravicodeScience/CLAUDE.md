@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 v0.1.0 is implemented and complete against `requirements.md`, a seventh library, **SciNet**
 (SciPy for .NET), has been added beside the original six, and an eighth, **Dask.Net** (Dask +
-dask-sql, `src/DaskNet`, 184 tests), against `Dask.Net-Features.md`. The solution has 38 projects and
-**4,312 tests passing** (2,983 of them SciNet's, 184 Dask.Net's, 47 ScienceAppGen's), eight samples
+dask-sql, `src/DaskNet`, 203 tests, plus the Lakehouse, Geo, ML and Streaming add-ons with 53 more),
+against `Dask.Net-Features.md`. The solution has 46 projects and
+**4,417 tests passing** (2,983 of them SciNet's, 256 Dask.Net's, 80 ScienceAppGen's), eight samples
 that run end to end, eight notebooks, eight benchmark suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -215,7 +216,8 @@ applications via Semantic Kernel function calling. See [docs/ScienceAppGen.md](d
   `#r` directives, concatenate, and build against the libraries — that is what found the ScottPlot
   break and several wrong method names. .NET Interactive allows redeclaring a variable across
   cells, so the check is stricter than the notebook; rename rather than shadow.
-- **The template self-test claim is real**: every `TemplateService` template is generated and built.
+- **The template self-test claim is real**: every `TemplateService` template is generated and built
+  (`DaskSupportTests.Every_template_builds`, ~1 min).
   `FindLibrarySource()` walks up from `AppContext.BaseDirectory` *and* `Environment.CurrentDirectory`,
   so a generator run from outside the repository silently emits empty `ProjectReference` paths.
 
@@ -491,6 +493,31 @@ and GraviFrame only. The worker host is `tools/DaskNet.Worker`; the test project
   only; otherwise rows outside caller-given bounds, or with a NULL index, are silently skipped.
   Workers resolve the provider by type name and its static `Instance`, so a cluster needs the
   provider assembly preloaded; the connection string crosses the wire with every task.
+- **SQL pushdown is superset-safe, never exact by assumption.** The pushed `WHERE` may keep more
+  rows than the filter, and the filter always runs again on what comes back. Text `=`/`IN` are
+  superset-only because a collation (SQLite `NOCASE`, SQL Server's default CI) can match more;
+  `NOT` is pushed only over exactly translated terms, since NOT of a superset is a subset.
+- **Join reordering only touches all-inner SQL chains**, and restores the written column order
+  with a final `Select`. Starting the greedy from the largest table chose bad orders; GOO
+  (merge the connected pair with the smallest combined estimate) is what is implemented.
+- **Speculation losers still hold a worker thread** until they finish: the client tracks them in
+  `_losers`, decrements `InFlight` when they reply and releases their result. A copy is only
+  started when nothing is ready to run, so it never delays real work.
+- **Detached runs are scheduled by a worker through an internal `Client`** to every address plus
+  its own; that worker is the run's single point of failure. Only `[RemoteTask]` graphs submit.
+- **Sibling packages (Lakehouse) see DaskNet internals through `InternalsVisibleTo`** for plan
+  nodes (`ScanSource`); Geo/ML/Streaming use only the public `ToDelayed`/`FromDelayed` and need none.
+  A new sibling needs its own icon copy (`assets/icons/DaskNet.X.png`) or packing fails.
+- **Delta checkpoints must be read untyped** (`ParquetSerializer.DeserializeAsync(stream)`): the
+  typed path threw "definition level mismatch" on delta-rs checkpoints. Iceberg paths are absolute
+  in the metadata, so every one is re-rooted against the table's recorded `location`; pyiceberg's
+  SQL catalog on Windows needs a plain path, not `file:///C:`.
+- **`MLKernels.PredictPartition` fits once per worker process per call token** (cached, at most 8
+  models), so `Predict(EstimatorSpec, ...)` requires a deterministic estimator; an already-fitted
+  model goes through `MapPartitions` and is local-only. Enums cross the wire by name.
+- **Stream window state is keyed by aligned start + key text, and late rows are judged against the
+  watermark from *before* the batch**, as in Spark. A checkpoint is tied to its window definition
+  and refuses a different one rather than mixing state.
 - **The icon is neon 640 nm**; `make_icons.py DaskNet` renders only it, and SciNet's strip keeps
   its original six lines so published icons do not change.
 
@@ -549,10 +576,18 @@ and GraviFrame only. The worker host is `tools/DaskNet.Worker`; the test project
   piped through another process is only visible when that process captures it.
 - **Testing with a real key: never print the key file.** Load it in a wrapper that passes
   `SCIENCEAPPGEN_APIKEY`/`SCIENCEAPPGEN_ENDPOINT` only through the child's environment.
+- **`Dask.All` is a local lambda task, so a dask graph using it cannot run on a `Client`.** Templates,
+  examples and the curated reference combine fixed fan-ins with a k-argument `[RemoteTask]` instead.
+- **Converted projects pin the science packages at `LibraryMap.ScienceVersion` (2.2.0).** Dask.Net
+  first shipped in 2.1.0; an older pin beside it fails restore with NU1605.
+- **`ApiReferenceBuilder.TypeName` must stop at generic parameters.** A `T`'s `DeclaringType` is the
+  generic type itself, so following it recursed until the test host died (`Bag<T>`).
+- **`--capture-template` scrolls the output panel after laying out at the capture size and lays out
+  again**; the offset applies on the next arrange, so without the second pass the panel renders empty.
 
 ### Science Gallery specifics
 
-`tools/ScienceGallery` is an Avalonia app of 45 runnable use cases; see
+`tools/ScienceGallery` is an Avalonia app of 50 runnable use cases; see
 [docs/ScienceGallery.md](docs/ScienceGallery.md). Each use case is one `Showcase` subclass in
 `Showcases/<Domain>/`, found by reflection, and its source file is embedded so the code panel shows
 exactly what ran.
@@ -568,7 +603,7 @@ exactly what ran.
 - **But the Linux native asset must be raised by hand** (`VersionOverride` in the gallery csproj).
   Avalonia brings `SkiaSharp.NativeAssets.Linux` 3.119, its `libSkiaSharp.so` wins in the output,
   and managed SkiaSharp 4 then throws `TypeInitializationException` in `SKImageInfo` - on Linux
-  only, so Windows builds and `--run-all` pass while CI fails all 45 use cases. Windows and macOS
+  only, so Windows builds and `--run-all` pass while CI fails all 50 use cases. Windows and macOS
   native assets already resolve to 4.x.
 - **A namespace called `Visual` (from Visual.Net.Core) hides `Avalonia.Visual`** in gallery code;
   write `Avalonia.Visual` in full.
@@ -584,7 +619,7 @@ exactly what ran.
 
 ## Packaging and CI
 
-The libraries under `src/` (eight, plus GraviFrame.Parquet) pack as `Gravicode.Science.*`; everything else is
+The libraries under `src/` (eight, plus GraviFrame.Parquet and the four DaskNet add-ons) pack as `Gravicode.Science.*`; everything else is
 `IsPackable=false`. Metadata lives once in `Directory.Build.props`, not in seven `.csproj` files.
 
 - **Each package's icon is `assets/icons/$(MSBuildProjectName).png`**, packed as `icon.png` by

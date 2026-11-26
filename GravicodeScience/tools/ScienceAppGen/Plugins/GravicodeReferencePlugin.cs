@@ -622,6 +622,75 @@ public sealed class GravicodeReferencePlugin
               Deviance scale: LOWER IS BETTER. Only DIFFERENCES are interpretable, and only
               between models scored on the same observations.
             """,
+        ["DaskNet"] = """
+            DaskNet - Dask for .NET: lazy task graphs, Bag, chunked DaskArray, partitioned DaskFrame, SQL, clusters.
+            using Gravicode.Science.DaskNet;  using static Gravicode.Science.DaskNet.Expr;
+            using Gravicode.Science.DaskNet.Distributed;  (Client, LocalCluster)
+            using Gravicode.Science.DaskNet.Sql;          (SqlContext)
+
+            Everything is lazy: building a collection does no work; Compute() runs it. With no argument
+            Compute uses the thread-pool scheduler; pass new SynchronousScheduler() to debug, or a Client.
+
+            Delayed (dask.delayed)
+              var x = Dask.Value(3.0);  var y = Dask.Delayed(Square, x);   // 1-4 Delayed arguments
+              y.Then(v => v + 1); y.Compute();  Dask.All(items) -> Delayed<T[]>
+              Dask.Compute(a, b) -> (T1, T2) in one graph;  Dask.Compute(IEnumerable<Delayed<T>>) -> T[]
+              dask.compute(*items) -> Dask.Compute(items, scheduler)
+
+            Bag (dask.bag) - partitioned sequence of any T
+              Bag.FromSequence(items, partitions: 8), Bag.ReadText("logs/*.txt", blockSize: 64 << 20), Bag.Range(n)
+              .Map(f) .Filter(p) .FlatMap(f) .MapPartitions(f) .Distinct() .Repartition(n)
+              .Count() .Sum(f) .Mean(f) .Std(f) .Min(f) .Max(f) .TopK(k, key) .Frequencies() -> (Item, Count)[]
+              .FoldBy(key, () => seed, (acc, x) => ..., (a, b) => ...) -> (Key, Value)[]   (cheaper than GroupBy)
+              .GroupBy(key) .Fold(seed, step, combine) .Reduce(op)    These return Delayed - call .Compute().
+              bag.Compute() -> List<T>;  bag.Take(n)
+
+            DaskArray (dask.array) - grid of GraviNum NdArray chunks
+              DaskArray.FromArray(ndarray, 1000, 1000)   // chunk size per axis (params int[])
+              DaskArray.RandomNormal([rows, cols], [chunkRows, chunkCols], seed: 7) / Random / Zeros / Ones / Arange(n, chunk)
+              + - * / with arrays and scalars, NumPy broadcasting: x - x.Mean(axis: 0)
+              .Sum() .Mean() .Std(ddof) .Min() .Max()   -> Delayed<double>
+              .Sum(axis: 0) .Mean(axis: 0) .Std(axis: 0, ddof: 1) .Max(axis: 1)  -> DaskArray
+              .Dot(other) .T .Rechunk(...) .ExpandDims(axis) .Exp() .Log() .Sqrt() .Abs() .Map(f) .MapBlocks(f)
+              .Compute() -> NdArray;  .Shape .Chunks .BlockCount
+              There are no comparison operators: x > 3 is x.Map(v => v > 3 ? 1.0 : 0.0).
+
+            DaskFrame (dask.dataframe) - logical plan over GraviFrame DataFrame partitions
+              DaskFrame.ReadCsv("sales/*.csv", blockSize: 64L << 20), DaskFrame.ReadJson("*.jsonl"),
+              DaskFrame.ReadArrow(pattern), DaskFrame.FromFrame(dataFrame, partitions: 4)   (dd.from_pandas)
+              Row-wise steps take EXPRESSIONS, not lambdas (that is what lets the optimiser push them down):
+                .Filter(Col("price") > 20 & Col("region").In("north", "east"))      // & | ! ; .Eq(v) .Ne(v)
+                .WithColumn("revenue", Col("price") * Col("qty"))   If(cond, a, b), .IsNull(), .FillNull(v)
+                .Select("a", "b") .Drop("c") .Rename("from", "to") .DropMissing() .Limit(n)
+              .GroupBy("region", "category").Agg(("revenue", "sum"), ("price", "mean"))  -> columns revenue_sum, price_mean
+                also .Sum("x") .Mean("x") .Count("x") .Size(); hows: sum mean count size min max var std
+              .Join(other, "key", JoinKind.Left) / .Merge(other, ["a"], ["b"])   (JoinKind is in Gravicode.Science.GraviFrame)
+              .SortBy("revenue_sum", ascending: false) .ValueCounts("col") .Repartition(n)
+              .Sum("col") .Mean("col") -> Delayed<double>;  .Count() -> Delayed<long>
+              .Compute() -> DataFrame;  .Head(5) -> DataFrame;  .Explain() -> optimised plan text
+              .ToCsv(dir) .ToJson(dir) .Persist()
+              df["x"].sum().compute()  ->  frame.Sum("x").Compute()
+
+            SqlContext (dask_sql.Context)
+              var sql = new SqlContext().RegisterCsv("orders", "orders/*.csv").Register("customers", dataFrame);
+              DataFrame r = sql.Execute("SELECT region, SUM(x) AS total FROM orders GROUP BY region");
+              DaskFrame lazy = sql.Sql("..."); sql.Explain("...");
+              Joins, GROUP BY/HAVING, ORDER BY, LIMIT, UNION, CASE, window functions
+              (ROW_NUMBER/RANK/LAG/LEAD, SUM(...) OVER (PARTITION BY ... ORDER BY ...)).
+
+            Distributed (dask.distributed)
+              await using var cluster = await LocalCluster.StartAsync(workers: 4, threadsPerWorker: 2);
+              var result = collection.Compute(cluster.Client);     // Client is an IScheduler
+              await Client.ConnectAsync(["host:8786"], token);  cluster.Client.LastRun.TasksPerWorker
+              ONLY public static methods marked [RemoteTask] run on a Client - their NAME crosses the
+              wire, never code. A lambda anywhere in the graph (Then(...), Bag.Map(x => ...),
+              MapPartitions, MapBlocks, Dask.All) throws NotSupportedException on a Client; it runs
+              fine on the default thread scheduler. Arguments/results must be numbers, strings,
+              arrays, NdArray or DataFrame.
+                public static class Tasks { [RemoteTask] public static double Square(double x) => x * x; }
+                Dask.Delayed(Tasks.Square, Dask.Value(3.0)).Compute(cluster.Client);
+              Array and DataFrame kernels are already [RemoteTask]; those graphs run on a cluster as is.
+            """,
     };
 
     /// <summary>The curated reference for one library, or null; shared with the Python converter.</summary>
@@ -632,8 +701,8 @@ public sealed class GravicodeReferencePlugin
                  "method signatures and the gotchas. Call this BEFORE writing code against a " +
                  "library rather than guessing method names.")]
     public string GravicodeReference(
-        [Description("Library name: GraviNum, GraviFrame, GraviLearn, GraviText, GraviGraph or " +
-                     "GraviProb. Use 'all' for a short index of every library.")]
+        [Description("Library name: GraviNum, GraviFrame, GraviLearn, GraviText, GraviGraph, " +
+                     "GraviProb or DaskNet. Use 'all' for a short index of every library.")]
         string library)
     {
         if (string.Equals(library, "all", StringComparison.OrdinalIgnoreCase))
@@ -645,6 +714,7 @@ public sealed class GravicodeReferencePlugin
             builder.AppendLine("  GraviText   tokenization, embeddings, transformers, NLP (needs GraviLearn)");
             builder.AppendLine("  GraviGraph  graphs, algorithms, node embeddings, GNNs (needs GraviText)");
             builder.AppendLine("  GraviProb   distributions, MCMC, Bayesian models (needs GraviNum)");
+            builder.AppendLine("  DaskNet     lazy task graphs, Bag, chunked arrays, partitioned frames, SQL, clusters (needs GraviFrame)");
             builder.AppendLine("\nCall GravicodeReference with one name for its full API surface.");
             return builder.ToString();
         }
@@ -661,7 +731,7 @@ public sealed class GravicodeReferencePlugin
         [Description("Task: classification, regression, clustering, dataframe, timeseries, " +
                      "sentiment, graph, bayesian, explainability, anomaly, tokenizer, ner, " +
                      "forecasting, gaussianprocess, windowfunctions, heterogeneousgraph, " +
-                     "arrow, outofcore, sparse, distributed or pretrained.")]
+                     "arrow, outofcore, sparse, distributed, pretrained, dask or daskcluster.")]
         string task)
     {
         var key = task.ToLowerInvariant();
@@ -1145,10 +1215,53 @@ public sealed class GravicodeReferencePlugin
                 //                     input_names=["input_ids"], opset_version=13)
                 """,
 
+            "dask" => """"
+                using Gravicode.Science.DaskNet;
+                using Gravicode.Science.DaskNet.Sql;
+                using static Gravicode.Science.DaskNet.Expr;
+
+                // A folder of CSV files as one lazy, partitioned frame. Row-wise steps are
+                // expressions, not lambdas, so the optimiser can push them into the scan.
+                var sales = DaskFrame.ReadCsv("data/*.csv");
+                var report = sales
+                    .Filter(Col("qty") > 0 & Col("region").In("north", "east"))
+                    .WithColumn("revenue", Col("qty") * Col("price"))
+                    .GroupBy("region")
+                    .Agg(("revenue", "sum"), ("qty", "mean"))      // -> revenue_sum, qty_mean
+                    .SortBy("revenue_sum", ascending: false);
+                Console.WriteLine(report.Explain());
+                Console.WriteLine(report.Compute());                // thread-pool scheduler
+
+                var sql = new SqlContext().RegisterCsv("orders", "data/*.csv");
+                Console.WriteLine(sql.Execute("""
+                    SELECT region, month, SUM(qty * price) AS revenue,
+                           SUM(SUM(qty * price)) OVER (PARTITION BY region ORDER BY month) AS running
+                    FROM orders GROUP BY region, month ORDER BY region, month
+                    """));
+                """",
+
+            "daskcluster" => """
+                using Gravicode.Science.DaskNet;
+                using Gravicode.Science.DaskNet.Distributed;
+
+                await using var cluster = await LocalCluster.StartAsync(workers: 4, threadsPerWorker: 2);
+                var tasks = Enumerable.Range(0, 100)
+                    .Select(i => Dask.Delayed(Tasks.Simulate, Dask.Value((double)i)));
+                double[] results = Dask.Compute(tasks, cluster.Client);
+                Console.WriteLine(cluster.Client.LastRun);           // tasks per worker, elapsed
+
+                // Only public static [RemoteTask] methods cross the wire, by name. A lambda in the
+                // graph (Then, Bag.Map, Dask.All) throws NotSupportedException on a Client.
+                public static class Tasks
+                {
+                    [RemoteTask] public static double Simulate(double seed) => Math.Sin(seed) * seed;
+                }
+                """,
+
             _ => "Unknown task. Try: classification, regression, clustering, dataframe, " +
                  "explainability, anomaly, tokenizer, ner, forecasting, gaussianprocess, " +
                  "windowfunctions, heterogeneousgraph, arrow, outofcore, sparse, distributed, " +
-                 "pretrained, " +
+                 "pretrained, dask, daskcluster, " +
                  "timeseries, sentiment, graph, bayesian.",
         };
     }

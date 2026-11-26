@@ -93,7 +93,8 @@ public static partial class ConversionSupport
         return result;
     }
 
-    private static readonly string[] LibraryPrefixes = ["Gravicode.", "Matplotlib.", "Seaborn.", "Plotly.", "Visual.Net"];
+    // "Dask." is not a .NET namespace anywhere; a model translating `import dask.distributed` writes it.
+    private static readonly string[] LibraryPrefixes = ["Gravicode.", "Matplotlib.", "Seaborn.", "Plotly.", "Visual.Net", "Dask."];
 
     private static readonly Lazy<(HashSet<string> Namespaces, HashSet<string> TypeNames)> Known = new(() =>
     {
@@ -103,6 +104,7 @@ public static partial class ConversionSupport
             typeof(Gravicode.Science.GraviFrame.DataFrame).Assembly,
             typeof(Gravicode.Science.GraviLearn.Pipeline).Assembly,
             typeof(Gravicode.Science.SciNet.Optimize).Assembly,
+            typeof(Gravicode.Science.DaskNet.Dask).Assembly,
             typeof(Matplotlib.Net.Figure).Assembly,
             typeof(Seaborn.Net.Sns).Assembly,
             typeof(Plotly.Net.Chart).Assembly,
@@ -166,6 +168,7 @@ public static partial class ConversionSupport
             typeof(Gravicode.Science.GraviFrame.DataFrame).Assembly,
             typeof(Gravicode.Science.GraviLearn.Pipeline).Assembly,
             typeof(Gravicode.Science.SciNet.Optimize).Assembly,
+            typeof(Gravicode.Science.DaskNet.Dask).Assembly,
             typeof(Matplotlib.Net.Figure).Assembly,
             typeof(Seaborn.Net.Sns).Assembly,
             typeof(Plotly.Net.Chart).Assembly,

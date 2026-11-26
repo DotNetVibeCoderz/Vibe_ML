@@ -59,6 +59,8 @@
     <ProjectReference Include="..\..\src\GraviLearn\GraviLearn.csproj" />
     <!-- The converter reflects over SciNet to give the model scipy's real counterparts. -->
     <ProjectReference Include="..\..\src\SciNet\SciNet.csproj" />
+    <!-- ...and over Dask.Net, for dask/dask.distributed/dask_sql signatures. -->
+    <ProjectReference Include="..\..\src\DaskNet\DaskNet.csproj" />
   </ItemGroup>
 
 </Project>

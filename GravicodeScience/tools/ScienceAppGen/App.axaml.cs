@@ -40,6 +40,11 @@ public partial class App : Application
                 // A capture must not rewrite the user's layout or last project in app.config.
                 window.Opened += async (_, _) => await Services.Conversion.ConverterScreenshot.RunAsync(args, window, shell, desktop);
             }
+            else if (TemplateScreenshot.IsRequested(args))
+            {
+                // Same rule: a capture leaves app.config alone.
+                window.Opened += async (_, _) => await TemplateScreenshot.RunAsync(args, window, shell, desktop);
+            }
             else
             {
                 desktop.ShutdownRequested += (_, _) => shell.PersistLayout();

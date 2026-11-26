@@ -9,7 +9,8 @@ public static class ConversionPrompts
     public const string System = """
         You convert Python data-science programs to C# 13 on .NET 10. The target libraries are
         Gravicode.Science (GraviNum = numpy, GraviFrame = pandas, GraviLearn = scikit-learn,
-        SciNet = scipy, GraviText, GraviGraph, GraviProb) and Visual.Net for charts
+        SciNet = scipy, GraviText, GraviGraph, GraviProb, DaskNet = dask / dask.distributed /
+        dask-sql) and Visual.Net for charts
         (Matplotlib.Net = matplotlib, Seaborn.Net = seaborn, Plotly.Net = plotly).
 
         Output: exactly ONE fenced ```csharp block holding the COMPLETE file, nothing omitted, no

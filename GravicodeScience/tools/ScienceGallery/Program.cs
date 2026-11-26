@@ -12,7 +12,12 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        if (args.Contains("--run-all")) return RunAll();
+        if (args.Contains("--run-all"))
+        {
+            // `--run-all --only Dask` runs just the use cases whose class name contains "Dask".
+            var only = Array.IndexOf(args, "--only");
+            return RunAll(only >= 0 && only + 1 < args.Length ? args[only + 1] : null, args.Contains("--verbose"));
+        }
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         return 0;
     }
@@ -27,10 +32,12 @@ public static class Program
     /// Runs every showcase and renders its chart, headless. Exits non-zero if any fails, so CI can
     /// check that every example the gallery shows actually works.
     /// </summary>
-    private static int RunAll()
+    private static int RunAll(string? only, bool verbose)
     {
         var failures = 0;
-        foreach (var showcase in ShowcaseRegistry.All)
+        var selected = ShowcaseRegistry.All
+            .Where(s => only is null || s.GetType().Name.Contains(only, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var showcase in selected)
         {
             var output = new ShowcaseOutput();
             var watch = Stopwatch.StartNew();
@@ -41,6 +48,11 @@ public static class Program
                 watch.Stop();
                 Console.WriteLine($"  ok    {watch.ElapsedMilliseconds,6} ms  {showcase.Domain,-10} {showcase.GetType().Name}" +
                                   $"  ({output.Metrics.Count} metrics{(png is null ? "" : $", chart {png.Length / 1024} KB")})");
+                if (verbose)
+                {
+                    foreach (var (label, value, note) in output.Metrics) Console.WriteLine($"          {label}: {value}{(note is null ? "" : $"  ({note})")}");
+                    foreach (var line in output.Lines) Console.WriteLine("          " + line.Replace("\n", "\n          "));
+                }
                 if (ShowcaseRegistry.SourceOf(showcase).StartsWith("// Source", StringComparison.Ordinal))
                     throw new InvalidOperationException("source file not embedded");
             }
@@ -50,7 +62,7 @@ public static class Program
                 Console.WriteLine($"  FAIL            {showcase.Domain,-10} {showcase.GetType().Name}: {exception.GetType().Name}: {exception.Message}");
             }
         }
-        Console.WriteLine($"{ShowcaseRegistry.All.Count - failures} of {ShowcaseRegistry.All.Count} use cases ran.");
+        Console.WriteLine($"{selected.Count - failures} of {selected.Count} use cases ran.");
         return failures == 0 ? 0 : 1;
     }
 }

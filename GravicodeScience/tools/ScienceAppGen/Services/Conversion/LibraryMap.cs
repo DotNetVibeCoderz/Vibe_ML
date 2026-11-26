@@ -30,7 +30,7 @@ public sealed record PackageMapping(string Package, TargetLibrary? Target, strin
 public static class LibraryMap
 {
     /// <summary>Gravicode.Science version that converted projects reference.</summary>
-    public const string ScienceVersion = "1.4.0";
+    public const string ScienceVersion = "2.2.0";
 
     /// <summary>Visual.Net version that converted projects reference.</summary>
     public const string VisualNetVersion = "1.1.0";
@@ -74,6 +74,12 @@ public static class LibraryMap
     public static readonly TargetLibrary SciNet = new("SciNet", "Gravicode.Science.SciNet", ScienceVersion,
         ["Gravicode.Science.SciNet"], "AccentBrush");
 
+    /// <summary>Dask, dask.distributed and dask-sql. The base namespace holds the collections
+    /// (<c>Dask</c>, <c>Bag</c>, <c>DaskArray</c>, <c>DaskFrame</c>); <c>.Distributed</c> and <c>.Sql</c>
+    /// come in only when the module imports dask.distributed or dask_sql.</summary>
+    public static readonly TargetLibrary DaskNet = new("DaskNet", "Gravicode.Science.DaskNet", ScienceVersion,
+        ["Gravicode.Science.DaskNet"], "Spec7");
+
     /// <summary>matplotlib.</summary>
     public static readonly TargetLibrary Matplotlib = new("Matplotlib.Net", "Gravicode.Matplotlib.Net", VisualNetVersion,
         ["Matplotlib.Net", "Matplotlib.Net.Artists", "Matplotlib.Net.Rendering", "Matplotlib.Net.Styling",
@@ -106,6 +112,9 @@ public static class LibraryMap
         ["pystan"] = (GraviProb, "Stan programs are rewritten as GraviProb models, not compiled."),
         ["stan"] = (GraviProb, "Stan programs are rewritten as GraviProb models, not compiled."),
         ["arviz"] = (GraviProb, "Diagnostics map to GraviProb's summaries and WAIC/LOO."),
+        ["dask"] = (DaskNet, "Row-wise DataFrame steps take Expr expressions (Col(\"x\") > 5), not lambdas, so the optimiser can push them down."),
+        ["distributed"] = (DaskNet, "dask.distributed's Client becomes LocalCluster.StartAsync(...).Client or Client.ConnectAsync; only [RemoteTask] public static methods run on it."),
+        ["dask_sql"] = (DaskNet, "dask_sql.Context becomes SqlContext; create_table is Register/RegisterCsv, c.sql(q) is Sql(q) (lazy) or Execute(q)."),
         ["transformers"] = (GraviText, "Architectures and tokenizers convert; hub downloads become explicit weight loading."),
         ["tokenizers"] = (GraviText, null),
         ["nltk"] = (GraviText, null),
@@ -156,7 +165,7 @@ public static class LibraryMap
         var own = module.ExternalPackages.Select(Map).Where(m => m.Target is not null).Select(m => m.Target!).ToList();
         var shared = SharedTargets(projectPackages);
 
-        if (own.Concat(shared).Any(t => t.Id.StartsWith("Gravi", StringComparison.Ordinal) || t == SciNet))
+        if (own.Concat(shared).Any(t => t.Id.StartsWith("Gravi", StringComparison.Ordinal) || t == SciNet || t == DaskNet))
             usings.AddRange(GraviNum.Usings);
         foreach (var target in shared.Concat(own)) usings.AddRange(target.Usings);
 
@@ -164,6 +173,8 @@ public static class LibraryMap
         if (Uses("scipy.sparse")) usings.Add("Gravicode.Science.SciNet.Sparse");
         if (Uses("scipy.spatial")) usings.Add("Gravicode.Science.SciNet.Spatial");
         if (Uses("scipy.io")) usings.Add("Gravicode.Science.SciNet.IO");
+        if (Uses("dask.distributed") || Uses("distributed")) usings.Add("Gravicode.Science.DaskNet.Distributed");
+        if (Uses("dask_sql")) usings.Add("Gravicode.Science.DaskNet.Sql");
 
         return usings.Distinct(StringComparer.Ordinal).ToList();
     }
@@ -171,12 +182,14 @@ public static class LibraryMap
     /// <summary>
     /// The Gravicode data libraries used anywhere in the project. Their objects cross module
     /// boundaries, so every module gets their usings and curated reference; SciNet and the plotting
-    /// libraries stay with the modules that import them.
+    /// libraries stay with the modules that import them. Dask.Net is shared too: a module that
+    /// never imports dask still receives the lazy <c>DaskFrame</c> another one built.
     /// </summary>
     public static IReadOnlyList<TargetLibrary> SharedTargets(IEnumerable<PackageMapping> projectPackages)
         => projectPackages.Select(p => p.Target)
             .OfType<TargetLibrary>()
-            .Where(t => t == GraviNum || t == GraviFrame || t == GraviLearn || t == GraviText || t == GraviGraph || t == GraviProb)
+            .Where(t => t == GraviNum || t == GraviFrame || t == GraviLearn || t == GraviText || t == GraviGraph || t == GraviProb
+                        || t == DaskNet)
             .Distinct()
             .ToList();
 
@@ -215,8 +228,10 @@ public static class LibraryMap
             targets.Add(GraviFrame);
             targets.Add(GraviLearn);
         }
+        // Dask.Net partitions are GraviFrame DataFrames and its chunks GraviNum NdArrays.
+        if (targets.Contains(DaskNet)) targets.Add(GraviFrame);
         if (targets.Contains(GraviLearn) || targets.Contains(GraviFrame) || targets.Contains(SciNet)
-            || targets.Contains(GraviProb) || targets.Contains(GraviText) || targets.Contains(GraviGraph))
+            || targets.Contains(GraviProb) || targets.Contains(GraviText) || targets.Contains(GraviGraph) || targets.Contains(DaskNet))
             targets.Add(GraviNum);
 
         return targets.OrderBy(t => t.PackageId, StringComparer.Ordinal).ToList();

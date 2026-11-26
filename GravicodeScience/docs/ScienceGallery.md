@@ -1,6 +1,6 @@
 # Gravicode Science Gallery
 
-*[Bahasa Indonesia](id/ScienceGallery.md)* · 45 real-world use cases for the seven
+*[Bahasa Indonesia](id/ScienceGallery.md)* · 50 real-world use cases for the eight
 Gravicode.Science libraries — each one runs on your machine when you open it, draws its chart with
 [Visual.Net](https://github.com/DotNetVibeCoderz/Vibe_Charting/tree/main/Visual.Net), and shows
 the exact source file it ran.
@@ -30,7 +30,7 @@ games, and every library appears in several of them.
 Every card carries a strip that reads like a spectroscope. Each Gravi library is a real emission
 line — the same colour and wavelength as its NuGet icon — and the lines a use case needs are lit,
 the rest left as faint ticks. SciNet, the instrument rather than a line, lights the whole band
-behind them. The strip tells you at a glance what a use case needs before you open it.
+behind them. Dask.Net is the orange neon line at 640 nm, just short of GraviNum's red. The strip tells you at a glance what a use case needs before you open it.
 
 ## Opening one
 
@@ -65,18 +65,21 @@ The light theme is the default; the switch at the bottom of the sidebar turns on
 | | How much calcite is in this rock sample? | SciNet, GraviNum |
 | | When will the outbreak peak, and how big will it be? | SciNet, GraviNum |
 | | Which papers does the field actually build on? (Cora) | GraviGraph, SciNet, GraviNum |
+| | Sweep an epidemic model across R0 on a four-worker cluster | DaskNet, GraviNum |
 | Office | Turn a year of orders into the monthly sales report | GraviFrame, GraviNum |
 | | Is a trained sentiment model worth the labelling? (IMDB reviews) | GraviText, GraviFrame, GraviLearn |
 | | Pull the invoice number, vendor, date and amount out of emails | GraviText, GraviNum |
 | | Sort a shared inbox into topics nobody labelled | GraviText, GraviLearn, GraviNum |
 | | Fit ten meetings into ten rooms without anyone squeezing in | SciNet |
 | | Build next week's rota that covers every shift and honours leave | SciNet, GraviNum |
+| | Ask SQL questions of a folder of monthly sales files | DaskNet, GraviFrame, GraviNum |
 | Industry | Catch a drifting machine before it makes scrap | SciNet, GraviFrame, GraviNum |
 | | Which bearing race is cracking in this motor? | SciNet, GraviNum |
 | | Walk less on every warehouse pick list | SciNet, GraviNum |
 | | Which supplier could stop all three factories? | GraviGraph, GraviNum |
 | | How much power will the building draw in the next 48 hours? | GraviProb, GraviFrame, GraviNum |
 | | How warm can the coolant get before the reactor runs away? | SciNet, GraviNum |
+| | Which of 48 pressure sensors are drifting or spiking? | DaskNet, GraviNum |
 | Health | Heart rate and variability from a noisy ECG | SciNet, GraviNum |
 | | Twice or three times a day: which schedule keeps the drug in range? | SciNet, GraviNum |
 | | How sure are we that the new treatment works better? | GraviProb, SciNet, GraviNum |
@@ -87,17 +90,45 @@ The light theme is the default; the switch at the bottom of the sidebar turns on
 | | How much could this position lose on a bad day? | SciNet, GraviFrame |
 | | Flag card payments that do not look like the cardholder | GraviLearn, GraviNum |
 | | What does this mortgage really cost per year? | SciNet, GraviFrame |
+| | Summarise a month of card payments by customer segment | DaskNet, GraviFrame, GraviNum |
 | Utility | Clean the hum and whistle out of a recording | SciNet, GraviNum |
 | | Rescue a grainy photo with dead pixels | SciNet, GraviNum |
 | | Why does my running app say I ran further than I did? | GraviProb, SciNet, GraviNum |
 | | Which store is nearest, and where should the next one open? | SciNet, GraviNum |
 | | Swap data with a MATLAB colleague, losslessly | SciNet, GraviFrame, GraviNum |
+| | Find the failing endpoint in a day of web-server logs | DaskNet, GraviNum |
 | Games | Generate a believable island for a game map | SciNet, GraviNum |
 | | Build a maze, solve it, and let every monster find the player | GraviGraph, GraviNum |
 | | Does the game's bouncing ball lose the right amount of energy? | SciNet, GraviNum |
 | | Are the matchmaker's win chances honest? | GraviLearn, GraviFrame, GraviNum |
 | | What are the exact odds of this dice roll? | SciNet, GraviNum |
 | | How long do players stay, and what is a new player worth? | GraviProb, SciNet, GraviNum |
+
+### Dask.Net use cases
+
+Five use cases show [Dask.Net](DaskNet.md), each on a different part of it. Filter by the Dask.Net
+library to see them together:
+
+![The five Dask.Net use cases](screenshots/gallery-dasknet-filter.png)
+
+| Use case | What of Dask.Net it shows |
+|---|---|
+| Ask SQL questions of a folder of monthly sales files | `SqlContext.RegisterCsv` over twelve files, a join, `SUM(SUM(x)) OVER (PARTITION BY ... ORDER BY ...)` running totals and `RANK() OVER`; checked against one GraviFrame to ~1e-12, with the optimised plan printed |
+| Summarise a month of card payments by customer segment | `DaskFrame` with expression filters, a broadcast join, `GroupBy().Agg`; `Explain()` shows the filter pushed into the scan below the join |
+| Sweep an epidemic model across R0 on a four-worker cluster | `Dask.Delayed` over `[RemoteTask]` methods on `LocalCluster.StartAsync`, with the tasks each worker ran |
+| Which of 48 pressure sensors are drifting or spiking? | a 86,400 × 48 `DaskArray` in 12 chunks: axis reductions, broadcasting against a baseline row, z-scores |
+| Find the failing endpoint in a day of web-server logs | `Bag.ReadText` in byte blocks, `Frequencies`, `FoldBy` and `TopK`, three answers from one pass |
+
+![SQL over a folder of CSV files](screenshots/gallery-dasknet-sql.png)
+
+![A parameter sweep on a local cluster](screenshots/gallery-dasknet-cluster.png)
+
+![A chunked sensor matrix](screenshots/gallery-dasknet-array.png)
+
+The cluster use case is the only one that needs `[RemoteTask]` methods: a client sends a method's
+name, never code, so a lambda in the graph is refused. `Dask.All` (gather) is a local delegate in
+Dask.Net 2.2, so it is avoided there - a four-argument `[RemoteTask]` combines the batches instead.
+The other four use the default thread scheduler, where lambdas are fine.
 
 Some use cases say plainly where a method falls short, because that is what the result showed: on
 80 IMDB reviews the trained sentiment classifier loses to the word list, both tickers in
@@ -162,8 +193,8 @@ SkiaSharp 3.
 
 | Command | What it does |
 |---|---|
-| `ScienceGallery --run-all` | Runs every use case headless and renders its chart; exits non-zero if any fails. CI runs this on Linux and Windows. |
-| `ScienceGallery --capture <folder>` | Drives the real window through home, a domain, a filter, four use cases and the dark theme, and saves each as a 1440×900 PNG. The screenshots on this page come from it. |
+| `ScienceGallery --run-all` | Runs every use case headless and renders its chart; exits non-zero if any fails. CI runs this on Linux and Windows. Add `--only <text>` to run the use cases whose class name contains it, and `--verbose` to print their metrics and findings. |
+| `ScienceGallery --capture <folder>` | Drives the real window through home, a domain, a filter, four use cases, the dark theme, the Dask.Net filter and three Dask.Net use cases, and saves each as a 1440×900 PNG. The screenshots on this page come from it. |
 
 ---
 

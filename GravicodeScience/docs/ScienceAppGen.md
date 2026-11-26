@@ -113,8 +113,9 @@ This was found by running against a real endpoint, not by reading documentation.
 
 ## Templates
 
-**File → New Project** offers nineteen templates. All of them build *and run* as written — that
-claim is checked by generating every one, building it and executing it, not asserted.
+**File → New Project** offers twenty-one templates. All of them build *and run* as written — that
+claim is checked, not asserted: `Every_template_builds` in `tests/ScienceAppGen.Tests` generates
+every template next to the libraries and builds it.
 
 | Template | Produces |
 |---|---|
@@ -137,6 +138,8 @@ claim is checked by generating every one, building it and executing it, not asse
 | `sparse-text` | TF-IDF to a CSR matrix, then a linear classifier trained without densifying it |
 | `distributed` | Sharding, weighted gradient averaging and a bit-identical distributed forest |
 | `pretrained` | Loading an exported BERT checkpoint into a `TransformerModel` |
+| `dask-pipeline` | A folder of CSV files as one lazy, partitioned `DaskFrame`, then the same data in SQL |
+| `dask-cluster` | A parameter sweep of `[RemoteTask]` simulations on a local Dask.Net cluster |
 
 The five added in v0.4 and the four added in v0.5 join the categories that already existed —
 *Data science*, *Machine learning* and *Natural language* — so the picker groups them by what they
@@ -177,6 +180,30 @@ created and where.
 report and a five-fold cross-validation score from the pipeline the template wrote.
 
 ![The generated project running, printing a classification report](screenshots/scienceappgen-run.png)
+
+### Parallel computing: the Dask.Net templates
+
+Two templates in a *Parallel computing* category put Dask.Net to work. Both write their own
+input and were captured with `ScienceAppGen --capture-template <id> <folder>`, which opens the
+dialog, creates the project, builds and runs it in the real shell, and renders both states with
+no model involved.
+
+| Template | Produces |
+|---|---|
+| `dask-pipeline` | Twelve monthly CSV exports read as one lazy `DaskFrame`: an expression filter, a broadcast join, group-by and `Explain()`; then the same data through `SqlContext` with a running-total window and `RANK()` |
+| `dask-cluster` | A four-worker `LocalCluster` running a growth-rate sweep of `[RemoteTask]` simulations (with tasks per worker), then a chunked `DaskArray` reduction on the same cluster |
+
+![The New Project dialog with dask-pipeline selected](screenshots/scienceappgen-dasknet-templates.png)
+
+![dask-pipeline running: the optimised plan, the grouped result and the SQL window query](screenshots/scienceappgen-dasknet-pipeline-run.png)
+
+![dask-cluster running: the sweep, 208 tasks across four workers, and the array reduction](screenshots/scienceappgen-dasknet-cluster-run.png)
+
+The second one teaches the rule that matters on a cluster: a worker is sent a method's *name*, so
+only `public static` methods marked `[RemoteTask]` may appear in a graph given to a `Client`. A
+lambda — `Then(...)`, `Bag.Map(x => ...)` or `Dask.All` — is refused with
+`NotSupportedException`, which is why the sweep combines its four batches with a four-argument
+`[RemoteTask]` method rather than `Dask.All`.
 
 ---
 
@@ -220,7 +247,7 @@ date, it is a poor calculator, and its knowledge has a cutoff.
 | Function | Purpose |
 |---|---|
 | `GravicodeReference` | The real API surface of a library, with its gotchas |
-| `GravicodeExample` | A complete working program for a common task |
+| `GravicodeExample` | A complete working program for a common task (`dask` and `daskcluster` among them) |
 
 Without this the model writes plausible-looking calls that do not exist. A curated reference is
 cheaper than a build-fix-rebuild cycle and more reliable than hoping the library was in the
@@ -243,6 +270,7 @@ does badly on its own.
 | pandas | GraviFrame | `Gravicode.Science.GraviFrame` |
 | scikit-learn | GraviLearn | `Gravicode.Science.GraviLearn` |
 | scipy | SciNet | `Gravicode.Science.SciNet` |
+| dask, dask.distributed, dask-sql | DaskNet | `Gravicode.Science.DaskNet` |
 | networkx, PyG, DGL | GraviGraph | `Gravicode.Science.GraviGraph` |
 | PyMC, Stan, ArviZ | GraviProb | `Gravicode.Science.GraviProb` |
 | transformers, NLTK, tokenizers | GraviText | `Gravicode.Science.GraviText` |
@@ -303,9 +331,15 @@ ScienceAppGen --convert script.py --prompt      # the exact prompts, no model ca
   forest or simulated noise gives different — equally valid — numbers.
 - **Library gaps become TODOs.** Where a call has no equivalent, the model writes it by hand and
   says so; `CONVERSION.md` lists every such note.
-- **Two sample projects** in `tools/ScienceAppGen/Samples/Python/` show the range: a single-file
-  signal analysis (numpy, scipy, matplotlib) and a five-module sales forecast (pandas,
-  scikit-learn, matplotlib, a CSV file).
+- **Three sample projects** in `tools/ScienceAppGen/Samples/Python/` show the range: a single-file
+  signal analysis (numpy, scipy, matplotlib), a five-module sales forecast (pandas,
+  scikit-learn, matplotlib, a CSV file), and `dask_order_pipeline.py` (dask.dataframe, dask-sql,
+  `dask.delayed` on a `LocalCluster`, matplotlib).
+- **dask becomes Dask.Net, with its rules.** `dd.read_csv` maps to `DaskFrame.ReadCsv`,
+  `from_pandas` to `FromFrame`, `Context.create_table`/`sql` to `SqlContext.Register`/`Execute`,
+  `Client(LocalCluster())` to `LocalCluster.StartAsync`. Row-wise steps become `Expr` expressions,
+  and a function sent to a cluster becomes a `[RemoteTask]` method, since a `Client` refuses lambdas.
+  Converted projects pin the science packages at 2.2.0, because Dask.Net first shipped in 2.1.0.
 
 ---
 
@@ -370,7 +404,8 @@ tools/ScienceAppGen/
   Services/
     ConfigurationService.cs       XML read/write that preserves comments
     ProjectService.cs             file access + dotnet CLI, with the path guard
-    TemplateService.cs            the ten templates
+    TemplateService.cs            the twenty-one templates
+    TemplateScreenshot.cs         --capture-template: dialog, create, build, run, render
     AssistantService.cs           Semantic Kernel wiring, streaming, tool surfacing
     AnthropicChatCompletionService.cs   Claude, since SK has no connector
     LlmFactory.cs                 provider wiring shared by Jack and the converter

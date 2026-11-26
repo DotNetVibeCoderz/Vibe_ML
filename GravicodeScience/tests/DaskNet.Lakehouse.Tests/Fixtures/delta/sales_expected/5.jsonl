@@ -1,0 +1,10 @@
+{"amount": 250.0, "flag": true, "id": 200, "name": "item-200", "region": "east", "ts": "2024-01-09T08:00:00"}
+{"amount": 251.25, "flag": false, "id": 201, "name": "item-201", "region": "north", "ts": "2024-01-09T09:00:00"}
+{"amount": 252.5, "flag": true, "id": 202, "name": "item-202", "region": "south", "ts": "2024-01-09T10:00:00"}
+{"amount": null, "flag": false, "id": 203, "name": "item-203", "region": "east", "ts": "2024-01-09T11:00:00"}
+{"amount": 255.0, "flag": true, "id": 204, "name": "item-204", "region": "north", "ts": "2024-01-09T12:00:00"}
+{"amount": 256.25, "flag": false, "id": 205, "name": "item-205", "region": "south", "ts": "2024-01-09T13:00:00"}
+{"amount": 257.5, "flag": true, "id": 206, "name": "item-206", "region": "east", "ts": "2024-01-09T14:00:00"}
+{"amount": 258.75, "flag": false, "id": 207, "name": "item-207", "region": "north", "ts": "2024-01-09T15:00:00"}
+{"amount": 260.0, "flag": null, "id": 208, "name": "item-208", "region": "south", "ts": "2024-01-09T16:00:00"}
+{"amount": 261.25, "flag": false, "id": 209, "name": null, "region": "east", "ts": "2024-01-09T17:00:00"}

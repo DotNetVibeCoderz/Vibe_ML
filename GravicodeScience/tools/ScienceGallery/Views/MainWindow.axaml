@@ -89,7 +89,7 @@
                      Text="See it run, then take the code." />
           <TextBlock FontSize="15.5" LineHeight="24" TextWrapping="Wrap" Foreground="{DynamicResource TextBaseBrush}">
             <Run Text="{Binding TotalCount}" />
-            <Run Text="real-world use cases for the seven Gravicode.Science libraries. Opening one runs it on this machine, draws its chart with Visual.Net, and shows the exact source it ran." />
+            <Run Text="real-world use cases for the eight Gravicode.Science libraries. Opening one runs it on this machine, draws its chart with Visual.Net, and shows the exact source it ran." />
           </TextBlock>
         </StackPanel>
 

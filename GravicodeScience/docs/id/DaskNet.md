@@ -109,7 +109,7 @@ akurat ketika jumlah kuadrat naif mengalami pembatalan (nilai sekitar 1e9 dengan
 Kisi (grid) chunk `NdArray` GraviNum.
 
 ```csharp
-var x = DaskArray.RandomNormal([20_000, 5_000], chunks: [2_000, 1_000], seed: 7);
+var x = DaskArray.RandomNormal([20_000, 5_000], chunkSize: [2_000, 1_000], seed: 7);
 var gram = x.T.Dot(x) / x.Shape[0];
 NdArray result = gram.Compute();
 
@@ -229,6 +229,19 @@ mereproduksi persis hal itu dengan kolom SQLite tanpa tipe). Nama tabel dan kolo
 SQL dan harus berupa identifier biasa; nilai selalu lewat parameter. Connection string ikut
 terkirim bersama setiap task - gunakan TLS di cluster.
 
+**Filter juga sampai ke basis data.** Filter pada pembacaan tabel (`orders.Filter(Col("qty") > 10)`,
+atau `WHERE` SQL di atas tabel `ReadSql` yang terdaftar) diterjemahkan ke klausa `WHERE` partisi
+sejauh mungkin, sehingga basis data melewati baris alih-alih mengirimkannya. Aturannya *aman
+sebagai superset*: klausa yang didorong boleh menyisakan lebih banyak baris daripada filter,
+tidak pernah lebih sedikit, dan filternya sendiri tetap dijalankan pada hasil yang kembali, jadi
+jawabannya tidak bisa berubah. Perbandingan numerik, `IS [NOT] NULL` dan `BETWEEN` diterjemahkan
+persis; `=`/`IN` pada teks didorong tetapi diperiksa ulang, karena collation basis data bisa
+membandingkan tanpa memedulikan huruf besar atau spasi (sebuah test memakai `NOCASE` SQLite untuk
+membuktikan pemeriksaan ulang itu perlu); `NOT` hanya didorong di atas term yang persis; `AND`
+mempertahankan sisi mana pun yang bisa diterjemahkan, `OR` hanya bila kedua sisinya bisa. Berikan
+`pushFilters: false` untuk tabel yang tipe kolom terdeklarasinya tidak menggambarkan nilainya
+(SQLite membolehkan kolom `REAL` berisi teks).
+
 ## SQL (`dask-sql`)
 
 ```csharp
@@ -254,6 +267,16 @@ sql.Explain("SELECT ...");                 // rencana yang sudah dioptimasi
 
 Query dikompilasi menjadi rencana `DaskFrame` biasa, sehingga mendapat optimiser yang sama dan
 berjalan di scheduler mana pun.
+
+**Urutan join.** Rangkaian tiga tabel atau lebih yang digabung dengan inner equi-join diurutkan
+ulang menurut estimasi ukuran (greedy operator ordering: berulang kali menggabungkan pasangan
+terhubung yang estimasi gabungannya paling kecil, input yang lebih besar di kiri), dan setiap
+konjungsi `WHERE` pada satu tabel membagi dua estimasi tabel itu. Kolom output kembali dalam
+urutan yang ditulis. Query dibiarkan seperti ditulis bila ada join yang outer, bila ada estimasi
+yang tidak tersedia, bila tabel-tabelnya tidak terhubung oleh kesamaan, atau bila urutan tertulis
+sudah merupakan urutan terpilih; `SqlContext.ReorderJoins = false` mematikannya. Pengurutan ulang
+mengubah rencana, tidak pernah barisnya - test membandingkan setiap query yang diurutkan ulang
+dengan urutan tertulis.
 
 Didukung: `SELECT [DISTINCT]`, `*` dan `t.*`, alias, tabel dan subquery di `FROM`,
 `[INNER|LEFT|RIGHT|FULL] JOIN ... ON` (kesamaan antara kedua sisi, plus kondisi tambahan pada
@@ -442,6 +465,150 @@ dipercaya mendapat `AuthenticationException`, dan token yang salah tetap
 `UnauthorizedAccessException`. Sebuah tes meneruskan lalu lintas lewat proxy perekam dan memeriksa
 bahwa penanda yang dikirim sebagai argumen task terbaca tanpa TLS dan tidak ada dengan TLS.
 
+### Run terlepas: cluster tetap bekerja ketika client pergi
+
+`Compute` menjadikan client scheduler run-nya, sehingga client yang mati kehilangan run-nya.
+`SubmitAsync` menyerahkan graph ke sebuah worker, yang menjadwalkannya ke seluruh cluster
+(termasuk dirinya) dan menyimpan hasilnya sampai dilupakan:
+
+```csharp
+RunHandle run = await client.SubmitAsync(report);          // Delayed, DaskArray, DaskFrame, atau graph
+File.WriteAllText("run.json", run.ToString());             // handle-nya JSON biasa
+
+// ... nanti, dari proses mana pun yang memegang token:
+await using var other = await Client.ConnectAsync(addresses, token);
+var handle = RunHandle.Parse(File.ReadAllText("run.json"));
+RunStatus status = await other.StatusAsync(handle);        // Running / Finished / Failed / Cancelled, dengan progres
+DataFrame result = await other.FrameResultAsync(handle);   // menunggu sampai selesai
+await other.ForgetAsync(handle);                           // melepas hasilnya di worker
+```
+
+Hanya graph `[RemoteTask]` yang bisa di-submit - lambda tidak bisa meninggalkan proses, dan
+`SubmitAsync` menolaknya dengan `NotSupportedException`. Worker yang menjadwalkan sebuah run
+menjadi titik tunggal untuk run itu (bila ia mati run-nya hilang, seperti client sebelumnya),
+tetapi bukan lagi client.
+
+### Eksekusi spekulatif: task yang tertinggal mendapat percobaan kedua
+
+```csharp
+client.Speculation = new SpeculationPolicy(Multiplier: 3, Minimum: TimeSpan.FromSeconds(1), MinimumSamples: 3);
+```
+
+Bila sebuah task sudah berjalan `Multiplier` kali lebih lama daripada median task selesai dengan
+label yang sama (dan setidaknya `Minimum`), dan tidak ada yang menunggu dijalankan, task itu
+dijalankan lagi di worker yang menganggur. Percobaan mana pun yang selesai lebih dulu menang;
+hasil yang lain dilepas ketika tiba. Ini bentuk work stealing di cluster, untuk mesin yang lambat
+atau tetangga yang berisik. Mati secara default, dan hanya untuk task tanpa efek samping, karena
+kedua percobaan bisa berjalan sampai akhir. `RunStatistics.Speculated` dan `SpeculationWins`
+menghitungnya, dan event `Speculating` dimunculkan. Sebuah test membuat satu task butuh 6 detik
+pada percobaan pertama dan 60 ms pada percobaan kedua, dan run-nya selesai di bawah 4 detik.
+
+## Paket tambahan
+
+Empat paket memperluas Dask.Net tanpa menambah dependensi padanya. Masing-masing paket NuGet
+terpisah yang kernel-nya method `[RemoteTask]`, sehingga berjalan di cluster begitu assembly-nya
+dimuat di worker (`--preload` untuk worker berbentuk proses).
+
+### Lakehouse: Delta Lake dan Apache Iceberg (`Gravicode.Science.DaskNet.Lakehouse`)
+
+```csharp
+using Gravicode.Science.DaskNet.Lakehouse;
+
+DaskFrame sales = DeltaLake.Read("lake/sales");                         // versi terbaru
+DaskFrame v3 = DeltaLake.Read("lake/sales", version: 3);                // time travel
+DaskFrame then = DeltaLake.Read("lake/sales", DateTimeOffset.Parse("2026-01-31T00:00Z"));
+IReadOnlyList<DeltaCommit> log = DeltaLake.History("lake/sales");
+
+DaskFrame events = Iceberg.Read("warehouse/db/events");                 // snapshot saat ini
+DaskFrame old = Iceberg.Read("warehouse/db/events", snapshotId: 4871234123L);
+```
+
+Satu partisi per file data. Nilai partisi diambil dari metadata tabel, sehingga filter pada kolom
+partisi memangkas seluruh file sebelum apa pun dibaca, dan hanya kolom yang diperlukan yang dibaca
+dari file yang tersisa. **Delta**: log diputar ulang dari checkpoint terbaru (termasuk checkpoint
+multi-bagian) ditambah commit JSON sesudahnya; evolusi skema dengan kolom tambahan berfungsi,
+sedangkan deletion vector pada file yang masih hidup, column mapping dan checkpoint v2 ditolak
+dengan menyebut fiturnya. **Iceberg** (format v1 dan v2): metadata JSON, lalu manifest list dan
+manifest Avro; setiap snapshot dibaca dengan skemanya sendiri, kolom yang diganti nama dilacak
+lewat field id, dan tabel boleh dipindahkan (path dipasang ulang terhadap lokasi yang tercatat).
+File delete ditolak, bukan diabaikan. Setiap versi fixture dibandingkan baris demi baris dengan
+hasil delta-rs dan pyiceberg (`tools/verify/make_lake_fixtures.py`).
+
+### Geo: spatial join (`Gravicode.Science.DaskNet.Geo`)
+
+```csharp
+using Gravicode.Science.DaskNet.Geo;
+
+var nearby = customers.DistanceJoin(stores, radiusKm: 5, ("lat", "lon"), ("lat", "lon"));  // menambah distance_km
+var tagged = trips.PointInPolygonJoin(districts, ("lat", "lon"), wktColumn: "geometry", keepUnmatched: true);
+var inside = trips.WithinPolygon("lat", "lon", Polygon.Parse("POLYGON ((106.7 -6.4, 107.0 -6.4, 107.0 -6.1, 106.7 -6.1, 106.7 -6.4))"));
+var local = trips.SpatialPartition("lat", "lon", partitions: 16);       // baris yang berdekatan berbagi partisi
+string cell = Geohash.Encode(-6.2, 106.8, precision: 7);
+```
+
+Titik adalah kolom lintang/bujur dalam derajat; poligon berupa WKT (`POLYGON`, `MULTIPOLYGON`,
+termasuk lubang; x = bujur). Kedua join mem-broadcast frame sebelah kanan, jadi letakkan sisi
+yang lebih kecil di sana. Di dalam task, sisi kanan diindeks - grid atas bounding box poligon,
+atau grid 3-D titik pada bola untuk distance join, sehingga antimeridian dan kutub tidak perlu
+kasus khusus - dan setiap kandidat diperiksa persis (haversine; titik di batas dihitung di dalam).
+`SpatialPartition` mempartisi per rentang geohash, sebuah kurva Z-order. Kedua join dibandingkan
+dengan loop ganda brute force, secara lokal dan di cluster. Buffer, union dan overlay tidak
+disertakan: semuanya membutuhkan topology suite lengkap.
+
+### ML: pencarian hyperparameter dan prediksi batch (`Gravicode.Science.DaskNet.ML`)
+
+```csharp
+using Gravicode.Science.DaskNet.ML;
+
+var result = HyperparameterSearch.Grid<KNearestNeighborsClassifier>(
+    new Dictionary<string, object?[]> { ["k"] = [1, 5, 15], ["metric"] = [DistanceMetric.Euclidean, DistanceMetric.Manhattan] },
+    x, y, folds: 5, scheduler: client);
+Console.WriteLine(result.Best.Spec);              // KNearestNeighborsClassifier(k=15, metric=Manhattan)
+DataFrame table = result.ToFrame();               // seperti cv_results_ scikit-learn
+IEstimator model = result.BestEstimator!;         // di-fit ulang pada seluruh data
+
+var scored = bigFrame.Predict(EstimatorSpec.Of<RandomForestClassifier>(("nTrees", 200), ("seed", 1)),
+    trainX, trainY, features: ["x1", "x2"], probabilities: true);   // berjalan di cluster
+```
+
+Satu task per (kandidat, fold). Data latih dikirim sekali dan diambil sekali per worker; estimator
+dikirim sebagai `EstimatorSpec` - nama tipe dan argumen konstruktornya, dicocokkan menurut nama,
+enum menurut namanya - sehingga estimator GraviLearn mana pun bisa dipakai tanpa kode serialisasi.
+Fold ditetapkan sebelum apa pun berjalan, sehingga seed yang sama memberi skor yang sama di
+scheduler mana pun, dan test memeriksa setiap skor terhadap loop biasa atas fold yang sama.
+Scoring: `accuracy`, `f1_macro`, `f1_weighted`, `r2`, `neg_mean_squared_error`,
+`neg_root_mean_squared_error`. `Predict` dengan spec mem-fit model sekali per proses worker dan
+menilai setiap partisi yang diterimanya (`ParallelPostFit` milik dask-ml), sehingga estimatornya
+harus deterministik untuk seed-nya; `Predict` dengan model yang sudah di-fit juga bisa, tetapi
+hanya secara lokal.
+
+### Streaming: micro-batch, window, ETL yang bisa dilanjutkan (`Gravicode.Science.DaskNet.Streaming`)
+
+```csharp
+using Gravicode.Science.DaskNet.Streaming;
+
+var query = DaskStream.FromDirectory("inbox", watch: true)            // setiap file CSV baru, sekali
+    .Filter(Col("value") >= 0)
+    .WithScheduler(client).Partitions(4)                               // setiap batch di cluster
+    .Window("time", TimeSpan.FromMinutes(10), keys: ["sensor"],
+            [(null, "count"), ("value", "mean"), ("value", "max")],
+            allowedLateness: TimeSpan.FromMinutes(2))
+    .ToCsvDirectory("out");
+await query.RunAsync(checkpointDirectory: "ckpt", cancellationToken);
+```
+
+Sumber: `IAsyncEnumerable<DataFrame>` apa pun, sebuah `Channel`, atau direktori file inkremental.
+Langkah tanpa state (`Filter`, `WithColumns`, `Select`, `Sql` per batch) berjalan di scheduler
+query; `Map` berjalan di dalam proses. `Window` mengagregasi menurut waktu kejadian (tumbling,
+atau sliding dengan `slide:`), diselaraskan ke epoch Unix. Sebuah window dikeluarkan ketika
+watermark - waktu kejadian terbaru dikurangi keterlambatan yang diizinkan - melewati akhirnya;
+baris yang tiba untuk window yang sudah dikeluarkan dibuang dan dihitung (`LateRows`). Dengan
+direktori checkpoint, file yang sudah dibaca, jumlah batch dan window yang masih terbuka disimpan
+setelah setiap batch, sehingga query yang dijalankan ulang hanya membaca file baru dan membawa
+window-nya; sebuah test menghentikan query setelah empat file, menambah dua lagi, menjalankannya
+ulang, dan mendapat window yang sama dengan satu run tanpa jeda. Pengiriman at-least-once; sink
+CSV menamai file menurut id batch, sehingga batch yang diputar ulang menimpa file-nya sendiri.
+
 ## Observabilitas
 
 Setiap task adalah sebuah `Activity` pada `ActivitySource` bernama `Gravicode.Science.DaskNet`,
@@ -476,8 +643,8 @@ Dask.Net untuk data yang tidak muat, bukan demi kecepatan.
 |---|---|
 | DataFrame berpartisi dan lazy; optimasi query; predicate dan projection pushdown | **Selesai** |
 | CSV (dipecah per blok), Arrow IPC, berkas apa pun via `ReadFiles` (Parquet lewat GraviFrame.Parquet) | **Selesai** |
-| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines dan array, baca dan tulis) **selesai**; sisanya lewat `ReadFiles` dengan reader (Excel: `ExcelReader` milik GraviFrame); format tabel masih roadmap |
-| Mesin lazy: eksekusi tertunda, planner, pipeline fusion | **Selesai**; strategi join berbasis biaya (estimasi ukuran), rewrite lain berbasis aturan; pengurutan ulang join banyak arah masih roadmap |
+| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines dan array, baca dan tulis) **selesai**; Delta Lake dan Iceberg **selesai** (paket Lakehouse: time travel, pemangkasan partisi); Excel lewat `ReadFiles` dengan `ExcelReader` milik GraviFrame; Hudi masih roadmap |
+| Mesin lazy: eksekusi tertunda, planner, pipeline fusion | **Selesai**; strategi join berbasis biaya (estimasi ukuran) dan rangkaian join SQL diurutkan ulang menurut estimasi ukuran; rewrite lain berbasis aturan |
 | DAG scheduler: visualisasi (DOT/Mermaid), cull/fuse, retry policy, pelacakan dependensi | **Selesai** |
 | Cluster lokal: multi-core, isolasi proses, batas memori per worker dengan spill ke disk | **Selesai** |
 | Cluster multi-node lewat TCP | **Selesai**; transport gRPC/QUIC/HTTP/3 masih roadmap |
@@ -486,11 +653,11 @@ Dask.Net untuk data yang tidak muat, bukan demi kecepatan.
 | Koleksi terdistribusi (`DistributedList` dsb.) | Roadmap; `Bag`, `DaskArray` dan `Persist` menangani kasus yang dominan baca |
 | Arrow: zero-copy, lintas bahasa | Berkas Arrow IPC **selesai**; shared memory antar proses masih roadmap |
 | SQL: join, agregasi, UNION, window function | **Selesai**; frame window eksplisit, CTE dan ANSI penuh masih roadmap |
-| GIS, ML, ETL/streaming, AI, basis data vektor | Roadmap (modul terpisah) |
+| GIS, ML, ETL/streaming, AI, basis data vektor | GIS (Geo: geohash, distance join dan point-in-polygon join), ML (pencarian hyperparameter, prediksi batch) dan streaming (micro-batch, window waktu kejadian, ETL direktori dengan checkpoint) **selesai** sebagai paket terpisah; AI dan basis data vektor masih roadmap |
 | Observabilitas: OpenTelemetry | **Selesai** (ActivitySource + Meter); Prometheus/Grafana/Jaeger lewat exporter OTel |
 | Operator Kubernetes, dashboard Aspire | Roadmap |
-| Toleransi kegagalan: retry task, checkpoint, pemulihan worker | **Selesai**; eksekusi spekulatif masih roadmap |
-| Konektor penyimpanan (basis data, data lake, warehouse) | Basis data **selesai** lewat provider ADO.NET apa pun (dipartisi per rentang atau per query, bisa jalan di cluster); data lake dan warehouse masih roadmap |
+| Toleransi kegagalan: retry task, checkpoint, pemulihan worker, eksekusi spekulatif | **Selesai**; run bisa dilepas dari client (`SubmitAsync`) |
+| Konektor penyimpanan (basis data, data lake, warehouse) | Basis data **selesai** lewat provider ADO.NET apa pun (dipartisi per rentang atau per query, filter didorong ke SQL, bisa jalan di cluster); Delta Lake dan Iceberg **selesai**; warehouse masih roadmap |
 | Scheduler: thread, cluster | **Selesai**; pool proses adalah `LocalCluster.StartProcessesAsync`; Kubernetes masih roadmap |
 | Keamanan: worker dengan autentikasi token, TLS dan mutual TLS | **Selesai**; OAuth2/Entra ID, multi-tenancy dan kuota masih roadmap |
 
@@ -502,8 +669,10 @@ Dask.Net untuk data yang tidak muat, bukan demi kecepatan.
   lokal; tulis method `[RemoteTask]` untuk menjalankan kode kustom di cluster.
 - Join dengan beberapa key membutuhkan nama key yang sama di kedua sisi (SQL menangani nama yang
   berbeda).
-- Client adalah satu-satunya scheduler sebuah run; bila client mati, run-nya hilang (worker tetap
-  hidup dan menerima client berikutnya).
+- Dengan `Compute`, client adalah scheduler run-nya, dan client yang mati kehilangan run itu;
+  `SubmitAsync` memindahkan peran itu ke sebuah worker (yang lalu menjadi titik tunggal run itu).
+- Pengurutan ulang join hanya berlaku untuk rangkaian inner join SQL, bukan untuk pemanggilan
+  `DaskFrame.Join`, yang berjalan sesuai urutan tertulis.
 
 ---
 

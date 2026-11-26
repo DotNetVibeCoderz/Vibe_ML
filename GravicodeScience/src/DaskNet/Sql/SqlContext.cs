@@ -25,6 +25,16 @@ namespace Gravicode.Science.DaskNet.Sql;
 /// Not supported, and refused with a message rather than approximated: <c>OFFSET</c>,
 /// <c>CROSS JOIN</c>, subqueries outside <c>FROM</c>, explicit window frames, and a join condition with no equality between the two sides.
 /// </para>
+/// <para>
+/// Join order: three or more tables joined only by inner joins are joined greedily
+/// (<see cref="ReorderJoins"/>): at each step the two connected groups with the smallest combined
+/// estimate are joined, the bigger on the left. Small tables therefore meet each other and the
+/// big ones first, where they are broadcast and can only shrink them, before two big tables are
+/// shuffled to meet; the plan may be bushy (two dimensions joined, then broadcast together). Single-table
+/// WHERE conditions count towards a table's estimate. Outer joins, tables without an estimate, and
+/// a chain that is not connected by equalities keep the written order. Columns come back in the
+/// written order.
+/// </para>
 /// </remarks>
 public sealed class SqlContext
 {
@@ -62,7 +72,14 @@ public sealed class SqlContext
     public bool Unregister(string name) => _tables.Remove(name);
 
     /// <summary>Compiles a query to a lazy frame. Nothing is read until it is computed.</summary>
-    public DaskFrame Sql(string query) => new SqlCompiler(_tables).Compile(SqlParser.Parse(query));
+    public DaskFrame Sql(string query) => new SqlCompiler(_tables, ReorderJoins).Compile(SqlParser.Parse(query));
+
+    /// <summary>
+    /// Whether a chain of three or more inner-joined tables is joined in an order chosen from size
+    /// estimates rather than the order written (default true). The result is the same either way;
+    /// see the remarks on <see cref="SqlContext"/>.
+    /// </summary>
+    public bool ReorderJoins { get; set; } = true;
 
     /// <summary>Runs a query and returns the result.</summary>
     public DataFrame Execute(string query, IScheduler? scheduler = null) => Sql(query).Compute(scheduler);
@@ -97,7 +114,7 @@ internal sealed class SqlScope
 }
 
 /// <summary>Turns a parsed statement into DaskFrame operations.</summary>
-internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
+internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables, bool reorderJoins = true)
 {
     private static readonly Dictionary<string, string> AggregateNames = new(StringComparer.Ordinal)
     {
@@ -355,6 +372,8 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
         if (repeated is not null) throw new SqlException($"Table alias '{repeated.Key}' is used twice", s.From.Position);
 
         var qualify = s.Joins.Length > 0;
+        if (reorderJoins && s.Joins.Length >= 2 && s.Joins.All(j => j.Kind == JoinKind.Inner) && Reordered(s) is { } reordered)
+            return reordered;
         var (frame, scope) = Table(s.From, qualify);
         foreach (var join in s.Joins)
         {
@@ -388,6 +407,107 @@ internal sealed class SqlCompiler(IReadOnlyDictionary<string, DaskFrame> tables)
         }
         return (frame, scope);
     }
+
+    /// <summary>
+    /// The inner-join chain of <paramref name="s"/> joined greedily by estimated size, or null to
+    /// keep the written order (it already is the greedy one, an estimate is missing, or the chain is
+    /// not connected by equalities). Each ON condition is resolved in the scope it was written in.
+    /// </summary>
+    private (DaskFrame, SqlScope)? Reordered(SelectStatement s)
+    {
+        var refs = new[] { s.From }.Concat(s.Joins.Select(j => j.Table)).ToArray();
+        var relations = refs.Select(t => Table(t, qualify: true)).ToArray();
+        var owner = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < relations.Length; i++)
+            foreach (var e in relations[i].Item2.Entries) owner[e.Internal] = i;
+
+        var full = new SqlScope();
+        foreach (var (_, scope) in relations) full.Entries.AddRange(scope.Entries);
+
+        // Equalities between two relations become edges; everything else is a filter on the result.
+        var edges = new List<(int A, string ColA, int B, string ColB)>();
+        var residual = new List<Expr>();
+        var prefix = new SqlScope();
+        prefix.Entries.AddRange(relations[0].Item2.Entries);
+        for (var j = 0; j < s.Joins.Length; j++)
+        {
+            prefix.Entries.AddRange(relations[j + 1].Item2.Entries);
+            var before = edges.Count;
+            foreach (var condition in Conjuncts(s.Joins[j].On))
+            {
+                if (condition is BinaryOp { Op: "=", Left: ColumnRef a, Right: ColumnRef b }
+                    && TryResolve(a, prefix) is { } ca && TryResolve(b, prefix) is { } cb && owner[ca] != owner[cb])
+                    edges.Add((owner[ca], ca, owner[cb], cb));
+                else residual.Add(Plain(condition, prefix));
+            }
+            if (edges.Count == before) return null;   // the written order reports the missing equality
+        }
+
+        // Estimated sizes, halved for every WHERE condition that reads only that table.
+        var sizes = new double[relations.Length];
+        for (var i = 0; i < relations.Length; i++)
+        {
+            if (CostModel.Bytes(relations[i].Item1.Plan) is not { } bytes) return null;
+            sizes[i] = bytes;
+        }
+        if (s.Where is not null)
+            foreach (var condition in Conjuncts(s.Where))
+            {
+                var readers = ColumnRefs(condition).Select(c => TryResolve(c, full)).ToArray();
+                if (readers.Length > 0 && readers.All(r => r is not null) && readers.Select(r => owner[r!]).Distinct().Count() == 1)
+                    sizes[owner[readers[0]!]] *= CostModel.FilterSelectivity;
+            }
+
+        // Greedy operator ordering: merge the two connected groups with the smallest combined
+        // estimate, bigger side on the left so the smaller one is what gets broadcast.
+        var groups = Enumerable.Range(0, relations.Length)
+            .Select(i => (Frame: relations[i].Item1, Members: new HashSet<int> { i }, Size: sizes[i])).ToList();
+        var used = new bool[edges.Count];
+        var leftDeepInWrittenOrder = true;
+        while (groups.Count > 1)
+        {
+            (int A, int B, double Cost)? best = null;
+            for (var a = 0; a < groups.Count; a++)
+                for (var b = a + 1; b < groups.Count; b++)
+                {
+                    var (ga, gb) = (groups[a].Members, groups[b].Members);
+                    if (!edges.Any(e => (ga.Contains(e.A) && gb.Contains(e.B)) || (ga.Contains(e.B) && gb.Contains(e.A)))) continue;
+                    var cost = groups[a].Size + groups[b].Size;
+                    if (best is null || cost < best.Value.Cost) best = (a, b, cost);
+                }
+            if (best is not { } pick) return null;
+
+            var (big, small) = groups[pick.A].Size >= groups[pick.B].Size ? (groups[pick.A], groups[pick.B]) : (groups[pick.B], groups[pick.A]);
+            var written = Enumerable.Range(0, big.Members.Count).ToHashSet();
+            leftDeepInWrittenOrder &= big.Members.SetEquals(written) && small.Members.SetEquals([big.Members.Count]);
+
+            var leftKeys = new List<string>();
+            var rightKeys = new List<string>();
+            for (var k = 0; k < edges.Count; k++)
+            {
+                var (a, colA, b, colB) = edges[k];
+                if (used[k]) continue;
+                if (big.Members.Contains(a) && small.Members.Contains(b)) { leftKeys.Add(colA); rightKeys.Add(colB); used[k] = true; }
+                else if (big.Members.Contains(b) && small.Members.Contains(a)) { leftKeys.Add(colB); rightKeys.Add(colA); used[k] = true; }
+            }
+            var merged = (Frame: Join(big.Frame, small.Frame, leftKeys, rightKeys, JoinKind.Inner),
+                          Members: big.Members.Union(small.Members).ToHashSet(), Size: big.Size + small.Size);
+            groups.Remove(big);
+            groups.Remove(small);
+            groups.Add(merged);
+        }
+        if (leftDeepInWrittenOrder) return null;
+
+        var frame = groups[0].Frame;
+        // Equalities inside one group that were never a join key (a cycle) still have to hold.
+        for (var k = 0; k < edges.Count; k++)
+            if (!used[k]) frame = frame.Filter(Expr.Col(edges[k].ColA) == Expr.Col(edges[k].ColB));
+        foreach (var r in residual) frame = frame.Filter(r);
+        return (frame.Select(full.Entries.Select(e => e.Internal).ToArray()), full);
+    }
+
+    private static IEnumerable<ColumnRef> ColumnRefs(SqlNode n)
+        => n is ColumnRef c ? [c] : Children(n).SelectMany(ColumnRefs);
 
     private static DaskFrame Join(DaskFrame left, DaskFrame right, List<string> leftKeys, List<string> rightKeys, JoinKind kind)
     {

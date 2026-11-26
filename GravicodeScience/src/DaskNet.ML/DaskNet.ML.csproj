@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Dask.Net machine learning (dask-ml's role): hyperparameter search with one task per
+    (candidate, fold), and batch scoring of partitioned frames, on GraviLearn estimators.
+    A separate package so Dask.Net does not depend on GraviLearn.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.DaskNet.ML</RootNamespace>
+    <AssemblyName>Gravicode.Science.DaskNet.ML</AssemblyName>
+    <PackageId>Gravicode.Science.DaskNet.ML</PackageId>
+    <Description>Distributed machine learning for Dask.Net (a dask-ml analogue): grid and random hyperparameter search with one task per candidate and fold, and batch prediction over partitioned frames, for GraviLearn estimators. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;machine-learning;hyperparameter-search;cross-validation;gravilearn;dotnet;gravicode</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DaskNet\DaskNet.csproj" />
+    <ProjectReference Include="..\GraviLearn\GraviLearn.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DaskNet.ML.Tests" />
+  </ItemGroup>
+
+</Project>

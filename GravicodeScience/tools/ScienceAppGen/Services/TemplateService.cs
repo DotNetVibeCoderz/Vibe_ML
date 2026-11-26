@@ -19,7 +19,7 @@ public sealed record ProjectTemplate(
 {
     /// <summary>
     /// The spectrum colour per library, so a card's bands read as its actual ingredients rather
-    /// than as a count of anonymous ticks. These match the six bands in <c>Themes/Tokens.axaml</c>.
+    /// than as a count of anonymous ticks. These match the bands in <c>Themes/Tokens.axaml</c> (Spec1-Spec7).
     /// </summary>
     public IReadOnlyList<string> LibraryColours => Libraries.Select(l => l switch
     {
@@ -29,6 +29,7 @@ public sealed record ProjectTemplate(
         "GraviText" => "#56B87F",
         "GraviGraph" => "#3FA9C9",
         "GraviProb" => "#7B7BD6",
+        "DaskNet" => "#D9609E",
         _ => "#586475",
     }).ToList();
 }
@@ -1459,6 +1460,235 @@ public static class TemplateService
                     Three things it refuses rather than absorbs: a wrong transpose (checked
                     against the non-square feed-forward weight, because a 768×768 projection
                     accepts either reading), a partial checkpoint, and a mismatched architecture.
+
+                    ```bash
+                    dotnet run
+                    ```
+
+                    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil
+                    """,
+            }),
+
+        // ------------------------------------------------------------ dask: partitioned data + SQL
+        new ProjectTemplate(
+            "dask-pipeline",
+            "Parallel data pipeline",
+            "Parallel computing",
+            "A folder of CSV files as one lazy DaskFrame: filter, join, group, then the same question in SQL.",
+            ["GraviNum", "GraviFrame", "DaskNet"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "DaskNet"),
+                ["Program.cs"] = """"
+                    using Gravicode.Science.DaskNet;
+                    using Gravicode.Science.DaskNet.Sql;
+                    using Gravicode.Science.GraviFrame;
+                    using Gravicode.Science.GraviNum;
+                    using static Gravicode.Science.DaskNet.Expr;
+
+                    Console.WriteLine(GraviInfo.Banner("$name$"));
+
+                    // Twelve monthly order exports, the way an order system drops them into a folder.
+                    // Replace this block with your own files; the pattern below picks them all up.
+                    Directory.CreateDirectory("data");
+                    string[] regions = ["north", "south", "east", "west"];
+                    string[] products = ["desk", "chair", "lamp", "shelf"];
+                    var rng = new GraviRandom(7);
+                    for (var month = 1; month <= 12; month++)
+                    {
+                        const int rows = 2_000;
+                        var orders = new DataFrame(
+                        [
+                            new NumericSeries("month", Enumerable.Repeat((double)month, rows).ToArray()),
+                            new TextSeries("region", Enumerable.Range(0, rows).Select(_ => regions[rng.Next(4)]).ToArray()),
+                            new TextSeries("product", Enumerable.Range(0, rows).Select(_ => products[rng.Next(4)]).ToArray()),
+                            new NumericSeries("qty", Enumerable.Range(0, rows).Select(_ => 1.0 + rng.Poisson(2)).ToArray()),
+                            new NumericSeries("price", Enumerable.Range(0, rows).Select(_ => Math.Round(rng.Uniform(5, 120), 2)).ToArray()),
+                        ]);
+                        orders.WriteCsv(Path.Combine("data", $"orders-{month:00}.csv"));
+                    }
+                    var targets = new DataFrame(
+                    [
+                        new TextSeries("region", regions),
+                        new NumericSeries("target", [1_000_000, 900_000, 1_100_000, 950_000]),
+                    ]);
+
+                    // 1. The DataFrame API. Nothing runs while the plan is built; row-wise steps are
+                    //    expressions (Col(...)), not lambdas, so the optimiser can move them around.
+                    var sales = DaskFrame.ReadCsv("data/orders-*.csv");
+                    var report = sales
+                        .Filter(Col("qty") > 0 & Col("region").In("north", "east", "west"))
+                        .WithColumn("revenue", Col("qty") * Col("price"))
+                        .Join(DaskFrame.FromFrame(targets, partitions: 1), "region")   // small: broadcast
+                        .GroupBy("region", "target")
+                        .Agg(("revenue", "sum"), ("qty", "mean"))
+                        .SortBy("revenue_sum", ascending: false);
+
+                    Console.WriteLine($"{sales.PartitionCount} partitions. The optimised plan:");
+                    Console.WriteLine(report.Explain());
+                    Console.WriteLine(report.Compute());          // thread-pool scheduler, all cores
+
+                    // 2. The same data in SQL, with a window function for the running total.
+                    var sql = new SqlContext().RegisterCsv("orders", "data/orders-*.csv");
+                    var monthly = sql.Execute("""
+                        SELECT region, month, SUM(qty * price) AS revenue,
+                               SUM(SUM(qty * price)) OVER (PARTITION BY region ORDER BY month) AS running_total
+                        FROM orders
+                        WHERE region = 'north'
+                        GROUP BY region, month
+                        ORDER BY month
+                        """);
+                    Console.WriteLine(monthly.ToString(12));
+
+                    var top = sql.Execute("""
+                        SELECT product, SUM(qty) AS units, RANK() OVER (ORDER BY SUM(qty) DESC) AS rank
+                        FROM orders GROUP BY product ORDER BY rank
+                        """);
+                    Console.WriteLine(top);
+
+                    Console.WriteLine();
+                    Console.WriteLine(GraviInfo.Attribution);
+                    """",
+                ["README.md"] = """
+                    # $name$
+
+                    A parallel data pipeline with Dask.Net: a folder of CSV files read as one lazy,
+                    partitioned `DaskFrame`, and the same data queried with SQL.
+
+                    - `DaskFrame.ReadCsv("data/*.csv")` splits the files into partitions; types are
+                      pinned from a sample so every partition parses a column the same way.
+                    - Filters and new columns are **expressions** (`Col("qty") > 0`), not lambdas:
+                      that is what lets the optimiser push a filter into the scan and below a join.
+                      Compare `Explain(optimized: false)` with `Explain()`.
+                    - A small right-hand table is broadcast to every partition instead of shuffled.
+                    - `SqlContext` compiles SQL to the same plans: joins, `GROUP BY`, window
+                      functions such as `SUM(...) OVER (PARTITION BY ... ORDER BY ...)` and `RANK()`.
+
+                    For data that fits in memory one GraviFrame call is usually faster; partitioning
+                    pays off when it does not, or on a cluster.
+
+                    ```bash
+                    dotnet run
+                    ```
+
+                    Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil
+                    """,
+            }),
+
+        // ------------------------------------------------------------ dask: local cluster
+        new ProjectTemplate(
+            "dask-cluster",
+            "Local cluster parameter sweep",
+            "Parallel computing",
+            "Hundreds of simulations as delayed tasks on a four-worker Dask.Net cluster, plus a chunked array reduction.",
+            ["GraviNum", "GraviFrame", "DaskNet"],
+            new Dictionary<string, string>
+            {
+                ["$name$.csproj"] = Csproj("GraviNum", "GraviFrame", "DaskNet"),
+                ["Program.cs"] = """
+                    using Gravicode.Science.DaskNet;
+                    using Gravicode.Science.DaskNet.Distributed;
+                    using Gravicode.Science.GraviNum;
+                    using $name$;
+
+                    Console.WriteLine(GraviInfo.Banner("$name$"));
+
+                    // Four workers in this process. They talk over TCP with serialised tasks and an
+                    // authenticated handshake, so this graph runs unchanged on workers elsewhere
+                    // (Client.ConnectAsync(["node-1:8786", ...], token)).
+                    await using var cluster = await LocalCluster.StartAsync(workers: 4, threadsPerWorker: 2);
+                    Console.WriteLine($"workers: {string.Join(", ", cluster.Addresses)}");
+
+                    // A parameter sweep: for each growth rate, 4 batches of 25 noisy logistic-growth
+                    // runs. Only [RemoteTask] methods may appear in a graph sent to a Client - a
+                    // lambda (Then, Bag.Map, Dask.All) is refused with NotSupportedException.
+                    var rates = Enumerable.Range(0, 16).Select(i => 0.5 + 0.2 * i).ToArray();
+                    var summaries = rates.Select(rate =>
+                    {
+                        var batches = Enumerable.Range(0, 4)
+                            .Select(b => Dask.Delayed(Simulation.Batch, Dask.Value(rate), Dask.Value(1000.0 * rate + b)))
+                            .ToArray();
+                        return Dask.Delayed(Simulation.Combine, batches[0], batches[1], batches[2], batches[3]);
+                    }).ToArray();
+
+                    var results = Dask.Compute(summaries, cluster.Client);
+                    Console.WriteLine();
+                    Console.WriteLine("  rate   mean final size      sd");
+                    for (var i = 0; i < rates.Length; i++)
+                        Console.WriteLine($"  {rates[i],4:F1}   {results[i][0],15:F1}   {results[i][1],5:F1}");
+
+                    var stats = cluster.Client.LastRun!;
+                    Console.WriteLine();
+                    Console.WriteLine($"{stats.TasksRun} tasks in {stats.Elapsed.TotalMilliseconds:F0} ms");
+                    foreach (var (worker, count) in stats.TasksPerWorker.OrderBy(w => w.Key))
+                        Console.WriteLine($"  {worker}: {count} tasks");
+
+                    // Array and DataFrame kernels are [RemoteTask] already, so their graphs run on
+                    // the cluster as they are: a 4000 x 4000 random matrix in 16 chunks.
+                    var x = DaskArray.RandomNormal([4_000, 4_000], [1_000, 1_000], seed: 7);
+                    var centred = x - x.Mean(axis: 0);
+                    Console.WriteLine();
+                    Console.WriteLine($"std of 16M values on the cluster: {centred.Std().Compute(cluster.Client):F4}");
+
+                    Console.WriteLine();
+                    Console.WriteLine(GraviInfo.Attribution);
+                    """,
+                ["Simulation.cs"] = """
+                    using Gravicode.Science.DaskNet;
+                    using Gravicode.Science.GraviNum;
+
+                    namespace $name$;
+
+                    /// <summary>
+                    /// The tasks workers may run. A worker receives a method's NAME and its arguments,
+                    /// never code, and refuses anything not marked [RemoteTask]. Arguments and results
+                    /// must be numbers, strings, arrays, NdArray or DataFrame.
+                    /// </summary>
+                    public static class Simulation
+                    {
+                        /// <summary>25 runs of stochastic logistic growth; returns each final size.</summary>
+                        [RemoteTask]
+                        public static double[] Batch(double rate, double seed)
+                        {
+                            var rng = new GraviRandom((int)seed);
+                            var finals = new double[25];
+                            for (var run = 0; run < finals.Length; run++)
+                            {
+                                var n = 10.0;
+                                for (var step = 0; step < 100; step++)
+                                    n = Math.Max(0, n + 0.05 * rate * n * (1 - n / 1000) + rng.Normal(0, Math.Sqrt(n) * 0.3));
+                                finals[run] = n;
+                            }
+                            return finals;
+                        }
+
+                        /// <summary>Mean and standard deviation over four batches.</summary>
+                        [RemoteTask]
+                        public static double[] Combine(double[] a, double[] b, double[] c, double[] d)
+                        {
+                            double[] all = [.. a, .. b, .. c, .. d];
+                            var mean = all.Average();
+                            return [mean, Math.Sqrt(all.Sum(v => (v - mean) * (v - mean)) / (all.Length - 1))];
+                        }
+                    }
+                    """,
+                ["README.md"] = """
+                    # $name$
+
+                    A parameter sweep on a Dask.Net cluster.
+
+                    `LocalCluster.StartAsync` starts workers inside this process that still speak
+                    the real protocol: TCP, an HMAC token handshake, serialised tasks. What runs
+                    here runs on `DaskNet.Worker` processes on other machines.
+
+                    The rule that matters: **only `public static` methods marked `[RemoteTask]` run
+                    on a cluster.** A worker is sent the method's name, never code. A lambda in the
+                    graph - `Then(...)`, `Bag.Map(x => ...)`, `Dask.All` - throws
+                    `NotSupportedException` on a `Client` (it is fine on the default thread
+                    scheduler). Array and DataFrame kernels are `[RemoteTask]` already.
+
+                    Per-task overhead is a few microseconds plus serialisation: aim for tasks of a
+                    millisecond or more, which is why the runs are batched.
 
                     ```bash
                     dotnet run

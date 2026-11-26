@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v2.2.0 · **Target framework**: .NET 10 · **Tests**: 4,312 passing, 0 failing
+**Release**: v2.3.0 · **Target framework**: .NET 10 · **Tests**: 4,417 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -10,22 +10,22 @@ Roadmap: [PLAN.md](PLAN.md)
 
 | Area | Status | Notes |
 |---|---|---|
-| Solution and build | ✅ Complete | 38 projects, central package management, Release build clean |
-| GraviNum | ✅ Complete | 301 tests |
+| Solution and build | ✅ Complete | 46 projects, central package management, Release build clean |
+| GraviNum | ✅ Complete | 340 tests |
 | GraviFrame | ✅ Complete | 165 tests |
 | GraviLearn | ✅ Complete | 176 tests |
-| GraviText | ✅ Complete | 171 tests |
+| GraviText | ✅ Complete | 181 tests |
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
-| SciNet | ✅ Complete | 2,198 tests — SciPy for .NET, all 15 `scipy.*` modules |
-| Dask.Net | ✅ Core complete | 184 tests — task graphs, Bag, Array, DataFrame, SQL (windows, UNION, DISTINCT aggregates), TCP cluster with recovery, TLS, spilling, discovery, cost-based joins, JSON/SQL connectors; see the coverage table in docs/DaskNet.md |
+| SciNet | ✅ Complete | 2,983 tests — SciPy for .NET, all 15 `scipy.*` modules |
+| Dask.Net | ✅ Core complete | 256 tests (203 core, 53 in the add-ons) — task graphs, Bag, Array, DataFrame, SQL (windows, UNION, DISTINCT aggregates), TCP cluster with recovery, TLS, spilling, discovery, cost-based joins, JSON/SQL connectors, SQL pushdown, join reordering, detached runs, speculation; Lakehouse, Geo, ML and Streaming add-ons; see the coverage table in docs/DaskNet.md |
 | Sample apps | ✅ Complete | 8 apps, all run end to end |
 | Notebooks | ✅ Complete | 8 notebooks, cells compile-checked |
 | Benchmarks | ✅ Complete | 8 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
 | Datasets | ✅ Complete | 4 real, 4 generated |
 | Documentation | ✅ Complete | 10 pages × 2 languages, with a visualisation gallery per library |
 | Screenshots | ✅ Complete | 13 rendered by the samples, plus 6 of ScienceAppGen |
-| Packaging | ✅ Complete | 7 NuGet packages with XML docs, `.snupkg` and a per-library icon, packed and verified |
+| Packaging | ✅ Complete | 13 NuGet packages with XML docs, `.snupkg` and a per-library icon, packed and verified |
 | CI | ✅ Complete | Build + test on Linux and Windows, notebook cells compiled, tag-driven release |
 
 ---
@@ -251,7 +251,7 @@ remains the better baseline on a small dataset.
 
 ---
 
-### Dask.Net — 184 tests
+### Dask.Net — 256 tests
 
 - [x] Task graph core: `TaskKey`/`TaskSpec`/`GraphLayer`, cull, linear fusion, depth-first
   priorities, cycle detection, DOT and Mermaid (task-level and layer-level)
@@ -289,6 +289,31 @@ remains the better baseline on a small dataset.
   bit; a worker killed mid-run (in-process and as a real process) is recovered by recomputation;
   an 8 MB computation on a worker limited to 1 MB is bit-identical; a swapped join keeps names,
   order and rows
+- [x] SQL pushdown into `ReadSql` (superset-safe `WHERE`; the filter re-runs on what comes back)
+  and GOO join reordering of all-inner SQL chains, with the written column order restored
+- [x] Worker-side scheduling: `SubmitAsync` detached runs scheduled by a worker, speculative copies
+  of stragglers when nothing else is ready to run
+- [x] `DaskNet.Lakehouse` (26 tests): Delta Lake and Iceberg tables with partition pruning and
+  time travel, checked against delta-rs and pyiceberg
+- [x] `DaskNet.Geo` (12 tests): geohash, WKT polygons, distance and point-in-polygon joins, checked
+  against brute force locally and on a cluster
+- [x] `DaskNet.ML` (6 tests): `EstimatorSpec`, grid/random hyperparameter search with k-fold
+  scoring on any scheduler, batch prediction on a cluster
+- [x] `DaskNet.Streaming` (9 tests): micro-batch streams from sequences, channels and watched
+  directories; event-time tumbling/sliding windows with watermarks and lateness; checkpointed
+  restarts
+- [x] ScienceGallery: 5 Dask.Net use cases; ScienceAppGen: `dask-pipeline`/`dask-cluster`
+  templates and Python `dask` conversion, with screenshots in the docs
+
+## 2.3.0 — Dask.Net add-ons: Lakehouse, Geo, ML, Streaming (2026-11-27)
+
+Four new packages: `Gravicode.Science.DaskNet.Lakehouse` (Delta Lake and Iceberg), `.Geo`
+(geohash, polygons, spatial joins), `.ML` (distributed hyperparameter search and batch prediction
+over GraviLearn) and `.Streaming` (micro-batch streams with event-time windows and checkpoints).
+Dask.Net itself gains SQL predicate pushdown into `ReadSql`, join reordering of inner-join SQL
+chains, detached runs (`SubmitAsync`) and speculative execution. ScienceGallery has five Dask.Net
+use cases, and ScienceAppGen converts Python `dask` code and ships two Dask templates. Other
+packages are unchanged and re-released at 2.3.0.
 
 ## 2.2.0 — Dask.Net: TLS, spilling, discovery, cost-based joins, connectors (2026-11-26)
 

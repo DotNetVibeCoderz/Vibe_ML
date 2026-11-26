@@ -115,9 +115,9 @@ ditemukan dengan menjalankannya terhadap endpoint sungguhan, bukan dengan membac
 
 ## Template
 
-**File → New Project** menawarkan sembilan belas template. Semuanya build *dan berjalan* apa
-adanya — klaim itu diperiksa dengan membangkitkan setiap template, mem-build-nya, lalu
-menjalankannya, bukan sekadar dinyatakan.
+**File → New Project** menawarkan dua puluh satu template. Semuanya build *dan berjalan* apa
+adanya — klaim itu diperiksa, bukan sekadar dinyatakan: `Every_template_builds` di
+`tests/ScienceAppGen.Tests` membangkitkan setiap template di samping library-nya lalu mem-build-nya.
 
 | Template | Menghasilkan |
 |---|---|
@@ -140,6 +140,8 @@ menjalankannya, bukan sekadar dinyatakan.
 | `sparse-text` | TF-IDF ke matriks CSR, lalu pengklasifikasi linear yang dilatih tanpa memadatkannya |
 | `distributed` | Pemecahan shard, perataan gradien berbobot, dan forest terdistribusi identik bit |
 | `pretrained` | Memuat checkpoint BERT hasil ekspor ke dalam `TransformerModel` |
+| `dask-pipeline` | Satu folder berkas CSV sebagai satu `DaskFrame` lazy berpartisi, lalu data yang sama dalam SQL |
+| `dask-cluster` | Sapuan parameter simulasi `[RemoteTask]` pada cluster Dask.Net lokal |
 
 Lima template yang ditambahkan pada v0.4 dan empat pada v0.5 masuk ke kategori yang sudah ada —
 *Data science*, *Machine learning*, dan *Natural language* — sehingga pemilih mengelompokkannya
@@ -183,6 +185,30 @@ classification report dan skor cross-validation lima lipat dari pipeline yang di
 
 ![Proyek hasil generate berjalan dan mencetak classification report](../screenshots/scienceappgen-run.png)
 
+### Komputasi paralel: template Dask.Net
+
+Dua template dalam kategori *Parallel computing* memakai Dask.Net. Keduanya menulis data
+masukannya sendiri dan diambil gambarnya dengan `ScienceAppGen --capture-template <id> <folder>`,
+yang membuka dialog, membuat proyek, mem-build dan menjalankannya di shell sungguhan, lalu
+merender kedua keadaan itu tanpa melibatkan model.
+
+| Template | Menghasilkan |
+|---|---|
+| `dask-pipeline` | Dua belas ekspor CSV bulanan dibaca sebagai satu `DaskFrame` lazy: filter berbasis ekspresi, broadcast join, group-by, dan `Explain()`; lalu data yang sama lewat `SqlContext` dengan window running total dan `RANK()` |
+| `dask-cluster` | `LocalCluster` empat worker yang menjalankan sapuan laju pertumbuhan berupa simulasi `[RemoteTask]` (dengan jumlah task per worker), lalu reduksi `DaskArray` ber-chunk pada cluster yang sama |
+
+![Dialog New Project dengan dask-pipeline terpilih](../screenshots/scienceappgen-dasknet-templates.png)
+
+![dask-pipeline berjalan: rencana yang sudah dioptimasi, hasil pengelompokan, dan kueri window SQL](../screenshots/scienceappgen-dasknet-pipeline-run.png)
+
+![dask-cluster berjalan: sapuan parameter, 208 task di empat worker, dan reduksi array](../screenshots/scienceappgen-dasknet-cluster-run.png)
+
+Template kedua mengajarkan aturan yang penting di cluster: worker hanya dikirimi *nama* method,
+sehingga hanya method `public static` bertanda `[RemoteTask]` yang boleh muncul dalam graf yang
+diberikan ke `Client`. Lambda — `Then(...)`, `Bag.Map(x => ...)`, atau `Dask.All` — ditolak dengan
+`NotSupportedException`; karena itu sapuan menggabungkan empat batch-nya dengan method
+`[RemoteTask]` empat argumen, bukan `Dask.All`.
+
 ---
 
 ## Tool milik Jack
@@ -225,7 +251,7 @@ tanggal hari ini, ia kalkulator yang buruk, dan pengetahuannya punya batas waktu
 | Fungsi | Kegunaan |
 |---|---|
 | `GravicodeReference` | Permukaan API sebenarnya sebuah library, beserta jebakannya |
-| `GravicodeExample` | Program lengkap yang berfungsi untuk tugas umum |
+| `GravicodeExample` | Program lengkap yang berfungsi untuk tugas umum (termasuk `dask` dan `daskcluster`) |
 
 Tanpa ini, model menulis pemanggilan yang tampak masuk akal tetapi tidak ada. Rujukan terkurasi
 lebih murah daripada siklus build-perbaiki-build-ulang dan lebih andal daripada berharap library-nya
@@ -248,6 +274,7 @@ yang tidak bisa dikerjakan LLM dengan baik sendirian.
 | pandas | GraviFrame | `Gravicode.Science.GraviFrame` |
 | scikit-learn | GraviLearn | `Gravicode.Science.GraviLearn` |
 | scipy | SciNet | `Gravicode.Science.SciNet` |
+| dask, dask.distributed, dask-sql | DaskNet | `Gravicode.Science.DaskNet` |
 | networkx, PyG, DGL | GraviGraph | `Gravicode.Science.GraviGraph` |
 | PyMC, Stan, ArviZ | GraviProb | `Gravicode.Science.GraviProb` |
 | transformers, NLTK, tokenizers | GraviText | `Gravicode.Science.GraviText` |
@@ -311,9 +338,15 @@ ScienceAppGen --convert script.py --prompt      # prompt persisnya, tanpa panggi
   train/test, random forest, atau noise simulasi memberi angka yang berbeda — sama-sama valid.
 - **Celah library menjadi TODO.** Bila suatu pemanggilan tidak punya padanan, model menuliskannya
   secara manual dan menyebutkannya; `CONVERSION.md` mencantumkan setiap catatan itu.
-- **Dua contoh proyek** di `tools/ScienceAppGen/Samples/Python/` menunjukkan cakupannya: analisis
-  sinyal satu file (numpy, scipy, matplotlib) dan prakiraan penjualan lima modul (pandas,
-  scikit-learn, matplotlib, satu file CSV).
+- **Tiga contoh proyek** di `tools/ScienceAppGen/Samples/Python/` menunjukkan cakupannya: analisis
+  sinyal satu file (numpy, scipy, matplotlib), prakiraan penjualan lima modul (pandas,
+  scikit-learn, matplotlib, satu file CSV), dan `dask_order_pipeline.py` (dask.dataframe, dask-sql,
+  `dask.delayed` di `LocalCluster`, matplotlib).
+- **dask menjadi Dask.Net, beserta aturannya.** `dd.read_csv` dipetakan ke `DaskFrame.ReadCsv`,
+  `from_pandas` ke `FromFrame`, `Context.create_table`/`sql` ke `SqlContext.Register`/`Execute`,
+  `Client(LocalCluster())` ke `LocalCluster.StartAsync`. Langkah per baris menjadi ekspresi `Expr`,
+  dan fungsi yang dikirim ke cluster menjadi method `[RemoteTask]`, karena `Client` menolak lambda.
+  Proyek hasil konversi mengunci paket science di 2.2.0, karena Dask.Net pertama kali rilis di 2.1.0.
 
 ---
 
@@ -378,7 +411,8 @@ tools/ScienceAppGen/
   Services/
     ConfigurationService.cs       baca/tulis XML yang menjaga komentar
     ProjectService.cs             akses berkas + dotnet CLI, dengan penjaga path
-    TemplateService.cs            sepuluh template
+    TemplateService.cs            dua puluh satu template
+    TemplateScreenshot.cs         --capture-template: dialog, buat, build, jalankan, render
     AssistantService.cs           perkabelan Semantic Kernel, streaming, penampilan tool
     AnthropicChatCompletionService.cs   Claude, karena SK tidak punya connector
     LlmFactory.cs                 wiring provider yang dipakai bersama Jack dan konverter

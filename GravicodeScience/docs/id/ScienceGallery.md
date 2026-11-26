@@ -1,6 +1,6 @@
 # Gravicode Science Gallery
 
-*[English](../ScienceGallery.md)* · 45 use case dunia nyata untuk ketujuh library
+*[English](../ScienceGallery.md)* · 50 use case dunia nyata untuk kedelapan library
 Gravicode.Science — masing-masing langsung berjalan di mesin Anda saat dibuka, menggambar chart-nya
 dengan [Visual.Net](https://github.com/DotNetVibeCoderz/Vibe_Charting/tree/main/Visual.Net), dan
 menampilkan berkas sumber persis yang dijalankannya.
@@ -31,7 +31,7 @@ keuangan, utilitas sehari-hari, dan game, dan setiap library muncul di beberapa 
 Setiap kartu membawa strip yang terbaca seperti spektroskop. Setiap library Gravi adalah garis
 emisi nyata — warna dan panjang gelombang yang sama dengan ikon NuGet-nya — dan garis yang
 dibutuhkan sebuah use case menyala, sisanya tinggal tanda samar. SciNet, sang instrumen alih-alih
-satu garis, menyalakan seluruh pita di belakangnya. Sekilas pandang, strip itu memberi tahu apa yang
+satu garis, menyalakan seluruh pita di belakangnya. Dask.Net adalah garis neon oranye di 640 nm, sedikit sebelum merah GraviNum. Sekilas pandang, strip itu memberi tahu apa yang
 dibutuhkan sebuah use case sebelum Anda membukanya.
 
 ## Membuka use case
@@ -68,18 +68,21 @@ Tema terang adalah bawaan; sakelar di bagian bawah sidebar menyalakan tema gelap
 | | Berapa banyak kalsit dalam sampel batuan ini? | SciNet, GraviNum |
 | | Kapan wabah memuncak, dan seberapa besar? | SciNet, GraviNum |
 | | Makalah mana yang benar-benar menjadi pijakan bidangnya? (Cora) | GraviGraph, SciNet, GraviNum |
+| | Menyapu model epidemi di sepanjang R0 pada cluster empat worker | DaskNet, GraviNum |
 | Perkantoran | Mengubah pesanan setahun menjadi laporan penjualan bulanan | GraviFrame, GraviNum |
 | | Apakah model sentimen terlatih sepadan dengan pelabelannya? (ulasan IMDB) | GraviText, GraviFrame, GraviLearn |
 | | Mengambil nomor invoice, vendor, tanggal, dan jumlah dari email | GraviText, GraviNum |
 | | Memilah kotak masuk bersama ke topik yang tak pernah dilabeli | GraviText, GraviLearn, GraviNum |
 | | Menempatkan sepuluh rapat di sepuluh ruangan tanpa ada yang berdesakan | SciNet |
 | | Menyusun jadwal minggu depan yang menutup semua shift dan menghormati cuti | SciNet, GraviNum |
+| | Mengajukan pertanyaan SQL ke folder berisi berkas penjualan bulanan | DaskNet, GraviFrame, GraviNum |
 | Industri | Menangkap mesin yang melenceng sebelum menghasilkan barang reject | SciNet, GraviFrame, GraviNum |
 | | Lintasan bearing mana yang retak di motor ini? | SciNet, GraviNum |
 | | Berjalan lebih sedikit di setiap daftar pengambilan gudang | SciNet, GraviNum |
 | | Pemasok mana yang bisa menghentikan ketiga pabrik? | GraviGraph, GraviNum |
 | | Berapa daya yang akan ditarik gedung dalam 48 jam ke depan? | GraviProb, GraviFrame, GraviNum |
 | | Seberapa hangat pendingin sebelum reaktor lepas kendali? | SciNet, GraviNum |
+| | Mana dari 48 sensor tekanan yang melenceng atau melonjak? | DaskNet, GraviNum |
 | Kesehatan | Detak jantung dan variabilitasnya dari EKG yang bising | SciNet, GraviNum |
 | | Dua atau tiga kali sehari: jadwal mana yang menjaga kadar obat? | SciNet, GraviNum |
 | | Seberapa yakin kita bahwa pengobatan baru lebih baik? | GraviProb, SciNet, GraviNum |
@@ -90,17 +93,45 @@ Tema terang adalah bawaan; sakelar di bagian bawah sidebar menyalakan tema gelap
 | | Berapa yang bisa hilang dari posisi ini di hari buruk? | SciNet, GraviFrame |
 | | Menandai pembayaran kartu yang tidak mirip pemiliknya | GraviLearn, GraviNum |
 | | Berapa biaya KPR ini sebenarnya per tahun? | SciNet, GraviFrame |
+| | Meringkas pembayaran kartu sebulan per segmen nasabah | DaskNet, GraviFrame, GraviNum |
 | Utilitas | Membersihkan dengung dan desis dari rekaman | SciNet, GraviNum |
 | | Menyelamatkan foto berbintik dengan piksel mati | SciNet, GraviNum |
 | | Kenapa aplikasi lari saya bilang saya berlari lebih jauh? | GraviProb, SciNet, GraviNum |
 | | Toko mana yang terdekat, dan di mana toko berikutnya sebaiknya dibuka? | SciNet, GraviNum |
 | | Bertukar data dengan rekan pengguna MATLAB tanpa kehilangan apa pun | SciNet, GraviFrame, GraviNum |
+| | Menemukan endpoint yang gagal dalam log web server sehari | DaskNet, GraviNum |
 | Game | Membuat pulau yang meyakinkan untuk peta game | SciNet, GraviNum |
 | | Membangun labirin, memecahkannya, dan membiarkan setiap monster menemukan pemain | GraviGraph, GraviNum |
 | | Apakah bola memantul di game kehilangan energi sebesar yang semestinya? | SciNet, GraviNum |
 | | Apakah peluang menang dari matchmaker jujur? | GraviLearn, GraviFrame, GraviNum |
 | | Berapa peluang pasti dari lemparan dadu ini? | SciNet, GraviNum |
 | | Berapa lama pemain bertahan, dan berapa nilai seorang pemain baru? | GraviProb, SciNet, GraviNum |
+
+### Use case Dask.Net
+
+Lima use case memperlihatkan [Dask.Net](DaskNet.md), masing-masing bagian yang berbeda. Saring
+dengan library Dask.Net untuk melihat semuanya:
+
+![Kelima use case Dask.Net](../screenshots/gallery-dasknet-filter.png)
+
+| Use case | Bagian Dask.Net yang diperlihatkan |
+|---|---|
+| Mengajukan pertanyaan SQL ke folder berkas penjualan bulanan | `SqlContext.RegisterCsv` atas dua belas berkas, join, total berjalan `SUM(SUM(x)) OVER (PARTITION BY ... ORDER BY ...)` dan `RANK() OVER`; dicek terhadap satu GraviFrame hingga ~1e-12, dengan rencana teroptimasi dicetak |
+| Meringkas pembayaran kartu sebulan per segmen nasabah | `DaskFrame` dengan filter ekspresi, broadcast join, `GroupBy().Agg`; `Explain()` memperlihatkan filter didorong ke scan di bawah join |
+| Menyapu model epidemi di sepanjang R0 pada cluster empat worker | `Dask.Delayed` atas metode `[RemoteTask]` di `LocalCluster.StartAsync`, beserta jumlah task yang dijalankan tiap worker |
+| Mana dari 48 sensor tekanan yang melenceng atau melonjak? | `DaskArray` 86.400 × 48 dalam 12 chunk: reduksi per sumbu, broadcasting terhadap baris baseline, z-score |
+| Menemukan endpoint yang gagal dalam log web server sehari | `Bag.ReadText` per blok byte, `Frequencies`, `FoldBy` dan `TopK`, tiga jawaban dari satu kali baca |
+
+![SQL atas folder berkas CSV](../screenshots/gallery-dasknet-sql.png)
+
+![Sapuan parameter di cluster lokal](../screenshots/gallery-dasknet-cluster.png)
+
+![Matriks sensor yang di-chunk](../screenshots/gallery-dasknet-array.png)
+
+Use case cluster adalah satu-satunya yang membutuhkan metode `[RemoteTask]`: client mengirim nama
+metode, tidak pernah kode, sehingga lambda di dalam graph ditolak. `Dask.All` (gather) adalah
+delegate lokal di Dask.Net 2.2, jadi di sana dihindari - sebuah `[RemoteTask]` empat argumen yang
+menggabungkan batch-batchnya. Empat lainnya memakai scheduler thread bawaan, tempat lambda boleh.
 
 Judul di aplikasi berbahasa Inggris; tabel di atas menerjemahkannya. Beberapa use case terang-terangan
 menyebut di mana sebuah metode kurang, karena memang itu yang ditunjukkan hasilnya: pada 80 ulasan
@@ -167,8 +198,8 @@ ScottPlot dari SkiaSharp 3.
 
 | Perintah | Fungsinya |
 |---|---|
-| `ScienceGallery --run-all` | Menjalankan setiap use case tanpa jendela dan merender chart-nya; keluar dengan kode bukan nol bila ada yang gagal. CI menjalankan ini di Linux dan Windows. |
-| `ScienceGallery --capture <folder>` | Menggerakkan jendela asli melewati beranda, satu domain, satu filter, empat use case, dan tema gelap, lalu menyimpan masing-masing sebagai PNG 1440×900. Screenshot di halaman ini berasal darinya. |
+| `ScienceGallery --run-all` | Menjalankan setiap use case tanpa jendela dan merender chart-nya; keluar dengan kode bukan nol bila ada yang gagal. CI menjalankan ini di Linux dan Windows. Tambahkan `--only <teks>` untuk menjalankan use case yang nama kelasnya memuat teks itu, dan `--verbose` untuk mencetak metrik dan temuannya. |
+| `ScienceGallery --capture <folder>` | Menggerakkan jendela asli melewati beranda, satu domain, satu filter, empat use case, tema gelap, filter Dask.Net, dan tiga use case Dask.Net, lalu menyimpan masing-masing sebagai PNG 1440×900. Screenshot di halaman ini berasal darinya. |
 
 ---
 

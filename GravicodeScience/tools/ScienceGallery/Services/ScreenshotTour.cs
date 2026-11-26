@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media.Imaging;
@@ -21,6 +21,14 @@ public static class ScreenshotTour
 {
     /// <summary>Use cases opened for the detail screenshots, by class name.</summary>
     private static readonly string[] DetailShowcases = ["HeartRateFromEcg", "CellCounting", "PortfolioFrontier", "ProductionLineControlChart"];
+
+    /// <summary>Dask.Net use cases opened for docs/ScienceGallery.md, by class name and file name.</summary>
+    private static readonly (string Showcase, string File)[] DaskShowcases =
+    [
+        ("SalesFilesSql", "gallery-dasknet-sql.png"),
+        ("EpidemicSweepCluster", "gallery-dasknet-cluster.png"),
+        ("SensorFleetArray", "gallery-dasknet-array.png"),
+    ];
 
     /// <summary>Takes the screenshots and closes the app.</summary>
     public static async Task RunAsync(MainWindow window, string folder, IClassicDesktopStyleApplicationLifetime lifetime)
@@ -60,6 +68,21 @@ public static class ScreenshotTour
             model.CloseCommand.Execute(null);
             await Settle();
             Save(window, folder, "gallery-home-dark.png");
+
+            // Dask.Net, in the light theme: the library filter, then three of its use cases.
+            window.SetDark(false);
+            model.Libraries.First(l => l.Info.Library == GraviLibrary.DaskNet).IsChecked = true;
+            await Settle();
+            Save(window, folder, "gallery-dasknet-filter.png");
+            model.ClearFiltersCommand.Execute(null);
+            foreach (var (name, file) in DaskShowcases)
+            {
+                var card = model.Visible.FirstOrDefault(c => c.Showcase.GetType().Name == name);
+                if (card is null) continue;
+                await model.OpenCommand.ExecuteAsync(card);
+                await Settle();
+                Save(window, folder, file);
+            }
         }
         finally
         {
@@ -74,7 +97,7 @@ public static class ScreenshotTour
     }
 
     /// <summary>
-    /// Lays the window's content out at a fixed 1440×900 and renders it, so the screenshots look
+    /// Lays the window's content out at a fixed 1440Ã—900 and renders it, so the screenshots look
     /// the same whatever screen they are taken on (a laptop clamps the real window smaller).
     /// </summary>
     private static void Save(MainWindow window, string folder, string name)

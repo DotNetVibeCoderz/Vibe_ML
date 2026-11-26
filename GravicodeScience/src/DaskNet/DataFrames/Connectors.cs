@@ -65,16 +65,31 @@ public sealed partial class DaskFrame
     /// <param name="index">A numeric column to split on; plain identifier.</param>
     /// <param name="partitions">How many ranges.</param>
     /// <param name="bounds">The index range; when null, <c>MIN</c>/<c>MAX</c> are queried now.</param>
+    /// <param name="pushFilters">Whether filters on the table's columns are also written into the
+    /// SQL's WHERE (default true). See the remarks.</param>
     /// <remarks>
+    /// <para>
     /// Only the columns a query needs are selected (projection pushdown reaches the SQL). Filters
-    /// run after the rows are read. Column types come from the provider's description of an empty
+    /// that read only the table's columns are pushed into the WHERE as parameters, where the
+    /// database can use its indexes, and are still applied to the rows read: the database decides
+    /// with its own types and collation, so only conditions for which it can return <i>more</i>
+    /// rows, never fewer, are sent. Numeric comparisons and <c>IS [NOT] NULL</c> are sent exactly;
+    /// text equality and <c>IN</c> are sent because a case-insensitive or padding collation only
+    /// widens them; text ordering, dates, functions and arithmetic are not sent (SQLite compares
+    /// dates as text, collations order text differently). The one way this can still lose rows is a
+    /// column whose stored values disagree with its declared type - an SQLite column declared
+    /// <c>REAL</c> holding text - so pass <c>pushFilters: false</c> for such tables.
+    /// </para>
+    /// <para>
+    /// Column types come from the provider's description of an empty
     /// result (<c>WHERE 1 = 0</c>) and are pinned, so an empty range cannot come back with
     /// different types. A database that types by value - an SQLite column declared with no type -
     /// can only describe such a column as text there; read it with the query overload, whose first
     /// query is run to learn the types.
+    /// </para>
     /// </remarks>
     public static DaskFrame ReadSql(DbProviderFactory factory, string connectionString, string table, string index,
-        int partitions, (double Lower, double Upper)? bounds = null)
+        int partitions, (double Lower, double Upper)? bounds = null, bool pushFilters = true)
     {
         ArgumentNullException.ThrowIfNull(factory);
         SqlSource.RequireIdentifier(table, "table");
@@ -110,7 +125,7 @@ public sealed partial class DaskFrame
                 parts.Add(($"{index} >= @lo AND {index} < @hi", ["lo", "hi"], [edges[i - 1], edges[i]]));
             parts.Add(($"{index} >= @lo OR {index} IS NULL", ["lo"], [edges[^1]]));
         }
-        var source = new SqlSource(factory, connectionString, schema, table, parts.ToArray());
+        var source = new SqlSource(factory, connectionString, schema, table, parts.ToArray(), pushFilters);
         return new DaskFrame(new ScanNode(source));
     }
 
@@ -163,10 +178,12 @@ internal sealed class SqlSource : ScanSource
     private readonly int[] _types;
     private readonly string? _table;
     private readonly (string Text, string[] Names, object?[] Values)[] _parts;
+    private readonly bool _pushFilters;
 
     public SqlSource(DbProviderFactory factory, string connectionString, DataFrame schema, string? table,
-        (string Text, string[] Names, object?[] Values)[] parts)
+        (string Text, string[] Names, object?[] Values)[] parts, bool pushFilters = false)
     {
+        _pushFilters = pushFilters;
         _factoryType = factory.GetType().AssemblyQualifiedName!;
         _connectionString = connectionString;
         _names = schema.ColumnNames.ToArray();
@@ -187,14 +204,139 @@ internal sealed class SqlSource : ScanSource
         // A table read selects only what is needed; a caller's query is run as written.
         var pushed = _table is not null && keep.All(IsIdentifier);
         var encoded = FrameOp.Encode(pushed || columns is null ? ops : [new SelectOp(keep.Select(Expr.Col).ToArray()), .. ops]);
+        // Leading filters read the scan's own columns. They stay in the ops as well: what the
+        // database is sent may match more rows than the filter, never fewer.
+        var filter = _table is not null && _pushFilters
+            ? Where(ops.TakeWhile(o => o is FilterOp).Select(o => ((FilterOp)o).Predicate).ToArray())
+            : null;
         return _parts.Select((p, i) =>
         {
             var sql = _table is null ? p.Text
-                : $"SELECT {(pushed ? string.Join(", ", keep) : "*")} FROM {_table} WHERE {p.Text}";
+                : $"SELECT {(pushed ? string.Join(", ", keep) : "*")} FROM {_table} WHERE "
+                  + (filter is null ? p.Text : $"({p.Text}) AND {filter.Value.Sql}");
+            string[] names = filter is null ? p.Names : [.. p.Names, .. filter.Value.Values.Select((_, k) => $"f{k}")];
+            object?[] values = filter is null ? p.Values : [.. p.Values, .. filter.Value.Values];
             return TaskSpec.Call(new TaskKey(name, i), ReadMethod,
-                [_factoryType, _connectionString, sql, p.Names, p.Values, keep, types, encoded], "read-sql");
+                [_factoryType, _connectionString, sql, names, values, keep, types, encoded], "read-sql");
         }).ToArray();
     }
+
+    /// <summary>
+    /// The part of <paramref name="predicates"/> (all of which must hold) that can be sent as a
+    /// WHERE clause with parameters <c>@f0, @f1...</c>, or null when none can. Whatever is sent
+    /// may only widen what the predicates keep (see the remarks on the table overload of
+    /// <c>DaskFrame.ReadSql</c>).
+    /// </summary>
+    internal (string Sql, object?[] Values)? Where(IReadOnlyList<Expr> predicates)
+    {
+        var values = new List<object?>();
+        var parts = new List<string>();
+        foreach (var p in predicates)
+            foreach (var conjunct in Conjuncts(p))
+                if (Translate(conjunct, values) is { } t) parts.Add(t.Sql);
+        return parts.Count == 0 ? null : (string.Join(" AND ", parts), values.ToArray());
+    }
+
+    private static IEnumerable<Expr> Conjuncts(Expr e) => e switch
+    {
+        AliasExpr a => Conjuncts(a.Inner),
+        BinaryExpr { Kind: BinaryKind.And } b => Conjuncts(b.Left).Concat(Conjuncts(b.Right)),
+        _ => [e],
+    };
+
+    /// <summary>SQL for <paramref name="e"/> that keeps a superset of its rows; <c>Exact</c> when
+    /// it keeps exactly its rows (only an exact condition may be negated). Parameters are added
+    /// to <paramref name="values"/> only when the result is not null.</summary>
+    private (string Sql, bool Exact)? Translate(Expr e, List<object?> values)
+    {
+        var mark = values.Count;
+        var result = TranslateCore(e, values);
+        if (result is null) values.RemoveRange(mark, values.Count - mark);
+        return result;
+    }
+
+    private (string Sql, bool Exact)? TranslateCore(Expr e, List<object?> values)
+    {
+        switch (e)
+        {
+            case AliasExpr a:
+                return Translate(a.Inner, values);
+            case BinaryExpr { Kind: BinaryKind.And } and:
+            {
+                // Keeping only one side of an AND widens it, which is allowed.
+                var l = Translate(and.Left, values);
+                var r = Translate(and.Right, values);
+                if (l is { } left && r is { } right) return ($"({left.Sql} AND {right.Sql})", left.Exact && right.Exact);
+                return (l ?? r) is { } one ? (one.Sql, false) : null;
+            }
+            case BinaryExpr { Kind: BinaryKind.Or } or:
+            {
+                if (Translate(or.Left, values) is not { } left) return null;
+                if (Translate(or.Right, values) is not { } right) return null;
+                return ($"({left.Sql} OR {right.Sql})", left.Exact && right.Exact);
+            }
+            case BinaryExpr { Kind: >= BinaryKind.Equal and <= BinaryKind.LessOrEqual } c:
+            {
+                var (column, literal, kind) = c.Left is ColumnExpr col && c.Right is LiteralExpr lit ? (col, lit, c.Kind)
+                    : c.Right is ColumnExpr col2 && c.Left is LiteralExpr lit2 ? (col2, lit2, Flip(c.Kind))
+                    : ((ColumnExpr?)null, (LiteralExpr?)null, c.Kind);
+                if (column is null || TypeOf(column.Name) is not { } type) return null;
+                var v = literal!.Value;
+                if (type == DataType.Numeric && v.Kind == DataType.Numeric && !double.IsNaN(v.Nums![0]))
+                    return (Compare(column.Name, kind, Parameter(values, v.Nums[0])), true);
+                if (type == DataType.Text && v.IsTypedText && kind == BinaryKind.Equal)
+                    return ($"{column.Name} = {Parameter(values, v.Texts![0])}", false);
+                return null;
+            }
+            case FunctionExpr { Name: "isnull" or "notnull", Args: [ColumnExpr col] } f when TypeOf(col.Name) is not null:
+                return ($"{col.Name} IS {(f.Name == "isnull" ? "" : "NOT ")}NULL", true);
+            case FunctionExpr { Name: "not", Args: [var inner] }:
+                return Translate(inner, values) is { Exact: true } t ? ($"NOT {t.Sql}", true) : null;
+            case FunctionExpr { Name: "in", Args: [ColumnExpr col, .. var items] } when items.Length > 0 && items.All(i => i is LiteralExpr):
+            {
+                var type = TypeOf(col.Name);
+                var literals = items.Select(i => ((LiteralExpr)i).Value).ToArray();
+                if (type == DataType.Numeric && literals.All(l => l.Kind == DataType.Numeric && !double.IsNaN(l.Nums![0])))
+                    return ($"{col.Name} IN ({string.Join(", ", literals.Select(l => Parameter(values, l.Nums![0])))})", true);
+                if (type == DataType.Text && literals.All(l => l.IsTypedText))
+                    return ($"{col.Name} IN ({string.Join(", ", literals.Select(l => Parameter(values, l.Texts![0])))})", false);
+                return null;
+            }
+            default:
+                return null;
+        }
+    }
+
+    private DataType? TypeOf(string column)
+    {
+        var i = Array.IndexOf(_names, column);
+        return i < 0 || !IsIdentifier(column) ? null : (DataType)_types[i];
+    }
+
+    private static string Parameter(List<object?> values, object? value)
+    {
+        values.Add(value);
+        return $"@f{values.Count - 1}";
+    }
+
+    private static string Compare(string column, BinaryKind kind, string parameter) => kind switch
+    {
+        BinaryKind.Equal => $"{column} = {parameter}",
+        BinaryKind.NotEqual => $"{column} <> {parameter}",
+        BinaryKind.Greater => $"{column} > {parameter}",
+        BinaryKind.Less => $"{column} < {parameter}",
+        BinaryKind.GreaterOrEqual => $"{column} >= {parameter}",
+        _ => $"{column} <= {parameter}",
+    };
+
+    private static BinaryKind Flip(BinaryKind kind) => kind switch
+    {
+        BinaryKind.Greater => BinaryKind.Less,
+        BinaryKind.Less => BinaryKind.Greater,
+        BinaryKind.GreaterOrEqual => BinaryKind.LessOrEqual,
+        BinaryKind.LessOrEqual => BinaryKind.GreaterOrEqual,
+        _ => kind,
+    };
 
     public static DataFrame Query(DbProviderFactory factory, string connectionString, string sql, IReadOnlyDictionary<string, object?>? parameters)
     {

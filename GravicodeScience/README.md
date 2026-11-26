@@ -33,6 +33,11 @@ dotnet add package Gravicode.Science.GraviGraph    # graphs and GNNs
 dotnet add package Gravicode.Science.GraviProb     # Bayesian inference
 dotnet add package Gravicode.Science.SciNet        # SciPy for .NET
 dotnet add package Gravicode.Science.DaskNet       # parallel and distributed computing
+# Dask.Net add-ons
+dotnet add package Gravicode.Science.DaskNet.Lakehouse   # Delta Lake and Iceberg tables
+dotnet add package Gravicode.Science.DaskNet.Geo         # geohash, distance and point-in-polygon joins
+dotnet add package Gravicode.Science.DaskNet.ML          # distributed hyperparameter search, batch scoring
+dotnet add package Gravicode.Science.DaskNet.Streaming   # micro-batches, event-time windows, restartable ETL
 ```
 
 Take only what you need — every package pulls in `GraviNum`, and nothing else is mandatory. See
@@ -71,14 +76,14 @@ Console.WriteLine(Metrics.ClassificationReport(split.TestY, pipeline.Predict(spl
 ## What is in the box
 
 ```
-src/          eight libraries, plus the GraviFrame.Parquet add-on
+src/          eight libraries, plus the GraviFrame.Parquet and four Dask.Net add-ons
 samples/      eight console apps, each printing real results
 notebooks/    eight .NET Interactive notebooks
 benchmarks/   eight BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        4,312 tests
+tests/        4,417 tests
 tools/        ScienceAppGen (an IDE that builds apps from a prompt), Science Gallery
-              (45 runnable use cases), the Dask.Net worker host, the icon generator
+              (50 runnable use cases), the Dask.Net worker host, the icon generator
 assets/       NuGet package icons
 docs/         English, with Bahasa Indonesia in docs/id/
 ```
@@ -87,7 +92,7 @@ docs/         English, with Bahasa Indonesia in docs/id/
 
 [![Gravicode Science Gallery](docs/screenshots/gallery-home.png)](docs/ScienceGallery.md)
 
-A desktop app with **45 real-world use cases** across education, science and research, office
+A desktop app with **50 real-world use cases** across education, science and research, office
 work, industry, health, finance, utilities and games. Opening one runs it on your machine, draws its
 chart with [Visual.Net](https://github.com/DotNetVibeCoderz/Vibe_Charting/tree/main/Visual.Net), and
 shows the exact source file it ran — copy it and you have working code.
@@ -193,6 +198,12 @@ var report = DaskFrame.ReadCsv("sales/*.csv")
 await using var cluster = await LocalCluster.StartAsync(workers: 4);
 var result = report.Compute(cluster.Client);
 ```
+
+SQL chains of inner joins are reordered by estimated size, and filters on database tables are
+pushed into the SQL they send. `Client.SubmitAsync` hands a run to a worker so it outlives the
+client, and speculative execution re-runs stragglers on idle workers. Four add-on packages read
+Delta Lake and Iceberg tables, join by distance and by polygon, cross-validate GraviLearn models
+one task per fold, and run streaming queries with event-time windows and checkpoints.
 
 ## Design
 

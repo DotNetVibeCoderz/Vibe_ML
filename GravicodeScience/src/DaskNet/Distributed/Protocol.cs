@@ -19,8 +19,8 @@ public sealed class WorkerLostException(string address, Exception? inner = null)
 
 internal enum MessageKind : byte
 {
-    Run = 1, Get = 2, Release = 3, Ping = 4,
-    Done = 10, Error = 11, Data = 12, Pong = 13, Ok = 14,
+    Run = 1, Get = 2, Release = 3, Ping = 4, Submit = 5, Status = 6, Cancel = 7, Forget = 8,
+    Done = 10, Error = 11, Data = 12, Pong = 13, Ok = 14, RunStatus = 15,
 }
 
 internal readonly record struct Message(MessageKind Kind, long Id, byte[] Body)

@@ -49,6 +49,8 @@ public enum TaskEventKind
     Failed,
     /// <summary>A result held by a lost worker is being recomputed.</summary>
     Recomputing,
+    /// <summary>A straggling task got a second attempt on another worker (<see cref="SpeculationPolicy"/>).</summary>
+    Speculating,
 }
 
 /// <summary>A progress event from a scheduler.</summary>
@@ -75,6 +77,22 @@ public sealed class DaskTaskException(TaskKey key, string label, Exception inner
 }
 
 /// <summary>What one scheduler run did.</summary>
+/// <summary>
+/// When a cluster run gives a straggling task a second attempt on an idle worker (speculative
+/// execution - the cluster's form of work stealing). Whichever attempt finishes first wins; the
+/// other is ignored and its result released.
+/// </summary>
+/// <param name="Multiplier">A task straggles once it has run this many times the median duration of
+/// finished tasks with the same label.</param>
+/// <param name="Minimum">...and at least this long, so short tasks are never duplicated.</param>
+/// <param name="MinimumSamples">Finished tasks with that label needed before the median is trusted.</param>
+/// <remarks>Only for tasks without side effects: both attempts may run to completion.</remarks>
+public sealed record SpeculationPolicy(double Multiplier = 3.0, TimeSpan Minimum = default, int MinimumSamples = 3)
+{
+    /// <summary>The threshold actually used: <see cref="Minimum"/>, or one second when unset.</summary>
+    public TimeSpan EffectiveMinimum => Minimum == default ? TimeSpan.FromSeconds(1) : Minimum;
+}
+
 public sealed class RunStatistics
 {
     /// <summary>Tasks executed (retries and recomputations included).</summary>
@@ -85,6 +103,12 @@ public sealed class RunStatistics
 
     /// <summary>Retries after failures.</summary>
     public int Retries { get; internal set; }
+
+    /// <summary>Straggling tasks given a second, speculative attempt on an idle worker.</summary>
+    public int Speculated { get; internal set; }
+
+    /// <summary>Speculative attempts that finished first.</summary>
+    public int SpeculationWins { get; internal set; }
 
     /// <summary>The most results held in memory at once.</summary>
     public int PeakResultsHeld { get; internal set; }

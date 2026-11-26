@@ -41,7 +41,7 @@ public sealed record WorkerInfo(string Address, string Name, int Threads, int St
 /// <c>MapPartitions</c> qualify; bags of lambdas do not.
 /// </para>
 /// </remarks>
-public sealed class Client : IScheduler, IAsyncDisposable
+public sealed partial class Client : IScheduler, IAsyncDisposable
 {
     // Replaced, never mutated: a run reads it while discovery adds workers. Lost workers stay in
     // it (closed), because a run's bookkeeping refers to their handles.
@@ -64,6 +64,9 @@ public sealed class Client : IScheduler, IAsyncDisposable
 
     /// <summary>Receives an event per task state change.</summary>
     public Action<TaskEvent>? OnEvent { get; set; }
+
+    /// <summary>Speculative re-execution of stragglers on idle workers; off (null) by default.</summary>
+    public SpeculationPolicy? Speculation { get; set; }
 
     /// <summary>Statistics of the most recent run.</summary>
     public RunStatistics? LastRun { get; private set; }
@@ -257,6 +260,13 @@ public sealed class Client : IScheduler, IAsyncDisposable
         private readonly Channel<Func<Task>> _events = Channel.CreateUnbounded<Func<Task>>();
         private int _completed;
 
+        // Speculation: when each attempt started, how long finished tasks took per label, the
+        // second attempt of a straggler, and attempts that lost and still occupy a thread.
+        private readonly Dictionary<TaskKey, long> _startedAt = [];
+        private readonly Dictionary<string, List<double>> _durations = [];
+        private readonly Dictionary<TaskKey, WorkerHandle> _copies = [];
+        private readonly HashSet<(TaskKey, WorkerHandle)> _losers = [];
+
         public ClusterRun(Client client, TaskGraph graph, TaskKey[] outputs, CancellationToken cancel)
         {
             _client = client;
@@ -291,6 +301,8 @@ public sealed class Client : IScheduler, IAsyncDisposable
             var clock = Stopwatch.StartNew();
             _graph.Validate();
             WatchNewWorkers();
+            using var stopTicks = new CancellationTokenSource();
+            if (_client.Speculation is { } policy) _ = TickAsync(policy, stopTicks.Token);
 
             try
             {
@@ -317,8 +329,49 @@ public sealed class Client : IScheduler, IAsyncDisposable
             }
             finally
             {
+                await stopTicks.CancelAsync().ConfigureAwait(false);
                 await ReleaseAllAsync().ConfigureAwait(false);
                 Statistics.Elapsed = clock.Elapsed;
+            }
+        }
+
+        /// <summary>Wakes the loop now and then so stragglers are noticed while nothing else happens.</summary>
+        private async Task TickAsync(SpeculationPolicy policy, CancellationToken stop)
+        {
+            var every = TimeSpan.FromMilliseconds(Math.Clamp(policy.EffectiveMinimum.TotalMilliseconds / 4, 20, 500));
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    await Task.Delay(every, stop).ConfigureAwait(false);
+                    _events.Writer.TryWrite(() => { Speculate(policy); return Task.CompletedTask; });
+                }
+            }
+            catch (OperationCanceledException) { }
+        }
+
+        /// <summary>Gives each straggler, at most once, a second attempt on an idle worker - only
+        /// when nothing is waiting to run, so speculation never delays real work.</summary>
+        private void Speculate(SpeculationPolicy policy)
+        {
+            if (_ready.Count > 0) return;
+            var now = Stopwatch.GetTimestamp();
+            foreach (var (key, worker) in _inFlight.ToArray())
+            {
+                if (_copies.ContainsKey(key) || !_startedAt.TryGetValue(key, out var started)) continue;
+                var task = _graph[key];
+                if (!_durations.TryGetValue(task.Label, out var seen) || seen.Count < policy.MinimumSamples) continue;
+                var sorted = seen.Order().ToArray();
+                var median = sorted[sorted.Length / 2];
+                var threshold = Math.Max(policy.EffectiveMinimum.TotalMilliseconds, policy.Multiplier * median);
+                if (Stopwatch.GetElapsedTime(started, now).TotalMilliseconds < threshold) continue;
+                if (!task.Dependencies.All(Available)) continue;
+                var idle = _client._workers.Where(w => w.Alive && w != worker && w.InFlight < w.Threads).OrderBy(w => w.InFlight).FirstOrDefault();
+                if (idle is null) return;
+                _copies[key] = idle;
+                Statistics.Speculated++;
+                _client.OnEvent?.Invoke(new TaskEvent(TaskEventKind.Speculating, key, task.Label, _completed, _graph.Count, idle.Name));
+                Request(task, idle);
             }
         }
 
@@ -394,12 +447,19 @@ public sealed class Client : IScheduler, IAsyncDisposable
 
         private void Send(TaskSpec task, WorkerHandle worker)
         {
-            worker.InFlight++;
             _inFlight[task.Key] = worker;
+            _startedAt[task.Key] = Stopwatch.GetTimestamp();
             _attempts[task.Key] = _attempts.GetValueOrDefault(task.Key) + 1;
+            _client.OnEvent?.Invoke(new TaskEvent(TaskEventKind.Started, task.Key, task.Label, _completed, _graph.Count, worker.Name));
+            Request(task, worker);
+        }
+
+        /// <summary>Sends one attempt of <paramref name="task"/> to <paramref name="worker"/>.</summary>
+        private void Request(TaskSpec task, WorkerHandle worker)
+        {
+            worker.InFlight++;
             Statistics.TasksRun++;
             Statistics.TasksPerWorker[worker.Name] = Statistics.TasksPerWorker.GetValueOrDefault(worker.Name) + 1;
-            _client.OnEvent?.Invoke(new TaskEvent(TaskEventKind.Started, task.Key, task.Label, _completed, _graph.Count, worker.Name));
 
             var sources = new Dictionary<TaskKey, WorkerHandle>();
             foreach (var d in task.Dependencies)
@@ -427,9 +487,38 @@ public sealed class Client : IScheduler, IAsyncDisposable
 
         private async Task OnReplyAsync(TaskSpec task, WorkerHandle worker, Task<Message> reply)
         {
-            if (!_inFlight.TryGetValue(task.Key, out var assigned) || assigned != worker) return; // superseded
+            if (_losers.Remove((task.Key, worker)))
+            {
+                // The other attempt already won; this one only held a thread. Drop its copy.
+                worker.InFlight--;
+                if (reply.IsCompletedSuccessfully && reply.Result.Kind == MessageKind.Done && worker.Alive) _ = ReleaseAsync(worker, [task.Key]);
+                return;
+            }
+            var original = _inFlight.TryGetValue(task.Key, out var assigned) && assigned == worker;
+            var copy = _copies.TryGetValue(task.Key, out var copier) && copier == worker;
+            if (!original && !copy) return; // superseded
+            var other = original ? (_copies.TryGetValue(task.Key, out var c) ? c : null) : assigned;
+            var succeeded = reply.IsCompletedSuccessfully && reply.Result.Kind == MessageKind.Done;
+            if (other is not null && !succeeded && !reply.IsCanceled)
+            {
+                // One of two attempts failed while the other still runs: let the other decide.
+                worker.InFlight--;
+                if (copy) _copies.Remove(task.Key);
+                else
+                {
+                    _inFlight[task.Key] = other;
+                    _copies.Remove(task.Key);
+                }
+                return;
+            }
             _inFlight.Remove(task.Key);
+            _copies.Remove(task.Key);
             worker.InFlight--;
+            if (other is not null && succeeded)
+            {
+                _losers.Add((task.Key, other));
+                if (copy) Statistics.SpeculationWins++;
+            }
 
             if (reply.IsCanceled) throw new OperationCanceledException(_cancel);
             if (reply.IsFaulted)
@@ -448,6 +537,8 @@ public sealed class Client : IScheduler, IAsyncDisposable
                 var fetched = r.ReadInt32();
                 for (var i = 0; i < fetched; i++) Hold(WireCodec.ReadKey(r), worker);
                 Hold(key, worker);
+                if (!_durations.TryGetValue(task.Label, out var durations)) _durations[task.Label] = durations = [];
+                durations.Add(elapsed.TotalMilliseconds);
                 _completed++;
                 DaskTelemetry.TasksCompleted.Add(1);
                 DaskTelemetry.TaskDuration.Record(elapsed.TotalMilliseconds);
@@ -530,9 +621,17 @@ public sealed class Client : IScheduler, IAsyncDisposable
             var orphaned = _inFlight.Where(p => p.Value == worker).Select(p => p.Key).ToArray();
             foreach (var key in orphaned)
             {
-                _inFlight.Remove(key);
+                worker.InFlight--;
+                // A straggler's second attempt elsewhere becomes the attempt.
+                if (_copies.Remove(key, out var copy)) _inFlight[key] = copy;
+                else _inFlight.Remove(key);
+            }
+            foreach (var key in _copies.Where(p => p.Value == worker).Select(p => p.Key).ToArray())
+            {
+                _copies.Remove(key);
                 worker.InFlight--;
             }
+            _losers.RemoveWhere(l => l.Item2 == worker);
             Replan();   // reports the keys only this worker held
         }
 

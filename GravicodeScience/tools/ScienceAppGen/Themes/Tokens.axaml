@@ -133,6 +133,7 @@
   <SolidColorBrush x:Key="Spec4" Color="#56B87F" />  <!-- GraviText  / success -->
   <SolidColorBrush x:Key="Spec5" Color="#3FA9C9" />  <!-- GraviGraph / info    -->
   <SolidColorBrush x:Key="Spec6" Color="#7B7BD6" />  <!-- GraviProb  / assistant -->
+  <SolidColorBrush x:Key="Spec7" Color="#D9609E" />  <!-- DaskNet (outside the six-band rule: neon pink) -->
 
   <LinearGradientBrush x:Key="SpectrumRule" StartPoint="0%,0%" EndPoint="100%,0%">
     <GradientStop Offset="0.00" Color="#E0555A" />

@@ -21,6 +21,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DaskNet.Tests" />
+    <!-- Sibling packages plug in plan sources and kernels; they ship at the same version. -->
+    <InternalsVisibleTo Include="Gravicode.Science.DaskNet.Lakehouse" />
+    <InternalsVisibleTo Include="DaskNet.Lakehouse.Tests" />
   </ItemGroup>
 
 </Project>

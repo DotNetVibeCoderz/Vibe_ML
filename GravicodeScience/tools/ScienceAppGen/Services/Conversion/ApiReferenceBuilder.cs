@@ -100,6 +100,10 @@ public static partial class ApiReferenceBuilder
                     builder.AppendLine(SeabornOverview);
                     AppendCalledMembers(builder, calledNames, typeof(Seaborn.Net.Sns));
                     break;
+                case "DaskNet":
+                    builder.AppendLine(GravicodeReferencePlugin.Lookup("DaskNet")!.Trim()).AppendLine();
+                    AppendDask(builder, module.UsedSymbols, calledNames);
+                    break;
                 case "Plotly.Net":
                     builder.AppendLine(PlotlyOverview);
                     AppendCalledMembers(builder, calledNames, typeof(Plotly.Net.Chart), typeof(Plotly.Net.PlotlyFigure));
@@ -302,8 +306,13 @@ public static partial class ApiReferenceBuilder
     }
 
     private static void AppendCalledMembers(StringBuilder builder, IReadOnlySet<string> called, params Type[] types)
+        => AppendCalledMembers(builder, called, PyplotRenames,
+            "Signatures of the plotting members this file needs (exact, from the assembly):", types);
+
+    private static void AppendCalledMembers(StringBuilder builder, IReadOnlySet<string> called,
+        IEnumerable<(string Python, string CSharp)> renameTable, string header, params Type[] types)
     {
-        var renames = PyplotRenames.ToLookup(r => r.Python, r => r.CSharp, StringComparer.Ordinal);
+        var renames = renameTable.ToLookup(r => r.Python, r => r.CSharp, StringComparer.Ordinal);
         var wanted = called
             .SelectMany(n => renames[n].DefaultIfEmpty(CSharpNaming.ToPascalCase(n)))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -316,13 +325,65 @@ public static partial class ApiReferenceBuilder
                 .Where(m => wanted.Contains(m.Name))
                 .GroupBy(m => m.Name)
                 .SelectMany(g => g.Take(MaxOverloadsPerName));
-            foreach (var member in members) lines.Add($"{type.Name}.{Describe(member)}");
+            foreach (var member in members) lines.Add($"{TypeName(type)}.{Describe(member)}");
         }
 
         if (lines.Count == 0) return;
-        builder.AppendLine("Signatures of the plotting members this file needs (exact, from the assembly):");
+        builder.AppendLine(header);
         foreach (var line in lines.Distinct()) builder.Append("  ").AppendLine(line);
         builder.AppendLine();
+    }
+
+    // ---------------------------------------------------------------- dask
+
+    /// <summary>Which Dask.Net types a dask submodule's names live on.</summary>
+    private static readonly (string Prefix, Type[] Types)[] DaskModules =
+    [
+        ("dask.dataframe", [typeof(Gravicode.Science.DaskNet.DaskFrame), typeof(Gravicode.Science.DaskNet.DaskGroupBy), typeof(Gravicode.Science.DaskNet.Expr)]),
+        ("dask.array", [typeof(Gravicode.Science.DaskNet.DaskArray)]),
+        ("dask.bag", [typeof(Gravicode.Science.DaskNet.Bag), typeof(Gravicode.Science.DaskNet.Bag<>)]),
+        ("dask.distributed", [typeof(Gravicode.Science.DaskNet.Distributed.LocalCluster), typeof(Gravicode.Science.DaskNet.Distributed.Client)]),
+        ("distributed", [typeof(Gravicode.Science.DaskNet.Distributed.LocalCluster), typeof(Gravicode.Science.DaskNet.Distributed.Client)]),
+        ("dask_sql", [typeof(Gravicode.Science.DaskNet.Sql.SqlContext)]),
+        ("dask", [typeof(Gravicode.Science.DaskNet.Dask), typeof(Gravicode.Science.DaskNet.Delayed<>)]),
+    ];
+
+    /// <summary>dask names whose Dask.Net spelling is not just PascalCase.</summary>
+    private static readonly (string Python, string CSharp)[] DaskRenames =
+    [
+        ("from_pandas", "FromFrame"), ("from_dask_array", "FromFrame"), ("sort_values", "SortBy"),
+        ("assign", "WithColumn"), ("assign", "WithColumns"), ("query", "Filter"), ("merge", "Merge"), ("merge", "Join"),
+        ("dropna", "DropMissing"), ("fillna", "FillMissing"), ("nlargest", "SortBy"), ("drop_duplicates", "Distinct"),
+        ("create_table", "Register"), ("create_table", "RegisterCsv"), ("sql", "Sql"), ("sql", "Execute"),
+        ("LocalCluster", "StartAsync"), ("Client", "ConnectAsync"), ("gather", "Compute"), ("submit", "Delayed"),
+        ("from_delayed", "FromDelayed"), ("read_sql_table", "ReadSql"), ("read_sql_query", "ReadSql"),
+        ("to_json", "ToJson"), ("read_json", "ReadJson"), ("random", "Random"), ("normal", "RandomNormal"),
+        ("pluck", "Map"), ("count", "Count"), ("head", "Head"), ("head", "Take"), ("isin", "In"),
+    ];
+
+    /// <summary>
+    /// The Dask.Net members this file needs, read from the assembly: for every dask submodule the
+    /// file imports, the members of its Dask.Net types whose names the file calls. The full API is
+    /// several hundred members; the dozen a file uses are what keep the model from inventing
+    /// <c>DaskFrame.FromPandas</c>.
+    /// </summary>
+    private static void AppendDask(StringBuilder builder, IReadOnlySet<string> used, IReadOnlySet<string> called)
+    {
+        var types = DaskModules
+            .Where(m => used.Any(s => s == m.Prefix || s.StartsWith(m.Prefix + ".", StringComparison.Ordinal)))
+            .SelectMany(m => m.Types)
+            .Distinct()
+            .ToArray();
+        if (types.Length == 0) return;
+
+        // Methods are named on the module (dd.read_csv) or on the collection (df.groupby): both count.
+        var names = new HashSet<string>(called, StringComparer.Ordinal);
+        foreach (var symbol in used.Where(s => s.StartsWith("dask", StringComparison.Ordinal) || s.StartsWith("distributed", StringComparison.Ordinal)))
+            names.Add(symbol[(symbol.LastIndexOf('.') + 1)..]);
+        names.UnionWith(["compute"]);
+
+        AppendCalledMembers(builder, names, DaskRenames,
+            "Dask.Net signatures for the dask names this file uses (exact, from the assembly):", types);
     }
 
     // ---------------------------------------------------------------- formatting
@@ -397,6 +458,9 @@ public static partial class ApiReferenceBuilder
     public static string TypeName(Type type)
     {
         if (type == typeof(void)) return "void";
+        // A generic parameter (the T of Bag<T>) reports its declaring type as "nested in"; following
+        // that back into the generic type's arguments never terminates.
+        if (type.IsGenericParameter) return type.Name;
         if (type.IsArray) return TypeName(type.GetElementType()!) + "[" + new string(',', type.GetArrayRank() - 1) + "]";
         var nullable = Nullable.GetUnderlyingType(type);
         if (nullable is not null) return TypeName(nullable) + "?";
