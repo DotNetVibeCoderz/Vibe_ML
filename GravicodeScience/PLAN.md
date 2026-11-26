@@ -834,18 +834,50 @@ locality-aware placement, peer-to-peer data transfer and lineage recovery.
 6. ✅ **Scheduler survival**: every detached run has a standby worker that takes it over (and
    recomputes lost results) when its scheduling worker dies.
 
+**Then (2.5.0):**
+
+1. ✅ **Hudi merge-on-read snapshots and Delta v2 checkpoints.** A file slice is its base file plus
+   the Avro data and delete blocks of its log files, merged by record key with Hudi 1.0's
+   event-time rule (a log record replaces the stored one unless the stored ordering value is
+   greater; a delete with natural ordering always applies) and rollback command blocks honoured.
+   Pinned against Spark 3.5 + Hudi 1.0 at every instant of a table with upserts, deletes, an
+   out-of-order write that must lose, inline compaction and a write after it; read-optimized reads
+   are pinned separately. Delta v2 checkpoints (UUID-named, Parquet or JSON top level, sidecar
+   files) are read, and `v2Checkpoint` is a supported reader feature. Custom merge modes and
+   tables without meta fields are refused.
+2. ✅ **Views over shared memory**: `Client.ComputeViewAsync` returns a `SharedArrayView` - a span
+   over the mapped segment for an `NdArray` or `double[]` result, released to the sender on
+   `Dispose`. It is not an `NdArray`: those own a managed `double[]`, so `ToNdArray()` is the copy.
+   Frames still copy.
+3. ✅ **Exactly-once Kafka and MQTT acknowledgement after the sink.** `ToKafka` with a
+   transactional id writes each batch in one transaction that also records the batch id as an
+   offset commit; the query's checkpoint is two-phase (pending, transaction, promote) and a restart
+   asks the sink which batch committed last. Without an id the sink is plain at-least-once. MQTT
+   QoS 1/2 messages are acknowledged only after the sink and checkpoint, so a persistent session
+   gets them redelivered after a crash.
+4. ✅ **Kafka in its own package**: `Gravicode.Science.DaskNet.Kafka`. `DaskStream.FromKafka` still
+   reads the same through a C# 14 extension block, so moving it broke no call site.
+5. ✅ **Geometry in metres**: `GeoCrs` (WGS 84, Web Mercator, the UTM zones) with `crs:` on buffer,
+   simplify, centroid and measures, and `ToCrs`. Each geometry is worked on in a transverse Mercator
+   centred on its own centroid (Krüger's series, as PROJ's tmerc), so results stay in the column's
+   system. Pinned against PROJ to 1e-9 and against geodesic areas within the plane's own error.
+6. ✅ **Run-state replication and several standbys**: `Client.RunStandbys` sets how many; each
+   watches its predecessors in the succession and takes over when all of them are gone. A
+   finished run's outputs are copied to every standby before it reports `Finished`, so losing the
+   scheduler after that recomputes nothing (`Worker.TakeoversFromReplica`). A takeover *mid-run*
+   still reruns the graph - intermediate results live on workers that may be the dead ones.
+
 **Next:**
 
-1. **Hudi merge-on-read snapshots** (merging Avro log blocks into base files) and Delta v2
-   checkpoints.
-2. **Zero-copy reads from shared memory** - frames and arrays as views over the mapped segment
-   instead of a copy, which needs lifetime tracking for the segment.
-3. **Exactly-once Kafka** (transactional sink) and MQTT acknowledgement after the sink.
-4. **Kafka in its own package**: Confluent.Kafka brings librdkafka's native binaries into every
-   `DaskNet.Streaming` user.
-5. **Geometry in metres**: CRS-aware buffers and areas (a projection step) instead of planar degrees.
-6. **Run-state replication**: a standby that resumes from the scheduler's finished tasks instead of
-   recomputing the whole graph, and more than one standby.
+1. **Mid-run takeover without recomputation**: replicate finished intermediate keys' locations, so
+   a new scheduler collects what live workers still hold instead of rerunning the graph.
+2. **Frames as shared-memory views** - an Arrow layout in the segment, so a `DataFrame`'s numeric
+   columns can be read in place too.
+3. **Hudi custom merge modes and record-level index**, and Delta writes (append, overwrite).
+4. **More coordinate systems**: a proj-string or WKT2 reader for transverse Mercator, Lambert
+   conformal conic and Albers, so national grids work without converting to UTM first.
+5. **Kafka source exactly-once end to end**: consumer offsets committed inside the sink's
+   transaction, for Kafka-to-Kafka pipelines that need no checkpoint directory.
 
 ## Non-goals
 

@@ -50,6 +50,74 @@ public sealed class SharedMemoryTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task A_view_reads_the_segment_in_place_until_disposed()
+    {
+        var a = DaskArray.Random([1200, 1200], [600, 600], seed: 11);
+        var block = a.ToDelayed()[0];                                      // one 600x600 block, 2.9 MB
+        var expected = block.Compute().ToArray();
+        var (workers, client) = await Start(2, threshold: 1 << 20);
+        try
+        {
+            var view = await client.ComputeViewAsync(block).WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(view.IsShared);
+            Assert.Equal([600, 600], view.Shape);
+            Assert.Equal(expected, view.Span.ToArray());
+            Assert.Equal(expected[12345], view[12345]);
+            Assert.Equal(expected, view.Memory.ToArray());
+            Assert.Equal(expected, view.ToNdArray().ToArray());
+            // The segment stays lent while the view lives, and goes back when it is disposed.
+            Assert.Equal(1, workers.Sum(w => w.LiveSharedSegments));
+            var memory = view.Memory;
+            view.Dispose();
+            view.Dispose();                                                // idempotent
+            Assert.Throws<ObjectDisposedException>(() => view.Span.Length);
+            Assert.Throws<ObjectDisposedException>(() => memory.Span.Length);
+            await WaitFor(() => workers.Sum(w => w.LiveSharedSegments) == 0);
+
+            // Several live views are distinct segments, not one reused buffer.
+            var views = await Task.WhenAll(a.ToDelayed().Select(d => client.ComputeViewAsync(d))).WaitAsync(TimeSpan.FromSeconds(30));
+            var blocks = a.ToDelayed().Select(d => d.Compute().ToArray()).ToArray();
+            for (var i = 0; i < views.Length; i++) Assert.Equal(blocks[i], views[i].Span.ToArray());
+            Assert.Equal(4, workers.Sum(w => w.LiveSharedSegments));
+            foreach (var v in views) v.Dispose();
+            await WaitFor(() => workers.Sum(w => w.LiveSharedSegments) == 0);
+
+            // With shared memory off the view is over a copy.
+            client.SharedMemory = false;
+            using var copy = await client.ComputeViewAsync(block).WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.False(copy.IsShared);
+            Assert.Equal(expected, copy.Span.ToArray());
+        }
+        finally { await Stop(workers, client); }
+    }
+
+    [Fact]
+    public async Task Small_or_non_array_results_view_a_copy_or_refuse()
+    {
+        var small = DaskArray.Random([100, 100], [100, 100], seed: 2).ToDelayed()[0];   // 80 KB, under the threshold
+        var (workers, client) = await Start(1, threshold: 1 << 20);
+        try
+        {
+            using var view = await client.ComputeViewAsync(small);
+            Assert.False(view.IsShared);
+            Assert.Equal(small.Compute().ToArray(), view.Span.ToArray());
+            Assert.Equal(0, workers[0].SharedMemoryBytesSent);
+        }
+        finally { await Stop(workers, client); }
+    }
+
+    private static async Task WaitFor(Func<bool> condition)
+    {
+        // SharedDone is sent without waiting for its reply; give it a moment to land.
+        var clock = Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (clock.Elapsed > TimeSpan.FromSeconds(10)) Assert.Fail("condition not reached in 10 s");
+            await Task.Delay(10);
+        }
+    }
+
+    [Fact]
     public async Task Small_results_and_disabled_workers_use_the_socket()
     {
         var a = DaskArray.Random([400, 400], [100, 100], seed: 3);           // 80 KB blocks

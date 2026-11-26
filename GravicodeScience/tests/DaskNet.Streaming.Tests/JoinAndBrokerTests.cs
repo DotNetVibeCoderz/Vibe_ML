@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
-using Confluent.Kafka;
 using Gravicode.Science.DaskNet.Streaming;
 using Gravicode.Science.GraviFrame;
 using MQTTnet;
@@ -348,150 +347,57 @@ public sealed class JoinAndBrokerTests : IDisposable
             await server.StopAsync();
         }
     }
-
-    // ------------------------------------------------------------------ Kafka (in-memory broker model)
-
-    /// <summary>A topic's partitions and a group's committed offsets, shared by consumers.</summary>
-    private sealed class FakeBroker
+    [Fact]
+    public async Task Mqtt_messages_a_failed_sink_never_finished_are_redelivered_on_restart()
     {
-        public List<List<RawMessage>> Partitions { get; } = [];
-        public Dictionary<(string, int), long> Committed { get; } = [];
-        public int Started { get; set; }
-    }
-
-    private sealed class FakeConsumer(FakeBroker broker) : IKafkaConsumer
-    {
-        private readonly long[] _position = new long[broker.Partitions.Count];
-        private int _turn;
-
-        public void Start(IReadOnlyDictionary<(string Topic, int Partition), long> resume)
+        var port = FreePort();
+        var serverFactory = new MqttServerFactory();
+        using var server = serverFactory.CreateMqttServer(serverFactory.CreateServerOptionsBuilder()
+            .WithDefaultEndpoint().WithDefaultEndpointPort(port).WithPersistentSessions(true).Build());
+        var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.ClientSubscribedTopicAsync += _ => { subscribed.TrySetResult(); return Task.CompletedTask; };
+        await server.StartAsync();
+        try
         {
-            broker.Started++;
-            for (var p = 0; p < _position.Length; p++)
-                _position[p] = resume.TryGetValue(("orders", p), out var o) ? o : broker.Committed.GetValueOrDefault(("orders", p));
-        }
-
-        public RawMessage? Consume(TimeSpan timeout, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            for (var k = 0; k < _position.Length; k++)
+            // A fixed client id and a persistent session: what the broker has not had a PUBACK for
+            // stays its responsibility. With acknowledgement after the sink, that is every message
+            // of a batch whose sink threw, and everything behind it.
+            MqttOptions Options() => new()
             {
-                var p = (_turn + k) % _position.Length;
-                if (_position[p] < broker.Partitions[p].Count)
+                Port = port, ClientId = "dasknet-redelivery", CleanSession = false,
+                MaxBatchRows = 10, MaxBatchDelay = TimeSpan.FromMilliseconds(100), IdleTimeout = TimeSpan.FromSeconds(3),
+            };
+            var format = MessageFormat.Json(("id", ColumnType.Number));
+            var failing = DaskStream.FromMqtt("127.0.0.1", ["jobs/#"], format, Options())
+                .ForEachBatch((_, _) => throw new InvalidOperationException("sink down"));
+            var first = failing.RunAsync();
+            await subscribed.Task.WaitAsync(TimeSpan.FromSeconds(20));
+
+            var factory = new MqttClientFactory();
+            using var publisher = factory.CreateMqttClient();
+            await publisher.ConnectAsync(new MqttClientOptionsBuilder().WithTcpServer("127.0.0.1", port).WithClientId("publisher").Build());
+            for (var i = 0; i < 40; i++)
+                await publisher.PublishAsync(new MqttApplicationMessageBuilder().WithTopic("jobs/a").WithPayload($"{{\"id\":{i}}}")
+                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build());
+            var error = await Assert.ThrowsAnyAsync<Exception>(() => first.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.Contains("sink down", error.ToString());
+
+            var seen = new System.Collections.Concurrent.ConcurrentBag<double>();
+            var stats = await DaskStream.FromMqtt("127.0.0.1", ["jobs/#"], format, Options())
+                .ForEachBatch((frame, _) =>
                 {
-                    _turn = p + 1;
-                    return broker.Partitions[p][(int)_position[p]++];
-                }
-            }
-            return null;                                                         // nothing new: as if the timeout passed
+                    foreach (var v in frame.Numeric("id").Values) seen.Add(v);
+                    return Task.CompletedTask;
+                })
+                .RunAsync().WaitAsync(TimeSpan.FromSeconds(60));
+            await publisher.DisconnectAsync();
+            // At least once: every id comes back, and nothing that was never published.
+            Assert.Equal(Enumerable.Range(0, 40).Select(i => (double)i), seen.Distinct().Order());
+            Assert.True(stats.InputRows >= 40, $"{stats.InputRows} rows");
         }
-
-        public void Commit(IReadOnlyDictionary<(string Topic, int Partition), long> next)
+        finally
         {
-            foreach (var (k, v) in next) broker.Committed[k] = v;
+            await server.StopAsync();
         }
-
-        public void Dispose() { }
-    }
-
-    private static FakeBroker Orders(int partitions, int perPartition)
-    {
-        var broker = new FakeBroker();
-        for (var p = 0; p < partitions; p++)
-            broker.Partitions.Add([.. Enumerable.Range(0, perPartition).Select(o =>
-                new RawMessage("orders", $"{{\"order\": {p * 1000 + o}, \"amount\": {o % 17}}}", T0.AddSeconds(o), $"k{o % 3}", p, o))]);
-        return broker;
-    }
-
-    private static KafkaOptions KafkaTestOptions() => new() { MaxBatchRows = 40, MaxBatchDelay = TimeSpan.FromSeconds(5), IdleTimeout = TimeSpan.FromMilliseconds(50), KeyColumn = "key", PartitionColumn = "partition", OffsetColumn = "offset", TimestampColumn = "ts" };
-
-    [Fact]
-    public async Task Kafka_offsets_are_checkpointed_and_committed_only_after_the_sink()
-    {
-        var broker = Orders(partitions: 3, perPartition: 70);
-        var checkpoint = Path.Combine(_root, "kafka");
-        var seen = new List<double>();
-        var batches = 0;
-        long committedBeforeFailure = 0;
-        Task Sink(DataFrame f, StreamBatch b)
-        {
-            if (++batches == 3)
-            {
-                committedBeforeFailure = broker.Committed.Values.Sum();
-                throw new IOException("sink down");
-            }
-            seen.AddRange(Enumerable.Range(0, f.RowCount).Select(i => f.Numeric("order")[i]));
-            return Task.CompletedTask;
-        }
-
-        var stream = DaskStream.FromKafkaConsumer(() => new FakeConsumer(broker), MessageFormat.Json(), KafkaTestOptions());
-        await Assert.ThrowsAsync<IOException>(() => stream.ForEachBatch(Sink).RunAsync(checkpoint));
-        Assert.Equal(80, seen.Count);                                            // two batches of 40 reached the sink
-        Assert.Equal(80, committedBeforeFailure);                                // ...and only they were committed
-
-        // Restart: the failed batch is replayed, nothing is skipped or repeated.
-        var stats = await stream.ForEachBatch(Sink).RunAsync(checkpoint);
-        Assert.Equal(2, broker.Started);
-        Assert.Equal(210 - 80, stats.InputRows);
-        var all = Enumerable.Range(0, 3).SelectMany(p => Enumerable.Range(0, 70).Select(o => (double)(p * 1000 + o))).Order();
-        Assert.Equal(all, seen.Order());
-        Assert.Equal(new[] { 70L, 70, 70 }, Enumerable.Range(0, 3).Select(p => broker.Committed[("orders", p)]));
-
-        // A new message after the end: a third run reads only it.
-        broker.Partitions[1].Add(new RawMessage("orders", "{\"order\": 9999, \"amount\": 1}", T0, null, 1, 70));
-        var third = await stream.ForEachBatch(Sink).RunAsync(checkpoint);
-        Assert.Equal(1, third.InputRows);
-        Assert.Equal(9999, seen[^1]);
-    }
-
-    [Fact]
-    public async Task Kafka_without_a_checkpoint_resumes_from_the_groups_commits_and_carries_metadata()
-    {
-        var broker = Orders(partitions: 2, perPartition: 30);
-        broker.Committed[("orders", 0)] = 25;                                    // the group had read most of p0
-        var query = DaskStream.FromKafkaConsumer(() => new FakeConsumer(broker), MessageFormat.Json(("order", ColumnType.Number)), KafkaTestOptions()).Collect();
-        var stats = await query.RunAsync();
-        Assert.Equal(5 + 30, stats.InputRows);
-        var frame = query.CollectedFrame();
-        Assert.Equal(["order", "amount", "topic", "ts", "key", "partition", "offset"], frame.ColumnNames);
-        var p0 = Enumerable.Range(0, frame.RowCount).Where(i => frame.Numeric("partition")[i] == 0).Select(i => frame.Numeric("offset")[i]).Order();
-        Assert.Equal([25.0, 26, 27, 28, 29], p0);
-        Assert.Equal(T0.AddSeconds(25), Enumerable.Range(0, frame.RowCount).Where(i => frame.Numeric("order")[i] == 25).Select(i => frame.DateTimes("ts")[i]).Single());
-        Assert.Equal(30, broker.Committed[("orders", 0)]);
-    }
-
-    // ------------------------------------------------------------------ Kafka (a real broker, opt-in)
-
-    /// <summary>Runs against a real broker when <c>DASKNET_KAFKA</c> names its bootstrap servers.</summary>
-    [Fact]
-    public async Task Kafka_against_a_real_broker()
-    {
-        var servers = Environment.GetEnvironmentVariable("DASKNET_KAFKA");
-        if (string.IsNullOrEmpty(servers)) Assert.Skip("Set DASKNET_KAFKA to a broker's bootstrap servers to run this test.");
-        var topic = "dasknet-test-" + Guid.NewGuid().ToString("N")[..8];
-        using (var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = servers }).Build())
-            await admin.CreateTopicsAsync([new Confluent.Kafka.Admin.TopicSpecification { Name = topic, NumPartitions = 3, ReplicationFactor = 1 }]);
-        using (var producer = new ProducerBuilder<string, string>(new ProducerConfig { BootstrapServers = servers }).Build())
-        {
-            for (var i = 0; i < 500; i++)
-                await producer.ProduceAsync(topic, new Message<string, string> { Key = $"k{i % 7}", Value = $"{{\"n\": {i}, \"region\": \"r{i % 4}\"}}" });
-            producer.Flush(TimeSpan.FromSeconds(10));
-        }
-        var checkpoint = Path.Combine(_root, "real-kafka");
-        var options = new KafkaOptions { MaxBatchRows = 100, MaxBatchDelay = TimeSpan.FromSeconds(1), IdleTimeout = TimeSpan.FromSeconds(15), KeyColumn = "key" };
-        var first = DaskStream.FromKafka(servers, [topic], "dasknet-tests", MessageFormat.Json(), options).Collect();
-        var stats = await first.RunAsync(checkpoint);
-        Assert.Equal(500, stats.InputRows);
-        var frame = first.CollectedFrame();
-        Assert.Equal(Enumerable.Range(0, 500).Select(i => (double)i), Enumerable.Range(0, frame.RowCount).Select(i => frame.Numeric("n")[i]).Order());
-
-        using (var producer = new ProducerBuilder<string, string>(new ProducerConfig { BootstrapServers = servers }).Build())
-        {
-            for (var i = 500; i < 520; i++) await producer.ProduceAsync(topic, new Message<string, string> { Key = "k", Value = $"{{\"n\": {i}, \"region\": \"r0\"}}" });
-            producer.Flush(TimeSpan.FromSeconds(10));
-        }
-        var second = DaskStream.FromKafka(servers, [topic], "dasknet-tests", MessageFormat.Json(), options).Collect();
-        var again = await second.RunAsync(checkpoint);
-        Assert.Equal(20, again.InputRows);
     }
 }

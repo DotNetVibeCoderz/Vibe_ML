@@ -20,7 +20,18 @@ internal sealed record LakeFile(string Path, long Size, IReadOnlyDictionary<stri
 
     /// <summary>A <see cref="DeletionVectors"/> descriptor of the rows deleted from the file, if any.</summary>
     public string? DeletionVector { get; init; }
+
+    /// <summary>Hudi log files to merge over this base file (or over nothing: a slice that is all
+    /// log), in the order they apply. Only read when the source has a <see cref="HudiMerge"/>.</summary>
+    public string[] Logs { get; init; } = [];
 }
+
+/// <summary>How a Hudi merge-on-read snapshot merges a file slice's logs into its base file.</summary>
+/// <param name="RecordKey">The column holding record keys (<c>_hoodie_record_key</c>).</param>
+/// <param name="OrderingField">The precombine / ordering column; empty for none.</param>
+/// <param name="EventTime">Event-time ordering: a record with a smaller ordering value loses.</param>
+/// <param name="Instants">The completed instants a log block may belong to.</param>
+internal sealed record HudiMerge(string RecordKey, string OrderingField, bool EventTime, string[] Instants);
 
 /// <summary>
 /// A table snapshot as a scan: one partition per data file, columns pinned to the table schema.
@@ -32,9 +43,10 @@ internal sealed record LakeFile(string Path, long Size, IReadOnlyDictionary<stri
 /// evolution) read as missing values, which is what both formats specify.
 /// </remarks>
 internal sealed class LakeSource(string label, string[] names, DataType[] types, LakeFile[] files,
-    IReadOnlyCollection<string> partitionColumns, bool partitionsInFile) : ScanSource
+    IReadOnlyCollection<string> partitionColumns, bool partitionsInFile, HudiMerge? merge = null) : ScanSource
 {
     private static readonly MethodInfo ReadMethod = typeof(LakeKernels).GetMethod(nameof(LakeKernels.ReadLakeFile))!;
+    private static readonly MethodInfo SliceMethod = typeof(HudiKernels).GetMethod(nameof(HudiKernels.ReadFileSlice))!;
 
     public override IReadOnlyList<string> Columns => names;
     public override int Partitions => Math.Max(1, files.Length);
@@ -67,6 +79,17 @@ internal sealed class LakeSource(string label, string[] names, DataType[] types,
         var fileNames = read.Select(c => file?.FileNames.GetValueOrDefault(c) ?? c).ToArray();
         var fieldIds = read.Select(c => file?.FieldIds.GetValueOrDefault(c) ?? 0).ToArray();
         string?[] constants = fromLog.Select(c => file!.PartitionValues.GetValueOrDefault(c)).ToArray();
+        if (merge is not null && file is { Logs.Length: > 0 })
+        {
+            // A merged slice needs the key and ordering columns whatever the projection keeps, so
+            // it reads the whole table schema and projects after merging.
+            var tableConstants = partitionsInFile ? [] : names.Where(partitionColumns.Contains).ToArray();
+            string?[] tableValues = tableConstants.Select(c => file.PartitionValues.GetValueOrDefault(c)).ToArray();
+            return TaskSpec.Call(new TaskKey(name, i), SliceMethod,
+                [file.Path, file.Logs, merge.Instants, merge.RecordKey, merge.OrderingField, merge.EventTime,
+                 tableConstants, tableValues, names, types.Select(t => (int)t).ToArray(), keep, encoded],
+                "read-" + label.Split(' ')[0].ToLowerInvariant());
+        }
         return TaskSpec.Call(new TaskKey(name, i), ReadMethod,
             [file?.Path ?? "", read, fileNames, fieldIds, file?.DeletionVector ?? "", fromLog, constants, keep, keepTypes, encoded],
             "read-" + label.Split(' ')[0].ToLowerInvariant());

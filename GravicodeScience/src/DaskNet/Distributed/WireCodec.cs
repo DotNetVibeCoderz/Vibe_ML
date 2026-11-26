@@ -92,6 +92,10 @@ public static class WireCodec
         return Read(r);
     }
 
+    /// <summary>The leading tag bytes of an encoded <c>NdArray</c> and <c>double[]</c>, for readers
+    /// that view the payload in place (<see cref="SharedArrayView"/>).</summary>
+    internal const byte NdArrayTag = (byte)Tag.NdArray, DoubleArrayTag = (byte)Tag.DoubleArray;
+
     private enum Tag : byte
     {
         Null, Bool, Int, Long, Double, String, DoubleArray, IntArray, LongArray, StringArray, BoolArray, Bytes,

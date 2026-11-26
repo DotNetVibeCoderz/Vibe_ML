@@ -1,6 +1,6 @@
 # Progress — Gravicode.Science
 
-**Release**: v2.4.0 · **Target framework**: .NET 10 · **Tests**: 4,487 passing, 0 failing
+**Release**: v2.5.0 · **Target framework**: .NET 10 · **Tests**: 4,523 passing, 0 failing
 
 Roadmap: [PLAN.md](PLAN.md)
 
@@ -10,7 +10,7 @@ Roadmap: [PLAN.md](PLAN.md)
 
 | Area | Status | Notes |
 |---|---|---|
-| Solution and build | ✅ Complete | 46 projects, central package management, Release build clean |
+| Solution and build | ✅ Complete | 48 projects, central package management, Release build clean |
 | GraviNum | ✅ Complete | 340 tests |
 | GraviFrame | ✅ Complete | 165 tests |
 | GraviLearn | ✅ Complete | 176 tests |
@@ -18,14 +18,14 @@ Roadmap: [PLAN.md](PLAN.md)
 | GraviGraph | ✅ Complete | 97 tests |
 | GraviProb | ✅ Complete | 139 tests |
 | SciNet | ✅ Complete | 2,983 tests — SciPy for .NET, all 15 `scipy.*` modules |
-| Dask.Net | ✅ Core complete | 326 tests (211 core, 115 in the add-ons) — task graphs, Bag, Array, DataFrame, SQL (windows, UNION, DISTINCT aggregates), TCP cluster with recovery, TLS, spilling, discovery, cost-based joins, JSON/SQL connectors, SQL pushdown, join reordering, detached runs with a standby scheduler, speculation, shared memory between co-located workers; Lakehouse (Delta, Iceberg, Hudi), Geo (joins, buffer/dissolve/overlay), ML (search, incremental, ONNX) and Streaming (files, MQTT, Kafka, stream joins) add-ons; see the coverage table in docs/DaskNet.md |
+| Dask.Net | ✅ Core complete | 362 tests (216 core, 146 in the add-ons) — task graphs, Bag, Array, DataFrame, SQL (windows, UNION, DISTINCT aggregates), TCP cluster with recovery, TLS, spilling, discovery, cost-based joins, JSON/SQL connectors, SQL pushdown, join reordering, detached runs with replicated standby schedulers, speculation, shared memory between co-located workers (with in-place array views); Lakehouse (Delta, Iceberg, Hudi with merge-on-read), Geo (joins, buffer/dissolve/overlay, in metres), ML (search, incremental, ONNX), Streaming (files, MQTT, stream joins) and Kafka (exactly-once sink) add-ons; see the coverage table in docs/DaskNet.md |
 | Sample apps | ✅ Complete | 8 apps, all run end to end |
 | Notebooks | ✅ Complete | 8 notebooks, cells compile-checked |
 | Benchmarks | ✅ Complete | 8 suites; cross-stack comparison now covers SciNet vs SciPy (26 workloads) |
 | Datasets | ✅ Complete | 4 real, 4 generated |
 | Documentation | ✅ Complete | 10 pages × 2 languages, with a visualisation gallery per library |
 | Screenshots | ✅ Complete | 13 rendered by the samples, plus 6 of ScienceAppGen |
-| Packaging | ✅ Complete | 13 NuGet packages with XML docs, `.snupkg` and a per-library icon, packed and verified |
+| Packaging | ✅ Complete | 14 NuGet packages with XML docs, `.snupkg` and a per-library icon, packed and verified |
 | CI | ✅ Complete | Build + test on Linux and Windows, notebook cells compiled, tag-driven release |
 
 ---
@@ -251,7 +251,7 @@ remains the better baseline on a small dataset.
 
 ---
 
-### Dask.Net — 326 tests
+### Dask.Net — 362 tests
 
 - [x] Task graph core: `TaskKey`/`TaskSpec`/`GraphLayer`, cull, linear fusion, depth-first
   priorities, cycle detection, DOT and Mermaid (task-level and layer-level)
@@ -309,13 +309,34 @@ remains the better baseline on a small dataset.
 - [x] Shared memory between co-located workers and clients: pooled mapped segments, 5x loopback
   TCP at 8-64 MiB; checked bit for bit between real worker processes
 - [x] Lakehouse: Delta deletion vectors and column mapping (name, id), Hudi copy-on-write and
-  read-optimized merge-on-read, against Spark/delta-spark/Hudi fixtures (56 tests)
+  merge-on-read, against Spark/delta-spark/Hudi fixtures (75 tests)
 - [x] Geo: buffer, simplify, centroid, measures, dissolve, overlay on NetTopologySuite, against
-  shapely/GEOS (18 tests)
+  shapely/GEOS and PROJ (23 tests)
 - [x] ML: incremental SGD regression/classification and Gaussian naive Bayes over partitions,
   ONNX batch scoring (15 tests)
-- [x] Streaming: MQTT and Kafka sources (real Kafka 4.3 checked), stream-stream interval joins
-  (27 tests, one needing `DASKNET_KAFKA`)
+- [x] Streaming: MQTT source and stream-stream interval joins (25 tests); Kafka source and
+  exactly-once sink in their own package (8 tests, two needing `DASKNET_KAFKA`; real Kafka 4.3 checked)
+- [x] Hudi merge-on-read snapshots (Avro data/delete log blocks merged into base files, rollbacks,
+  event-time ordering) at every instant of a Spark-written table; Delta v2 checkpoints with sidecars
+- [x] `Client.ComputeViewAsync`: `SharedArrayView` spans over the mapped segment, released on dispose
+- [x] Exactly-once Kafka sink (`ToKafka` with a transactional id, two-phase checkpoint) in the new
+  `DaskNet.Kafka` package; MQTT acknowledged after the sink, redelivered to a persistent session
+- [x] `GeoCrs` (WGS 84, Web Mercator, UTM): buffers, simplify, centroids and measures in metres,
+  `ToCrs`; checked against PROJ and geodesic areas
+- [x] Several standbys per detached run (`Client.RunStandbys`), finished outputs copied to every
+  standby so a takeover after finishing recomputes nothing
+
+## 2.5.0 — Dask.Net: Hudi merge-on-read, Kafka package, metres, replicated runs (2026-11-27)
+
+Lakehouse: Hudi merge-on-read snapshots and Delta v2 checkpoints. Geo: `GeoCrs` and `crs:` on
+buffer/simplify/centroid/measures, `ToCrs`. Streaming: MQTT acknowledgement after the sink;
+**breaking for package references** - Kafka moved to `Gravicode.Science.DaskNet.Kafka` (the
+`DaskStream.FromKafka` call is unchanged, it needs the new package), which adds an exactly-once
+transactional sink. Core: `ComputeViewAsync`/`SharedArrayView`, `Client.RunStandbys`,
+`RunHandle.Standbys`, `Worker.TakeoversFromReplica`; 2.4 handles still parse. Fixes: several runs
+at once on one `Client` could hang forever when the cluster was saturated (a slot freed by one
+run woke no other; since 2.1); an MQTT "persistent" session was discarded at disconnect, because
+MQTT 5's default session expiry is zero (`MqttOptions.SessionExpiry`, one day by default).
 
 ## 2.4.0 — Dask.Net: shared memory, standby scheduler, Hudi, geometry, incremental ML, brokers (2026-11-27)
 

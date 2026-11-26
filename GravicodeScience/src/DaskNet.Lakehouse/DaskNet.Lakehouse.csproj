@@ -10,7 +10,7 @@
     <RootNamespace>Gravicode.Science.DaskNet.Lakehouse</RootNamespace>
     <AssemblyName>Gravicode.Science.DaskNet.Lakehouse</AssemblyName>
     <PackageId>Gravicode.Science.DaskNet.Lakehouse</PackageId>
-    <Description>Delta Lake (deletion vectors, column mapping), Apache Iceberg and Apache Hudi readers for Dask.Net: tables become partitioned DaskFrames with time travel, partition pruning and column projection, readable on a cluster. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <Description>Delta Lake (deletion vectors, column mapping, v2 checkpoints), Apache Iceberg and Apache Hudi (copy-on-write and merge-on-read snapshots) readers for Dask.Net: tables become partitioned DaskFrames with time travel, partition pruning and column projection, readable on a cluster. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
     <PackageTags>dask;delta-lake;iceberg;lakehouse;parquet;dataframe;dotnet;gravicode</PackageTags>
   </PropertyGroup>
 

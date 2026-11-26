@@ -486,16 +486,27 @@ await other.ForgetAsync(handle);                           // melepas hasilnya d
 Hanya graph `[RemoteTask]` yang bisa di-submit - lambda tidak bisa meninggalkan proses, dan
 `SubmitAsync` menolaknya dengan `NotSupportedException`.
 
-**Scheduler punya cadangan (standby).** `SubmitAsync` juga mengirim graph ke worker kedua
-(`RunHandle.Standby`), yang menanyai worker penjadwal setiap 200 ms. Setelah tiga kali gagal -
-atau jawaban bahwa scheduler tidak mengenal run itu, yang berarti ia di-restart - standby
-menjalankan graph itu sendiri di semua worker lain dan menyimpan hasilnya. Itu mencakup scheduler
-yang mati di tengah run maupun yang mati setelah selesai (hasilnya ikut hilang, jadi dihitung
-ulang). `StatusAsync`, `ResultsAsync`, `CancelAsync` dan `ForgetAsync` otomatis beralih ke
-standby; cancel dan forget dikirim ke standby *lebih dulu*, karena kalau tidak, standby akan
-melihat scheduler melupakan run itu lalu mengambil alih. Kehilangan kedua worker berarti run
-hilang, dan cluster satu worker tidak punya standby. Test membunuh scheduler berdasarkan event
-(setelah run mengalami kemajuan) dan setelah selesai, lalu memeriksa hasil dan `Worker.Takeovers`.
+**Scheduler punya cadangan (standby).** `SubmitAsync` juga mengirim graph ke
+`Client.RunStandbys` worker lain (satu secara bawaan; `RunHandle.Standbys`, menurut urutan
+suksesi). Masing-masing menanyai pendahulu pertama yang belum ia anggap mati setiap 200 ms;
+setelah tiga kali gagal - atau jawaban bahwa run itu tidak dikenal, yang berarti restart - ia
+beralih ke pendahulu berikutnya, dan bila tidak ada yang tersisa ia mengambil alih run. Saat run
+selesai, output-nya disalin ke setiap pemegang sesudahnya *sebelum* ia melaporkan `Finished`,
+sehingga scheduler yang mati sesudahnya tidak merugikan apa pun: standby berikutnya menyajikan
+salinannya (`Worker.TakeoversFromReplica`). Pemegang yang mati *di tengah run* digantikan standby
+yang menjalankan ulang graph di worker yang masih hidup - hasil antara tinggal di worker yang
+mungkin justru ikut mati. `StatusAsync`, `ResultsAsync`, `CancelAsync` dan `ForgetAsync` otomatis
+beralih sepanjang suksesi; cancel dan forget dikirim ke standby terakhir *lebih dulu*, karena
+kalau tidak, standby akan melihat pendahulunya melupakan run itu lalu mengambil alih. Kehilangan
+semua pemegang berarti run hilang, dan cluster satu worker tidak punya standby. Test membunuh
+scheduler dan standby pertama bersamaan di tengah run, serta scheduler lalu standby pertama
+setelah selesai, dan memeriksa bahwa kasus kedua tidak menjalankan satu task pun.
+
+```csharp
+client.RunStandbys = 2;                                   // bertahan dari dua pemegang yang hilang
+RunHandle run = await client.SubmitAsync(report);
+// run.Scheduler, run.Standbys[0], run.Standbys[1]; handle 2.4 (satu "standby") tetap terbaca
+```
 
 ### Shared memory antar worker di satu mesin
 
@@ -508,6 +519,21 @@ dibuktikan dengan membuka segmen; pembaca yang gagal membukanya kembali ke socke
 meminta ke pemegang itu. `Client.SharedMemory = false` menonaktifkannya untuk client,
 `--shared-memory-threshold off` untuk worker; `WorkerInfo` melaporkan `SharedMemoryBytesSent` dan
 `SocketBytesSent`.
+
+**View, bukan salinan.** `ComputeViewAsync` membaca hasil `NdArray` atau `double[]` di tempat:
+
+```csharp
+using SharedArrayView view = await client.ComputeViewAsync(big);   // Delayed<NdArray> atau Delayed<double[]>
+ReadOnlySpan<double> values = view.Span;                           // langsung di atas segmen yang di-map
+double total = 0; foreach (var v in values) total += v;
+NdArray copy = view.ToNdArray();                                   // bila butuh array
+```
+
+Segmen tetap dipinjamkan ke pembaca sampai view di-dispose, yang memberi tahu pemegang bahwa
+segmen boleh dipakai ulang; lupa men-dispose menahan segmen sampai pemegang membuangnya setelah
+satu menit. Hasil di bawah ambang, atau dari mesin lain, datang sebagai view atas salinan
+(`IsShared` bernilai false). Ini bukan `NdArray` - `NdArray` memiliki `double[]` terkelola - dan
+frame tetap disalin.
 
 Segmen tetap di-map, dan justru itulah kuncinya. Versi pertama memetakan view baru untuk setiap
 transfer dan terukur *lebih lambat* daripada TCP loopback (0,87x pada 64 MiB): setiap transfer
@@ -571,8 +597,9 @@ dengan container array, bitmap dan run; checksum diperiksa) dan baris yang dihap
 Identitas sebuah file adalah path-nya *dan* deletion vector-nya, karena Spark menulis
 `add(P, newDV)` dan `remove(P, oldDV)` dalam satu commit. **Column mapping** mode `name` dan `id`:
 file dibaca menurut nama fisik atau field id Parquet dan kolom kembali dengan nama logisnya,
-termasuk yang diganti nama dan dihapus. Checkpoint v2 (bernama UUID) ditolak dengan menyebut
-fiturnya. **Iceberg** (format v1 dan v2): metadata JSON, lalu manifest list dan
+termasuk yang diganti nama dan dihapus. Checkpoint v2 (bernama UUID, level atas Parquet atau JSON
+yang aksi add dan remove-nya ada di `_delta_log/_sidecars/`) juga dibaca; remove di dalam
+checkpoint adalah tombstone dan dilewati. **Iceberg** (format v1 dan v2): metadata JSON, lalu manifest list dan
 manifest Avro; setiap snapshot dibaca dengan skemanya sendiri, kolom yang diganti nama dilacak
 lewat field id, dan tabel boleh dipindahkan (path dipasang ulang terhadap lokasi yang tercatat).
 File delete ditolak, bukan diabaikan.
@@ -580,7 +607,8 @@ File delete ditolak, bukan diabaikan.
 ```csharp
 DaskFrame trips = Hudi.Read("lake/trips");                              // instant terakhir yang selesai
 DaskFrame then = Hudi.Read("lake/trips", instant: "20261101093000000");  // time travel
-DaskFrame fast = Hudi.Read("lake/events_mor", readOptimized: true);      // file dasar tabel MOR
+DaskFrame live = Hudi.Read("lake/events_mor");                         // file dasar digabung dengan log-nya
+DaskFrame fast = Hudi.Read("lake/events_mor", readOptimized: true);      // hanya file dasar
 IReadOnlyList<HudiInstant> timeline = Hudi.Instants("lake/trips");
 ```
 
@@ -588,14 +616,21 @@ IReadOnlyList<HudiInstant> timeline = Hudi.Instants("lake/trips");
 `timeline/` dengan Avro), hanya instant yang selesai, file dasar terbaru dari setiap file group,
 file group yang digantikan `replacecommit` (insert-overwrite, clustering) dibuang, nilai partisi
 dari path bergaya hive maupun biasa dengan pemangkasan. Kolom `_hoodie_*` dibuang kecuali
-diminta. Pembacaan snapshot atas tabel merge-on-read yang punya log file hidup ditolak -
-penggabungan blok log Avro belum diimplementasikan - dan pesannya menyarankan
-`readOptimized: true`.
+diminta. Snapshot tabel merge-on-read menggabungkan setiap file slice di task-nya sendiri: file
+dasar, lalu blok data dan delete Avro dari log file-nya menurut urutan instant, per record key.
+Record log menggantikan yang tersimpan kecuali nilai urutan yang tersimpan
+(`hoodie.table.ordering.fields`, atau field precombine) lebih besar - aturan event-time Hudi 1.0,
+sehingga penulisan yang datang tidak berurutan kalah - dan delete dengan urutan alami selalu
+berlaku; tabel commit-time membiarkan record yang lebih baru menang. Blok perintah rollback
+menghapus blok yang ditargetkannya, dan blok terakhir yang terpotong (penulis yang mati)
+diabaikan. Merge mode kustom dan tabel tanpa meta field ditolak.
 
 Setiap versi fixture dibandingkan baris demi baris dengan yang dibaca kembali oleh penulis
 rujukan: delta-rs dan pyiceberg (`tools/verify/make_lake_fixtures.py`), serta Spark 3.5 dengan
-delta-spark 3.3 dan Hudi 1.0 untuk deletion vector, column mapping dan Hudi
-(`tools/verify/make_lake_fixtures_spark.py`).
+delta-spark 3.3 dan Hudi 1.0 untuk deletion vector, column mapping, checkpoint v2 dan Hudi
+(`tools/verify/make_lake_fixtures_spark.py`). Tabel merge-on-read dibaca di keenam instant-nya -
+upsert, delete, upsert tidak berurutan yang harus kalah, inline compaction dan penulisan
+sesudahnya - sebagai snapshot maupun read-optimized, secara lokal dan di cluster.
 
 ### Geo: spatial join (`Gravicode.Science.DaskNet.Geo`)
 
@@ -632,14 +667,34 @@ var centres = parcels.Centroid("geometry", output: "centre");
 `Dissolve` meng-union grup di setiap partisi dulu lalu menggabungkan union parsialnya berpasangan
 dalam sebuah tree, sehingga tidak ada task yang memegang semua geometri. `Overlay` mem-broadcast
 layer kanan dan mengindeksnya dengan STR-tree; pasangan yang hanya bersentuhan di sepanjang tepi
-dibuang. Aritmetikanya planar: untuk bujur/lintang, buffer 0,001 berarti 0,001 derajat dan luas
-dalam derajat persegi, jadi proyeksikan dulu bila jarak harus berarti meter. Input yang tidak
+dibuang. Tanpa sistem koordinat aritmetikanya planar: untuk bujur/lintang, buffer 0,001 berarti
+0,001 derajat dan luas dalam derajat persegi. Input yang tidak
 valid diperbaiki dengan `GeometryFixer` (bow-tie menjadi dua segitiganya), bukan ditolak. Semuanya
 diperiksa terhadap shapely/GEOS pada 60 poligon berbentuk bintang dengan lubang
 (`tools/verify/make_geometry_fixtures.py`): dissolve, overlay, simplify dan centroid cocok hingga
 1e-9 relatif, dengan 1, 5 dan 16 partisi dan di cluster. Buffer hanya cocok hingga galat
 aproksimasi busur (terburuk 1,8e-4 relatif) - GEOS dan NTS mengaproksimasi sambungan bulat secara
 berbeda - dan test membatasi selisihnya dengan luas yang hilang dari lingkaran pada segi-32.
+
+**Meter.** Berikan sistem koordinat kolomnya, maka jarak, toleransi, luas dan panjang menjadi
+meter di permukaan bumi, sementara hasilnya tetap dalam sistem kolom itu:
+
+```csharp
+var wgs84 = GeoCrs.Wgs84;                                             // juga WebMercator, Utm(48, north: false), FromEpsg(32748)
+var zones = parcels.Buffer("geometry", 250, crs: wgs84)               // 250 m
+    .Simplify("geometry", 10, crs: wgs84)                             // 10 m
+    .WithMeasures("geometry", crs: wgs84);                            // m² dan m
+var utm = parcels.ToCrs("geometry", wgs84, GeoCrs.UtmFor(106.8, -6.2));   // to_crs ala geopandas
+```
+
+Setiap geometri diproyeksikan ke transverse Mercator yang berpusat di centroid-nya sendiri (deret
+Krüger orde enam, yang dipakai `tmerc` milik PROJ), diolah di sana, lalu diproyeksikan kembali.
+Bidang itu eksak di centroid dan meleset (jarak / jari-jari bumi)² / 2 di luarnya - sepersejuta
+pada 9 km, sepersepuluh ribu pada 90 km - cocok untuk kota atau wilayah; benua butuh proyeksi
+equal-area. Koordinat yang bukan sistem yang dinyatakan (lintang 500) ditolak. Diperiksa terhadap
+PROJ lewat pyproj (`tools/verify/make_crs_fixtures.py`): bidang lokal yang sama cocok hingga 1e-9,
+konversi UTM dan Web Mercator hingga satu mikrometer, dan luas serta panjang berada dalam 1e-6 dari
+nilai geodesik di elipsoid untuk bentuk seukuran kota dan 5e-5 untuk wilayah 90 km.
 
 ### ML: pencarian hyperparameter dan prediksi batch (`Gravicode.Science.DaskNet.ML`)
 
@@ -734,6 +789,7 @@ skema bertipe, atau baris CSV:
 var format = MessageFormat.Json(("sensor", ColumnType.Text), ("time", ColumnType.DateTime), ("value", ColumnType.Number));
 var mqtt = DaskStream.FromMqtt("broker.local", ["plant/+/temperature"], format,
     new MqttOptions { MaxBatchRows = 500, MaxBatchDelay = TimeSpan.FromSeconds(1) });
+// Kafka ada di paketnya sendiri, Gravicode.Science.DaskNet.Kafka (Confluent.Kafka membawa librdkafka)
 var kafka = DaskStream.FromKafka("kafka:9092", ["orders"], groupId: "etl", format,
     new KafkaOptions { KeyColumn = "key", OffsetColumn = "offset" });
 ```
@@ -745,9 +801,37 @@ menjadi kosong. **Kafka** menyimpan offset per partisi di checkpoint query dan m
 group hanya setelah sink selesai: at-least-once, dan restart melanjutkan dari akhir batch terakhir
 yang selesai. Diuji terhadap model broker di memori (sink yang gagal di tengah jalan memutar ulang
 tepat batch yang gagal) dan terhadap Apache Kafka 4.3 mode KRaft (test yang berjalan bila
-`DASKNET_KAFKA` di-set). **MQTT** tidak punya replay: pesan di-acknowledge saat diterima, dan hanya
-client id tetap dengan `CleanSession = false` yang membuat broker mengantrekan pesan selama query
-mati. Diuji ujung ke ujung terhadap broker in-process milik MQTTnet.
+`DASKNET_KAFKA` di-set); consumer hanya membaca record yang sudah di-commit (`ReadCommitted`).
+Pesan **MQTT** QoS 1/2 baru di-acknowledge setelah sink batch-nya selesai dan checkpoint
+tersimpan (`AcknowledgeAfterSink`, aktif secara bawaan), sehingga dengan client id tetap dan
+`CleanSession = false` broker mengirim ulang apa yang tidak sempat diselesaikan query yang crash (broker menyimpan
+session selama `SessionExpiry`, satu hari secara bawaan - bawaan MQTT 5 yaitu nol akan
+membuangnya saat disconnect).
+Broker membatasi pesan yang belum di-acknowledge per client (Mosquitto: 20), yang bisa menutup batch
+lebih awal. Diuji ujung ke ujung terhadap broker in-process milik MQTTnet: sink yang melempar
+exception, lalu restart yang menerima setiap pesan.
+
+**Exactly-once ke Kafka.** Dengan transactional id, `ToKafka` menulis setiap batch dalam satu
+transaksi Kafka:
+
+```csharp
+await DaskStream.FromKafka("kafka:9092", ["orders"], "etl", format)
+    .Window("time", TimeSpan.FromMinutes(5), ["region"], [("amount", "sum")])
+    .ToKafka("kafka:9092", "order-totals", new KafkaSinkOptions { TransactionalId = "totals-1", KeyColumn = "region" })
+    .RunAsync("checkpoints/totals");
+```
+
+Checkpoint menjadi dua fase: state setelah sebuah batch disimpan sebagai pending, batch ditulis
+dalam transaksi yang juga mencatat id-nya (sebagai offset commit milik group penanda,
+`{transactionalId}.dasknet`), lalu checkpoint pending dipromosikan. Restart yang menemukan
+checkpoint pending menanyakan ke Kafka batch mana yang terakhir di-commit lalu mempromosikan atau
+membuangnya, sehingga crash di titik mana pun di antaranya tidak menghilangkan maupun mengulang
+batch bagi pembaca `read_committed`. Memulai producer dengan id yang sama memagari (fence) yang
+lama. Baris ditulis sebagai objek JSON (NaN menjadi null, timestamp ISO 8601), dengan key dari
+`KeyColumn`. Tanpa transactional id sink-nya biasa dan at-least-once. Sink apa pun bisa melakukan
+hal yang sama dengan mengimplementasikan `ITransactionalSink` dan menjalankan
+`StreamQuery.For(stream, sink)`. Diuji terhadap model broker yang crash sebelum dan sesudah commit,
+dan terhadap Kafka sungguhan.
 
 **Join stream-stream** mencocokkan baris dua stream menurut key dan waktu kejadian:
 
@@ -801,7 +885,7 @@ Dask.Net untuk data yang tidak muat, bukan demi kecepatan.
 |---|---|
 | DataFrame berpartisi dan lazy; optimasi query; predicate dan projection pushdown | **Selesai** |
 | CSV (dipecah per blok), Arrow IPC, berkas apa pun via `ReadFiles` (Parquet lewat GraviFrame.Parquet) | **Selesai** |
-| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines dan array, baca dan tulis) **selesai**; Delta Lake (deletion vector, column mapping), Iceberg dan Hudi (copy-on-write, merge-on-read read-optimized) **selesai** di paket Lakehouse, dengan time travel dan pemangkasan partisi; Excel lewat `ReadFiles` dengan `ExcelReader` milik GraviFrame |
+| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines dan array, baca dan tulis) **selesai**; Delta Lake (deletion vector, column mapping, checkpoint v2), Iceberg dan Hudi (copy-on-write, snapshot merge-on-read dan read-optimized) **selesai** di paket Lakehouse, dengan time travel dan pemangkasan partisi; Excel lewat `ReadFiles` dengan `ExcelReader` milik GraviFrame |
 | Mesin lazy: eksekusi tertunda, planner, pipeline fusion | **Selesai**; strategi join berbasis biaya (estimasi ukuran) dan rangkaian join SQL diurutkan ulang menurut estimasi ukuran; rewrite lain berbasis aturan |
 | DAG scheduler: visualisasi (DOT/Mermaid), cull/fuse, retry policy, pelacakan dependensi | **Selesai** |
 | Cluster lokal: multi-core, isolasi proses, batas memori per worker dengan spill ke disk | **Selesai** |
@@ -809,12 +893,12 @@ Dask.Net untuk data yang tidak muat, bukan demi kecepatan.
 | Penemuan worker (Consul, Kubernetes, Service Fabric, Aspire) | **Selesai** untuk Kubernetes (DNS Service headless) dan Aspire, dengan refresh di latar belakang sehingga worker bisa bergabung ke client yang sedang berjalan; Consul/Service Fabric lewat `WorkerDiscovery.From` |
 | Parallel LINQ: map, reduce, fold, aggregate, shuffle, broadcast | **Selesai** (`Bag`) |
 | Koleksi terdistribusi (`DistributedList` dsb.) | Roadmap; `Bag`, `DaskArray` dan `Persist` menangani kasus yang dominan baca |
-| Arrow: zero-copy, lintas bahasa | Berkas Arrow IPC **selesai**; hasil berpindah antar proses di satu mesin lewat shared memory (encoding wire Dask.Net, bukan Arrow; 5x lebih cepat daripada TCP loopback) |
+| Arrow: zero-copy, lintas bahasa | Berkas Arrow IPC **selesai**; hasil berpindah antar proses di satu mesin lewat shared memory (encoding wire Dask.Net, bukan Arrow; 5x lebih cepat daripada TCP loopback), dan array bisa dibaca di tempat sebagai `SharedArrayView` |
 | SQL: join, agregasi, UNION, window function | **Selesai**; frame window eksplisit, CTE dan ANSI penuh masih roadmap |
-| GIS, ML, ETL/streaming, AI, basis data vektor | GIS (Geo: geohash, distance join dan point-in-polygon join, buffer/simplify/dissolve/overlay), ML (pencarian hyperparameter, prediksi batch, pelatihan inkremental, scoring ONNX) dan streaming (file, channel, MQTT dan Kafka; window waktu kejadian; join stream-stream; checkpoint) **selesai** sebagai paket terpisah; AI dan basis data vektor masih roadmap |
+| GIS, ML, ETL/streaming, AI, basis data vektor | GIS (Geo: geohash, distance join dan point-in-polygon join, buffer/simplify/dissolve/overlay, dalam meter lewat `GeoCrs`), ML (pencarian hyperparameter, prediksi batch, pelatihan inkremental, scoring ONNX) dan streaming (file, channel, MQTT dan Kafka; window waktu kejadian; join stream-stream; checkpoint; sink Kafka exactly-once) **selesai** sebagai paket terpisah; AI dan basis data vektor masih roadmap |
 | Observabilitas: OpenTelemetry | **Selesai** (ActivitySource + Meter); Prometheus/Grafana/Jaeger lewat exporter OTel |
 | Operator Kubernetes, dashboard Aspire | Roadmap |
-| Toleransi kegagalan: retry task, checkpoint, pemulihan worker, eksekusi spekulatif | **Selesai**; run bisa dilepas dari client (`SubmitAsync`), dan worker standby mengambil alih run bila worker penjadwalnya mati |
+| Toleransi kegagalan: retry task, checkpoint, pemulihan worker, eksekusi spekulatif | **Selesai**; run bisa dilepas dari client (`SubmitAsync`), dan worker standby mengambil alih run bila worker penjadwalnya mati, menyajikan output yang disalin bila run sudah selesai |
 | Konektor penyimpanan (basis data, data lake, warehouse) | Basis data **selesai** lewat provider ADO.NET apa pun (dipartisi per rentang atau per query, filter didorong ke SQL, bisa jalan di cluster); Delta Lake dan Iceberg **selesai**; warehouse masih roadmap |
 | Scheduler: thread, cluster | **Selesai**; pool proses adalah `LocalCluster.StartProcessesAsync`; Kubernetes masih roadmap |
 | Keamanan: worker dengan autentikasi token, TLS dan mutual TLS | **Selesai**; OAuth2/Entra ID, multi-tenancy dan kuota masih roadmap |
@@ -828,13 +912,14 @@ Dask.Net untuk data yang tidak muat, bukan demi kecepatan.
 - Join dengan beberapa key membutuhkan nama key yang sama di kedua sisi (SQL menangani nama yang
   berbeda).
 - Dengan `Compute`, client adalah scheduler run-nya, dan client yang mati kehilangan run itu;
-  `SubmitAsync` memindahkan peran itu ke sebuah worker dengan standby, sehingga run bertahan bila
-  salah satunya mati, tetapi tidak bila keduanya mati.
-- Tabel Hudi merge-on-read dengan log file hidup hanya dibaca sebagai `readOptimized`; checkpoint
-  Delta v2 dan tipe bersarang ditolak.
-- Aritmetika geometri bersifat planar; proyeksikan bujur/lintang sebelum mem-buffer dengan jarak.
-- Pengiriman Kafka dan MQTT bersifat at-least-once; MQTT tidak punya replay. Join stream hanya
-  mencocokkan key yang sama.
+  `SubmitAsync` memindahkan peran itu ke sebuah worker dengan standby. Pengambilalihan setelah
+  run selesai menyajikan salinan; pengambilalihan di tengah run menghitung ulang graph.
+- Merge mode kustom Hudi, tabel tanpa meta field dan tipe bersarang ditolak.
+- Geometri metrik memakai bidang lokal per geometri, akurat hingga sepersepuluh ribu pada 90 km;
+  hanya WGS 84, Web Mercator dan UTM yang dikenal, dan antimeridian tidak dipecah.
+- Pembacaan Kafka dan MQTT bersifat at-least-once; penulisan ke Kafka exactly-once dengan
+  transactional id. `SharedArrayView` mencakup array, bukan frame. Join stream hanya mencocokkan
+  key yang sama.
 - Pengurutan ulang join hanya berlaku untuk rangkaian inner join SQL, bukan untuk pemanggilan
   `DaskFrame.Join`, yang berjalan sesuai urutan tertulis.
 

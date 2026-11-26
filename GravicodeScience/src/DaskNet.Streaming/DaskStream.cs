@@ -14,9 +14,10 @@ public abstract class StreamSource
 }
 
 /// <summary>One batch from a source: the files it came from, or the next offset per Kafka
-/// partition after it (both for the checkpoint), and what to call once it is safely processed.</summary>
+/// partition after it (both for the checkpoint), and what to call once it is safely processed
+/// (commit Kafka offsets, acknowledge MQTT messages).</summary>
 internal sealed record SourceBatch(DataFrame Frame, string[] Files,
-    IReadOnlyDictionary<(string Topic, int Partition), long>? Offsets = null, Action? Commit = null);
+    IReadOnlyDictionary<(string Topic, int Partition), long>? Offsets = null, Func<Task>? Commit = null);
 
 /// <summary>What a source has consumed, carried in the checkpoint. Lock the instance to read or
 /// change it: a joined query's sources run beside the loop that records their progress.</summary>
@@ -104,7 +105,9 @@ public sealed class DaskStream
     /// <remarks>MQTT cannot replay, so a checkpoint keeps the windows and the batch count but not
     /// a position: what is published while the query is down is lost, unless a fixed
     /// <see cref="MqttOptions.ClientId"/> with <see cref="MqttOptions.CleanSession"/> off has the
-    /// broker queue it (QoS 1 or 2). Messages are acknowledged on receipt, not after the sink.</remarks>
+    /// broker queue it (QoS 1 or 2). QoS 1/2 messages are acknowledged only after their batch's
+    /// sink has returned and the checkpoint is saved (<see cref="MqttOptions.AcknowledgeAfterSink"/>),
+    /// so with such a session a crash makes the broker redeliver them: at-least-once.</remarks>
     public static DaskStream FromMqtt(string host, string[] topics, MessageFormat format, MqttOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(host);
@@ -117,30 +120,8 @@ public sealed class DaskStream
         return new(new MqttSource(host, topics, format, options), [], 1, null);
     }
 
-    /// <summary>
-    /// A Kafka consumer group on <paramref name="topics"/>: each message value becomes a row,
-    /// decoded by <paramref name="format"/>. With a checkpoint, each partition resumes after the
-    /// last batch whose sink returned; without one, from the group's committed offsets.
-    /// </summary>
-    /// <remarks>Delivery is at-least-once: offsets go to the checkpoint and are committed to the
-    /// group only after a batch's sink has returned, so a crash in between replays the batch
-    /// (make the sink idempotent by <see cref="StreamBatch.Id"/>, as the CSV sink is).</remarks>
-    public static DaskStream FromKafka(string bootstrapServers, string[] topics, string groupId, MessageFormat format, KafkaOptions? options = null)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(bootstrapServers);
-        ArgumentNullException.ThrowIfNull(topics);
-        if (topics.Length == 0) throw new ArgumentException("Subscribe to at least one topic.", nameof(topics));
-        ArgumentException.ThrowIfNullOrEmpty(groupId);
-        options ??= new KafkaOptions();
-        return FromKafkaConsumer(() => new ConfluentConsumer(bootstrapServers, topics, groupId, options), format, options);
-    }
-
-    internal static DaskStream FromKafkaConsumer(Func<IKafkaConsumer> consumer, MessageFormat format, KafkaOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(format);
-        options.Validate();
-        return new(new KafkaSource(consumer, format, options), [], 1, null);
-    }
+    /// <summary>A stream over a source defined in another package (Kafka).</summary>
+    internal static DaskStream FromSource(StreamSource source) => new(source, [], 1, null);
 
     // ------------------------------------------------------------------ steps
 

@@ -18,7 +18,9 @@ public sealed record DeltaCommit(long Version, DateTimeOffset? Timestamp, string
 /// <remarks>
 /// <para>
 /// The state of a version is replayed from the transaction log: the newest checkpoint at or
-/// before it (single- or multi-part Parquet), then every JSON commit after it, in order. Time
+/// before it (classic single- or multi-part Parquet, or a v2 checkpoint: UUID-named, with a
+/// Parquet or JSON top level whose file actions live in <c>_sidecars/</c>), then every JSON commit
+/// after it, in order. Time
 /// travel is by version or by commit timestamp. The schema is the one in force at that version,
 /// so a column added later does not appear when reading an earlier version, and reads as missing
 /// in files written before it was added.
@@ -31,7 +33,7 @@ public sealed record DeltaCommit(long Version, DateTimeOffset? Timestamp, string
 /// read: the rows they mark are dropped before any filter runs.
 /// </para>
 /// <para>
-/// Refused rather than misread: v2 (UUID-named) checkpoints, nested column types, and a reader
+/// Refused rather than misread: nested column types, and a reader
 /// version above 3 or a reader feature not listed in <see cref="SupportedReaderFeatures"/>. Local
 /// paths only; reading cloud storage needs it mounted or synced.
 /// </para>
@@ -39,7 +41,7 @@ public sealed record DeltaCommit(long Version, DateTimeOffset? Timestamp, string
 public static class DeltaLake
 {
     /// <summary>Reader features a table may declare and still be read.</summary>
-    public static IReadOnlyCollection<string> SupportedReaderFeatures { get; } = ["timestampNtz", "vacuumProtocolCheck", "deletionVectors", "columnMapping"];
+    public static IReadOnlyCollection<string> SupportedReaderFeatures { get; } = ["timestampNtz", "vacuumProtocolCheck", "deletionVectors", "columnMapping", "v2Checkpoint"];
 
     /// <summary>Reads the table at <paramref name="path"/>, at its latest version or at <paramref name="version"/>.</summary>
     public static DaskFrame Read(string path, long? version = null)
@@ -176,29 +178,35 @@ public static class DeltaLake
             .Select(f => (long.Parse(f.Name, CultureInfo.InvariantCulture), f.File))
             .OrderBy(f => f.Item1);
 
-    /// <summary>Complete checkpoints: single-part, or every part of a multi-part one.</summary>
+    /// <summary>Complete checkpoints: classic single-part, every part of a multi-part one, or a v2
+    /// (UUID-named) top-level file. Several checkpoints of one version are equivalent; the first
+    /// by name is taken.</summary>
     private static IEnumerable<(long Version, string[]? Files)> Checkpoints(string log)
     {
         var parts = new Dictionary<long, (int Total, List<string> Files)>();
-        foreach (var file in Directory.EnumerateFiles(log, "*.checkpoint*.parquet"))
+        var single = new SortedDictionary<long, string>();
+        foreach (var file in Directory.EnumerateFiles(log, "*.checkpoint*").Order(StringComparer.Ordinal))
         {
             var pieces = Path.GetFileName(file).Split('.');
-            // 00000000000000000010.checkpoint.parquet or ...checkpoint.0000000001.0000000002.parquet
+            // 00000000000000000010.checkpoint.parquet, ...checkpoint.0000000001.0000000002.parquet,
+            // or v2: ...checkpoint.<uuid>.parquet / ...checkpoint.<uuid>.json
             if (pieces.Length < 3 || !long.TryParse(pieces[0], CultureInfo.InvariantCulture, out var v) || pieces[1] != "checkpoint") continue;
-            if (pieces.Length == 3) { yield return (v, [file]); continue; }
-            if (pieces.Length == 5 && int.TryParse(pieces[3], CultureInfo.InvariantCulture, out var total))
+            var extension = pieces[^1];
+            if (extension is not ("parquet" or "json")) continue;
+            if (pieces.Length == 3 && extension == "parquet") single.TryAdd(v, file);
+            else if (pieces.Length == 4 && Guid.TryParse(pieces[2], out _)) single.TryAdd(v, file);
+            else if (pieces.Length == 5 && extension == "parquet" && int.TryParse(pieces[3], CultureInfo.InvariantCulture, out var total))
             {
                 if (!parts.TryGetValue(v, out var entry)) parts[v] = entry = (total, []);
                 entry.Files.Add(file);
             }
-            else if (pieces.Length == 4)
-                throw new NotSupportedException($"{file} is a v2 (UUID-named) checkpoint, which is not supported.");
         }
+        foreach (var (v, file) in single) yield return (v, [file]);
         foreach (var (v, (total, files)) in parts)
-            if (files.Count == total) yield return (v, files.Order(StringComparer.Ordinal).ToArray());
+            if (files.Count == total && !single.ContainsKey(v)) yield return (v, files.Order(StringComparer.Ordinal).ToArray());
     }
 
-    private static void Apply(string line, Snapshot snapshot)
+    private static void Apply(string line, Snapshot snapshot, string? checkpointLog = null)
     {
         using var doc = JsonDocument.Parse(line);
         foreach (var action in doc.RootElement.EnumerateObject())
@@ -206,6 +214,11 @@ public static class DeltaLake
             var a = action.Value;
             switch (action.Name)
             {
+                case "sidecar" when checkpointLog is not null:
+                    ReadCheckpoint(SidecarPath(checkpointLog, a.GetProperty("path").GetString()!), snapshot);
+                    break;
+                case "remove" when checkpointLog is not null:
+                    break;   // in a checkpoint, a remove is a tombstone of a file already gone
                 case "add":
                     snapshot.Files[FileKey(a.GetProperty("path").GetString()!, VectorId(a))] = (
                         a.TryGetProperty("size", out var size) ? size.GetInt64() : 0,
@@ -270,6 +283,15 @@ public static class DeltaLake
     /// </summary>
     private static void ReadCheckpoint(string file, Snapshot snapshot)
     {
+        var log = Path.GetDirectoryName(file)!;
+        if (Path.GetFileName(log) == "_sidecars") log = Path.GetDirectoryName(log)!;
+        if (file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            // A v2 checkpoint's JSON top level: one action per line, like a commit.
+            foreach (var line in File.ReadLines(file))
+                if (line.Length > 0) Apply(line, snapshot, log);
+            return;
+        }
         using var stream = File.OpenRead(file);
         var result = ParquetSerializer.DeserializeAsync(stream).GetAwaiter().GetResult();
         foreach (var row in result.Data)
@@ -296,7 +318,17 @@ public static class DeltaLake
                             Convert.ToInt32(Get(dv, "sizeInBytes"), CultureInfo.InvariantCulture), snapshot.Root)
                         : null);
             // A checkpoint's remove actions are tombstones of files already gone; nothing to undo.
+            if (Struct(fields, "sidecar") is { } sidecar && Get(sidecar, "path") is string sidecarPath)
+                ReadCheckpoint(SidecarPath(log, sidecarPath), snapshot);
         }
+    }
+
+    /// <summary>A sidecar's file: relative paths are under <c>_delta_log/_sidecars/</c>.</summary>
+    private static string SidecarPath(string log, string path)
+    {
+        if (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsFile) return uri.LocalPath;
+        if (Path.IsPathRooted(path)) return path;
+        return Path.Combine(log, "_sidecars", Uri.UnescapeDataString(path));
     }
 
     private static IDictionary<string, object?>? Struct(IDictionary<string, object?> row, string name)

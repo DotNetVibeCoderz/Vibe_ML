@@ -470,16 +470,26 @@ await other.ForgetAsync(handle);                           // release the result
 Only `[RemoteTask]` graphs can be submitted - a lambda cannot leave the process, and
 `SubmitAsync` refuses it with `NotSupportedException`.
 
-**The scheduler has a standby.** `SubmitAsync` sends the graph to a second worker as well
-(`RunHandle.Standby`), which polls the scheduling worker every 200 ms. After three failed polls -
-or an answer that the scheduler does not know the run, which means it restarted - the standby
-runs the graph itself on every other worker and holds the results. That covers a scheduler that
-dies mid-run and one that dies after finishing (its results died with it, so they are
-recomputed). `StatusAsync`, `ResultsAsync`, `CancelAsync` and `ForgetAsync` fall back to the
-standby on their own; cancel and forget go to the standby *first*, or it would see the
-scheduler forget the run and take over. Losing both workers loses the run, and a one-worker
-cluster has no standby. Tests kill the scheduler on an event (once the run has made progress)
-and after it finished, and check the result and `Worker.Takeovers`.
+**The scheduler has standbys.** `SubmitAsync` sends the graph to `Client.RunStandbys` more
+workers as well (one by default; `RunHandle.Standbys`, in order of succession). Each polls the
+first of its predecessors it has not given up on every 200 ms; after three failed polls - or an
+answer that the run is unknown, which means a restart - it moves on to the next predecessor, and
+when none is left it takes the run over. When a run finishes, its outputs are copied to every
+later holder *before* it reports `Finished`, so a scheduler that dies afterwards costs nothing:
+the next standby serves the copies (`Worker.TakeoversFromReplica`). A holder that dies *mid-run*
+is replaced by a standby that runs the graph again on the workers still alive - intermediate
+results live on workers that may be the dead ones. `StatusAsync`, `ResultsAsync`, `CancelAsync`
+and `ForgetAsync` fall back along the succession on their own; cancel and forget go to the last
+standby *first*, or it would see its predecessor forget the run and take over. Losing every
+holder loses the run, and a one-worker cluster has no standby. Tests kill the scheduler and the
+first standby together mid-run, and the scheduler then the first standby after finishing, and
+check that the second case runs no task at all.
+
+```csharp
+client.RunStandbys = 2;                                   // survives two lost holders
+RunHandle run = await client.SubmitAsync(report);
+// run.Scheduler, run.Standbys[0], run.Standbys[1]; a 2.4 handle (one "standby") still parses
+```
 
 ### Shared memory between workers on one machine
 
@@ -491,6 +501,21 @@ of its own mapping. Co-location is claimed by host id and proved by opening the 
 that cannot open it falls back to the socket and stops asking that holder. `Client.SharedMemory =
 false` opts a client out, `--shared-memory-threshold off` a worker; `WorkerInfo` reports
 `SharedMemoryBytesSent` and `SocketBytesSent`.
+
+**Views instead of copies.** `ComputeViewAsync` reads an `NdArray` or `double[]` result in place:
+
+```csharp
+using SharedArrayView view = await client.ComputeViewAsync(big);   // Delayed<NdArray> or Delayed<double[]>
+ReadOnlySpan<double> values = view.Span;                           // over the mapped segment
+double total = 0; foreach (var v in values) total += v;
+NdArray copy = view.ToNdArray();                                   // when an array is needed
+```
+
+The segment stays lent to the reader until the view is disposed, which tells the holder it may
+reuse it; forgetting to dispose holds the segment until the holder drops it after a minute. A
+result below the threshold, or one from another machine, comes as a view over a copy
+(`IsShared` is false). It is not an `NdArray` - those own a managed `double[]` - and frames still
+copy.
 
 The segments stay mapped, and that is the whole trick. The first version mapped a fresh view per
 transfer and measured *slower* than loopback TCP (0.87x at 64 MiB): every transfer page-faulted
@@ -552,7 +577,9 @@ deleted rows dropped *before* any pushed filter, since their positions are posit
 A file's identity is its path *and* its deletion vector, because Spark writes `add(P, newDV)` and
 `remove(P, oldDV)` in one commit. **Column mapping** in `name` and `id` modes: files are read by
 physical name or Parquet field id and columns come back under their logical names, renames and
-drops included. v2 (UUID-named) checkpoints are refused with the feature named. **Iceberg** (format v1 and v2): metadata JSON, then the Avro
+drops included. v2 checkpoints (UUID-named, a Parquet or JSON top level whose add and remove
+actions live in `_delta_log/_sidecars/`) are read too; removes in a checkpoint are tombstones and
+skipped. **Iceberg** (format v1 and v2): metadata JSON, then the Avro
 manifest list and manifests; each snapshot is read with its own schema, renamed columns are
 traced by field id, and the table can be moved (paths are re-rooted against its recorded
 location). Delete files are refused rather than ignored.
@@ -560,7 +587,8 @@ location). Delete files are refused rather than ignored.
 ```csharp
 DaskFrame trips = Hudi.Read("lake/trips");                              // latest completed instant
 DaskFrame then = Hudi.Read("lake/trips", instant: "20261101093000000");  // time travel
-DaskFrame fast = Hudi.Read("lake/events_mor", readOptimized: true);      // base files of a MOR table
+DaskFrame live = Hudi.Read("lake/events_mor");                         // base files merged with their logs
+DaskFrame fast = Hudi.Read("lake/events_mor", readOptimized: true);      // base files only
 IReadOnlyList<HudiInstant> timeline = Hudi.Instants("lake/trips");
 ```
 
@@ -568,13 +596,20 @@ IReadOnlyList<HudiInstant> timeline = Hudi.Instants("lake/trips");
 `timeline/` with Avro), completed instants only, the latest base file of each file group, file
 groups replaced by `replacecommit` (insert-overwrite, clustering) dropped, partition values from
 hive-style or plain paths with pruning. The `_hoodie_*` columns are dropped unless asked for. A
-snapshot read of a merge-on-read table with live log files is refused - merging Avro log blocks
-is not implemented - and the message says to pass `readOptimized: true`.
+snapshot of a merge-on-read table merges each file slice in its own task: the base file, then the
+Avro data and delete blocks of its log files in instant order, by record key. A log record
+replaces the stored one unless the stored ordering value (`hoodie.table.ordering.fields`, or the
+precombine field) is greater - Hudi 1.0's event-time rule, so an out-of-order write loses - and a
+delete with natural ordering always applies; commit-time tables let the newer record win. Rollback
+command blocks remove the blocks they target, and a truncated last block (a writer that died) is
+ignored. Custom merge modes and tables without meta fields are refused.
 
 Every fixture version is compared row for row with what the reference writers read back:
 delta-rs and pyiceberg (`tools/verify/make_lake_fixtures.py`), and Spark 3.5 with delta-spark
-3.3 and Hudi 1.0 for deletion vectors, column mapping and Hudi
-(`tools/verify/make_lake_fixtures_spark.py`).
+3.3 and Hudi 1.0 for deletion vectors, column mapping, v2 checkpoints and Hudi
+(`tools/verify/make_lake_fixtures_spark.py`). The merge-on-read table is read at every one of its
+six instants - upserts, deletes, an out-of-order upsert that must lose, inline compaction and a
+write after it - as a snapshot and read-optimized, locally and on a cluster.
 
 ### Geo: spatial joins (`Gravicode.Science.DaskNet.Geo`)
 
@@ -610,15 +645,36 @@ var centres = parcels.Centroid("geometry", output: "centre");
 
 `Dissolve` unions each partition's groups first and merges the partial unions pairwise in a
 tree, so no task holds every geometry. `Overlay` broadcasts the right layer and indexes it with
-an STR-tree; pairs that only touch along an edge are dropped. The arithmetic is planar: for
-longitude/latitude a buffer of 0.001 is 0.001 degrees and areas are square degrees, so project
-first when distances must mean metres. Invalid input is repaired with `GeometryFixer` (a bow-tie
+an STR-tree; pairs that only touch along an edge are dropped. Without a system the arithmetic is
+planar: for longitude/latitude a buffer of 0.001 is 0.001 degrees and areas are square degrees.
+Invalid input is repaired with `GeometryFixer` (a bow-tie
 becomes its two triangles) rather than refused. Everything is checked against shapely/GEOS on 60
 star-shaped polygons with holes (`tools/verify/make_geometry_fixtures.py`): dissolve, overlay,
 simplify and centroids agree to 1e-9 relative, under 1, 5 and 16 partitions and on a cluster.
 Buffers agree only to the arc-approximation error (worst 1.8e-4 relative) - GEOS and NTS
 approximate round joins differently - and the test bounds the difference by the area a 32-gon
 misses of its circle.
+
+**Metres.** Pass the column's coordinate system and distances, tolerances, areas and lengths are
+ground metres, while the results stay in the column's system:
+
+```csharp
+var wgs84 = GeoCrs.Wgs84;                                             // also WebMercator, Utm(48, north: false), FromEpsg(32748)
+var zones = parcels.Buffer("geometry", 250, crs: wgs84)               // 250 m
+    .Simplify("geometry", 10, crs: wgs84)                             // 10 m
+    .WithMeasures("geometry", crs: wgs84);                            // m² and m
+var utm = parcels.ToCrs("geometry", wgs84, GeoCrs.UtmFor(106.8, -6.2));   // geopandas' to_crs
+```
+
+Each geometry is projected into a transverse Mercator centred on its own centroid (Krüger's
+series to sixth order, what PROJ's `tmerc` uses), worked on there and projected back. That plane
+is exact at the centroid and off by (distance / Earth radius)² / 2 away from it - a part in a
+million 9 km out, a part in ten thousand at 90 km - which suits a city or a region; a continent
+wants an equal-area projection. Coordinates that are not the system they are declared as (a
+latitude of 500) are refused. Checked against PROJ through pyproj
+(`tools/verify/make_crs_fixtures.py`): the same local plane agrees to 1e-9, UTM and Web Mercator
+conversions to a micrometre, and areas and lengths are within 1e-6 of the geodesic values on the
+ellipsoid for city-sized shapes and 5e-5 for a 90 km region.
 
 ### ML: hyperparameter search and batch prediction (`Gravicode.Science.DaskNet.ML`)
 
@@ -710,6 +766,7 @@ with a typed schema, or CSV lines:
 var format = MessageFormat.Json(("sensor", ColumnType.Text), ("time", ColumnType.DateTime), ("value", ColumnType.Number));
 var mqtt = DaskStream.FromMqtt("broker.local", ["plant/+/temperature"], format,
     new MqttOptions { MaxBatchRows = 500, MaxBatchDelay = TimeSpan.FromSeconds(1) });
+// Kafka is its own package, Gravicode.Science.DaskNet.Kafka (Confluent.Kafka brings librdkafka)
 var kafka = DaskStream.FromKafka("kafka:9092", ["orders"], groupId: "etl", format,
     new KafkaOptions { KeyColumn = "key", OffsetColumn = "offset" });
 ```
@@ -720,10 +777,35 @@ value), so batches never change schema; a value that does not fit is missing. **
 per-partition offsets in the query's checkpoint and commits them to the group only after the
 sink returns: at-least-once, and a restart resumes where the last finished batch ended. Tested
 against an in-memory broker model (a sink failing mid-run replays exactly the failed batch) and
-against Apache Kafka 4.3 in KRaft mode (a test that runs when `DASKNET_KAFKA` is set). **MQTT** has
-no replay: messages are acknowledged on receipt, and only a fixed client id with
-`CleanSession = false` lets the broker queue what arrives while the query is down. Tested end to
-end against MQTTnet's in-process broker.
+against Apache Kafka 4.3 in KRaft mode (a test that runs when `DASKNET_KAFKA` is set); the
+consumer reads committed records only (`ReadCommitted`). **MQTT** QoS 1/2 messages are
+acknowledged only after their batch's sink returned and the checkpoint was saved
+(`AcknowledgeAfterSink`, on by default), so with a fixed client id and `CleanSession = false` the
+broker redelivers what a crashed query never finished (the broker keeps the session for
+`SessionExpiry`, a day by default - MQTT 5's own default of zero would drop it at disconnect). Brokers cap unacknowledged messages per
+client (Mosquitto: 20), which can close batches early. Tested end to end against MQTTnet's
+in-process broker: a sink that throws, then a restart that sees every message.
+
+**Exactly-once into Kafka.** With a transactional id, `ToKafka` writes each batch in one Kafka
+transaction:
+
+```csharp
+await DaskStream.FromKafka("kafka:9092", ["orders"], "etl", format)
+    .Window("time", TimeSpan.FromMinutes(5), ["region"], [("amount", "sum")])
+    .ToKafka("kafka:9092", "order-totals", new KafkaSinkOptions { TransactionalId = "totals-1", KeyColumn = "region" })
+    .RunAsync("checkpoints/totals");
+```
+
+The checkpoint becomes two-phase: the state after a batch is saved as pending, the batch is
+written in a transaction that also records its id (as an offset commit of a marker group,
+`{transactionalId}.dasknet`), and then the pending checkpoint is promoted. A restart that finds a
+pending checkpoint asks Kafka which batch committed last and promotes or discards it, so a crash
+anywhere in between neither loses nor repeats a batch for `read_committed` readers. Starting a
+producer with the same id fences an older one. Rows are JSON objects (NaN as null, timestamps
+ISO 8601), keyed by `KeyColumn`. Without a transactional id the sink is plain and at-least-once.
+Any sink can do the same by implementing `ITransactionalSink` and running
+`StreamQuery.For(stream, sink)`. Tested against a broker model that crashes before and after the
+commit, and against a real Kafka.
 
 **Stream-stream joins** match rows of two streams by key and event time:
 
@@ -776,7 +858,7 @@ Dask.Net for the data that doesn't, not for speed.
 |---|---|
 | Partitioned, lazy DataFrame; query optimisation; predicate and projection pushdown | **Done** |
 | CSV (block-split), Arrow IPC, any file via `ReadFiles` (Parquet through GraviFrame.Parquet) | **Done** |
-| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines and arrays, read and write) **done**; Delta Lake (deletion vectors, column mapping), Iceberg and Hudi (copy-on-write, read-optimized merge-on-read) **done** in the Lakehouse package, with time travel and partition pruning; Excel through `ReadFiles` with GraviFrame's `ExcelReader` |
+| JSON, Excel, Delta Lake, Iceberg, Hudi | JSON (Lines and arrays, read and write) **done**; Delta Lake (deletion vectors, column mapping, v2 checkpoints), Iceberg and Hudi (copy-on-write, merge-on-read snapshots and read-optimized) **done** in the Lakehouse package, with time travel and partition pruning; Excel through `ReadFiles` with GraviFrame's `ExcelReader` |
 | Lazy engine: deferred execution, planner, pipeline fusion | **Done**; join strategy is cost-based (size estimates) and SQL join chains are reordered by estimated size; the other rewrites are rule-based |
 | DAG scheduler: visualisation (DOT/Mermaid), cull/fuse, retry policy, dependency tracking | **Done** |
 | Local cluster: multi-core, process isolation, per-worker memory limits with spill to disk | **Done** |
@@ -784,12 +866,12 @@ Dask.Net for the data that doesn't, not for speed.
 | Worker discovery (Consul, Kubernetes, Service Fabric, Aspire) | **Done** for Kubernetes (headless-Service DNS) and Aspire, with background refresh so workers can join a live client; Consul/Service Fabric through `WorkerDiscovery.From` |
 | Parallel LINQ: map, reduce, fold, aggregate, shuffle, broadcast | **Done** (`Bag`) |
 | Distributed collections (`DistributedList` etc.) | Roadmap; `Bag`, `DaskArray` and `Persist` cover the read-mostly cases |
-| Arrow: zero-copy, cross-language | Arrow IPC files **done**; results move between processes on one machine through shared memory (Dask.Net's wire encoding, not Arrow; 5x faster than loopback TCP) |
+| Arrow: zero-copy, cross-language | Arrow IPC files **done**; results move between processes on one machine through shared memory (Dask.Net's wire encoding, not Arrow; 5x faster than loopback TCP), and arrays can be read in place as `SharedArrayView`s |
 | SQL: joins, aggregations, UNION, window functions | **Done**; explicit window frames, CTE and full ANSI are roadmap |
-| GIS, ML, ETL/streaming, AI, vector databases | GIS (Geo: geohash, distance and point-in-polygon joins, buffer/simplify/dissolve/overlay), ML (hyperparameter search, batch prediction, incremental training, ONNX scoring) and streaming (files, channels, MQTT and Kafka; event-time windows; stream-stream joins; checkpoints) **done** as separate packages; AI and vector databases are roadmap |
+| GIS, ML, ETL/streaming, AI, vector databases | GIS (Geo: geohash, distance and point-in-polygon joins, buffer/simplify/dissolve/overlay, in metres through `GeoCrs`), ML (hyperparameter search, batch prediction, incremental training, ONNX scoring) and streaming (files, channels, MQTT and Kafka; event-time windows; stream-stream joins; checkpoints; exactly-once Kafka sink) **done** as separate packages; AI and vector databases are roadmap |
 | Observability: OpenTelemetry | **Done** (ActivitySource + Meter); Prometheus/Grafana/Jaeger via the OTel exporters |
 | Kubernetes operator, Aspire dashboard | Roadmap |
-| Fault tolerance: task retry, checkpointing, worker recovery, speculative execution | **Done**; runs can be detached from the client (`SubmitAsync`), and a standby worker takes a run over if its scheduling worker dies |
+| Fault tolerance: task retry, checkpointing, worker recovery, speculative execution | **Done**; runs can be detached from the client (`SubmitAsync`), and standby workers take a run over if its scheduling worker dies, serving copied outputs once it finished |
 | Storage connectors (databases, data lakes, warehouses) | Databases **done** through any ADO.NET provider (range- or query-partitioned, filters pushed into the SQL, remotable); Delta Lake and Iceberg **done**; warehouses are roadmap |
 | Schedulers: thread, cluster | **Done**; a process pool is `LocalCluster.StartProcessesAsync`; Kubernetes is roadmap |
 | Security: token-authenticated workers, TLS and mutual TLS | **Done**; OAuth2/Entra ID, multi-tenancy and quotas are roadmap |
@@ -801,13 +883,13 @@ Dask.Net for the data that doesn't, not for speed.
   `[RemoteTask]` method to run custom code on a cluster.
 - Joins on several keys need the same key names on both sides (SQL handles different names).
 - With `Compute`, the client is the scheduler of the run, and a client that dies loses it;
-  `SubmitAsync` moves that role to a worker with a standby, so the run survives either one dying
-  but not both.
-- A merge-on-read Hudi table with live log files is read only as `readOptimized`; Delta v2
-  checkpoints and nested types are refused.
-- Geometry arithmetic is planar; project longitude/latitude before buffering by a distance.
-- Kafka and MQTT delivery is at-least-once; MQTT has no replay. Stream joins match on equal keys
-  only.
+  `SubmitAsync` moves that role to a worker with standbys. A takeover after the run finished
+  serves copies; one mid-run recomputes the graph.
+- Hudi custom merge modes, tables without meta fields and nested types are refused.
+- Metric geometry uses a local plane per geometry, good to a part in ten thousand at 90 km;
+  only WGS 84, Web Mercator and UTM are known, and the antimeridian is not split.
+- Kafka reads and MQTT are at-least-once; writes into Kafka are exactly-once with a transactional
+  id. `SharedArrayView` covers arrays, not frames. Stream joins match on equal keys only.
 - Join reordering applies to SQL inner-join chains only, not to `DaskFrame.Join` calls, which run
   in the order written.
 

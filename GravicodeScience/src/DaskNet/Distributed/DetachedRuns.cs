@@ -35,17 +35,27 @@ public sealed record RunStatus(RunState State, int Completed, int Total, string?
 public sealed record RunHandle(string Id, string Scheduler, IReadOnlyList<TaskKey> Outputs)
 {
     /// <summary>
-    /// The worker that holds a copy of the run's graph and takes the run over if
-    /// <see cref="Scheduler"/> dies; null when the cluster had only one worker.
+    /// The workers that hold a copy of the run's graph, in order of succession: the first takes
+    /// the run over if <see cref="Scheduler"/> dies, the second if both are gone, and so on.
+    /// Empty when the cluster had only one worker. Set the count with
+    /// <see cref="Client.RunStandbys"/>.
     /// </summary>
-    public string? Standby { get; init; }
+    public IReadOnlyList<string> Standbys { get; init; } = [];
+
+    /// <summary>The first of <see cref="Standbys"/>, or null.</summary>
+    public string? Standby
+    {
+        get => Standbys.Count > 0 ? Standbys[0] : null;
+        init => Standbys = value is null ? [] : [value];
+    }
 
     /// <summary>A JSON form of the handle, for <see cref="Parse"/>.</summary>
     public override string ToString() => JsonSerializer.Serialize(new
     {
         id = Id,
         scheduler = Scheduler,
-        standby = Standby,
+        standby = Standby,                              // what 2.4 readers look for
+        standbys = Standbys,
         outputs = Outputs.Select(k => new { name = k.Name, index = k.Index }),
     });
 
@@ -58,7 +68,9 @@ public sealed record RunHandle(string Id, string Scheduler, IReadOnlyList<TaskKe
             root.GetProperty("outputs").EnumerateArray()
                 .Select(o => new TaskKey(o.GetProperty("name").GetString()!, o.GetProperty("index").GetInt32())).ToArray())
         {
-            Standby = root.TryGetProperty("standby", out var standby) && standby.ValueKind == JsonValueKind.String ? standby.GetString() : null,
+            Standbys = root.TryGetProperty("standbys", out var list) && list.ValueKind == JsonValueKind.Array
+                ? list.EnumerateArray().Select(s => s.GetString()!).ToArray()
+                : root.TryGetProperty("standby", out var standby) && standby.ValueKind == JsonValueKind.String ? [standby.GetString()!] : [],
         };
     }
 }
@@ -75,10 +87,13 @@ public sealed partial class Client
     /// <remarks>
     /// The scheduling worker is the connected live worker with the fewest tasks in flight. It
     /// connects to every worker this client knows, itself included, and recovers lost workers as
-    /// a client does. A second worker, the <see cref="RunHandle.Standby"/>, keeps a copy of the
-    /// graph and watches the scheduler; if the scheduler dies - mid-run or after finishing - the
-    /// standby runs the graph again from its inputs and holds the results instead, and every call
-    /// here falls back to it. Losing both loses the run. Results are held until
+    /// a client does. <see cref="RunStandbys"/> more workers, the <see cref="RunHandle.Standbys"/>,
+    /// keep a copy of the graph and watch their predecessors in the succession. When the run
+    /// finishes, its outputs are copied to every standby before it reports
+    /// <see cref="RunState.Finished"/>, so a scheduler that dies afterwards costs nothing: the
+    /// next standby serves the copies. One that dies mid-run is replaced by the next live standby,
+    /// which runs the graph again from its inputs. Every call here falls back along the
+    /// succession; losing every holder loses the run. Results are held until
     /// <see cref="ForgetAsync"/>.
     /// </remarks>
     public async Task<RunHandle> SubmitAsync(IDaskCollection collection, CancellationToken cancellationToken = default)
@@ -108,7 +123,7 @@ public sealed partial class Client
         var ranked = live.OrderBy(w => w.InFlight).ToArray();
         var scheduler = ranked.FirstOrDefault() ?? throw new InvalidOperationException("No worker is connected.");
         var id = Guid.NewGuid().ToString("N");
-        void Body(BinaryWriter w, string? primary)
+        void Body(BinaryWriter w, string[]? predecessors)
         {
             w.Write(id);
             w.Write(live.Length);
@@ -123,28 +138,70 @@ public sealed partial class Client
             }
             w.Write(outputs.Count);
             foreach (var k in outputs) WireCodec.WriteKey(w, k);
-            if (primary is not null) w.Write(primary);
+            if (predecessors is null) return;
+            w.Write(predecessors.Length);
+            foreach (var p in predecessors) w.Write(p);
         }
 
         var reply = await scheduler.Rpc.RequestAsync(MessageKind.Submit, w => Body(w, null), cancellationToken).ConfigureAwait(false);
         ThrowIfError(reply);
-        string? standbyAddress = null;
+        var succession = new List<string> { scheduler.Address };
+        var holders = new List<WorkerHandle> { scheduler };
         foreach (var candidate in ranked.Skip(1))
         {
+            if (holders.Count > RunStandbys) break;
+            var predecessors = succession.ToArray();
             try
             {
-                var standby = await candidate.Rpc.RequestAsync(MessageKind.Standby, w => Body(w, scheduler.Address), cancellationToken).ConfigureAwait(false);
+                var standby = await candidate.Rpc.RequestAsync(MessageKind.Standby, w => Body(w, predecessors), cancellationToken).ConfigureAwait(false);
                 ThrowIfError(standby);
-                standbyAddress = candidate.Address;
-                break;
+                succession.Add(candidate.Address);
+                holders.Add(candidate);
             }
             catch (WorkerLostException)
             {
                 // try the next one; the run itself is already scheduled
             }
         }
-        return new RunHandle(id, scheduler.Address, outputs.ToArray()) { Standby = standbyAddress };
+        if (holders.Count > 1)
+        {
+            // Every holder learns the whole succession, so whichever finishes the run knows whom
+            // to copy its outputs to. A run that already finished copies them before replying.
+            var all = succession.ToArray();
+            foreach (var holder in holders)
+                try
+                {
+                    ThrowIfError(await holder.Rpc.RequestAsync(MessageKind.Replicas, w =>
+                    {
+                        w.Write(id);
+                        w.Write(all.Length);
+                        foreach (var a in all) w.Write(a);
+                    }, cancellationToken).ConfigureAwait(false));
+                }
+                catch (WorkerLostException)
+                {
+                    // its successors will notice
+                }
+        }
+        return new RunHandle(id, scheduler.Address, outputs.ToArray()) { Standbys = succession.Skip(1).ToArray() };
     }
+
+    /// <summary>
+    /// How many standbys <see cref="SubmitAsync(TaskGraph, IReadOnlyList{TaskKey}, CancellationToken)"/>
+    /// asks for (default 1; fewer when the cluster is smaller). Each one survives one more lost
+    /// holder, and each receives a copy of the finished outputs.
+    /// </summary>
+    public int RunStandbys
+    {
+        get => _runStandbys;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _runStandbys = value;
+        }
+    }
+
+    private int _runStandbys = 1;
 
     /// <summary>Where a submitted run is.</summary>
     /// <exception cref="KeyNotFoundException">The scheduling worker knows no such run (it was forgotten, or the worker restarted).</exception>
@@ -204,9 +261,10 @@ public sealed partial class Client
                     }
                     return results;
                 }
-                catch (WorkerLostException) when (run.Standby is not null && !holder.Address.Equals(run.Standby, StringComparison.OrdinalIgnoreCase))
+                catch (WorkerLostException)
                 {
-                    // the scheduler died between reporting and sending: the standby takes over
+                    // the holder died between reporting and sending: ask along the succession
+                    // again (which throws once nobody is left)
                 }
             }
             await Task.Delay(every, cancellationToken).ConfigureAwait(false);
@@ -231,9 +289,9 @@ public sealed partial class Client
         => TellBothAsync(run, MessageKind.Forget, cancellationToken);
 
     /// <summary>
-    /// Sends a cancel or forget to the standby first, then the scheduler: told the other way
-    /// round, the standby would see the scheduler forget the run, take it for a restarted
-    /// scheduler and run the graph again. Succeeds if either knew the run.
+    /// Sends a cancel or forget along the succession backwards - last standby first, scheduler
+    /// last: told the other way round, a standby would see its predecessor forget the run, take
+    /// it for a restart and run the graph again. Succeeds if any holder knew the run.
     /// </summary>
     private async Task TellBothAsync(RunHandle run, MessageKind kind, CancellationToken cancellationToken)
     {
@@ -254,12 +312,12 @@ public sealed partial class Client
         if (!told) throw last ?? NotConnected(run);
     }
 
-    /// <summary>The connected, live workers that may know the run: scheduler first, then standby.</summary>
+    /// <summary>The connected, live workers that may know the run: scheduler first, then the standbys in order.</summary>
     private List<WorkerHandle> HoldersOf(RunHandle run)
     {
-        var holders = new List<WorkerHandle>(2);
-        foreach (var address in new[] { run.Scheduler, run.Standby })
-            if (address is not null && _workers.FirstOrDefault(w => w.Alive && w.Address.Equals(address, StringComparison.OrdinalIgnoreCase)) is { } h)
+        var holders = new List<WorkerHandle>(1 + run.Standbys.Count);
+        foreach (var address in run.Standbys.Prepend(run.Scheduler))
+            if (_workers.FirstOrDefault(w => w.Alive && w.Address.Equals(address, StringComparison.OrdinalIgnoreCase)) is { } h)
                 holders.Add(h);
         return holders;
     }
@@ -267,7 +325,7 @@ public sealed partial class Client
     private static WorkerLostException NotConnected(RunHandle run)
         => new(run.Scheduler, new InvalidOperationException(
             $"This client is not connected to {run.Scheduler} (the worker scheduling run {run.Id})"
-            + (run.Standby is null ? "." : $" or to {run.Standby}, its standby.")));
+            + (run.Standbys.Count == 0 ? "." : $" or to any of its standbys ({string.Join(", ", run.Standbys)}).")));
 
     private static void ThrowIfError(Message reply)
     {
@@ -284,8 +342,12 @@ internal sealed class DetachedRun
 {
     public required TaskKey[] Outputs { get; init; }
     public required int Total { get; init; }
-    /// <summary>For a standby: the scheduler it watches. Null once it schedules the run itself.</summary>
-    public volatile string? Watching;
+    /// <summary>The whole succession (scheduler, then standbys), once the client sends it.</summary>
+    public string[] Succession = [];
+    /// <summary>Set under the run's lock when this holder has the outputs it must copy onwards.</summary>
+    public bool ResultsReady;
+    /// <summary>A standby that received every output from the holder that finished the run.</summary>
+    public volatile bool Replicated;
     public CancellationTokenSource Cancel { get; } = new();
     public volatile int Completed;
     public volatile RunState State = RunState.Running;
@@ -304,7 +366,7 @@ public sealed partial class Worker
         int attempts;
         TaskSpec[] tasks;
         TaskKey[] outputs;
-        string? primary;
+        string[]? predecessors;
         try
         {
             using var r = message.Reader();
@@ -318,7 +380,7 @@ public sealed partial class Worker
                 return TaskSpec.FromRemote(key, (RemoteCall)WireCodec.Read(r)!, label);
             }).ToArray();
             outputs = Enumerable.Range(0, r.ReadInt32()).Select(_ => WireCodec.ReadKey(r)).ToArray();
-            primary = message.Kind == MessageKind.Standby ? r.ReadString() : null;
+            predecessors = message.Kind == MessageKind.Standby ? Enumerable.Range(0, r.ReadInt32()).Select(_ => r.ReadString()).ToArray() : null;
         }
         catch (Exception e)
         {
@@ -326,7 +388,7 @@ public sealed partial class Worker
             return;
         }
 
-        var run = new DetachedRun { Outputs = outputs, Total = tasks.Length, Watching = primary };
+        var run = new DetachedRun { Outputs = outputs, Total = tasks.Length };
         if (!_runs.TryAdd(id, run))
         {
             await SendErrorAsync(connection, message.Id, new InvalidOperationException($"Run {id} already exists."), null).ConfigureAwait(false);
@@ -334,24 +396,27 @@ public sealed partial class Worker
         }
         var graph = new TaskGraph(tasks);
         if (!addresses.Contains(Address, StringComparer.OrdinalIgnoreCase)) addresses = [Address, .. addresses];
-        run.Execution = primary is null
-            ? Task.Run(() => ScheduleAsync(run, graph, addresses, attempts))
-            : Task.Run(() => StandByAsync(run, id, primary, graph, addresses, attempts));
+        run.Execution = predecessors is null
+            ? Task.Run(() => ScheduleAsync(run, id, graph, addresses, attempts))
+            : Task.Run(() => StandByAsync(run, id, predecessors, graph, addresses, attempts));
         await connection.SendAsync(MessageKind.Ok, message.Id).ConfigureAwait(false);
     }
 
-    /// <summary>Runs a submitted graph as a client of the cluster, then keeps its outputs here.</summary>
-    private async Task ScheduleAsync(DetachedRun run, TaskGraph graph, string[] addresses, int attempts)
+    /// <summary>Runs a submitted graph as a client of the cluster, keeps its outputs here and
+    /// copies them to the holders after this one before reporting it finished.</summary>
+    private async Task ScheduleAsync(DetachedRun run, string id, TaskGraph graph, string[] addresses, int attempts)
     {
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(run.Cancel.Token, _stop.Token);
-            await using var client = await ConnectReachableAsync(addresses, linked.Token).ConfigureAwait(false);
-            client.Retry = attempts > 0 ? new RetryPolicy(attempts) : RetryPolicy.None;
-            client.OnEvent = e => { if (e.Kind == TaskEventKind.Finished) Interlocked.Increment(ref run.Completed); };
-            var results = await client.ExecuteAsync(graph, run.Outputs, linked.Token).ConfigureAwait(false);
-            foreach (var (key, value) in results) _data.Set(key, value);
-            run.State = RunState.Finished;
+            await using (var client = await ConnectReachableAsync(addresses, linked.Token).ConfigureAwait(false))
+            {
+                client.Retry = attempts > 0 ? new RetryPolicy(attempts) : RetryPolicy.None;
+                client.OnEvent = e => { if (e.Kind == TaskEventKind.Finished) Interlocked.Increment(ref run.Completed); };
+                var results = await client.ExecuteAsync(graph, run.Outputs, linked.Token).ConfigureAwait(false);
+                foreach (var (key, value) in results) _data.Set(key, value);
+            }
+            await FinishAsync(run, id).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (run.Cancel.IsCancellationRequested)
         {
@@ -369,25 +434,135 @@ public sealed partial class Worker
     internal static TimeSpan StandbyPoll { get; set; } = TimeSpan.FromMilliseconds(200);
     internal const int StandbyStrikes = 3;
 
+    /// <summary>Marks the run finished once its outputs are on every later holder. The flag is
+    /// set under the run's lock so a succession arriving at the same moment copies them instead
+    /// (<see cref="ReplicasAsync"/>); copying twice is harmless.</summary>
+    private async Task FinishAsync(DetachedRun run, string id)
+    {
+        string[] targets;
+        lock (run)
+        {
+            run.ResultsReady = true;
+            targets = Successors(run);
+        }
+        await ReplicateAsync(run, id, targets).ConfigureAwait(false);
+        run.Completed = Math.Max(run.Completed, run.Total);
+        run.State = RunState.Finished;
+    }
+
+    /// <summary>The holders after this worker in the run's succession.</summary>
+    private string[] Successors(DetachedRun run)
+    {
+        var at = Array.FindIndex(run.Succession, a => a.Equals(Address, StringComparison.OrdinalIgnoreCase));
+        return at < 0 ? [] : run.Succession[(at + 1)..];
+    }
+
+    /// <summary>Copies the run's outputs to <paramref name="targets"/>; a holder that cannot be
+    /// reached is skipped - it is dead, and its own successors have the copy.</summary>
+    private async Task ReplicateAsync(DetachedRun run, string id, string[] targets)
+    {
+        if (targets.Length == 0) return;
+        var payload = new List<(TaskKey Key, byte[] Bytes)>(run.Outputs.Length);
+        foreach (var key in run.Outputs)
+        {
+            if (!_data.TryGetSerialized(key, out var bytes)) return;        // forgotten meanwhile
+            payload.Add((key, bytes));
+        }
+        foreach (var target in targets)
+        {
+            try
+            {
+                await using var rpc = await RpcClient.ConnectAsync(target, _options.Token, ClientTls(), _stop.Token).ConfigureAwait(false);
+                await rpc.RequestAsync(MessageKind.Replica, w =>
+                {
+                    w.Write(id);
+                    w.Write(payload.Count);
+                    foreach (var (key, bytes) in payload)
+                    {
+                        WireCodec.WriteKey(w, key);
+                        w.Write(bytes.Length);
+                        w.Write(bytes);
+                    }
+                }, _stop.Token).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                // unreachable: the next one still gets its copy
+            }
+        }
+    }
+
+    /// <summary>The client telling a holder the whole succession; a run already finished here
+    /// copies its outputs onwards before replying.</summary>
+    private async Task ReplicasAsync(WireConnection connection, Message message)
+    {
+        using var r = message.Reader();
+        var id = r.ReadString();
+        var succession = Enumerable.Range(0, r.ReadInt32()).Select(_ => r.ReadString()).ToArray();
+        if (!_runs.TryGetValue(id, out var run))
+        {
+            await SendErrorAsync(connection, message.Id, new KeyNotFoundException($"{Name} knows no run {id}."), null).ConfigureAwait(false);
+            return;
+        }
+        string[]? targets = null;
+        lock (run)
+        {
+            run.Succession = succession;
+            if (run.ResultsReady) targets = Successors(run);
+        }
+        if (targets is not null) await ReplicateAsync(run, id, targets).ConfigureAwait(false);
+        await connection.SendAsync(MessageKind.Ok, message.Id).ConfigureAwait(false);
+    }
+
+    /// <summary>A finished run's outputs, copied here by the holder that finished it.</summary>
+    private async Task ReplicaAsync(WireConnection connection, Message message)
+    {
+        using var r = message.Reader();
+        var id = r.ReadString();
+        if (!_runs.TryGetValue(id, out var run))
+        {
+            await SendErrorAsync(connection, message.Id, new KeyNotFoundException($"{Name} knows no run {id}."), null).ConfigureAwait(false);
+            return;
+        }
+        var count = r.ReadInt32();
+        for (var i = 0; i < count; i++)
+        {
+            var key = WireCodec.ReadKey(r);
+            _data.Set(key, WireCodec.Deserialize(r.ReadBytes(r.ReadInt32())));
+        }
+        run.Replicated = run.Outputs.All(_data.Contains);
+        await connection.SendAsync(MessageKind.Ok, message.Id).ConfigureAwait(false);
+    }
+
     /// <summary>
-    /// Holds a run's graph for its scheduler and watches it. While the scheduler answers, this
-    /// reports the scheduler's progress; once it stops answering (or answers that it does not
-    /// know the run - it restarted) this worker schedules the graph itself, on every worker but
-    /// the dead one. A scheduler that already finished is treated the same way: its results died
-    /// with it, so they are recomputed.
+    /// Holds a run's graph and watches the holders before this one in the succession, asking the
+    /// first that has not been given up for. While one answers, this reports its progress; once
+    /// it stops answering (or says it does not know the run - it restarted) the next is watched,
+    /// and when every predecessor is gone this worker takes the run over. If the run had
+    /// finished and its outputs were copied here, that is all a takeover is; otherwise the graph
+    /// runs again, on every worker but the dead ones.
     /// </summary>
-    private async Task StandByAsync(DetachedRun run, string id, string primary, TaskGraph graph, string[] addresses, int attempts)
+    private async Task StandByAsync(DetachedRun run, string id, string[] predecessors, TaskGraph graph, string[] addresses, int attempts)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(run.Cancel.Token, _stop.Token);
+        var dead = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         RpcClient? rpc = null;
+        string? watched = null;
         var strikes = 0;
         try
         {
-            while (true)
+            while (predecessors.FirstOrDefault(p => !dead.Contains(p)) is { } target)
             {
+                if (!target.Equals(watched, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (rpc is not null) await rpc.DisposeAsync().ConfigureAwait(false);
+                    rpc = null;
+                    watched = target;
+                    strikes = 0;
+                }
                 try
                 {
-                    rpc ??= await RpcClient.ConnectAsync(primary, _options.Token, ClientTls(), linked.Token).ConfigureAwait(false);
+                    rpc ??= await RpcClient.ConnectAsync(target, _options.Token, ClientTls(), linked.Token).ConfigureAwait(false);
                     var reply = await rpc.RequestAsync(MessageKind.Status, w => w.Write(id), linked.Token).ConfigureAwait(false);
                     if (reply.Kind == MessageKind.Error)
                     {
@@ -421,7 +596,11 @@ public sealed partial class Worker
                     if (rpc is not null) await rpc.DisposeAsync().ConfigureAwait(false);
                     rpc = null;
                 }
-                if (strikes >= StandbyStrikes) break;
+                if (strikes >= StandbyStrikes)
+                {
+                    dead.Add(target);                   // ask the next predecessor at once
+                    continue;
+                }
                 await Task.Delay(StandbyPoll, linked.Token).ConfigureAwait(false);
             }
         }
@@ -439,16 +618,25 @@ public sealed partial class Worker
             if (rpc is not null) await rpc.DisposeAsync().ConfigureAwait(false);
         }
 
-        run.Watching = null;
-        run.Completed = 0;
         Interlocked.Increment(ref _takeovers);
-        await ScheduleAsync(run, graph, addresses.Where(a => !a.Equals(primary, StringComparison.OrdinalIgnoreCase)).ToArray(), attempts).ConfigureAwait(false);
+        if (run.Replicated && run.Outputs.All(_data.Contains))
+        {
+            Interlocked.Increment(ref _replicaTakeovers);
+            await FinishAsync(run, id).ConfigureAwait(false);     // pass the copy on down the succession
+            return;
+        }
+        run.Completed = 0;
+        await ScheduleAsync(run, id, graph, addresses.Where(a => !dead.Contains(a)).ToArray(), attempts).ConfigureAwait(false);
     }
 
     private int _takeovers;
+    private int _replicaTakeovers;
 
     /// <summary>Runs this worker took over from a dead scheduler, as a standby.</summary>
     public int Takeovers => _takeovers;
+
+    /// <summary>The part of <see cref="Takeovers"/> served from copied outputs, with nothing recomputed.</summary>
+    public int TakeoversFromReplica => _replicaTakeovers;
 
     /// <summary>A client of every address that answers; a dead worker in the list is skipped
     /// rather than failing the run, while a wrong token or TLS failure still throws.</summary>

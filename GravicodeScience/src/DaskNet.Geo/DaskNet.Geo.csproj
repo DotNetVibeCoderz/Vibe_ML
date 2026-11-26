@@ -10,7 +10,7 @@
     <RootNamespace>Gravicode.Science.DaskNet.Geo</RootNamespace>
     <AssemblyName>Gravicode.Science.DaskNet.Geo</AssemblyName>
     <PackageId>Gravicode.Science.DaskNet.Geo</PackageId>
-    <Description>Geospatial operations for Dask.Net (a dask-geopandas analogue): geohashes, spatial partitioning, distance joins, point-in-polygon joins, and buffer, simplify, dissolve and overlay on NetTopologySuite, all runnable on a cluster. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <Description>Geospatial operations for Dask.Net (a dask-geopandas analogue): geohashes, spatial partitioning, distance joins, point-in-polygon joins, and buffer, simplify, dissolve and overlay on NetTopologySuite - in metres through GeoCrs (WGS 84, Web Mercator, UTM) - all runnable on a cluster. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
     <PackageTags>dask;geospatial;geohash;spatial-join;wkt;overlay;dissolve;netTopologySuite;dataframe;dotnet;gravicode</PackageTags>
   </PropertyGroup>
 

@@ -42,9 +42,18 @@ public sealed class StreamStatistics
 /// windows and any join state are saved; a new run of the same query resumes from there.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Delivery is at-least-once: a crash after the sink but before the checkpoint replays that batch.
 /// The CSV sink names files by batch id, so a replay overwrites rather than duplicates - which makes
 /// it effectively exactly-once. Other sinks should be idempotent by <see cref="StreamBatch.Id"/>.
+/// </para>
+/// <para>
+/// A transactional sink (Kafka with a transactional id) is exactly-once with a checkpoint: the
+/// state after a batch is saved as a pending checkpoint, the batch is written in one transaction
+/// that also records its id, and only then is the pending checkpoint promoted. A restart that finds
+/// a pending checkpoint asks the sink which batch it last committed: if that batch's transaction
+/// committed, the pending state is the truth; if not, it is discarded and the batch replayed.
+/// </para>
 /// </remarks>
 public sealed class StreamQuery
 {
@@ -52,6 +61,7 @@ public sealed class StreamQuery
     private readonly WindowSpec? _window;
     private readonly JoinSpec? _join;
     private readonly Func<DataFrame, StreamBatch, Task>? _sink;
+    private readonly ITransactionalSink? _transactional;
     private readonly List<DataFrame> _results = [];
 
     internal StreamQuery(DaskStream stream, WindowSpec? window, Func<DataFrame, StreamBatch, Task>? sink, JoinSpec? join = null)
@@ -61,6 +71,19 @@ public sealed class StreamQuery
         _sink = sink;
         _join = join;
     }
+
+    /// <summary>A query writing to a transactional sink (from another package: Kafka).</summary>
+    internal StreamQuery(DaskStream stream, WindowSpec? window, JoinSpec? join, ITransactionalSink sink)
+        : this(stream, window, (Func<DataFrame, StreamBatch, Task>?)null, join)
+        => _transactional = sink;
+
+    /// <summary>Queries over each kind of stream, for sinks defined in other packages.</summary>
+    internal static StreamQuery For(DaskStream stream, ITransactionalSink sink) => new(stream, null, null, sink);
+    internal static StreamQuery For(WindowedStream stream, ITransactionalSink sink) => new(stream.Stream, stream.Spec, stream.Join, sink);
+    internal static StreamQuery For(JoinedStream stream, ITransactionalSink sink) => new(stream.Left, null, stream.Spec, sink);
+    internal static StreamQuery For(DaskStream stream, Func<DataFrame, StreamBatch, Task> sink) => new(stream, null, sink);
+    internal static StreamQuery For(WindowedStream stream, Func<DataFrame, StreamBatch, Task> sink) => new(stream.Stream, stream.Spec, sink, stream.Join);
+    internal static StreamQuery For(JoinedStream stream, Func<DataFrame, StreamBatch, Task> sink) => new(stream.Left, null, sink, stream.Spec);
 
     /// <summary>Output batches kept by a <c>Collect()</c> query.</summary>
     public IReadOnlyList<DataFrame> Results => _results;
@@ -88,6 +111,17 @@ public sealed class StreamQuery
         var windows = _window is null ? null : new WindowState(_window);
         var join = _join is null ? null : new JoinState(_join);
         var path = checkpointDirectory is null ? null : Path.Combine(Path.GetFullPath(checkpointDirectory), "checkpoint.json");
+        var pending = path is null ? null : path + ".pending";
+        using var session = _transactional is null ? null : await Task.Run(_transactional.Open, cancellationToken).ConfigureAwait(false);
+        if (session is not null && pending is not null && File.Exists(pending))
+        {
+            // A batch was being written when the last run stopped: its transaction either
+            // committed (the pending state is the truth) or did not (replay from the old state).
+            var batchId = Checkpoint.ReadBatches(pending) - 1;
+            var committed = await Task.Run(session.LastCommitted, cancellationToken).ConfigureAwait(false);
+            if (committed >= batchId) File.Move(pending, path!, overwrite: true);
+            else File.Delete(pending);
+        }
         if (path is not null && File.Exists(path)) Checkpoint.Load(path, source, windows, join);
         stats.LateRows = (windows?.LateRows ?? 0) + (join?.LateRows ?? 0);
 
@@ -101,13 +135,15 @@ public sealed class StreamQuery
                 if (join is not null) output = join.Add(side == 0, output) ?? DataFrame.Empty();
                 if (windows is not null) output = windows.Add(output) ?? DataFrame.Empty();
                 stats.LateRows = (windows?.LateRows ?? 0) + (join?.LateRows ?? 0);
-                await EmitAsync(output, new StreamBatch(source.Batches, batch.Frame.RowCount, batch.Files, windows?.Watermark ?? join?.Watermark), stats).ConfigureAwait(false);
+                var info = new StreamBatch(source.Batches, batch.Frame.RowCount, batch.Files, windows?.Watermark ?? join?.Watermark);
+                if (session is null) await EmitAsync(output, info, stats).ConfigureAwait(false);
                 (join is null ? source : side == 0 ? join.Left.Source : join.Right.Source).Consumed(batch);
                 source.Batches++;
                 stats.Batches++;
                 stats.InputRows += batch.Frame.RowCount;
-                if (path is not null) Checkpoint.Save(path, source, windows, join);
-                batch.Commit?.Invoke();                            // only now is the batch safe
+                if (session is not null) await WriteTransactionAsync(session, output, info, stats, path, pending, source, windows, join).ConfigureAwait(false);
+                else if (path is not null) Checkpoint.Save(path, source, windows, join);
+                if (batch.Commit is not null) await batch.Commit().ConfigureAwait(false);   // only now is the batch safe
             }
             finished = !cancellationToken.IsCancellationRequested;
         }
@@ -124,14 +160,31 @@ public sealed class StreamQuery
             }
             if (rest is { RowCount: > 0 })
             {
-                await EmitAsync(rest, new StreamBatch(source.Batches, 0, [], windows?.Watermark ?? join?.Watermark), stats).ConfigureAwait(false);
+                var info = new StreamBatch(source.Batches, 0, [], windows?.Watermark ?? join?.Watermark);
+                if (session is null) await EmitAsync(rest, info, stats).ConfigureAwait(false);
                 source.Batches++;
-                if (path is not null) Checkpoint.Save(path, source, windows, join);
+                if (session is not null) await WriteTransactionAsync(session, rest, info, stats, path, pending, source, windows, join).ConfigureAwait(false);
+                else if (path is not null) Checkpoint.Save(path, source, windows, join);
             }
         }
         stats.JoinStateRows = join is null ? 0 : join.Left.Count + join.Right.Count;
         stats.Elapsed = clock.Elapsed;
         return stats;
+    }
+
+    /// <summary>Pending checkpoint, then the batch's transaction (every batch, even an empty one,
+    /// so the sink's record of the last batch id is exact), then the checkpoint promoted.</summary>
+    private async Task WriteTransactionAsync(ITransactionalSession session, DataFrame output, StreamBatch info, StreamStatistics stats,
+        string? path, string? pending, SourceState source, WindowState? windows, JoinState? join)
+    {
+        if (pending is not null) Checkpoint.Save(pending, source, windows, join);
+        await Task.Run(() => session.Write(output, info)).ConfigureAwait(false);
+        if (output.RowCount > 0)
+        {
+            if (_window is not null) stats.WindowsEmitted += output.RowCount;
+            stats.OutputRows += output.RowCount;
+        }
+        if (pending is not null) File.Move(pending, path!, overwrite: true);
     }
 
     /// <summary>
@@ -192,6 +245,26 @@ public sealed class StreamQuery
             return Task.CompletedTask;
         };
     }
+}
+
+/// <summary>
+/// A sink whose writes are atomic and which remembers the last batch it committed - what makes a
+/// checkpointed query exactly-once (see <see cref="StreamQuery"/>). Kafka with a transactional id is one.
+/// </summary>
+internal interface ITransactionalSink
+{
+    /// <summary>Starts a session for one run; it fences earlier sessions of the same identity.</summary>
+    ITransactionalSession Open();
+}
+
+/// <summary>One run's connection to a transactional sink.</summary>
+internal interface ITransactionalSession : IDisposable
+{
+    /// <summary>The id of the last batch whose transaction committed, or -1.</summary>
+    long LastCommitted();
+
+    /// <summary>Writes the batch's rows and its id in one transaction.</summary>
+    void Write(DataFrame output, StreamBatch batch);
 }
 
 /// <summary>The checkpoint file: JSON, written to a temporary name and renamed into place.</summary>
@@ -332,6 +405,11 @@ internal static class Checkpoint
         File.WriteAllText(temp, JsonSerializer.Serialize(doc, Options));
         File.Move(temp, path, overwrite: true);
     }
+
+    /// <summary>The batch count a checkpoint file records (the next batch's id).</summary>
+    public static long ReadBatches(string path)
+        => (JsonSerializer.Deserialize<Document>(File.ReadAllText(path), Options)
+            ?? throw new InvalidDataException($"{path} is not a stream checkpoint.")).Batches;
 
     public static void Load(string path, SourceState source, WindowState? windows, JoinState? join = null)
     {

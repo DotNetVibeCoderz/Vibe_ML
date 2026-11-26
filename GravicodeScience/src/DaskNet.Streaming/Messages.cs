@@ -91,7 +91,11 @@ public class MessageSourceOptions
 }
 
 /// <summary>One message as a source received it.</summary>
-internal sealed record RawMessage(string Topic, string Payload, DateTime? Timestamp, string? Key = null, int Partition = 0, long Offset = 0);
+internal sealed record RawMessage(string Topic, string Payload, DateTime? Timestamp, string? Key = null, int Partition = 0, long Offset = 0)
+{
+    /// <summary>Acknowledges the message to its broker, for sources that defer it (MQTT).</summary>
+    public Func<CancellationToken, Task>? Acknowledge { get; init; }
+}
 
 /// <summary>
 /// Turns messages into frames with a pinned schema. One decoder lives for one query run.

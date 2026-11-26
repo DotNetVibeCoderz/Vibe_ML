@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Dask.Net streaming over Apache Kafka: a consumer-group source and an exactly-once
+    (transactional) sink. A separate package because Confluent.Kafka brings librdkafka, a native
+    library of several megabytes per platform, that MQTT and directory streams do not need.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>Gravicode.Science.DaskNet.Streaming</RootNamespace>
+    <AssemblyName>Gravicode.Science.DaskNet.Kafka</AssemblyName>
+    <PackageId>Gravicode.Science.DaskNet.Kafka</PackageId>
+    <Description>Apache Kafka for Dask.Net streaming: consumer-group sources with checkpointed offsets, and a transactional sink that makes checkpointed queries exactly-once. Dibuat oleh Gravicode Studios, dipimpin oleh Kang Fadhil.</Description>
+    <PackageTags>dask;streaming;kafka;exactly-once;transactions;micro-batch;dataframe;dotnet;gravicode</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DaskNet.Streaming\DaskNet.Streaming.csproj" />
+    <PackageReference Include="Confluent.Kafka" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DaskNet.Kafka.Tests" />
+  </ItemGroup>
+
+</Project>

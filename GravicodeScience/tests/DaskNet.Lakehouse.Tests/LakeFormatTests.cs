@@ -23,6 +23,7 @@ public sealed class LakeFormatTests
         { "dv", 0 }, { "dv", 1 }, { "dv", 2 }, { "dv", 3 }, { "dv", 4 }, { "dv", 5 },
         { "mapped", 0 }, { "mapped", 1 }, { "mapped", 2 }, { "mapped", 3 }, { "mapped", 4 }, { "mapped", 5 },
         { "mapped_id", 0 }, { "mapped_id", 1 },
+        { "v2", 0 }, { "v2", 1 }, { "v2", 2 }, { "v2", 3 }, { "v2", 4 }, { "v2", 5 }, { "v2", 6 },
     };
 
     [Theory]
@@ -107,6 +108,41 @@ public sealed class LakeFormatTests
         Assert.Contains(Scan(DeltaLake.Read(Fixture("delta", "mapped_id"))).Files, f => f.FieldIds.Count > 0);
     }
 
+    [Fact]
+    public void V2_checkpoints_rebuild_versions_from_their_sidecars()
+    {
+        // Spark wrote a v2 checkpoint at 3 with a Parquet top level and one at 5 with a JSON top
+        // level, both with their file actions in _sidecars/. Deleting the commits they cover
+        // proves each is read, and read whole: the sidecar adds carry deletion vectors.
+        var log = Fixture("delta", "v2", "_delta_log");
+        Assert.Single(Directory.EnumerateFiles(log, "00000000000000000003.checkpoint.*.parquet"));
+        Assert.Single(Directory.EnumerateFiles(log, "00000000000000000005.checkpoint.*.json"));
+        Assert.Equal(2, Directory.EnumerateFiles(Path.Combine(log, "_sidecars")).Count());
+
+        foreach (var (drop, keepCheckpoint, versions) in new[] { (5, 5, new[] { 5, 6 }), (3, 3, new[] { 3, 4, 5, 6 }) })
+        {
+            var copy = Path.Combine(Path.GetTempPath(), "delta-v2-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                CopyDirectory(Fixture("delta", "v2"), copy);
+                var copyLog = Path.Combine(copy, "_delta_log");
+                foreach (var f in Directory.EnumerateFiles(copyLog))
+                {
+                    var name = Path.GetFileName(f);
+                    if (name.Length >= 20 && long.TryParse(name[..20], out var v)
+                        && ((v <= drop && !name.Contains(".checkpoint.", StringComparison.Ordinal)) || (name.Contains(".checkpoint.", StringComparison.Ordinal) && v != keepCheckpoint)))
+                        File.Delete(f);
+                }
+                File.Delete(Path.Combine(copyLog, "_last_checkpoint"));
+                foreach (var v in versions)
+                    Same(Fixture("delta", "v2_expected", $"{v}.jsonl"), DeltaLake.Read(copy, v).Compute());
+                Assert.Throws<InvalidDataException>(() => DeltaLake.Read(copy, drop - 1));
+            }
+            finally { Directory.Delete(copy, recursive: true); }
+        }
+        Assert.Contains(Scan(DeltaLake.Read(Fixture("delta", "v2"))).Files, f => f.DeletionVector is not null);
+    }
+
     // ------------------------------------------------------------------ Hudi
 
     private static string[] HudiInstants(string table)
@@ -114,14 +150,26 @@ public sealed class LakeFormatTests
 
     public static TheoryData<string, int> HudiInstantIndexes => new()
     {
-        { "cow", 0 }, { "cow", 1 }, { "cow", 2 }, { "cow", 3 }, { "flat", 0 }, { "flat", 1 }, { "mor", 0 }, { "mor", 1 },
+        { "cow", 0 }, { "cow", 1 }, { "cow", 2 }, { "cow", 3 }, { "flat", 0 }, { "flat", 1 },
+        { "mor", 0 }, { "mor", 1 }, { "mor", 2 }, { "mor", 3 }, { "mor", 4 }, { "mor", 5 },
     };
 
     [Theory]
     [MemberData(nameof(HudiInstantIndexes))]
     public void Every_hudi_instant_reads_as_spark_reads_it(string table, int index)
         => Same(Fixture("hudi", table + "_expected", $"{index}.jsonl"),
-            Hudi.Read(Fixture("hudi", table), HudiInstants(table)[index], readOptimized: table == "mor").Compute());
+            Hudi.Read(Fixture("hudi", table), HudiInstants(table)[index]).Compute());
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void Every_merge_on_read_instant_reads_optimized_as_spark_does(int index)
+        => Same(Fixture("hudi", "mor_expected", $"{index}_ro.jsonl"),
+            Hudi.Read(Fixture("hudi", "mor"), HudiInstants("mor")[index], readOptimized: true).Compute());
 
     [Fact]
     public void Hudi_timeline_replacecommit_and_latest_read()
@@ -171,13 +219,76 @@ public sealed class LakeFormatTests
     }
 
     [Fact]
-    public void Hudi_merge_on_read_refuses_a_snapshot_with_pending_logs()
+    public async Task Hudi_merge_on_read_merges_file_slices_locally_and_on_a_cluster()
     {
         var path = Fixture("hudi", "mor");
-        var error = Assert.Throws<NotSupportedException>(() => Hudi.Read(path));
-        Assert.Contains("readOptimized", error.Message);
-        // Before the upsert there were no logs, so a snapshot read is exact.
-        Same(Fixture("hudi", "mor_expected", "0.jsonl"), Hudi.Read(path, HudiInstants("mor")[0]).Compute());
+        var instants = Hudi.Instants(path);
+        Assert.Equal(["deltacommit", "deltacommit", "deltacommit", "deltacommit", "commit", "deltacommit"], instants.Select(i => i.Action));
+
+        // Before the compaction (instant 3) every updated group merges logs from three delta
+        // commits over the first base file; after it, only the logs written since.
+        var before = Scan(Hudi.Read(path, instants[3].Time));
+        var after = Scan(Hudi.Read(path));
+        Assert.Contains(before.Files, f => f.Logs.Length == 3);
+        Assert.All(after.Files, f => Assert.True(f.Logs.Length <= 1, $"{f.Path} has {f.Logs.Length} logs after compaction"));
+        Assert.Contains(after.Files, f => f.Logs.Length == 1);
+        Assert.DoesNotContain(after.Files.SelectMany(f => f.Logs), l => before.Files.SelectMany(b => b.Logs).Contains(l));
+
+        // The upsert with seq 0 lost to seq 1, the deletes applied, the post-compaction update won.
+        var latest = Hudi.Read(path).Compute();
+        var amounts = Enumerable.Range(0, latest.RowCount).ToDictionary(i => (double)latest["id"].GetValue(i)!, i => latest["amount"].GetValue(i));
+        Assert.Equal(6.25, amounts[5]);
+        Assert.Equal(4007.5, amounts[6]);
+        Assert.False(amounts.ContainsKey(16));
+
+        // A projection that drops the key and ordering columns still merges by them.
+        var narrow = Hudi.Read(path).Select("id", "amount").Compute();
+        Assert.Equal(["id", "amount"], narrow.ColumnNames);
+        Assert.Equal(latest.RowCount, narrow.RowCount);
+        var filtered = Hudi.Read(path).Filter(Col("region").Eq("north")).Compute();
+        Assert.All(Enumerable.Range(0, filtered.RowCount), i => Assert.Equal("north", filtered["region"].GetValue(i)));
+
+        await using var cluster = await LocalCluster.StartAsync(workers: 2);
+        Assert.Equal(Canonical(latest), Canonical(Hudi.Read(path).Compute(cluster.Client)));
         Assert.Throws<DirectoryNotFoundException>(() => Hudi.Read(Fixture("delta", "dv")));
+    }
+
+    [Fact]
+    public void Hudi_log_blocks_decode_as_written()
+    {
+        // Every log in the fixture starts with an Avro data block or a delete block whose
+        // instant is a delta commit on the timeline, and whose schema header is the writer's.
+        var path = Fixture("hudi", "mor");
+        var deltaCommits = Hudi.Instants(path).Where(i => i.Action == "deltacommit").Select(i => i.Time).ToHashSet();
+        var logs = Directory.EnumerateFiles(path, "*.log.*", SearchOption.AllDirectories).ToArray();
+        Assert.True(logs.Length >= 8, $"{logs.Length} logs");
+        var deletes = 0;
+        foreach (var log in logs)
+        {
+            var blocks = HudiLog.Read(log);
+            Assert.NotEmpty(blocks);
+            foreach (var b in blocks)
+            {
+                Assert.Contains(b.Instant!, deltaCommits);
+                if (b.Type == HudiLog.BlockType.Delete) deletes += HudiLog.Deletes(b, log).Count();
+                else
+                {
+                    Assert.Equal(HudiLog.BlockType.AvroData, b.Type);
+                    var schema = Avro.Schema.Parse(b.Header[HudiLog.SchemaKey]);
+                    Assert.All(HudiLog.Records(b, schema), r => Assert.IsType<string>(r["_hoodie_record_key"]));
+                }
+            }
+        }
+        Assert.Equal(3, deletes);   // ids 3, 4 and 16
+
+        // A truncated block (a crashed writer) ends the log rather than failing the read.
+        var copy = Path.GetTempFileName();
+        try
+        {
+            var bytes = File.ReadAllBytes(logs[0]);
+            File.WriteAllBytes(copy, [.. bytes, .. bytes[..40]]);
+            Assert.Equal(HudiLog.Read(logs[0]).Count, HudiLog.Read(copy).Count);
+        }
+        finally { File.Delete(copy); }
     }
 }

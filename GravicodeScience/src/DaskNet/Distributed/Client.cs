@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading.Channels;
+using Gravicode.Science.GraviNum;
 
 namespace Gravicode.Science.DaskNet.Distributed;
 
@@ -53,6 +55,15 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
     // Replaced, never mutated: a run reads it while discovery adds workers. Lost workers stay in
     // it (closed), because a run's bookkeeping refers to their handles.
     private WorkerHandle[] _workers = [];
+
+    /// <summary>The runs executing on this client right now; they share the workers' slots.</summary>
+    private readonly ConcurrentDictionary<ClusterRun, byte> _activeRuns = new();
+
+    /// <summary>Wakes every active run so one blocked on a full cluster dispatches again.</summary>
+    private void SlotFreed()
+    {
+        foreach (var run in _activeRuns.Keys) run.Nudge();
+    }
     private readonly string _token;
     private readonly TlsOptions? _tls;
     private readonly SemaphoreSlim _joining = new(1, 1);
@@ -222,6 +233,34 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
         finally { LastRun = run.Statistics; }
     }
 
+    /// <summary>
+    /// Computes an array and returns it as a view rather than a copy: from a worker on this
+    /// machine, the view's span is that worker's shared-memory segment, so a large result is never
+    /// copied into this process. Dispose the view to release the segment.
+    /// </summary>
+    /// <remarks>Results from other machines, or smaller than the worker's
+    /// <see cref="WorkerOptions.SharedMemoryThreshold"/>, come back as a view over a decoded copy
+    /// (<see cref="SharedArrayView.IsShared"/> false).</remarks>
+    public Task<SharedArrayView> ComputeViewAsync(Delayed<NdArray> value, CancellationToken cancellationToken = default)
+        => ViewAsync(value, cancellationToken);
+
+    /// <inheritdoc cref="ComputeViewAsync(Delayed{NdArray}, CancellationToken)"/>
+    public Task<SharedArrayView> ComputeViewAsync(Delayed<double[]> value, CancellationToken cancellationToken = default)
+        => ViewAsync(value, cancellationToken);
+
+    private async Task<SharedArrayView> ViewAsync(IDaskCollection value, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var key = value.OutputKeys[0];
+        var graph = Dask.Graph(value);
+        var local = graph.Tasks.Values.Where(t => !t.IsRemotable).Select(t => t.Label).Distinct().Take(5).ToArray();
+        if (local.Length > 0)
+            throw new NotSupportedException($"Tasks [{string.Join(", ", local)}] wrap local delegates and cannot run on a cluster.");
+        var run = new ClusterRun(this, graph.Cull([key]), [key], cancellationToken) { Views = true };
+        try { return (SharedArrayView)(await run.ExecuteAsync().ConfigureAwait(false))[key]!; }
+        finally { LastRun = run.Statistics; }
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
@@ -247,7 +286,21 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
         public RpcClient Rpc { get; } = rpc;
         public int Threads { get; } = threads;
         public string Name { get; } = name;
-        public int InFlight { get; set; }
+        private int _inFlight;
+
+        /// <summary>Tasks sent to this worker and not yet answered, by every run of the client.</summary>
+        public int InFlight => Volatile.Read(ref _inFlight);
+
+        public void Started() => Interlocked.Increment(ref _inFlight);
+
+        /// <summary>One attempt answered or abandoned. Other runs of the client may be waiting
+        /// for this very slot, and they only look again when an event of theirs arrives, so each
+        /// is woken.</summary>
+        public void Ended(Client client)
+        {
+            Interlocked.Decrement(ref _inFlight);
+            client.SlotFreed();
+        }
         public bool Alive => !Rpc.IsClosed;
         /// <summary>Set once a shared-memory read from this worker failed (not the same machine after all).</summary>
         public volatile bool NoSharedMemory;
@@ -294,6 +347,9 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
 
         public RunStatistics Statistics { get; } = new();
 
+        /// <summary>Gather outputs as <see cref="SharedArrayView"/>s instead of values.</summary>
+        public bool Views { get; init; }
+
         private readonly HashSet<WorkerHandle> _watched = [];
 
         /// <summary>Hooks the loss of every live worker not hooked yet - those present at the start,
@@ -317,6 +373,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
             using var stopTicks = new CancellationTokenSource();
             if (_client.Speculation is { } policy) _ = TickAsync(policy, stopTicks.Token);
 
+            _client._activeRuns[this] = 0;
             try
             {
                 Replan();
@@ -342,11 +399,15 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
             }
             finally
             {
+                _client._activeRuns.TryRemove(this, out _);
                 await stopTicks.CancelAsync().ConfigureAwait(false);
                 await ReleaseAllAsync().ConfigureAwait(false);
                 Statistics.Elapsed = clock.Elapsed;
             }
         }
+
+        /// <summary>An empty event: the loop runs <c>Dispatch</c> again after it.</summary>
+        public void Nudge() => _events.Writer.TryWrite(static () => Task.CompletedTask);
 
         /// <summary>Wakes the loop now and then so stragglers are noticed while nothing else happens.</summary>
         private async Task TickAsync(SpeculationPolicy policy, CancellationToken stop)
@@ -470,7 +531,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
         /// <summary>Sends one attempt of <paramref name="task"/> to <paramref name="worker"/>.</summary>
         private void Request(TaskSpec task, WorkerHandle worker)
         {
-            worker.InFlight++;
+            worker.Started();
             Statistics.TasksRun++;
             Statistics.TasksPerWorker[worker.Name] = Statistics.TasksPerWorker.GetValueOrDefault(worker.Name) + 1;
 
@@ -503,7 +564,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
             if (_losers.Remove((task.Key, worker)))
             {
                 // The other attempt already won; this one only held a thread. Drop its copy.
-                worker.InFlight--;
+                worker.Ended(_client);
                 if (reply.IsCompletedSuccessfully && reply.Result.Kind == MessageKind.Done && worker.Alive) _ = ReleaseAsync(worker, [task.Key]);
                 return;
             }
@@ -515,7 +576,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
             if (other is not null && !succeeded && !reply.IsCanceled)
             {
                 // One of two attempts failed while the other still runs: let the other decide.
-                worker.InFlight--;
+                worker.Ended(_client);
                 if (copy) _copies.Remove(task.Key);
                 else
                 {
@@ -526,7 +587,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
             }
             _inFlight.Remove(task.Key);
             _copies.Remove(task.Key);
-            worker.InFlight--;
+            worker.Ended(_client);
             if (other is not null && succeeded)
             {
                 _losers.Add((task.Key, other));
@@ -634,7 +695,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
             var orphaned = _inFlight.Where(p => p.Value == worker).Select(p => p.Key).ToArray();
             foreach (var key in orphaned)
             {
-                worker.InFlight--;
+                worker.Ended(_client);
                 // A straggler's second attempt elsewhere becomes the attempt.
                 if (_copies.Remove(key, out var copy)) _inFlight[key] = copy;
                 else _inFlight.Remove(key);
@@ -642,7 +703,7 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
             foreach (var key in _copies.Where(p => p.Value == worker).Select(p => p.Key).ToArray())
             {
                 _copies.Remove(key);
-                worker.InFlight--;
+                worker.Ended(_client);
             }
             _losers.RemoveWhere(l => l.Item2 == worker);
             Replan();   // reports the keys only this worker held
@@ -669,7 +730,16 @@ public sealed partial class Client : IScheduler, IAsyncDisposable
                 var holder = _holders[key].First(h => h.Alive);
                 try
                 {
-                    var (found, value) = await Distributed.SharedMemory.GetAsync(holder.Rpc, key, _client.SharedMemory && !holder.NoSharedMemory,
+                    var shared = _client.SharedMemory && !holder.NoSharedMemory;
+                    if (Views)
+                    {
+                        var (seen, view) = await Distributed.SharedMemory.GetViewAsync(holder.Rpc, key, shared, () => holder.NoSharedMemory = true, _cancel)
+                            .ConfigureAwait(false);
+                        if (seen) return view;
+                        _holders[key].Remove(holder);
+                        continue;
+                    }
+                    var (found, value) = await Distributed.SharedMemory.GetAsync(holder.Rpc, key, shared,
                         () => holder.NoSharedMemory = true, _cancel).ConfigureAwait(false);
                     if (found) return value;
                     _holders[key].Remove(holder);

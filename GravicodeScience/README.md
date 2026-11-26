@@ -35,9 +35,10 @@ dotnet add package Gravicode.Science.SciNet        # SciPy for .NET
 dotnet add package Gravicode.Science.DaskNet       # parallel and distributed computing
 # Dask.Net add-ons
 dotnet add package Gravicode.Science.DaskNet.Lakehouse   # Delta Lake, Iceberg and Hudi tables
-dotnet add package Gravicode.Science.DaskNet.Geo         # spatial joins, buffer/dissolve/overlay (NetTopologySuite)
+dotnet add package Gravicode.Science.DaskNet.Geo         # spatial joins, buffer/dissolve/overlay, in metres (NetTopologySuite)
 dotnet add package Gravicode.Science.DaskNet.ML          # hyperparameter search, incremental training, ONNX scoring
-dotnet add package Gravicode.Science.DaskNet.Streaming   # files, MQTT, Kafka; windows, stream joins, checkpoints
+dotnet add package Gravicode.Science.DaskNet.Streaming   # files, MQTT; windows, stream joins, checkpoints
+dotnet add package Gravicode.Science.DaskNet.Kafka       # Kafka source and exactly-once sink (Confluent.Kafka)
 ```
 
 Take only what you need — every package pulls in `GraviNum`, and nothing else is mandatory. See
@@ -81,7 +82,7 @@ samples/      eight console apps, each printing real results
 notebooks/    eight .NET Interactive notebooks
 benchmarks/   eight BenchmarkDotNet suites, plus the Python comparison harness
 datasets/     Iris, Titanic, MNIST digits, Cora, plus generated data
-tests/        4,487 tests
+tests/        4,523 tests
 tools/        ScienceAppGen (an IDE that builds apps from a prompt), Science Gallery
               (50 runnable use cases), the Dask.Net worker host, the icon generator
 assets/       NuGet package icons
@@ -201,12 +202,14 @@ var result = report.Compute(cluster.Client);
 
 SQL chains of inner joins are reordered by estimated size, and filters on database tables are
 pushed into the SQL they send. `Client.SubmitAsync` hands a run to a worker so it outlives the
-client - with a standby worker that takes the run over if the scheduling worker dies - and
-speculative execution re-runs stragglers on idle workers. Workers on one machine hand large
-results over through shared memory. Four add-on packages read Delta Lake, Iceberg and Hudi
-tables; join by distance and by polygon, and buffer, dissolve and overlay geometries; cross-validate,
-train incrementally and score ONNX models over partitions; and run streaming queries over files,
-MQTT and Kafka with event-time windows, stream-stream joins and checkpoints.
+client - with standby workers that take the run over if the scheduling worker dies, serving
+copies of its outputs once it has finished - and speculative execution re-runs stragglers on idle
+workers. Workers on one machine hand large results over through shared memory, and arrays can be
+read in place from it. Five add-on packages read Delta Lake, Iceberg and Hudi tables (merge-on-read
+included); join by distance and by polygon, and buffer, dissolve and overlay geometries, in metres
+if asked; cross-validate, train incrementally and score ONNX models over partitions; run streaming
+queries over files and MQTT with event-time windows, stream-stream joins and checkpoints; and read
+from and write exactly once into Kafka.
 
 ## Design
 

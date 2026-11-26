@@ -53,6 +53,29 @@ internal static class Avro
         return (metadata, records);
     }
 
+    /// <summary>A schema prepared for <see cref="Decode"/>: the parsed root and its named types.</summary>
+    public sealed class Schema
+    {
+        internal Schema(JsonElement root)
+        {
+            Root = root;
+            Register(root, Named);
+        }
+
+        public JsonElement Root { get; }
+        internal Dictionary<string, JsonElement> Named { get; } = new(StringComparer.Ordinal);
+
+        public static Schema Parse(string json) => new(JsonDocument.Parse(json).RootElement.Clone());
+    }
+
+    /// <summary>One value in Avro's binary encoding, without a container (Hudi log blocks store
+    /// records this way, the schema travelling in the block header).</summary>
+    public static object? Decode(byte[] data, int offset, int count, Schema schema)
+    {
+        using var stream = new MemoryStream(data, offset, count, writable: false);
+        return ReadValue(new BinaryReader(stream), schema.Root, schema.Named);
+    }
+
     private static MemoryStream Inflate(byte[] block)
     {
         var output = new MemoryStream();

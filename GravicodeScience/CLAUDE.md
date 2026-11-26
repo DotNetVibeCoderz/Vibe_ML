@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 v0.1.0 is implemented and complete against `requirements.md`, a seventh library, **SciNet**
 (SciPy for .NET), has been added beside the original six, and an eighth, **Dask.Net** (Dask +
-dask-sql, `src/DaskNet`, 211 tests, plus the Lakehouse, Geo, ML and Streaming add-ons with 115 more),
-against `Dask.Net-Features.md`. The solution has 46 projects and
-**4,487 tests passing** (2,983 of them SciNet's, 326 Dask.Net's, 80 ScienceAppGen's), eight samples
+dask-sql, `src/DaskNet`, 216 tests, plus the Lakehouse, Geo, ML, Streaming and Kafka add-ons with 146 more),
+against `Dask.Net-Features.md`. The solution has 48 projects and
+**4,523 tests passing** (2,983 of them SciNet's, 362 Dask.Net's, 80 ScienceAppGen's), eight samples
 that run end to end, eight notebooks, eight benchmark suites, and bilingual docs. `requirements.md` remains the specification of record; [Progress.md](Progress.md)
 tracks what is done and [PLAN.md](PLAN.md) tracks direction.
 
@@ -551,6 +551,35 @@ and GraviFrame only. The worker host is `tools/DaskNet.Worker`; the test project
   interleaving. Kafka offsets go to the checkpoint first and to the group only after the sink.
 - **Kafka's Windows `.bat` scripts fail on deep paths** ("input line is too long"); start the
   broker with `java -cp "libs/*" kafka.Kafka`. The real-broker test runs only with `DASKNET_KAFKA`.
+- **A `Client`'s worker slots are shared by every run on it.** `WorkerHandle.InFlight` counts
+  all runs' tasks, but a run waiting for a slot only looks again when one of *its* events arrives,
+  so a slot freed by another run used to wake nobody: four concurrent `ExecuteAsync` on 1-thread
+  workers hung forever (since 2.1). `Ended` now nudges every active run. Any new cross-run
+  resource needs the same wake-up, and counts touched from several runs must be atomic.
+- **MQTTnet 5 connects as MQTT 5, where session expiry 0 deletes the session at disconnect.**
+  `CleanSession = false` alone kept nothing - redelivery after a crash silently did not happen.
+  `MqttOptions.SessionExpiry` is sent whenever the session is persistent. The redelivery test
+  also fails with `AcknowledgeAfterSink = false`, which is what shows it tests the deferral.
+- **Hudi MOR merging is pinned per instant against Spark, not against itself.** Event-time
+  ordering means a log record with a *smaller* ordering value loses to the base file; the
+  fixture's seq-0 upsert exists to catch "newer always wins". A log belongs to the newest base
+  file with instant <= its own; logs of older slices are skipped, not replayed.
+- **Delta v2 sidecars carry `remove` actions with deletion vectors of the same path as an
+  `add`.** Applying them as removes empties the table; removes in a checkpoint are tombstones.
+- **`DaskStream.FromKafka` lives in `DaskNet.Kafka` as a C# 14 `extension(DaskStream)` block**, so
+  the static-looking call survived the package split. Kafka must not come back into Streaming:
+  Confluent.Kafka ships librdkafka natives to every user.
+- **The exactly-once batch marker is an offset commit** (group `{transactionalId}.dasknet`, output
+  topic partition 0, offset = batch id + 1) sent with `SendOffsetsToTransaction`, so it commits
+  atomically with the rows. The checkpoint is pending until the transaction commits; restart
+  resolves it by asking the sink, never by guessing.
+- **`GeoCrs` metric operations use a transverse Mercator centred on each geometry**, so they need
+  no zone choice and stay exact at the centroid; the error is (d/R)^2/2. Tests compare against PROJ
+  with the *same* projection (1e-9) and against GeographicLib geodesics (bounded by extent).
+  pyproj's polygon perimeter leaves out holes - don't compare holed lengths with it.
+- **Finished detached runs are copied to every standby before `Finished` is reported**, under the
+  run's lock against a succession arriving at the same moment. A mid-run takeover still
+  recomputes; `TakeoversFromReplica` is what tells the two apart in tests (check `TasksRun` too).
 - **The icon is neon 640 nm**; `make_icons.py DaskNet` renders only it, and SciNet's strip keeps
   its original six lines so published icons do not change.
 
@@ -652,7 +681,7 @@ exactly what ran.
 
 ## Packaging and CI
 
-The libraries under `src/` (eight, plus GraviFrame.Parquet and the four DaskNet add-ons) pack as `Gravicode.Science.*`; everything else is
+The libraries under `src/` (eight, plus GraviFrame.Parquet and the five DaskNet add-ons) pack as `Gravicode.Science.*`; everything else is
 `IsPackable=false`. Metadata lives once in `Directory.Build.props`, not in seven `.csproj` files.
 
 - **Each package's icon is `assets/icons/$(MSBuildProjectName).png`**, packed as `icon.png` by

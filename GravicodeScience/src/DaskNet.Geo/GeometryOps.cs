@@ -26,9 +26,15 @@ public enum OverlayKind
 /// </summary>
 /// <remarks>
 /// <para>
-/// The arithmetic is planar, in the units of the coordinates. For longitude/latitude data a
-/// buffer of 0.01 is 0.01 degrees - about 1.1 km north-south and less east-west away from the
-/// equator - and areas are square degrees. Project first when distances must mean metres.
+/// Without a <see cref="GeoCrs"/> the arithmetic is planar, in the units of the coordinates: for
+/// longitude/latitude data a buffer of 0.01 is 0.01 degrees and areas are square degrees. Given
+/// one (<c>crs: GeoCrs.Wgs84</c>), buffer distances, simplify tolerances, areas and lengths are
+/// metres on the ground: each geometry is projected into a transverse Mercator centred on its
+/// own centroid, worked on there, and projected back, so results stay in the column's system.
+/// That is exact at the centroid and off by (distance / Earth radius)^2 / 2 away from it - a part
+/// in a million 9 km out, a part in ten thousand at 90 km - which suits anything up to a large
+/// region; a continent wants an equal-area projection. Dissolve and overlay are topological and
+/// need no system. Geometries crossing the antimeridian are not split.
 /// </para>
 /// <para>
 /// Invalid input (a self-touching ring, a bow-tie) is repaired with NTS's <c>GeometryFixer</c>
@@ -43,37 +49,56 @@ public static class GeometryFrame
     /// polygon), into <paramref name="output"/> or in place. <paramref name="quadrantSegments"/>
     /// is the number of segments approximating a quarter circle.
     /// </summary>
-    public static DaskFrame Buffer(this DaskFrame frame, string wktColumn, double distance, int quadrantSegments = 8, string? output = null)
+    /// <remarks>With <paramref name="crs"/>, <paramref name="distance"/> is in metres on the ground.</remarks>
+    public static DaskFrame Buffer(this DaskFrame frame, string wktColumn, double distance, int quadrantSegments = 8, string? output = null,
+        GeoCrs? crs = null)
     {
         Check(frame, wktColumn);
         ArgumentOutOfRangeException.ThrowIfLessThan(quadrantSegments, 1);
         if (!double.IsFinite(distance)) throw new ArgumentOutOfRangeException(nameof(distance));
-        return Map(frame, wktColumn, output, "buffer", [distance, (double)quadrantSegments]);
+        return Map(frame, wktColumn, output, "buffer", [distance, (double)quadrantSegments], crs);
     }
 
     /// <summary>Simplifies each geometry within <paramref name="tolerance"/>, never changing its topology
     /// (Douglas-Peucker that keeps rings valid and holes inside).</summary>
-    public static DaskFrame Simplify(this DaskFrame frame, string wktColumn, double tolerance, string? output = null)
+    /// <remarks>With <paramref name="crs"/>, <paramref name="tolerance"/> is in metres on the ground.</remarks>
+    public static DaskFrame Simplify(this DaskFrame frame, string wktColumn, double tolerance, string? output = null, GeoCrs? crs = null)
     {
         Check(frame, wktColumn);
         if (!(tolerance >= 0)) throw new ArgumentOutOfRangeException(nameof(tolerance));
-        return Map(frame, wktColumn, output, "simplify", [tolerance]);
+        return Map(frame, wktColumn, output, "simplify", [tolerance], crs);
     }
 
     /// <summary>Replaces each geometry by its centroid (a POINT).</summary>
-    public static DaskFrame Centroid(this DaskFrame frame, string wktColumn, string? output = null)
+    /// <remarks>With <paramref name="crs"/> the centroid is taken in the local plane rather than in
+    /// degrees, which matters for a large or high-latitude polygon.</remarks>
+    public static DaskFrame Centroid(this DaskFrame frame, string wktColumn, string? output = null, GeoCrs? crs = null)
     {
         Check(frame, wktColumn);
-        return Map(frame, wktColumn, output, "centroid", []);
+        return Map(frame, wktColumn, output, "centroid", [], crs);
     }
 
-    /// <summary>Adds the planar area and length (perimeter, for polygons) of each geometry.</summary>
-    public static DaskFrame WithMeasures(this DaskFrame frame, string wktColumn, string area = "area", string length = "length")
+    /// <summary>Adds the area and length (perimeter, for polygons) of each geometry: planar in the
+    /// coordinates' units, or with <paramref name="crs"/> square metres and metres on the ground.</summary>
+    public static DaskFrame WithMeasures(this DaskFrame frame, string wktColumn, string area = "area", string length = "length", GeoCrs? crs = null)
     {
         Check(frame, wktColumn);
         var parts = frame.ToDelayed().Select(p => Dask.Delayed(GeometryKernels.Measures, p,
-            Dask.Value(new[] { wktColumn, area, length }), "measures")).ToArray();
+            Dask.Value(new[] { wktColumn, area, length, crs?.ToString() ?? "" }), "measures")).ToArray();
         return DaskFrame.FromDelayed(parts, [.. frame.Columns.Where(c => c != area && c != length), area, length]);
+    }
+
+    /// <summary>Converts each geometry from <paramref name="from"/> to <paramref name="to"/>
+    /// (geopandas' <c>to_crs</c>), into <paramref name="output"/> or in place.</summary>
+    public static DaskFrame ToCrs(this DaskFrame frame, string wktColumn, GeoCrs from, GeoCrs to, string? output = null)
+    {
+        Check(frame, wktColumn);
+        ArgumentNullException.ThrowIfNull(from);
+        ArgumentNullException.ThrowIfNull(to);
+        var target = output ?? wktColumn;
+        var parts = frame.ToDelayed().Select(p => Dask.Delayed(GeometryKernels.Map, p,
+            Dask.Value(new[] { wktColumn, target, "to-crs", from.ToString(), to.ToString() }), Dask.Value(Array.Empty<double>()), "to-crs")).ToArray();
+        return DaskFrame.FromDelayed(parts, target == wktColumn ? frame.Columns : [.. frame.Columns.Where(c => c != target), target]);
     }
 
     /// <summary>
@@ -120,11 +145,11 @@ public static class GeometryFrame
         return DaskFrame.FromDelayed(parts, columns);
     }
 
-    private static DaskFrame Map(DaskFrame frame, string wktColumn, string? output, string op, double[] args)
+    private static DaskFrame Map(DaskFrame frame, string wktColumn, string? output, string op, double[] args, GeoCrs? crs)
     {
         var target = output ?? wktColumn;
         var parts = frame.ToDelayed().Select(p => Dask.Delayed(GeometryKernels.Map, p,
-            Dask.Value(new[] { wktColumn, target, op }), Dask.Value(args), op)).ToArray();
+            Dask.Value(new[] { wktColumn, target, op, crs?.ToString() ?? "" }), Dask.Value(args), op)).ToArray();
         return DaskFrame.FromDelayed(parts, target == wktColumn ? frame.Columns : [.. frame.Columns.Where(c => c != target), target]);
     }
 
@@ -157,32 +182,59 @@ public static class GeometryKernels
         return result;
     }
 
-    /// <summary>A geometry-to-geometry operation; <paramref name="names"/> is (input, output, op).</summary>
+    /// <summary>A geometry-to-geometry operation; <paramref name="names"/> is (input, output, op,
+    /// crs) - an empty crs for planar - or (input, output, "to-crs", from, to).</summary>
     [RemoteTask]
     public static DataFrame Map(DataFrame frame, string[] names, double[] args)
     {
         var op = names[2];
+        var crs = names.Length > 3 && names[3].Length > 0 ? GeoCrs.Parse(names[3]) : null;
+        var to = op == "to-crs" ? GeoCrs.Parse(names[4]) : null;
         var input = Geometries(frame, names[0]);
         var result = new string?[input.Length];
         for (var i = 0; i < input.Length; i++)
         {
             if (input[i] is not { } g) continue;
-            result[i] = Write(op switch
+            if (op == "to-crs")
             {
-                "buffer" => g.Buffer(args[0], new BufferParameters((int)args[1])),
-                "simplify" => TopologyPreservingSimplifier.Simplify(g, args[0]),
-                "centroid" => g.Centroid,
+                result[i] = Write(crs!.Equals(to) ? g : GeoCrs.Transform(g, (x, y) =>
+                {
+                    var (lon, lat) = crs.ToGeographic(x, y);
+                    return to!.FromGeographic(lon, lat);
+                }));
+                continue;
+            }
+            Geometry Apply(Geometry x) => op switch
+            {
+                "buffer" => x.Buffer(args[0], new BufferParameters((int)args[1])),
+                "simplify" => TopologyPreservingSimplifier.Simplify(x, args[0]),
+                "centroid" => x.Centroid,
                 _ => throw new NotSupportedException(op),
-            });
+            };
+            if (crs is null) result[i] = Write(Apply(g));
+            else
+            {
+                var local = new LocalProjection(g, crs, out var projected);
+                var done = Apply(projected);
+                result[i] = done.IsEmpty ? null : Write(local.Back(done));
+            }
         }
         return Replace(frame, names[1], new TextSeries(names[1], result));
     }
 
-    /// <summary>Area and length per row; <paramref name="names"/> is (wkt, area, length).</summary>
+    /// <summary>Area and length per row; <paramref name="names"/> is (wkt, area, length, crs).</summary>
     [RemoteTask]
     public static DataFrame Measures(DataFrame frame, string[] names)
     {
+        var crs = names.Length > 3 && names[3].Length > 0 ? GeoCrs.Parse(names[3]) : null;
         var g = Geometries(frame, names[0]);
+        if (crs is not null)
+            g = g.Select(x =>
+            {
+                if (x is null) return null;
+                _ = new LocalProjection(x, crs, out var projected);
+                return projected;
+            }).ToArray();
         var area = g.Select(x => x?.Area ?? double.NaN).ToArray();
         var length = g.Select(x => x?.Length ?? double.NaN).ToArray();
         return Replace(Replace(frame, names[1], new NumericSeries(names[1], area)), names[2], new NumericSeries(names[2], length));

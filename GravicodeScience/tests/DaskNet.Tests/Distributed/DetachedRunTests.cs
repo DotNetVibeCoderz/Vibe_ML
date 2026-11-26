@@ -119,19 +119,81 @@ public sealed class DetachedRunTests
     }
 
     [Fact]
-    public async Task Results_lost_with_a_finished_scheduler_are_recomputed_by_the_standby()
+    public async Task A_finished_run_is_served_from_the_standbys_copies_without_recomputing()
     {
-        await using var cluster = await LocalCluster.StartAsync(workers: 3, threadsPerWorker: 2);
+        await using var cluster = await LocalCluster.StartAsync(workers: 4, threadsPerWorker: 2);
         var client = cluster.Client;
+        client.RunStandbys = 2;
         var sales = DaskFrame.FromFrame(SalesData.Make(2_000), 4);
         var report = sales.GroupBy("region").Agg(("qty", "sum"));
         var run = await client.SubmitAsync(report);
+        Assert.Equal(2, run.Standbys.Count);
+        Assert.Equal(3, run.Standbys.Append(run.Scheduler).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         var expected = SalesData.Rows(report.Compute(), sorted: true);
         Assert.Equal(expected, SalesData.Rows(await client.FrameResultAsync(run), sorted: true));
+        var tasksRun = cluster.InProcessWorkers.Sum(w => w.TasksRun);
 
+        // Finished means copied: the scheduler, then the first standby, can die and the next holder
+        // serves the same outputs without running a task.
         Kill(cluster, run.Scheduler);
         Assert.Equal(expected, SalesData.Rows(await client.FrameResultAsync(run), sorted: true));
-        Assert.Equal(1, WorkerAt(cluster, run.Standby!).Takeovers);
+        var first = WorkerAt(cluster, run.Standbys[0]);
+        Assert.Equal(1, first.Takeovers);
+        Assert.Equal(1, first.TakeoversFromReplica);
+
+        Kill(cluster, run.Standbys[0]);
+        Assert.Equal(expected, SalesData.Rows(await client.FrameResultAsync(run), sorted: true));
+        var second = WorkerAt(cluster, run.Standbys[1]);
+        Assert.Equal(1, second.Takeovers);
+        Assert.Equal(1, second.TakeoversFromReplica);
+        Assert.Equal(tasksRun, cluster.InProcessWorkers.Sum(w => w.TasksRun));
+
+        await client.ForgetAsync(run);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => client.StatusAsync(run));
+    }
+
+    [Fact]
+    public async Task With_two_standbys_a_run_survives_losing_its_scheduler_and_first_standby_mid_run()
+    {
+        await using var cluster = await LocalCluster.StartAsync(workers: 4, threadsPerWorker: 2);
+        var client = cluster.Client;
+        Assert.Throws<ArgumentOutOfRangeException>(() => client.RunStandbys = -1);
+        client.RunStandbys = 2;
+        var run = await client.SubmitAsync(Sum(30, 60));
+        Assert.Equal(2, run.Standbys.Count);
+        Assert.Equal(run.Standbys, RunHandle.Parse(run.ToString()).Standbys);
+
+        var clock = Stopwatch.StartNew();
+        while ((await client.StatusAsync(run)).Completed < 3)
+        {
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), "the run made no progress");
+            await Task.Delay(10);
+        }
+        var last = WorkerAt(cluster, run.Standbys[1]);
+        Kill(cluster, run.Scheduler);
+        Kill(cluster, run.Standbys[0]);
+
+        Assert.Equal(Enumerable.Range(0, 30).Sum(), await client.ResultAsync<double>(run));
+        Assert.Equal(1, last.Takeovers);
+        Assert.Equal(0, last.TakeoversFromReplica);           // it died mid-run: nothing to copy yet
+        Assert.Equal(1, cluster.InProcessWorkers.Sum(w => w.Takeovers));
+        await client.ForgetAsync(run);
+    }
+
+    [Fact]
+    public void Handles_carry_their_succession_and_read_the_older_form()
+    {
+        var keys = new[] { new TaskKey("sum", 0) };
+        var run = new RunHandle("r", "tcp://a:1", keys) { Standbys = ["tcp://b:2", "tcp://c:3"] };
+        var back = RunHandle.Parse(run.ToString());
+        Assert.Equal(run.Standbys, back.Standbys);
+        Assert.Equal("tcp://b:2", back.Standby);
+
+        // A 2.4 handle has a single "standby".
+        var old = RunHandle.Parse("""{"id":"r","scheduler":"tcp://a:1","standby":"tcp://b:2","outputs":[{"name":"sum","index":0}]}""");
+        Assert.Equal(["tcp://b:2"], old.Standbys);
+        Assert.Empty(RunHandle.Parse("""{"id":"r","scheduler":"tcp://a:1","standby":null,"outputs":[]}""").Standbys);
+        Assert.Equal(["tcp://z:9"], (run with { Standby = "tcp://z:9" }).Standbys);
     }
 
     [Fact]

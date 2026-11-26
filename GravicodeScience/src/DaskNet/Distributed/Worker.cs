@@ -183,6 +183,12 @@ public sealed partial class Worker : IAsyncDisposable
                     case MessageKind.Status:
                         await StatusAsync(connection, message).ConfigureAwait(false);
                         break;
+                    case MessageKind.Replicas:
+                        _ = Task.Run(() => ReplicasAsync(connection, message));
+                        break;
+                    case MessageKind.Replica:
+                        await ReplicaAsync(connection, message).ConfigureAwait(false);
+                        break;
                     case MessageKind.Cancel:
                     case MessageKind.Forget:
                     {

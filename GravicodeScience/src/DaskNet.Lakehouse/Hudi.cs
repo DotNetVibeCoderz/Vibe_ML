@@ -25,12 +25,16 @@ public sealed record HudiInstant(string Time, string Action, string? CompletionT
 /// uncommitted and rolled-back writes are never visible because their instants never completed.
 /// </para>
 /// <para>
-/// Copy-on-write tables read fully. A merge-on-read table whose updates still sit in log files
-/// is refused for a snapshot read, since merging Avro log blocks is not implemented; pass
-/// <c>readOptimized: true</c> to read its base files only, which is Hudi's own read-optimized
-/// query (it lags the log until compaction). The schema is the writer schema recorded in the
-/// newest commit's metadata; the <c>_hoodie_*</c> meta columns are left out unless asked for.
-/// Nested types and non-Parquet base files are refused. Local paths only.
+/// Copy-on-write tables read fully. A merge-on-read snapshot merges each file slice - the newest
+/// visible base file of a file group and the log files written over it - by record key on the
+/// worker that reads it: Avro data blocks upsert, delete blocks delete, rollback command blocks
+/// cancel their target, and with event-time ordering (Hudi 1.0's default when the table has a
+/// precombine field) a record with a smaller ordering value loses to the one it would replace.
+/// <c>readOptimized: true</c> reads base files only, which is Hudi's read-optimized query (it
+/// lags the log until compaction). The schema is the writer schema recorded in the newest commit's
+/// metadata; the <c>_hoodie_*</c> meta columns are left out unless asked for. Nested types,
+/// non-Parquet base files, Parquet/HFile log blocks, custom mergers and pre-0.14 (Kryo) delete
+/// blocks are refused. Local paths only.
 /// </para>
 /// </remarks>
 public static class Hudi
@@ -148,19 +152,26 @@ public static class Hudi
                 .Select(f => f.Contains(':') ? f[..f.IndexOf(':')] : f).ToArray();
 
             var latest = new Dictionary<(string Partition, string FileId), (string Instant, string Path, long Size)>();
-            var logs = new List<string>();
+            var logs = new List<(string Partition, string FileId, string Instant, int Version, string Token, string Path)>();
             foreach (var (partition, directory) in PartitionDirectories(partitionFields.Length))
                 foreach (var file in Directory.EnumerateFiles(directory))
                 {
                     var name = Path.GetFileName(file);
                     if (name.StartsWith('.'))
                     {
-                        // .{fileId}_{instant}.log.{version}_{token}
+                        // .{fileId}_{instant}.log.{version}_{token}. Before Hudi 1.0 the instant is
+                        // the base file's; from 1.0 it is the delta commit that wrote the log.
                         var log = name.IndexOf(".log.", StringComparison.Ordinal);
                         if (log < 0) continue;
                         var head = name[1..log];
                         var cut = head.LastIndexOf('_');
-                        if (cut > 0 && completed.Contains(head[(cut + 1)..]) && !replaced.Contains((partition, head[..cut]))) logs.Add(file);
+                        if (cut <= 0) continue;
+                        var tail = name[(log + 5)..];
+                        var under = tail.IndexOf('_');
+                        if (!int.TryParse(under < 0 ? tail : tail[..under], NumberStyles.None, CultureInfo.InvariantCulture, out var version)) continue;
+                        var (logFileId, logInstant) = (head[..cut], head[(cut + 1)..]);
+                        if (completed.Contains(logInstant) && !replaced.Contains((partition, logFileId)))
+                            logs.Add((partition, logFileId, logInstant, version, under < 0 ? "" : tail[(under + 1)..], file));
                         continue;
                     }
                     if (!name.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase)) continue;
@@ -174,10 +185,24 @@ public static class Hudi
                         latest[(partition, fileId)] = (time, file, new FileInfo(file).Length);
                 }
 
+            // A log belongs to the file slice of the newest base file at or before its instant;
+            // logs of an older slice were compacted into the newer base file and are skipped.
+            var slices = new Dictionary<(string Partition, string FileId), List<string>>();
+            HudiMerge? merge = null;
             if (MergeOnRead && !readOptimized && logs.Count > 0)
-                throw new NotSupportedException(
-                    $"Hudi merge-on-read table at {_root} has updates in log files (e.g. {Path.GetFileName(logs[0])}) that a snapshot read would have to merge, " +
-                    "which is not supported; pass readOptimized: true to read the base files only (Hudi's read-optimized query).");
+            {
+                merge = MergeSettings(visible);
+                foreach (var log in logs.OrderBy(l => l.Instant, StringComparer.Ordinal).ThenBy(l => l.Version).ThenBy(l => l.Token, StringComparer.Ordinal))
+                {
+                    var group = (log.Partition, log.FileId);
+                    if (latest.TryGetValue(group, out var current) && string.CompareOrdinal(current.Instant, log.Instant) > 0) continue;
+                    if (!slices.TryGetValue(group, out var list)) slices[group] = list = [];
+                    list.Add(log.Path);
+                }
+                // A file group can be all log (an insert into a log file): its slice has no base.
+                foreach (var group in slices.Keys)
+                    if (!latest.ContainsKey(group)) latest[group] = ("", "", 0);
+            }
 
             var (names, types) = Schema(visible, includeMetaColumns);
             var inFile = !Properties.GetValueOrDefault("hoodie.datasource.write.drop.partition.columns", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
@@ -185,10 +210,35 @@ public static class Hudi
                 if (!names.Contains(field)) throw new InvalidDataException($"Hudi table at {_root}: partition field '{field}' is not in the schema.");
 
             var files = latest.OrderBy(f => f.Key.Partition, StringComparer.Ordinal).ThenBy(f => f.Key.FileId, StringComparer.Ordinal)
-                .Select(f => new LakeFile(f.Value.Path, f.Value.Size, PartitionValues(f.Key.Partition, partitionFields), new Dictionary<string, string>()))
+                .Select(f => new LakeFile(f.Value.Path, f.Value.Size + (slices.TryGetValue(f.Key, out var l) ? l.Sum(x => new FileInfo(x).Length) : 0),
+                    PartitionValues(f.Key.Partition, partitionFields), new Dictionary<string, string>())
+                { Logs = slices.TryGetValue(f.Key, out var ls) ? [.. ls] : [] })
                 .ToArray();
-            var source = new LakeSource($"Hudi {Path.GetFileName(_root)} @{asOf}", names, types, files, partitionFields, partitionsInFile: inFile);
+            var source = new LakeSource($"Hudi {Path.GetFileName(_root)} @{asOf}", names, types, files, partitionFields, partitionsInFile: inFile, merge);
             return new DaskFrame(new ScanNode(source));
+        }
+
+        /// <summary>How log records merge: Hudi 1.0 records the mode in hoodie.properties; before
+        /// it, the payload class decides (DefaultHoodieRecordPayload orders by the precombine
+        /// field, OverwriteWithLatestAvroPayload - the 0.x default - takes the latest commit).</summary>
+        private HudiMerge MergeSettings(List<HudiInstant> visible)
+        {
+            if (!Properties.GetValueOrDefault("hoodie.populate.meta.fields", "true").Equals("true", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException($"Hudi merge-on-read table at {_root} does not populate _hoodie_record_key, so its logs cannot be merged by key; pass readOptimized: true.");
+            var ordering = Properties.GetValueOrDefault("hoodie.table.ordering.fields")
+                ?? Properties.GetValueOrDefault("hoodie.table.precombine.field") ?? "";
+            if (ordering.Contains(','))
+                throw new NotSupportedException($"Hudi table at {_root} orders by several fields ({ordering}), which is not supported.");
+            var mode = Properties.GetValueOrDefault("hoodie.record.merge.mode");
+            var payload = Properties.GetValueOrDefault("hoodie.compaction.payload.class", "");
+            bool eventTime;
+            if (mode is null)
+                eventTime = payload.EndsWith("DefaultHoodieRecordPayload", StringComparison.Ordinal) || payload.EndsWith("EventTimeAvroPayload", StringComparison.Ordinal);
+            else if (mode == "EVENT_TIME_ORDERING") eventTime = true;
+            else if (mode == "COMMIT_TIME_ORDERING") eventTime = false;
+            else throw new NotSupportedException($"Hudi table at {_root} merges with a {mode} merger, which is not supported; pass readOptimized: true.");
+            return new HudiMerge("_hoodie_record_key", ordering, eventTime && ordering.Length > 0,
+                [.. visible.Where(i => i.Action is "deltacommit" or "commit").Select(i => i.Time)]);
         }
 
         /// <summary>Partition directories relative to the root, '/'-separated; "" for a table that is not partitioned.</summary>

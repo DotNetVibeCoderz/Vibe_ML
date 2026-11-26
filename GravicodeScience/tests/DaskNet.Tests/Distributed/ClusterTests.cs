@@ -221,6 +221,12 @@ public sealed class ProcessClusterTests
         Assert.Equal((big * 3).Sum(axis: 1).Compute().ToArray(), (big * 3).Sum(axis: 1).Compute(cluster.Client).ToArray());
         var after = await cluster.Client.GetWorkerInfoAsync();
         Assert.True(after.Sum(i => i.SharedMemoryBytesSent) >= 4L * 600 * 600 * 8, "blocks did not go through shared memory");
+
+        // A view reads another process's segment in place.
+        var block = big.ToDelayed()[1];
+        using var view = await cluster.Client.ComputeViewAsync(block);
+        Assert.True(view.IsShared);
+        Assert.Equal(block.Compute().ToArray(), view.Span.ToArray());
     }
 
     [Fact]

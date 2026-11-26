@@ -59,6 +59,9 @@ internal static class SharedMemory
         public string Locator { get; }
         public long Capacity { get; }
 
+        /// <summary>The first byte of the mapped view; valid until the mapping is disposed.</summary>
+        public byte* Pointer => _pointer;
+
         /// <summary>A new segment of <paramref name="capacity"/> bytes, owned by the caller.</summary>
         public static Mapping Create(long capacity)
         {
@@ -129,35 +132,108 @@ internal static class SharedMemory
     /// <summary>Decodes a value from a segment another process wrote, through a cached mapping.</summary>
     public static object? Read(string locator, long length)
     {
-        Mapping? mapping;
-        lock (ReaderCache)
-        {
-            mapping = ReaderCache.FirstOrDefault(m => m.Locator == locator && m.Capacity >= length);
-            if (mapping is not null) ReaderCache.Remove(mapping);
-        }
-        mapping ??= Mapping.Open(locator);
+        var mapping = Acquire(locator, length);
         try
         {
             using var s = mapping.Stream(length, write: false);
             using var r = new BinaryReader(s, System.Text.Encoding.UTF8);
             return WireCodec.Read(r);
         }
-        finally
+        finally { Return(mapping); }
+    }
+
+    /// <summary>A mapping of <paramref name="locator"/>, from the cache or newly opened; the caller
+    /// owns it until <see cref="Return"/>.</summary>
+    internal static Mapping Acquire(string locator, long length)
+    {
+        lock (ReaderCache)
         {
-            // Back to the front of the cache; the oldest falls out. A cached mapping keeps a segment
-            // the holder has dropped alive, which is why there are only a few.
-            Mapping? evicted = null;
-            lock (ReaderCache)
+            var cached = ReaderCache.FirstOrDefault(m => m.Locator == locator && m.Capacity >= length);
+            if (cached is not null)
             {
-                ReaderCache.AddFirst(mapping);
-                if (ReaderCache.Count > ReaderCacheSize)
-                {
-                    evicted = ReaderCache.Last!.Value;
-                    ReaderCache.RemoveLast();
-                }
+                ReaderCache.Remove(cached);
+                return cached;
             }
-            evicted?.Dispose();
         }
+        return Mapping.Open(locator);
+    }
+
+    /// <summary>Back to the front of the cache; the oldest falls out. A cached mapping keeps a
+    /// segment the holder has dropped alive, which is why there are only a few.</summary>
+    internal static void Return(Mapping mapping)
+    {
+        Mapping? evicted = null;
+        lock (ReaderCache)
+        {
+            ReaderCache.AddFirst(mapping);
+            if (ReaderCache.Count > ReaderCacheSize)
+            {
+                evicted = ReaderCache.Last!.Value;
+                ReaderCache.RemoveLast();
+            }
+        }
+        evicted?.Dispose();
+    }
+
+    /// <summary>
+    /// Fetches an array result as a <see cref="SharedArrayView"/>: over the holder's segment when it
+    /// came through shared memory (the segment stays lent until the view is disposed), over a
+    /// decoded copy otherwise. Returns false when the holder does not have the key.
+    /// </summary>
+    public static async Task<(bool Found, SharedArrayView? View)> GetViewAsync(RpcClient holder, TaskKey key, bool useShared,
+        Action? sharedFailed, CancellationToken cancellationToken)
+    {
+        if (useShared)
+        {
+            var reply = await holder.RequestAsync(MessageKind.GetShared, w => { WireCodec.WriteKey(w, key); w.Write(HostId); }, cancellationToken)
+                .ConfigureAwait(false);
+            if (reply.Kind == MessageKind.SharedData)
+            {
+                long segment;
+                string locator;
+                long length;
+                using (var r = reply.Reader())
+                {
+                    segment = r.ReadInt64();
+                    locator = r.ReadString();
+                    length = r.ReadInt64();
+                }
+                void Done() => _ = holder.RequestAsync(MessageKind.SharedDone, w => w.Write(segment), CancellationToken.None)
+                    .ContinueWith(t => _ = t.Exception, TaskScheduler.Default);   // the holder may be gone; it drops the segment itself
+                Mapping mapping;
+                try { mapping = Acquire(locator, length); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+                {
+                    sharedFailed?.Invoke();
+                    Done();
+                    return ViewOf(await holder.RequestAsync(MessageKind.Get, w => WireCodec.WriteKey(w, key), cancellationToken).ConfigureAwait(false), key);
+                }
+                var view = SharedArrayView.Over(mapping, length, () => { Return(mapping); Done(); });
+                if (view is not null) return (true, view);
+                // Not an array: decode it and say what it was.
+                object? value;
+                try
+                {
+                    using var s = mapping.Stream(length, write: false);
+                    using var br = new BinaryReader(s, System.Text.Encoding.UTF8);
+                    value = WireCodec.Read(br);
+                }
+                finally
+                {
+                    Return(mapping);
+                    Done();
+                }
+                return (true, SharedArrayView.Copy(value, key));
+            }
+            return ViewOf(reply, key);
+        }
+        return ViewOf(await holder.RequestAsync(MessageKind.Get, w => WireCodec.WriteKey(w, key), cancellationToken).ConfigureAwait(false), key);
+    }
+
+    private static (bool, SharedArrayView?) ViewOf(Message reply, TaskKey key)
+    {
+        var (found, value) = Decode(reply);
+        return found ? (true, SharedArrayView.Copy(value, key)) : (false, null);
     }
 
     /// <summary>
